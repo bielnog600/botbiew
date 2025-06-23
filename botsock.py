@@ -114,6 +114,71 @@ def validar_e_limpar_velas(velas_raw):
         if all(vela_padronizada.values()): velas_limpas.append(vela_padronizada)
     return velas_limpas
 
+def catalogar_estrategias(api, state, params):
+    log_info("="*40); log_info("INICIANDO MODO DE CATALOGAÇÃO DE ESTRATÉGIAS..."); log_info("="*40)
+    TODAS_AS_ESTRATEGIAS = {'mql_pullback': strategy_mql_pullback, 'flow': strategy_flow, 'patterns': strategy_patterns, 'rejection_candle': strategy_rejection_candle}
+    ativos_abertos = []
+    all_assets = api.get_all_open_time()
+    for tipo_mercado in ['binary', 'turbo']:
+        if tipo_mercado in all_assets:
+            for ativo, info in all_assets[tipo_mercado].items():
+                if info.get('open', False) and ativo not in ativos_abertos: ativos_abertos.append(ativo)
+    if not ativos_abertos: log_error("Nenhum par de moeda aberto encontrado para catalogar."); return
+    log_info(f"Encontrados {len(ativos_abertos)} pares abertos para análise.")
+    for ativo in ativos_abertos:
+        try:
+            log_info(f"\n--- Analisando o par: {w}{ativo}{c} ---")
+            velas_historicas_raw = api.get_candles(ativo, 60, 500, time.time())
+            todas_as_velas = validar_e_limpar_velas(velas_historicas_raw)
+            if not todas_as_velas or len(todas_as_velas) < 100: log_warning(f"Não foi possível obter dados históricos suficientes para {ativo}."); continue
+            resultados = {nome: {'win': 0, 'loss': 0} for nome in TODAS_AS_ESTRATEGIAS}
+            for i in range(50, len(todas_as_velas) - 1):
+                velas_atuais = todas_as_velas[:i]; vela_sinal = velas_atuais[-1]; vela_resultado = todas_as_velas[i]
+                for nome, funcao_estrategia in TODAS_AS_ESTRATEGIAS.items():
+                    sinal = funcao_estrategia(velas_atuais, params)
+                    if sinal:
+                        if (sinal == 'BUY' and vela_resultado['close'] > vela_sinal['close']) or (sinal == 'SELL' and vela_resultado['close'] < vela_sinal['close']):
+                            resultados[nome]['win'] += 1
+                        else:
+                            resultados[nome]['loss'] += 1
+            melhor_estrategia, maior_assertividade = None, 0
+            for nome, res in resultados.items():
+                total = res['win'] + res['loss']
+                if total > 0:
+                    assertividade = (res['win'] / total) * 100
+                    if assertividade > maior_assertividade:
+                        maior_assertividade, melhor_estrategia = assertividade, nome
+            if melhor_estrategia and maior_assertividade > 50:
+                log_success(f" >> Melhor estratégia para {ativo}: '{melhor_estrategia}' com {maior_assertividade:.2f}% de acerto.")
+                state.strategy_performance[ativo] = {'best_strategy': melhor_estrategia}
+        except Exception as e: log_error(f"Ocorreu um erro ao analisar o par {ativo}: {e}"); traceback.print_exc()
+    log_info("="*40); log_info("CATALOGAÇÃO FINALIZADA!"); log_info("="*40); time.sleep(5)
+    
+def sma_slope(closes, period):
+    if len(closes) < period + 1: return None
+    sma1 = sum(closes[-(period+1):-1]) / period
+    sma2 = sum(closes[-period:]) / period
+    if sma1 == sma2: return None
+    return sma2 > sma1
+
+def strategy_rejection_candle(velas, p):
+    if len(velas) < p['MAPeriod'] + 2: return None
+    nano_up = sma_slope([v['close'] for v in velas], p['MAPeriod'])
+    if nano_up is None: return None
+    o, h, l, c = velas[-2]['open'], velas[-2]['high'], velas[-2]['low'], velas[-2]['close']
+    range_total = h - l
+    if range_total == 0: return None
+    corpo = abs(o - c); pavio_superior = h - max(o, c); pavio_inferior = min(o, c) - l
+    if nano_up and (pavio_inferior / range_total >= 0.6) and (corpo / range_total <= 0.3) and (pavio_superior / range_total <= 0.15): return 'BUY'
+    if not nano_up and (pavio_superior / range_total >= 0.6) and (corpo / range_total <= 0.3) and (pavio_inferior / range_total <= 0.15): return 'SELL'
+    return None
+
+def strategy_mql_pullback(velas, p): return None
+def strategy_flow(velas, p): return None
+def strategy_patterns(velas, p): return None
+    
+def is_market_indecisive(velas, p): return False
+
 class BotState:
     def __init__(self):
         self.stop = True
@@ -183,6 +248,7 @@ def compra_thread(api, ativo, valor, direcao, expiracao, tipo_op, state, config,
             state.signal_history[signal_id]["result"] = resultado_final
             placar_payload = {"type": "result", "signal_id": signal_id, "result": resultado_final, "placar": {"wins": state.win_count, "losses": state.loss_count, "gale_wins": sum(state.gale_wins.values())}}
             signal_queue.put(placar_payload)
+        exibir_placar(state, config)
     except Exception as e: log_error(f"ERRO CRÍTICO NA THREAD DE COMPRA: {e}"); traceback.print_exc()
     finally: state.is_trading = False
 
@@ -227,6 +293,8 @@ def main_bot_logic(state):
     cifrao, nome_usuario = perfil['currency_char'], perfil['name']
     log_info(f"Olá, {w}{nome_usuario}{c}! Bot a iniciar em modo de servidor.")
     
+    if config['modo_operacao'] == '1': catalogar_estrategias(API, state, {})
+    
     minuto_anterior, analise_feita = -1, False
     log_info("Bot iniciado. Aguardando janela de análise...")
     
@@ -234,10 +302,9 @@ def main_bot_logic(state):
 
     while state.stop:
         try:
-            # ### ATUALIZAÇÃO ### Lógica de timeout para obter o tempo do servidor
             future = executor.submit(API.get_server_timestamp)
             try:
-                timestamp = future.result(timeout=3)
+                timestamp = future.result(timeout=5)
             except TimeoutError:
                 log_error("ERRO: A chamada para obter o tempo do servidor está bloqueada. A reiniciar conexão...")
                 if not try_connect():
@@ -270,7 +337,7 @@ def main_bot_logic(state):
                     continue
                 
                 signal_queue.put({"type": "analysis_status", "asset": ativo, "message": "A aplicar estratégias..."})
-                direcao_final, nome_estrategia_usada = strategy_rejection_candle(velas, {}), "Rejeição de Pavio"
+                direcao_final, nome_estrategia_usada = strategy_rejection_candle(velas, config), "Rejeição de Pavio"
                 
                 if direcao_final:
                     state.is_trading = True
