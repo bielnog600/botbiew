@@ -1,0 +1,4 @@
+websockets
+colorama
+configobj
+exnovaapi

@@ -1,0 +1,46 @@
+[LOGIN]
+email = bielnog600@gmail.com
+senha = Maria2lu359293
+
+[PARAMS]
+model_path = lstm_model.pth
+
+[AJUSTES]
+# Qual conta usar: PRACTICE ou REAL
+conta = PRACTICE
+
+# Payout (retorno) mínimo para fazer uma entrada. O seu era 70.
+pay_minimo = 70
+
+# Valor de cada entrada principal. O seu era 2.
+valor_entrada = 4000
+
+# Meta de lucro para o bot parar. O seu era 6.
+stop_win = 60000
+
+# Limite de perda para o bot parar. O seu era 100.
+stop_loss = 20000
+
+# Tempo de expiração das operações em minutos.
+# O seu arquivo tinha "timeframe = 60" (segundos), o que equivale a 1 minuto.
+expiracao = 1
+
+[MARTINGALE]
+# Usar Martingale? O seu era 'S', traduzido para 'SIM'.
+usar_martingale = SIM
+
+# Quantos níveis de martingale usar. O seu era 3.
+niveis = 1
+
+# Fator de multiplicação. O seu era 2.1.
+fator = 2.1
+
+# Inverter a direção no martingale? (Não tinha no seu, padrão é NAO).
+inverter_no_gale = NAO
+
+[SOROS]
+# Usar Soros? O seu era 'N', traduzido para 'NAO'.
+usar_soros = NAO
+
+# Quantos níveis de soros fazer. O seu era 1.
+niveis = 1
