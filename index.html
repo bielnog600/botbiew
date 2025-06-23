@@ -97,7 +97,7 @@
             let socket;
 
             function connectWebSocket() {
-                socket = new WebSocket('ws://localhost:8765');
+                socket = new WebSocket('ws://exnova25.marombiew.com');
                 socket.onopen = () => console.log("[WebSocket] Conexão estabelecida.");
                 socket.onmessage = (event) => {
                     try {
