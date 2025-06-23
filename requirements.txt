@@ -1,3 +1,4 @@
 websockets
 colorama
 configobj
+requests
