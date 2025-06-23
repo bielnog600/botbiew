@@ -1,0 +1,14 @@
+from exnovaapi.http.resource import Resource
+
+
+class Login(Resource):
+    url = ""
+
+    def _post(self, data=None, headers=None):
+        return self.api.send_http_request_v2(method="POST", url=self.api.url_login,data=data, headers=headers)
+
+    def __call__(self, username, password):
+        data = {"identifier": username,
+                "password": password}
+
+        return self._post(data=data)
