@@ -10,7 +10,6 @@ import uuid
 from datetime import datetime, timedelta
 from collections import deque
 from threading import Thread, Lock
-from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
 import asyncio
 import websockets
@@ -162,8 +161,8 @@ def sma_slope(closes, period):
     return sma2 > sma1
 
 def strategy_rejection_candle(velas, p):
-    if len(velas) < p['MAPeriod'] + 2: return None
-    nano_up = sma_slope([v['close'] for v in velas], p['MAPeriod'])
+    if len(velas) < 5 + 2: return None
+    nano_up = sma_slope([v['close'] for v in velas], 5)
     if nano_up is None: return None
     o, h, l, c = velas[-2]['open'], velas[-2]['high'], velas[-2]['low'], velas[-2]['close']
     range_total = h - l
@@ -206,10 +205,13 @@ def get_config_from_env():
 
 def compra_thread(api, ativo, valor, direcao, expiracao, tipo_op, state, config, cifrao, signal_id, target_entry_timestamp):
     try:
+        # ### CORREÇÃO ### Espera de alta precisão no início da thread
         wait_time = target_entry_timestamp - time.time()
-        if wait_time > 0: time.sleep(max(0, wait_time - 0.2));
-        while time.time() < target_entry_timestamp: pass
-        
+        if wait_time > 0:
+            time.sleep(max(0, wait_time - 0.2)) 
+        while time.time() < target_entry_timestamp:
+            pass
+
         entrada_atual = valor
         direcao_atual, niveis_mg = direcao, config['mg_niveis'] if config['usar_mg'] else 0
         resultado_final = None
@@ -293,7 +295,7 @@ def main_bot_logic(state):
     cifrao, nome_usuario = perfil['currency_char'], perfil['name']
     log_info(f"Olá, {w}{nome_usuario}{c}! Bot a iniciar em modo de servidor.")
     
-    if config['modo_operacao'] == '1': catalogar_estrategias(API, state, {})
+    if config['modo_operacao'] == '1': catalogar_estrategias(API, state, config)
     
     minuto_anterior, analise_feita = -1, False
     log_info("Bot iniciado. Aguardando janela de análise...")
