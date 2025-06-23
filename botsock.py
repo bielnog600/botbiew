@@ -14,6 +14,8 @@ from threading import Thread, Lock
 import asyncio
 import websockets
 import queue
+# ### ATUALIZAÇÃO ### Import necessário para o servidor de health check
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
 from colorama import init, Fore
 from configobj import ConfigObj
@@ -55,7 +57,26 @@ def exibir_banner():
     print(y + "*"*88)
     print(c + "="*88)
 
+# ### ATUALIZAÇÃO ### Servidor HTTP para responder aos Health Checks
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == '/health':
+            self.send_response(200)
+            self.send_header('Content-type', 'text/plain')
+            self.end_headers()
+            self.wfile.write(b'ok')
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+def run_health_check_server():
+    server_address = ('', 8080) # Usa uma porta diferente da do WebSocket
+    httpd = HTTPServer(server_address, HealthCheckHandler)
+    log_info("Servidor de Health Check a correr na porta 8080...")
+    httpd.serve_forever()
+
 async def ws_handler(websocket, bot_state):
+    # ... (código mantido)
     connected_clients.add(websocket)
     log_success(f"Novo cliente WebSocket conectado: {websocket.remote_address}")
     try:
@@ -67,6 +88,7 @@ async def ws_handler(websocket, bot_state):
         log_warning(f"Cliente WebSocket desconectado: {websocket.remote_address}")
 
 async def broadcast_signals():
+    # ... (código mantido)
     while True:
         try:
             signal_data = signal_queue.get_nowait()
@@ -79,25 +101,36 @@ async def broadcast_signals():
             log_error(f"Erro no broadcast do WebSocket: {e}")
 
 def start_websocket_server_sync(bot_state):
+    # ... (código mantido)
     asyncio.set_event_loop(asyncio.new_event_loop())
     handler_with_state = lambda ws: ws_handler(ws, bot_state)
     asyncio.get_event_loop().run_until_complete(start_websocket_server_async(handler_with_state))
 
 async def start_websocket_server_async(handler):
+    # ... (código mantido)
     async with websockets.serve(handler, "0.0.0.0", 8765):
         log_info("Servidor WebSocket iniciado em ws://0.0.0.0:8765")
         await broadcast_signals()
 
 def validar_e_limpar_velas(velas_raw):
+    # ... (código mantido)
     if not velas_raw: return []
     velas_limpas = []
     for v_raw in velas_raw:
         if not isinstance(v_raw, dict): continue
-        vela_padronizada = {'open': v_raw.get('open'), 'close': v_raw.get('close'), 'high': v_raw.get('high') or v_raw.get('max'), 'low': v_raw.get('low') or v_raw.get('min')}
-        if all(vela_padronizada.values()): velas_limpas.append(vela_padronizada)
+        vela_padronizada = {}
+        if 'open' in v_raw: vela_padronizada['open'] = v_raw['open']
+        if 'close' in v_raw: vela_padronizada['close'] = v_raw['close']
+        if 'high' in v_raw: vela_padronizada['high'] = v_raw['high']
+        elif 'max' in v_raw: vela_padronizada['high'] = v_raw['max']
+        if 'low' in v_raw: vela_padronizada['low'] = v_raw['low']
+        elif 'min' in v_raw: vela_padronizada['low'] = v_raw['min']
+        chaves_obrigatorias = ['open', 'high', 'low', 'close']
+        if all(key in vela_padronizada for key in chaves_obrigatorias): velas_limpas.append(vela_padronizada)
     return velas_limpas
 
 def catalogar_estrategias(api, state, params):
+    # ... (código mantido)
     log_info("="*40); log_info("INICIANDO MODO DE CATALOGAÇÃO DE ESTRATÉGIAS..."); log_info("="*40)
     TODAS_AS_ESTRATEGIAS = {'mql_pullback': strategy_mql_pullback, 'flow': strategy_flow, 'patterns': strategy_patterns, 'rejection_candle': strategy_rejection_candle}
     ativos_abertos = []
@@ -115,53 +148,117 @@ def catalogar_estrategias(api, state, params):
             todas_as_velas = validar_e_limpar_velas(velas_historicas_raw)
             if not todas_as_velas or len(todas_as_velas) < 100: log_warning(f"Não foi possível obter dados históricos suficientes para {ativo}."); continue
             resultados = {nome: {'win': 0, 'loss': 0} for nome in TODAS_AS_ESTRATEGIAS}
+            total_sinais = 0
             for i in range(50, len(todas_as_velas) - 1):
                 velas_atuais = todas_as_velas[:i]; vela_sinal = velas_atuais[-1]; vela_resultado = todas_as_velas[i]
                 for nome, funcao_estrategia in TODAS_AS_ESTRATEGIAS.items():
-                    sinal = funcao_estrategia(velas_atuais, params)
+                    sinal = funcao_estrategia(velas_atuais, params) 
                     if sinal:
-                        if (sinal == 'BUY' and vela_resultado['close'] > vela_sinal['close']) or (sinal == 'SELL' and vela_resultado['close'] < vela_sinal['close']):
-                            resultados[nome]['win'] += 1
-                        else:
-                            resultados[nome]['loss'] += 1
-            melhor_estrategia, maior_assertividade = None, 0
+                        total_sinais += 1
+                        if sinal == 'BUY' and vela_resultado['close'] > vela_sinal['close']: resultados[nome]['win'] += 1
+                        elif sinal == 'SELL' and vela_resultado['close'] < vela_sinal['close']: resultados[nome]['win'] += 1
+                        else: resultados[nome]['loss'] += 1
+            melhor_estrategia = None; maior_assertividade = 0
+            print(f" {y}Resultados para {ativo} (baseado em {total_sinais} sinais totais):")
             for nome, res in resultados.items():
-                total = res['win'] + res['loss']
-                if total > 0:
-                    assertividade = (res['win'] / total) * 100
-                    if assertividade > maior_assertividade:
-                        maior_assertividade, melhor_estrategia = assertividade, nome
+                total_operacoes = res['win'] + res['loss']
+                if total_operacoes > 0:
+                    assertividade = (res['win'] / total_operacoes) * 100
+                    print(f"    - {c}{nome:<20}{w}: {g}{res['win']} wins, {r}{res['loss']} loss {y}({assertividade:.2f}%)")
+                    if assertividade > maior_assertividade: maior_assertividade = assertividade; melhor_estrategia = nome
+                else: print(f"    - {c}{nome:<20}{w}: Nenhum sinal gerado.")
             if melhor_estrategia and maior_assertividade > 50:
                 log_success(f" >> Melhor estratégia para {ativo}: '{melhor_estrategia}' com {maior_assertividade:.2f}% de acerto.")
-                state.strategy_performance[ativo] = {'best_strategy': melhor_estrategia}
-        except Exception as e: log_error(f"Ocorreu um erro ao analisar o par {ativo}: {e}"); traceback.print_exc()
+                state.strategy_performance[ativo] = {'best_strategy': melhor_estrategia, 'win_rate': maior_assertividade}
+            else: log_error(f" >> Nenhuma estratégia teve desempenho satisfatório para {ativo}.")
+        except Exception as e: log_error(f"Ocorreu um erro ao analisar o par {ativo}: {e}"); traceback.print_exc(); continue
     log_info("="*40); log_info("CATALOGAÇÃO FINALIZADA!"); log_info("="*40); time.sleep(5)
     
 def sma_slope(closes, period):
+    # ... (código mantido)
     if len(closes) < period + 1: return None
-    sma1 = sum(closes[-(period+1):-1]) / period
-    sma2 = sum(closes[-period:]) / period
-    if sma1 == sma2: return None
-    return sma2 > sma1
+    sma = deque(maxlen=period)
+    for close in closes[- (period + 1):]: sma.append(sum(closes[-(period):])/period)
+    if len(sma) < 2 or sma[-2] == 0: return None
+    return sma[-1] > sma[-2]
+
+def detect_fractals(velas, max_levels):
+    # ... (código mantido)
+    highs, lows = [v['high'] for v in velas], [v['low'] for v in velas]
+    res, sup = deque(maxlen=max_levels), deque(maxlen=max_levels)
+    for i in range(len(velas) - 3, 2, -1):
+        if highs[i-1] > max(highs[i-3:i-1] + highs[i:i+2]): res.append(highs[i-1])
+        if lows[i-1] < min(lows[i-3:i-1] + lows[i:i+2]): sup.append(lows[i-1])
+    return list(res), list(sup)
 
 def strategy_rejection_candle(velas, p):
+    # ... (código mantido)
     if len(velas) < p['MAPeriod'] + 2: return None
     nano_up = sma_slope([v['close'] for v in velas], p['MAPeriod'])
     if nano_up is None: return None
-    o, h, l, c = velas[-2]['open'], velas[-2]['high'], velas[-2]['low'], velas[-2]['close']
+    vela_anterior = velas[-2]; o, h, l, c = vela_anterior['open'], vela_anterior['high'], vela_anterior['low'], vela_anterior['close']
     range_total = h - l
     if range_total == 0: return None
     corpo = abs(o - c); pavio_superior = h - max(o, c); pavio_inferior = min(o, c) - l
-    if nano_up and (pavio_inferior / range_total >= 0.6) and (corpo / range_total <= 0.3) and (pavio_superior / range_total <= 0.15): return 'BUY'
-    if not nano_up and (pavio_superior / range_total >= 0.6) and (corpo / range_total <= 0.3) and (pavio_inferior / range_total <= 0.15): return 'SELL'
+    if nano_up and ((pavio_inferior / range_total) >= 0.6) and ((corpo / range_total) <= 0.3) and ((pavio_superior / range_total) <= 0.15): return 'BUY'
+    if not nano_up and ((pavio_superior / range_total) >= 0.6) and ((corpo / range_total) <= 0.3) and ((pavio_inferior / range_total) <= 0.15): return 'SELL'
     return None
 
-def strategy_mql_pullback(velas, p): return None # Desativada temporariamente para simplificar
-def strategy_flow(velas, p): return None # Desativada temporariamente para simplificar
-def strategy_patterns(velas, p): return None # Desativada temporariamente para simplificar
-    
-def is_market_indecisive(velas, p): return False # Desativada temporariamente para simplificar
+def strategy_mql_pullback(velas, p):
+    # ... (código mantido)
+    if len(velas) < p['MAPeriod'] + 2: return None
+    nano_up = sma_slope([v['close'] for v in velas], p['MAPeriod'])
+    if nano_up is None: return None
+    res_levels, sup_levels = detect_fractals(velas, p['MaxLevels'])
+    last = velas[-1]
+    if nano_up and sup_levels and last['close'] > last['open']:
+        sup_level = sup_levels[0]; target_price = sup_level + p['Proximity'] * p['Point']
+        if last['low'] <= target_price and last['close'] >= sup_level: return 'BUY'
+    if not nano_up and res_levels and last['close'] < last['open']:
+        res_level = res_levels[0]; target_price = res_level - p['Proximity'] * p['Point']
+        if last['high'] >= target_price and last['close'] <= res_level: return 'SELL'
+    return None
 
+def strategy_flow(velas, p):
+    # ... (código mantido)
+    flow_candles_count = p.get('FlowCandles', 3)
+    if len(velas) < p['MAPeriod'] + flow_candles_count: return None
+    nano_up = sma_slope([v['close'] for v in velas], p['MAPeriod'])
+    if nano_up is None: return None
+    last_candles = velas[-flow_candles_count:]
+    if nano_up and all(v['close'] > v['open'] for v in last_candles): return 'BUY'
+    if not nano_up and all(v['close'] < v['open'] for v in last_candles): return 'SELL'
+    return None
+
+def strategy_patterns(velas, p):
+    # ... (código mantido)
+    if len(velas) < p['MAPeriod'] + 2: return None
+    nano_up = sma_slope([v['close'] for v in velas], p['MAPeriod'])
+    if nano_up is None: return None
+    penultimate, last = velas[-2], velas[-1]
+    if nano_up:
+        if (penultimate['close'] < penultimate['open'] and last['close'] > last['open'] and last['open'] < penultimate['close'] and last['close'] > penultimate['open']): return 'BUY'
+        if (penultimate['close'] < penultimate['open'] and last['close'] > last['open'] and last['open'] > penultimate['close'] and last['close'] < penultimate['open']): return 'BUY'
+    if not nano_up:
+        if (penultimate['close'] > penultimate['open'] and last['close'] < last['open'] and last['open'] > penultimate['close'] and last['close'] < penultimate['open']): return 'SELL'
+        if (penultimate['close'] > penultimate['open'] and last['close'] < last['open'] and last['open'] < penultimate['close'] and last['close'] > penultimate['open']): return 'SELL'
+    return None
+    
+def is_market_indecisive(velas, p):
+    # ... (código mantido)
+    candles_to_check, body_max_ratio, min_indecisive_count = p.get('IndecisionCandles', 3), p.get('IndecisionBodyMaxRatio', 0.4), p.get('IndecisionMinCount', 2)
+    if len(velas) < candles_to_check: return False
+    last_candles, indecisive_candles_found = velas[-candles_to_check:], 0
+    for vela in last_candles:
+        range_total = vela['high'] - vela['low']
+        if range_total == 0:
+            indecisive_candles_found += 1
+            continue
+        corpo = abs(vela['open'] - vela['close'])
+        if (corpo / range_total) <= body_max_ratio:
+            indecisive_candles_found += 1
+    return indecisive_candles_found >= min_indecisive_count
+    
 class BotState:
     def __init__(self):
         self.stop = True
@@ -188,6 +285,7 @@ def get_config_from_env():
     }
 
 def compra_thread(api, ativo, valor, direcao, expiracao, tipo_op, state, config, cifrao, signal_id, target_entry_timestamp):
+    # ... (código da thread de compra mantido)
     try:
         wait_time = target_entry_timestamp - time.time()
         if wait_time > 0: time.sleep(max(0, wait_time - 0.2));
@@ -250,6 +348,7 @@ def obter_melhor_par(api, payout_minimo):
     return max(ativos, key=lambda k: ativos[k]['payout']), ativos[max(ativos, key=lambda k: ativos[k]['payout'])]['tipo'], ativos[max(ativos, key=lambda k: ativos[k]['payout'])]['payout']
     
 def main_bot_logic(state):
+    # ... (código de setup mantido, sem alterações)
     exibir_banner()
     email = os.getenv('EXNOVA_EMAIL')
     senha = os.getenv('EXNOVA_PASSWORD')
@@ -341,6 +440,11 @@ def main_bot_logic(state):
 
 def main():
     bot_state = BotState()
+    
+    # Inicia o servidor de health check numa thread separada
+    health_check_thread = Thread(target=run_health_check_server, daemon=True)
+    health_check_thread.start()
+    
     websocket_thread = Thread(target=start_websocket_server_sync, args=(bot_state,), daemon=True)
     websocket_thread.start()
     main_bot_logic(bot_state)
