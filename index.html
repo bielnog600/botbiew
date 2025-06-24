@@ -20,12 +20,17 @@
         .signal-card.result-win { border-color: #22c55e; }
         .signal-card.result-loss { border-color: #ef4444; }
         .gale-notice { position: absolute; top: 8px; right: 8px; background-color: #f59e0b; color: #111827; padding: 2px 8px; border-radius: 9999px; font-size: 0.75rem; font-weight: bold; }
+        #live-analysis-card {
+            filter: blur(1.5px);
+            opacity: 0.6;
+            transition: opacity 0.3s ease;
+            pointer-events: none;
+        }
     </style>
 </head>
 <body class="text-gray-200">
 
     <div id="login-screen" class="min-h-screen flex items-center justify-center bg-gray-900 p-4">
-        <!-- ... (código do login mantido) ... -->
         <div class="w-full max-w-sm glass-effect rounded-2xl p-8 shadow-2xl">
             <div class="text-center mb-8">
                 <h1 class="text-3xl font-bold"><i class="fas fa-chart-line text-green-400"></i> Signal <span class="text-green-400">Bot</span></h1>
@@ -55,7 +60,6 @@
             </div>
         </header>
 
-        <!-- ### PAINEL DE CONTROLO ### -->
         <div id="control-panel" class="flex items-center justify-center gap-4 mb-6 p-4 glass-effect rounded-lg">
             <button id="toggle-trading-btn" class="btn-control font-bold py-2 px-6 rounded-lg btn-on"><i class="fas fa-play mr-2"></i>Ligar Análise</button>
             <div id="bot-status" class="text-lg text-gray-300 text-center flex-grow">
@@ -84,7 +88,9 @@
             let isTrading = false;
 
             function connectWebSocket() {
+                // ### ATENÇÃO ### Substitua 'localhost:8765' pelo seu URL do Coolify
                 socket = new WebSocket('wss://qsggss444w0ggs8k80wk0k8c.144.91.107.111.sslip.io');
+
                 socket.onopen = () => {
                     botStatus.innerHTML = `<i class="fas fa-check-circle text-green-500 mr-2"></i>Conectado. Bot está desligado.`;
                 };
@@ -94,16 +100,17 @@
                         const message = JSON.parse(event.data);
                         switch(message.type) {
                             case 'init': handleInitialState(message.data); break;
-                            case 'signal': createSignalCard(message); break;
+                            case 'signal': handleNewSignal(message); break;
                             case 'result': handleResult(message); break;
                             case 'gale': handleGale(message); break;
-                            case 'status_update': 
-                                botStatus.innerHTML = `<i class="fas fa-spinner fa-spin mr-2"></i>${message.message}`;
-                                break;
+                            case 'analysis_status': handleAnalysisStatus(message); break;
                         }
                     } catch (error) { console.error("Erro ao processar mensagem JSON:", error); }
                 };
-                socket.onclose = () => { setTimeout(connectWebSocket, 5000); };
+                socket.onclose = () => { 
+                    botStatus.innerHTML = `<i class="fas fa-times-circle text-red-500 mr-2"></i>Conexão perdida. A reconectar...`;
+                    setTimeout(connectWebSocket, 5000); 
+                };
             }
 
             if (loginForm) {
@@ -150,6 +157,7 @@
                 if (card) {
                     const galeNotice = card.querySelector('.gale-notice');
                     if (galeNotice) galeNotice.remove();
+                    
                     const resultDisplay = card.querySelector('.entry-time-display');
                     const resultClass = result.result === 'WIN' ? 'text-green-400' : 'text-red-400';
                     const resultIcon = result.result === 'WIN' ? 'fa-check-circle' : 'fa-times-circle';
@@ -169,6 +177,14 @@
                     notice.textContent = `GALE ${gale.gale_level}`;
                     card.appendChild(notice);
                 }
+            }
+            
+            function handleAnalysisStatus(status) {
+                botStatus.innerHTML = `<i class="fas fa-spinner fa-spin mr-2"></i>${status.message}`;
+            }
+
+            function handleNewSignal(signal) {
+                createSignalCard(signal); 
             }
             
             function createSignalCard(signal) {
