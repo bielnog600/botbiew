@@ -197,16 +197,7 @@ def main_bot_logic(state):
     
     log_success("Conexão estabelecida com sucesso!")
     API.change_balance(config['conta'])
-    
-    cifrao = "$"
-    try:
-        perfil = API.get_profile_ansyc()
-        cifrao = perfil.get('currency_char', '$')
-        nome_usuario = perfil.get('name', 'Utilizador')
-        log_info(f"Olá, {w}{nome_usuario}{c}! Bot a iniciar em modo de servidor.")
-    except Exception as e:
-        log_warning(f"Não foi possível obter o perfil do utilizador. A continuar com valores padrão. Erro: {e}")
-        log_info(f"Olá! Bot a iniciar em modo de servidor.")
+    log_info(f"Bot a iniciar em modo de servidor.")
     
     minuto_anterior, analise_feita = -1, False
     log_info("Bot iniciado. A entrar no ciclo de análise...")
@@ -254,7 +245,7 @@ def main_bot_logic(state):
                     state.signal_history[signal_id] = signal_payload
                     signal_queue.put(signal_payload)
 
-                    Thread(target=compra_thread, args=(API, ativo, config['valor_entrada'], direcao_final, config['expiracao'], tipo_op, state, config, cifrao, signal_id, target_entry_timestamp), daemon=True).start()
+                    Thread(target=compra_thread, args=(API, ativo, config['valor_entrada'], direcao_final, config['expiracao'], tipo_op, state, config, '$', signal_id, target_entry_timestamp), daemon=True).start()
                 else:
                     signal_queue.put({"type": "analysis_status", "asset": ativo, "message": "Nenhuma estratégia encontrou sinal."})
             
