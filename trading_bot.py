@@ -38,7 +38,7 @@ except ImportError:
 
         def get_profile_ansyc(self):
             print("Mocking get_profile_ansyc")
-            self.profile = {'name': 'Fabiel Nogueira Aires', 'currency_char': '$'}
+            self.profile = {'name': 'Mock User', 'currency_char': '$'}
             return self.profile
 
         def get_all_open_time(self):
@@ -118,39 +118,28 @@ def exibir_banner():
     print(y + "*"*88)
     print(c + "="*88)
 
-# ######################################
-# APROXIMAÇÃO FINAL COM CLASSE
-# ######################################
-class WebSocketServer:
-    def __init__(self, bot_state):
-        self.bot_state = bot_state
-
-    # #############################################################
-    # A ASSINATURA DA FUNÇÃO FOI CORRIGIDA PARA ACEITAR 1 ARGUMENTO
-    # #############################################################
-    async def handler(self, websocket):
-        path = websocket.path
-        connected_clients.add(websocket)
-        log_success(f"New WebSocket client connected: {websocket.remote_address} on path {path}")
-        try:
-            initial_state = {
-                "type": "init",
-                "data": {
-                    "signals": list(self.bot_state.signal_history.values()),
-                    "placar": {
-                        "wins": self.bot_state.win_count,
-                        "losses": self.bot_state.loss_count,
-                        "gale_wins": sum(self.bot_state.gale_wins.values())
-                    }
+async def ws_handler(websocket, path, bot_state):
+    connected_clients.add(websocket)
+    log_success(f"New WebSocket client connected: {websocket.remote_address}")
+    try:
+        initial_state = {
+            "type": "init",
+            "data": {
+                "signals": list(bot_state.signal_history.values()),
+                "placar": {
+                    "wins": bot_state.win_count,
+                    "losses": bot_state.loss_count,
+                    "gale_wins": sum(bot_state.gale_wins.values())
                 }
             }
-            await websocket.send(json.dumps(initial_state))
-            await websocket.wait_closed()
-        except websockets.exceptions.ConnectionClosed as e:
-            log_warning(f"Connection closed with client {websocket.remote_address} (Code: {e.code}, Reason: {e.reason})")
-        finally:
-            connected_clients.remove(websocket)
-            log_warning(f"WebSocket client disconnected: {websocket.remote_address}")
+        }
+        await websocket.send(json.dumps(initial_state))
+        await websocket.wait_closed()
+    except websockets.exceptions.ConnectionClosed as e:
+        log_warning(f"Connection closed with client {websocket.remote_address}: {e}")
+    finally:
+        connected_clients.remove(websocket)
+        log_warning(f"WebSocket client disconnected: {websocket.remote_address}")
 
 async def broadcast_signals():
     while True:
@@ -158,7 +147,8 @@ async def broadcast_signals():
             signal_data = signal_queue.get_nowait()
             if connected_clients:
                 message = json.dumps(signal_data)
-                tasks = [client.send(message) for client in connected_clients]
+                # Use asyncio.create_task to avoid blocking the broadcast loop
+                tasks = [asyncio.create_task(client.send(message)) for client in connected_clients]
                 await asyncio.gather(*tasks, return_exceptions=True)
         except queue.Empty:
             await asyncio.sleep(0.1)
@@ -166,41 +156,33 @@ async def broadcast_signals():
             log_error(f"Error in WebSocket broadcast: {e}")
 
 def start_websocket_server_sync(bot_state):
+    # This function runs in a separate thread and manages its own event loop
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     
-    server_instance = WebSocketServer(bot_state)
-
-    async def main_async_logic():
-        server_options = {
-            "ping_interval": 20,
-            "ping_timeout": 20,
-            "reuse_port": True
-        }
-        
-        try:
-            # Passa o método handler da instância do servidor
-            start_server = websockets.serve(server_instance.handler, "0.0.0.0", 8765, **server_options)
-        except (AttributeError, TypeError, OSError):
-            log_warning("reuse_port not supported or failed. Starting WebSocket server without it.")
-            del server_options["reuse_port"]
-            start_server = websockets.serve(server_instance.handler, "0.0.0.0", 8765, **server_options)
-        
-        server = await start_server
-        log_success(f"WebSocket Server started successfully on {server.sockets[0].getsockname()} with keep-alive pings.")
-
-        await asyncio.gather(
-            broadcast_signals(),
-            server.wait_closed()
-        )
-
+    # Curry the bot_state into the ws_handler
+    handler_with_state = lambda ws, path: ws_handler(ws, path, bot_state)
+    
     try:
-        loop.run_until_complete(main_async_logic())
+        # Try with reuse_port, fallback if not supported
+        try:
+            start_server = websockets.serve(handler_with_state, "0.0.0.0", 8765, reuse_port=True)
+        except (AttributeError, TypeError): # reuse_port might not be available
+            log_warning("reuse_port not supported on this system. Starting WebSocket server without it.")
+            start_server = websockets.serve(handler_with_state, "0.0.0.0", 8765)
+
+        server = loop.run_until_complete(start_server)
+        log_info("WebSocket Server started on ws://0.0.0.0:8765")
+        
+        # Run the broadcast task and the server concurrently
+        loop.run_until_complete(asyncio.gather(broadcast_signals(), server.wait_closed()))
+
+    except (OSError, websockets.exceptions.WebSocketException) as e:
+        log_error(f"Failed to start WebSocket server on port 8765: {e}")
+        log_error("Please check if the port is already in use or if you have permissions to bind to it.")
     except Exception as e:
-        log_error(f"CRITICAL ERROR in WebSocket server thread: {e}")
-        traceback.print_exc()
+        log_error(f"An unexpected error occurred in the WebSocket server thread: {e}")
     finally:
-        log_warning("WebSocket server loop is shutting down.")
         loop.close()
 
 
@@ -385,7 +367,8 @@ def compra_thread(api, ativo, valor, direcao, expiracao, tipo_op, state, config,
             if not check: log_error(f"Failed to open order in Gale {i}."); resultado_final = "ERROR"; break
             
             resultado, status_encontrado = 0.0, False
-            tempo_limite = time.time() + expiracao * 60 + 15 
+            # Wait for the result
+            tempo_limite = time.time() + expiracao * 60 + 15 # Add a 15-second buffer
             while time.time() < tempo_limite:
                 status, lucro = api.check_win_v4(id_ordem)
                 if status:
@@ -401,7 +384,7 @@ def compra_thread(api, ativo, valor, direcao, expiracao, tipo_op, state, config,
                     state.win_count += 1
                     if i > 0: state.gale_wins[f'g{i}'] += 1
                 resultado_final = 'WIN'
-                break 
+                break # Exit the martingale loop on a win
             elif resultado < 0:
                 log_error(f"RESULT: LOSS {gale_info} | Loss: {cifrao}{abs(resultado):.2f}")
                 if i < niveis_mg:
@@ -412,7 +395,9 @@ def compra_thread(api, ativo, valor, direcao, expiracao, tipo_op, state, config,
                     resultado_final = 'LOSS'
             else:
                 log_warning(f"RESULT: DRAW {gale_info}.")
+                # Treat draw as a loss for martingale purposes
                 if i < niveis_mg:
+                    # Don't increase the bet size on a draw, just re-enter
                     log_info("Re-entering after a draw...")
                 else:
                     resultado_final = 'DRAW'
@@ -452,7 +437,7 @@ def obter_melhor_par(api, payout_minimo):
                             if ativo not in ativos or payout > ativos[ativo]['payout']:
                                 ativos[ativo] = {'payout': payout, 'tipo': 'digital' if tipo_mercado == 'digital' else 'turbo'}
                     except Exception:
-                        continue
+                        continue # Ignore pairs that might cause issues
 
     if not ativos:
         return None, None, None
@@ -462,8 +447,8 @@ def obter_melhor_par(api, payout_minimo):
 
 def main_bot_logic(state):
     exibir_banner()
-    email = os.getenv('EXNOVA_EMAIL', 'test@example.com')
-    senha = os.getenv('EXNOVA_PASSWORD', 'password')
+    email = os.getenv('EXNOVA_EMAIL', 'test@example.com') # Fallback for testing
+    senha = os.getenv('EXNOVA_PASSWORD', 'password') # Fallback for testing
     if not email or not senha:
         log_error("Environment variables EXNOVA_EMAIL and EXNOVA_PASSWORD not set.")
         sys.exit(1)
@@ -527,6 +512,7 @@ def main_bot_logic(state):
                 direcao_final, nome_estrategia_usada = None, None
                 strategies_to_try = [('Pullback MQL', 'mql_pullback'), ('Flow', 'flow'), ('Patterns', 'patterns'), ('Rejection', 'rejection_candle')]
                 
+                # Check for a cataloged best strategy first
                 if ativo in state.strategy_performance:
                     cod_est = state.strategy_performance[ativo]['best_strategy']
                     sinal = globals().get(f'strategy_{cod_est}')(velas, PARAMS)
@@ -534,6 +520,7 @@ def main_bot_logic(state):
                         direcao_final = {'BUY': 'call', 'SELL': 'put'}.get(sinal)
                         nome_estrategia_usada = cod_est.replace('_', ' ').title()
                 
+                # If no signal from the best strategy, try others
                 if not direcao_final:
                     for nome, cod in strategies_to_try:
                         sinal = globals().get(f'strategy_{cod}')(velas, PARAMS)
@@ -582,9 +569,6 @@ def main():
     websocket_thread = Thread(target=start_websocket_server_sync, args=(bot_state,), daemon=True)
     websocket_thread.start()
     
-    # Give the WebSocket server a moment to start before the main logic
-    time.sleep(2)
-
     try:
         main_bot_logic(bot_state)
     except KeyboardInterrupt:
@@ -595,6 +579,7 @@ def main():
     finally:
         bot_state.stop = True
         log(b, "Shutting down the bot...")
+        # Give threads a moment to finish
         time.sleep(2)
         sys.exit()
 
