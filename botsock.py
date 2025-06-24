@@ -88,6 +88,7 @@ async def start_websocket_server_async(handler):
         log_info("Servidor WebSocket iniciado em ws://0.0.0.0:8765")
         await broadcast_signals()
 
+# --- Funções de Lógica e Estratégia ---
 def validar_e_limpar_velas(velas_raw):
     if not velas_raw: return []
     velas_limpas = []
@@ -160,8 +161,8 @@ def strategy_rejection_candle(velas, p):
     range_total = h - l
     if range_total == 0: return None
     corpo = abs(o - c); pavio_superior = h - max(o, c); pavio_inferior = min(o, c) - l
-    if nano_up and ((pavio_inferior / range_total) >= p['RejectionWickMinRatio']) and ((corpo / range_total) <= p['RejectionBodyMaxRatio']) and ((pavio_superior / range_total) <= p['RejectionOppositeWickMaxRatio']): return 'BUY'
-    if not nano_up and ((pavio_superior / range_total) >= p['RejectionWickMinRatio']) and ((corpo / range_total) <= p['RejectionBodyMaxRatio']) and ((pavio_inferior / range_total) <= p['RejectionOppositeWickMaxRatio']): return 'SELL'
+    if nano_up and ((pavio_inferior / range_total) >= p.get('RejectionWickMinRatio', 0.6)) and ((corpo / range_total) <= p.get('RejectionBodyMaxRatio', 0.3)) and ((pavio_superior / range_total) <= p.get('RejectionOppositeWickMaxRatio', 0.15)): return 'BUY'
+    if not nano_up and ((pavio_superior / range_total) >= p.get('RejectionWickMinRatio', 0.6)) and ((corpo / range_total) <= p.get('RejectionBodyMaxRatio', 0.3)) and ((pavio_inferior / range_total) <= p.get('RejectionOppositeWickMaxRatio', 0.15)): return 'SELL'
     return None
 
 def strategy_mql_pullback(velas, p):
@@ -177,10 +178,10 @@ def strategy_mql_pullback(velas, p):
     return None
 
 def strategy_flow(velas, p):
-    if len(velas) < p['MAPeriod'] + p['FlowCandles']: return None
+    if len(velas) < p['MAPeriod'] + 3: return None
     nano_up = sma_slope([v['close'] for v in velas], p['MAPeriod'])
     if nano_up is None: return None
-    last_candles = velas[-p['FlowCandles']:]
+    last_candles = velas[-3:]
     if nano_up and all(v['close'] > v['open'] for v in last_candles): return 'BUY'
     if not nano_up and all(v['close'] < v['open'] for v in last_candles): return 'SELL'
     return None
@@ -199,14 +200,14 @@ def strategy_patterns(velas, p):
     return None
 
 def is_market_indecisive(velas, p):
-    if len(velas) < p['IndecisionCandles']: return False
-    last_candles, indecisive_candles = velas[-p['IndecisionCandles']:], 0
+    if len(velas) < 3: return False
+    last_candles, indecisive_candles = velas[-3:], 0
     for vela in last_candles:
         range_total = vela['high'] - vela['low']
         if range_total == 0: indecisive_candles += 1; continue
         corpo = abs(vela['open'] - vela['close'])
-        if (corpo / range_total) <= p['IndecisionBodyMaxRatio']: indecisive_candles += 1
-    return indecisive_candles >= p['IndecisionMinCount']
+        if (corpo / range_total) <= 0.4: indecisive_candles += 1
+    return indecisive_candles >= 2
 
 class BotState:
     def __init__(self):
