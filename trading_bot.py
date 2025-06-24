@@ -119,16 +119,17 @@ def exibir_banner():
     print(c + "="*88)
 
 # ######################################
-# NOVA ABORDAGEM COM CLASSE
+# APROXIMAÇÃO FINAL COM CLASSE
 # ######################################
 class WebSocketServer:
     def __init__(self, bot_state):
         self.bot_state = bot_state
 
-    # ######################################
-    # A LINHA CORRIGIDA ESTÁ AQUI
-    # ######################################
-    async def handler(self, websocket, path):
+    # #############################################################
+    # A ASSINATURA DA FUNÇÃO FOI CORRIGIDA PARA ACEITAR 1 ARGUMENTO
+    # #############################################################
+    async def handler(self, websocket):
+        path = websocket.path
         connected_clients.add(websocket)
         log_success(f"New WebSocket client connected: {websocket.remote_address} on path {path}")
         try:
