@@ -8,7 +8,6 @@ import uuid
 from datetime import datetime, timedelta
 from collections import deque
 from threading import Thread, Lock
-from http.server import HTTPServer, BaseHTTPRequestHandler
 
 import asyncio
 import websockets
@@ -18,12 +17,13 @@ from colorama import init, Fore
 from configobj import ConfigObj
 from exnovaapi.stable_api import Exnova
 
+# --- Inicialização ---
 init(autoreset=True)
 g, y, r, w, c, b = Fore.GREEN, Fore.YELLOW, Fore.RED, Fore.WHITE, Fore.CYAN, Fore.BLUE
-
 signal_queue = queue.Queue()
 connected_clients = set()
 
+# --- Funções de Log ---
 def log(cor, mensagem):
     print(f"{cor}[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] {w}{mensagem}")
 
@@ -32,8 +32,8 @@ def log_success(msg): log(g, msg)
 def log_warning(msg): log(y, msg)
 def log_error(msg): log(r, msg)
 
+# --- Banner e Funções de WebSocket (sem alterações) ---
 def exibir_banner():
-    # ... (código do banner mantido)
     print(c + "\n" + "="*88)
     print(y + "*"*88)
     print(g + '''
@@ -53,19 +53,6 @@ def exibir_banner():
     ''')
     print(y + "*"*88)
     print(c + "="*88)
-
-class HealthCheckHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-    def log_message(self, format, *args):
-        return
-
-def run_health_check_server():
-    server_address = ('', 8080)
-    httpd = HTTPServer(server_address, HealthCheckHandler)
-    log_info("Servidor de Health Check a correr na porta 8080...")
-    httpd.serve_forever()
 
 async def ws_handler(websocket, bot_state):
     connected_clients.add(websocket)
@@ -100,6 +87,7 @@ async def start_websocket_server_async(handler):
         log_info("Servidor WebSocket iniciado em ws://0.0.0.0:8765")
         await broadcast_signals()
 
+# --- Funções de Lógica e Estratégia (sem alterações) ---
 def validar_e_limpar_velas(velas_raw):
     if not velas_raw: return []
     velas_limpas = []
@@ -112,7 +100,6 @@ def validar_e_limpar_velas(velas_raw):
 class BotState:
     def __init__(self):
         self.stop = True
-        self.lucro_total = 0.0
         self.win_count = 0
         self.loss_count = 0
         self.gale_wins = {f"g{i}": 0 for i in range(1, 11)}
@@ -134,10 +121,14 @@ def get_config_from_env():
 
 def compra_thread(api, ativo, valor, direcao, expiracao, tipo_op, state, config, cifrao, signal_id, target_entry_timestamp):
     try:
+        # ### CORREÇÃO ### Lógica de espera de alta precisão
         wait_time = target_entry_timestamp - time.time()
-        if wait_time > 0: time.sleep(max(0, wait_time - 0.2));
-        while time.time() < target_entry_timestamp: pass
+        if wait_time > 0:
+            time.sleep(max(0, wait_time - 0.2))
+        while time.time() < target_entry_timestamp:
+            pass
         
+        # O resto da lógica da thread continua aqui...
         entrada_atual = valor
         direcao_atual, niveis_mg = direcao, config['mg_niveis'] if config['usar_mg'] else 0
         resultado_final = None
@@ -159,7 +150,7 @@ def compra_thread(api, ativo, valor, direcao, expiracao, tipo_op, state, config,
                 if status: resultado, status_encontrado = lucro, True; break
                 time.sleep(0.5)
             if not status_encontrado: log_error(f"Timeout na ordem {id_ordem}."); resultado_final = "ERRO"; break
-            state.lucro_total += resultado
+            
             if resultado > 0:
                 log_success(f"RESULTADO: WIN {gale_info} | Lucro: {cifrao}{resultado:.2f}")
                 state.win_count += 1
@@ -239,21 +230,13 @@ def main_bot_logic(state):
 
             if segundo_atual >= 55 and not analise_feita and not state.is_trading:
                 analise_feita = True
-                signal_queue.put({"type": "analysis_status", "asset": "BOT", "message": "Procurando melhor par..."})
                 ativo, tipo_op, payout = obter_melhor_par(API, config['pay_minimo'])
-                if not ativo:
-                    signal_queue.put({"type": "analysis_status", "asset": "AVISO", "message": "Nenhum par com payout mínimo."})
-                    continue
+                if not ativo: continue
 
-                signal_queue.put({"type": "analysis_status", "asset": ativo, "message": "A obter velas..."})
                 velas = validar_e_limpar_velas(API.get_candles(ativo, 60, 150, time.time()))
-
-                if not velas or len(velas) < 20:
-                    signal_queue.put({"type": "analysis_status", "asset": ativo, "message": "Dados insuficientes."})
-                    continue
+                if not velas or len(velas) < 20: continue
                 
-                signal_queue.put({"type": "analysis_status", "asset": ativo, "message": "A aplicar estratégias..."})
-                direcao_final, nome_estrategia_usada = strategy_rejection_candle(velas, config), "Rejeição de Pavio"
+                direcao_final, nome_estrategia = strategy_rejection_candle(velas, config), "Rejeição de Pavio"
                 
                 if direcao_final:
                     state.is_trading = True
@@ -264,31 +247,25 @@ def main_bot_logic(state):
                     target_entry_timestamp = (timestamp // 60 + 1) * 60
                     signal_id = str(uuid.uuid4())
                     vela_sinal = velas[-1]
-                    signal_payload = {"type": "signal", "signal_id": signal_id, "pair": ativo, "strategy": nome_estrategia_usada, "direction": direcao_final.upper(), "entry_time": horario_entrada_str, "candle": {"open": vela_sinal['open'], "close": vela_sinal['close'], "high": vela_sinal['high'], "low": vela_sinal['low'], "color": 'text-green-400' if vela_sinal['close'] > vela_sinal['open'] else 'text-red-400'}, "result": None, "gale_level": 0}
+                    signal_payload = {"type": "signal", "signal_id": signal_id, "pair": ativo, "strategy": nome_estrategia, "direction": direcao_final.upper(), "entry_time": horario_entrada_str, "candle": {"open": vela_sinal['open'], "close": vela_sinal['close'], "high": vela_sinal['high'], "low": vela_sinal['low'], "color": 'text-green-400' if vela_sinal['close'] > vela_sinal['open'] else 'text-red-400'}, "result": None, "gale_level": 0}
                     state.signal_history[signal_id] = signal_payload
                     signal_queue.put(signal_payload)
 
                     Thread(target=compra_thread, args=(API, ativo, config['valor_entrada'], direcao_final, config['expiracao'], tipo_op, state, config, cifrao, signal_id, target_entry_timestamp), daemon=True).start()
-                else:
-                    signal_queue.put({"type": "analysis_status", "asset": ativo, "message": "Nenhuma estratégia encontrou sinal."})
             
             time.sleep(0.2)
         
         except Exception as e:
-            log_error(f"ERRO NÃO TRATADO NO LOOP PRINCIPAL: {e}")
-            traceback.print_exc()
-            log_warning("Aguardando 10 segundos antes de continuar...")
-            time.sleep(10)
+            log_error(f"ERRO NÃO TRATADO NO LOOP PRINCIPAL: {e}"); traceback.print_exc()
+            log_warning("Aguardando 10 segundos antes de continuar..."); time.sleep(10)
 
 def main():
     bot_state = BotState()
     
-    # Inicia os serviços de apoio em segundo plano (daemon=True)
     websocket_thread = Thread(target=start_websocket_server_sync, args=(bot_state,), daemon=True)
     websocket_thread.start()
     
     try:
-        # Executa a lógica principal diretamente para manter o programa vivo
         main_bot_logic(bot_state)
     except KeyboardInterrupt:
         log_warning("\nBot interrompido pelo usuário.")
@@ -297,8 +274,7 @@ def main():
         log_error(f"Erro fatal ao iniciar o bot: {e}")
         traceback.print_exc()
     finally:
-        log(b, "Encerrando o bot.");
-        sys.exit()
+        log(b, "Encerrando o bot."); sys.exit()
 
 if __name__ == "__main__":
     main()
