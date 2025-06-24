@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 import time
 import json
-import base64
 import os
 import sys
 import traceback
@@ -9,6 +8,7 @@ import uuid
 from datetime import datetime, timedelta
 from collections import deque
 from threading import Thread, Lock
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
 import asyncio
 import websockets
@@ -54,6 +54,19 @@ def exibir_banner():
     print(y + "*"*88)
     print(c + "="*88)
 
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+    def log_message(self, format, *args):
+        return
+
+def run_health_check_server():
+    server_address = ('', 8080)
+    httpd = HTTPServer(server_address, HealthCheckHandler)
+    log_info("Servidor de Health Check a correr na porta 8080...")
+    httpd.serve_forever()
+
 async def ws_handler(websocket, bot_state):
     connected_clients.add(websocket)
     log_success(f"Novo cliente WebSocket conectado: {websocket.remote_address}")
@@ -96,6 +109,15 @@ def validar_e_limpar_velas(velas_raw):
         if all(vela_padronizada.values()): velas_limpas.append(vela_padronizada)
     return velas_limpas
 
+# ### CORREÇÃO ### Função re-adicionada
+def detect_fractals(velas, max_levels):
+    highs, lows = [v['high'] for v in velas], [v['low'] for v in velas]
+    res, sup = deque(maxlen=max_levels), deque(maxlen=max_levels)
+    for i in range(len(velas) - 3, 2, -1):
+        if highs[i-1] > max(highs[i-3:i-1] + highs[i:i+2]): res.append(highs[i-1])
+        if lows[i-1] < min(lows[i-3:i-1] + lows[i:i+2]): sup.append(lows[i-1])
+    return list(res), list(sup)
+    
 def catalogar_estrategias(api, state, params):
     log_info("="*40); log_info("INICIANDO MODO DE CATALOGAÇÃO DE ESTRATÉGIAS..."); log_info("="*40)
     TODAS_AS_ESTRATEGIAS = {'mql_pullback': strategy_mql_pullback, 'flow': strategy_flow, 'patterns': strategy_patterns, 'rejection_candle': strategy_rejection_candle}
@@ -218,7 +240,7 @@ def get_config_from_env():
         'usar_mg': os.getenv('EXNOVA_USAR_MG', 'SIM').upper() == 'SIM',
         'mg_niveis': int(os.getenv('EXNOVA_MG_NIVEIS', 2)),
         'mg_fator': float(os.getenv('EXNOVA_MG_FATOR', 2.0)),
-        'modo_operacao': os.getenv('EXNOVA_MODO_OPERACAO', '2') # 1=Catalogar, 2=Operar
+        'modo_operacao': os.getenv('EXNOVA_MODO_OPERACAO', '2')
     }
 
 def compra_thread(api, ativo, valor, direcao, expiracao, tipo_op, state, config, cifrao, signal_id, target_entry_timestamp):
@@ -310,8 +332,9 @@ def main_bot_logic(state):
         log_warning(f"Não foi possível obter o perfil do utilizador. Erro: {e}")
         log_info(f"Olá! Bot a iniciar em modo de servidor.")
     
+    PARAMS = { 'MAPeriod': 5, 'MaxLevels': 10, 'Proximity': 7.0, 'Point': 1e-6, 'FlowCandles': 3, 'RejectionWickMinRatio': 0.6, 'RejectionBodyMaxRatio': 0.3, 'RejectionOppositeWickMaxRatio': 0.15, 'IndecisionCandles': 3, 'IndecisionBodyMaxRatio': 0.4, 'IndecisionMinCount': 2 }
     if config['modo_operacao'] == '1':
-        catalogar_estrategias(API, state, config)
+        catalogar_estrategias(API, state, PARAMS)
     
     minuto_anterior, analise_feita = -1, False
     log_info("Bot iniciado. A entrar no ciclo de análise...")
@@ -332,7 +355,6 @@ def main_bot_logic(state):
                 analise_feita = True
                 ativo, tipo_op, payout = obter_melhor_par(API, config['pay_minimo'])
                 if not ativo:
-                    signal_queue.put({"type": "analysis_status", "asset": "AVISO", "message": "Nenhum par com payout mínimo."})
                     continue
 
                 velas = validar_e_limpar_velas(API.get_candles(ativo, 60, 150, time.time()))
@@ -343,12 +365,12 @@ def main_bot_logic(state):
                 direcao_final, nome_estrategia_usada = None, None
                 if state.strategy_performance.get(ativo):
                     cod_est = state.strategy_performance[ativo]['best_strategy']
-                    sinal = globals().get(f'strategy_{cod_est}')(velas, config)
+                    sinal = globals().get(f'strategy_{cod_est}')(velas, PARAMS)
                     if sinal:
                         direcao_final, nome_estrategia_usada = {'BUY': 'call', 'SELL': 'put'}.get(sinal), cod_est.replace('_', ' ').title()
                 else: 
                     for nome, cod in [('Pullback MQL', 'mql_pullback'), ('Fluxo', 'flow'), ('Padrões', 'patterns'), ('Rejeição', 'rejection_candle')]:
-                        sinal = globals().get(f'strategy_{cod}')(velas, config)
+                        sinal = globals().get(f'strategy_{cod}')(velas, PARAMS)
                         if sinal:
                             direcao_final, nome_estrategia_usada = {'BUY': 'call', 'SELL': 'put'}.get(sinal), nome
                             break
