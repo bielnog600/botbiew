@@ -140,9 +140,10 @@ def start_websocket_server_sync(bot_state):
 
     # A função de tratamento agora é definida aqui dentro (closure)
     # e tem acesso direto ao 'bot_state'.
+    # A ASSINATURA AGORA ESTÁ CORRETA: (websocket, path)
     async def connection_handler(websocket, path):
         connected_clients.add(websocket)
-        log_success(f"New WebSocket client connected: {websocket.remote_address}")
+        log_success(f"New WebSocket client connected: {websocket.remote_address} on path {path}")
         try:
             initial_state = {
                 "type": "init",
