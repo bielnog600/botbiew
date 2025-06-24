@@ -10,22 +10,30 @@
     <style>
         body { font-family: 'Inter', sans-serif; background-color: #111827; }
         .glass-effect { background: rgba(31, 41, 55, 0.6); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); }
-        .btn-control { transition: background-color 0.2s, transform 0.2s; }
-        .btn-control:active { transform: scale(0.95); }
-        .btn-on { background-color: #16a34a; color: white; }
-        .btn-on:hover { background-color: #15803d; }
-        .btn-off { background-color: #dc2626; color: white; }
-        .btn-off:hover { background-color: #b91c1c; }
+        .entry-time-display { font-family: 'monospace', 'Courier New'; font-size: 2.2rem; font-weight: 700; line-height: 1; }
+        .brand-text { color: #00ff87; }
         .signal-card { border: 2px solid transparent; transition: border-color 0.3s; }
         .signal-card.result-win { border-color: #22c55e; }
         .signal-card.result-loss { border-color: #ef4444; }
-        .gale-notice { position: absolute; top: 8px; right: 8px; background-color: #f59e0b; color: #111827; padding: 2px 8px; border-radius: 9999px; font-size: 0.75rem; font-weight: bold; }
         #live-analysis-card {
             filter: blur(1.5px);
             opacity: 0.6;
             transition: opacity 0.3s ease;
             pointer-events: none;
         }
+        .gale-notice {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            background-color: #f59e0b;
+            color: #111827;
+            padding: 2px 8px;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: bold;
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
     </style>
 </head>
 <body class="text-gray-200">
@@ -59,13 +67,6 @@
                 <div class="text-center"><p class="text-sm text-yellow-400">GALE WINS</p><p id="score-gale-wins" class="text-2xl font-bold">0</p></div>
             </div>
         </header>
-
-        <div id="control-panel" class="flex items-center justify-center gap-4 mb-6 p-4 glass-effect rounded-lg">
-            <button id="toggle-trading-btn" class="btn-control font-bold py-2 px-6 rounded-lg btn-on"><i class="fas fa-play mr-2"></i>Ligar Análise</button>
-            <div id="bot-status" class="text-lg text-gray-300 text-center flex-grow">
-                <i class="fas fa-power-off text-red-500 mr-2"></i>Desligado
-            </div>
-        </div>
         
         <div id="signals-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6"></div>
     </div>
@@ -81,20 +82,15 @@
             const scoreLosses = document.getElementById('score-losses');
             const scoreGaleWins = document.getElementById('score-gale-wins');
             
-            const toggleTradingBtn = document.getElementById('toggle-trading-btn');
-            const botStatus = document.getElementById('bot-status');
-
             let socket;
-            let isTrading = false;
 
             function connectWebSocket() {
-                // ### ATENÇÃO ### Substitua 'localhost:8765' pelo seu URL do Coolify
-                socket = new WebSocket('wss://qsggss444w0ggs8k80wk0k8c.144.91.107.111.sslip.io');
+                // ### ATENÇÃO ### Verifique se este endereço está correto!
+                // Deve ser o endereço que o Coolify lhe deu para o BOT, começando com 'wss://'
+                const websocketUrl = 'wss://qsggss444w0ggs8k80wk0k8c.144.91.107.111.sslip.io';
+                socket = new WebSocket(websocketUrl);
 
-                socket.onopen = () => {
-                    botStatus.innerHTML = `<i class="fas fa-check-circle text-green-500 mr-2"></i>Conectado. Bot está desligado.`;
-                };
-
+                socket.onopen = () => console.log("[WebSocket] Conexão estabelecida.");
                 socket.onmessage = (event) => {
                     try {
                         const message = JSON.parse(event.data);
@@ -107,10 +103,7 @@
                         }
                     } catch (error) { console.error("Erro ao processar mensagem JSON:", error); }
                 };
-                socket.onclose = () => { 
-                    botStatus.innerHTML = `<i class="fas fa-times-circle text-red-500 mr-2"></i>Conexão perdida. A reconectar...`;
-                    setTimeout(connectWebSocket, 5000); 
-                };
+                socket.onclose = () => { setTimeout(connectWebSocket, 5000); };
             }
 
             if (loginForm) {
@@ -123,22 +116,10 @@
                     }
                 });
             }
-
-            if(toggleTradingBtn) {
-                toggleTradingBtn.addEventListener('click', () => {
-                    isTrading = !isTrading;
-                    const command = isTrading ? "start_trading" : "stop_trading";
-                    socket.send(JSON.stringify({ type: command }));
-                    
-                    if(isTrading) {
-                        toggleTradingBtn.innerHTML = `<i class="fas fa-stop mr-2"></i>Parar Análise`;
-                        toggleTradingBtn.className = 'btn-control font-bold py-2 px-6 rounded-lg btn-off';
-                    } else {
-                        toggleTradingBtn.innerHTML = `<i class="fas fa-play mr-2"></i>Ligar Análise`;
-                        toggleTradingBtn.className = 'btn-control font-bold py-2 px-6 rounded-lg btn-on';
-                        botStatus.innerHTML = `<i class="fas fa-power-off text-red-500 mr-2"></i>Desligado`;
-                    }
-                });
+            
+            function removeAnalysisCard() {
+                const analysisCard = document.getElementById('live-analysis-card');
+                if (analysisCard) analysisCard.remove();
             }
             
             function handleInitialState(data) {
@@ -157,7 +138,6 @@
                 if (card) {
                     const galeNotice = card.querySelector('.gale-notice');
                     if (galeNotice) galeNotice.remove();
-                    
                     const resultDisplay = card.querySelector('.entry-time-display');
                     const resultClass = result.result === 'WIN' ? 'text-green-400' : 'text-red-400';
                     const resultIcon = result.result === 'WIN' ? 'fa-check-circle' : 'fa-times-circle';
@@ -178,12 +158,27 @@
                     card.appendChild(notice);
                 }
             }
-            
+
             function handleAnalysisStatus(status) {
-                botStatus.innerHTML = `<i class="fas fa-spinner fa-spin mr-2"></i>${status.message}`;
+                let analysisCard = document.getElementById('live-analysis-card');
+                if (!analysisCard) {
+                    removeAnalysisCard(); 
+                    analysisCard = document.createElement('div');
+                    analysisCard.id = 'live-analysis-card';
+                    analysisCard.className = 'signal-card glass-effect rounded-2xl p-6 flex flex-col items-center text-center relative';
+                    signalsContainer.prepend(analysisCard);
+                }
+                analysisCard.innerHTML = `
+                    <h3 class="text-xl font-bold mb-1">${status.asset}</h3>
+                    <div class="h-28 w-full flex items-center justify-center text-5xl text-gray-400">
+                        <i class="fas fa-spinner fa-spin"></i>
+                    </div>
+                    <p class="text-lg text-gray-300">${status.message}</p>
+                `;
             }
 
             function handleNewSignal(signal) {
+                removeAnalysisCard(); 
                 createSignalCard(signal); 
             }
             
