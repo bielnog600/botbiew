@@ -1,8 +1,6 @@
 # -*- coding: utf-8 -*-
 import time
 import json
-import base64
-import getpass
 import os
 import sys
 import traceback
