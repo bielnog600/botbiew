@@ -128,12 +128,7 @@
 
             // --- LÓGICA DO WEBSOCKET ---
             function connectWebSocket() {
-                // ######################### ATENÇÃO #########################
-                // AQUI VAI O DOMÍNIO PÚBLICO DO SEU BOT CONFIGURADO NO COOLIFY.
-                // DEVE COMEÇAR COM wss:// para uma conexão segura.
-                // Exemplo: wss://meu-bot-legal.coolify.app
-                const websocketUrl = 'wss://botexnova.marombiew.com'; // <-- MUDE AQUI!
-                // ###########################################################
+                const websocketUrl = 'wss://botexnova.marombiew.com';
                 
                 console.log(`[WebSocket] Tentando conectar a ${websocketUrl}...`);
                 socket = new WebSocket(websocketUrl);
@@ -153,7 +148,10 @@
 
                 socket.onclose = () => {
                     console.log('[WebSocket] Conexão perdida. Tentando reconectar em 5 segundos...');
-                    createOrUpdateAnalysisCard({ message: 'Reconectando...' });
+                    // #########################################
+                    // AQUI ESTÁ A CORREÇÃO DO ERRO DE JAVASCRIPT
+                    // #########################################
+                    createAnalysisCard({ message: 'Reconectando...' });
                     setTimeout(connectWebSocket, 5000);
                 };
 
@@ -169,7 +167,7 @@
                         handleInitialState(message.data);
                         break;
                     case 'analysis_status':
-                        createOrUpdateAnalysisCard(message);
+                        createAnalysisCard(message);
                         break;
                     case 'signal':
                         removeAnalysisCard();
@@ -197,7 +195,6 @@
                 const candleColor = candle.close >= candle.open ? '#22c55e' : '#ef4444';
                 const priceRange = candle.high - candle.low;
                 
-                // Previne divisão por zero se high == low
                 if (priceRange <= 0) {
                      return `<svg viewBox="0 0 30 100" class="w-full h-full"><line x1="5" y1="50" x2="25" y2="50" stroke="${candleColor}" stroke-width="2"/></svg>`;
                 }
@@ -207,9 +204,7 @@
 
                 return `
                     <svg viewBox="0 0 30 100" class="w-full h-full">
-                        <!-- Wick -->
                         <rect x="14" y="0" width="2" height="100" fill="${candleColor}" />
-                        <!-- Body -->
                         <rect x="5" y="${bodyTop}" width="20" height="${bodyHeight}" fill="${candleColor}" />
                     </svg>
                 `;
@@ -268,7 +263,6 @@
                 
                 signalsGrid.prepend(card);
                 
-                // Adiciona e remove a animação de pulso
                 card.classList.add(pulseClass);
                 setTimeout(() => card.classList.remove(pulseClass), 5000);
             }
@@ -314,11 +308,9 @@
                 signalsGrid.innerHTML = '';
                 updateScoreboard(data.placar);
                 if (data.signals && Array.isArray(data.signals)) {
-                    // Ordena para mostrar os mais recentes primeiro
                     data.signals.sort((a, b) => b.entry_time.localeCompare(a.entry_time)).forEach(signal => {
                         createSignalCard(signal);
                         if (signal.result) {
-                            // Atraso pequeno para garantir que o card existe no DOM antes de atualizar
                             setTimeout(() => updateCardForResult({ ...signal, placar: data.placar }), 50);
                         }
                         if (signal.gale_level > 0) {
@@ -326,7 +318,7 @@
                         }
                     });
                 }
-                 createOrUpdateAnalysisCard({ message: 'Conectado. Aguardando...' });
+                 createAnalysisCard({ message: 'Conectado. Aguardando...' });
             }
 
             connectWebSocket();
