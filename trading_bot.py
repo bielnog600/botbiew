@@ -122,10 +122,7 @@ def exibir_banner():
 # HANDLER CORRIGIDO PARA SER ROBUSTO A DIFERENÇAS DE AMBIENTE
 # ###########################################################
 async def ws_handler(websocket, *args, bot_state):
-     # em versões novas do websockets, o path vem em args[0], não em websocket.path
-    path = args[0] if args else None
-    connected_clients.add(websocket)
-    log_success(f"New WebSocket client connected: {websocket.remote_address} on path {path}")
+    log_success(f"New WebSocket client connected: {websocket.remote_address}")
     try:
         initial_state = {
             "type": "init",
@@ -165,7 +162,8 @@ def start_websocket_server_sync(bot_state):
     
     # Usa uma lambda flexível que aceita qualquer argumento extra e os passa para o handler.
     # Isso resolve o problema de TypeError, não importa como a biblioteca chame o handler.
-    handler_with_state = lambda websocket, path: ws_handler(websocket, path, bot_state=bot_state)
+    # handler mais flexível, ignora quaisquer args extras
+    handler_with_state = lambda websocket, *args: ws_handler(websocket, *args, bot_state=bot_state)
     
     async def main_async_logic():
         server_options = {
