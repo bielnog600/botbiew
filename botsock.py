@@ -15,74 +15,71 @@ import websockets
 import queue
 
 from colorama import init, Fore
-# The configobj library is not used in the script, so it can be removed.
-# from configobj import ConfigObj
-from exnovaapi.stable_api import Exnova
+from configobj import ConfigObj
+try:
+    from exnovaapi.stable_api import Exnova
+except ImportError:
+    print("Warning: 'exnovaapi' not found. Using a mock class for testing.")
+    # --- Mock Exnova Class for Testing ---
+    class Exnova:
+        def __init__(self, email, password):
+            self.email = email
+            self.password = password
+            self.profile = None
+            print("Initialized Mock Exnova API.")
 
-# --- Mock Exnova Class for Testing ---
-# This class simulates the Exnova API for local testing without real credentials.
-class MockExnova:
-    """A mock class to simulate the Exnova API for testing purposes."""
-    def __init__(self, email, password):
-        self.email = email
-        self.password = password
-        self.profile = None
+        def connect(self):
+            print("Mocking connection to Exnova...")
+            return True, None
 
-    def connect(self):
-        log_info("Mocking connection to Exnova...")
-        return True, None
+        def change_balance(self, balance_type):
+            print(f"Mocking change_balance to {balance_type}")
+            pass
 
-    def change_balance(self, balance_type):
-        log_info(f"Mocking change_balance to {balance_type}")
-        pass
+        def get_profile_ansyc(self):
+            print("Mocking get_profile_ansyc")
+            self.profile = {'name': 'Mock User', 'currency_char': '$'}
+            return self.profile
 
-    def get_profile_ansyc(self):
-        log_info("Mocking get_profile_ansyc")
-        self.profile = {'name': 'Test User', 'currency_char': '$'}
-        return self.profile
+        def get_all_open_time(self):
+            # print("Mocking get_all_open_time")
+            return {
+                'binary': {'EURUSD': {'open': True}, 'GBPUSD': {'open': True}},
+                'turbo': {'EURUSD-TURBO': {'open': True}}
+            }
 
-    def get_all_open_time(self):
-        # Returns a sample of open assets for testing.
-        return {
-            'binary': {'EURUSD': {'open': True}, 'GBPUSD': {'open': True}},
-            'turbo': {'EURUSD-TURBO': {'open': True}}
-        }
+        def get_all_profit(self):
+            # print("Mocking get_all_profit")
+            return {
+                'EURUSD': {'binary': 0.85, 'turbo': 0.90},
+                'GBPUSD': {'binary': 0.82},
+                'EURUSD-TURBO': {'turbo': 0.92}
+            }
 
-    def get_all_profit(self):
-        # Returns sample profits for open assets.
-        return {
-            'EURUSD': {'binary': 0.85, 'turbo': 0.90},
-            'GBPUSD': {'binary': 0.82}
-        }
+        def get_candles(self, active, interval, count, endtime):
+            # print(f"Mocking get_candles for {active}")
+            candles = []
+            start_price = 1.1000
+            for i in range(count):
+                open_price = start_price + (i * 0.0001) * (-1 if i % 2 == 0 else 1)
+                close_price = open_price + 0.0005 * (-1 if i % 3 == 0 else 1)
+                high_price = max(open_price, close_price) + 0.0003
+                low_price = min(open_price, close_price) - 0.0003
+                candles.append({'open': open_price, 'close': close_price, 'high': high_price, 'low': low_price, 'max': high_price, 'min': low_price})
+            return candles
 
-    def get_candles(self, active, interval, count, endtime):
-        # Generates mock candle data for analysis.
-        log_info(f"Mocking get_candles for {active}")
-        candles = []
-        start_price = 1.1000
-        for i in range(count):
-            candles.append({
-                'open': start_price + (i * 0.0001),
-                'close': start_price + 0.0005 + (i * 0.0001),
-                'high': start_price + 0.0010 + (i * 0.0001),
-                'low': start_price - 0.0005 + (i * 0.0001)
-            })
-        return candles
+        def buy_digital_spot(self, active, amount, action, duration):
+            print(f"Mocking buy_digital_spot: {active}, {amount}, {action}, {duration}")
+            return True, "mock_order_id_" + str(uuid.uuid4())
 
-    def buy_digital_spot(self, active, amount, action, duration):
-        log_info(f"Mocking buy_digital_spot: {active}, {amount}, {action}, {duration}")
-        return True, "mock_order_" + str(uuid.uuid4())
+        def buy(self, amount, active, action, duration):
+            print(f"Mocking buy: {amount}, {active}, {action}, {duration}")
+            return True, "mock_order_id_" + str(uuid.uuid4())
 
-    def buy(self, amount, active, action, duration):
-        log_info(f"Mocking buy: {amount}, {active}, {action}, {duration}")
-        return True, "mock_order_" + str(uuid.uuid4())
-
-    def check_win_v4(self, order_id):
-        # Simulates checking the result of a trade.
-        log_info(f"Mocking check_win_v4 for order {order_id}")
-        # Simulate a winning trade for testing purposes.
-        return "win", 1.85 * float(os.getenv('EXNOVA_VALOR_ENTRADA', 1))
-
+        def check_win_v4(self, order_id):
+            # print(f"Mocking check_win_v4 for order {order_id}")
+            # Mocking a win scenario for demonstration
+            return "win", 10.0
 
 # --- Initialization ---
 init(autoreset=True)
@@ -92,7 +89,6 @@ connected_clients = set()
 
 # --- Logging Functions ---
 def log(cor, mensagem):
-    """Prints a colored log message to the console."""
     print(f"{cor}[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] {w}{mensagem}")
 
 def log_info(msg): log(c, msg)
@@ -102,7 +98,6 @@ def log_error(msg): log(r, msg)
 
 # --- Banner and WebSocket Functions ---
 def exibir_banner():
-    """Displays the application's startup banner."""
     print(c + "\n" + "="*88)
     print(y + "*"*88)
     print(g + '''
@@ -111,12 +106,12 @@ def exibir_banner():
           ██║     ██║   ██║██║  ███╗███████║██╔██╗ ██║     ███████╗██╔████╔██║██║   ██║   ███████║
           ██║     ██║   ██║██║   ██║██╔══██║██║╚██╗██║     ╚════██║██║╚██╔╝██║██║   ██║   ██╔══██║
           ███████╗╚██████╔╝╚██████╔╝██║  ██║██║ ╚████║     ███████║██║ ╚═╝ ██║██║   ██║   ██║  ██║
-          ╚══════╝ ╚═════╝  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═══╝     ╚══════╝╚═╝     ╚═╝╚═╝   ╚═╝   ╚═╝  ╚═╝ '''+c+'''    
+          ╚══════╝ ╚═════╝  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═══╝     ╚══════╝╚═╝     ╚═╝╚═╝   ╚═╝   ╚═╝  ╚═╝ '''+c+'''
     ████████╗██████╗ ██╗ █████╗ ██╗         ██╗   ██║██╗  ████████╗██████╗  █████╗ ██████╗  ██████╗ ████████╗
     ╚══██╔══╝██╔══██╗██║██╔══██╗██║         ██║   ██║██║  ╚══██╔══╝██╔══██╗██╔═══██╗╚══██╔══╝
-      ██║   ██████╔╝██║███████║██║         ██║   ██║██║     ██║   ██████╔╝███████║██████╔╝██║   ██║   ██║   
-      ██║   ██╔══██╗██║██╔══██║██║         ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║   ██║   ██║   
-      ██║   ██║  ██║██║██║  ██║███████╗     ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝   ██║   
+      ██║   ██████╔╝██║███████║██║         ██║   ██║██║     ██║   ██████╔╝███████║██████╔╝██║   ██║   ██║
+      ██║   ██╔══██╗██║██╔══██║██║         ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║   ██║   ██║
+      ██║   ██║  ██║██║██║  ██║███████╗     ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝   ██║
       ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝      ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝    ╚═╝ '''+y+'''
                   azkzero@gmail.com
     ''')
@@ -124,7 +119,6 @@ def exibir_banner():
     print(c + "="*88)
 
 async def ws_handler(websocket, path, bot_state):
-    """Handles new WebSocket connections, sends initial state, and manages client lifecycle."""
     connected_clients.add(websocket)
     log_success(f"New WebSocket client connected: {websocket.remote_address}")
     try:
@@ -141,97 +135,87 @@ async def ws_handler(websocket, path, bot_state):
         }
         await websocket.send(json.dumps(initial_state))
         await websocket.wait_closed()
+    except websockets.exceptions.ConnectionClosed as e:
+        log_warning(f"Connection closed with client {websocket.remote_address}: {e}")
     finally:
         connected_clients.remove(websocket)
         log_warning(f"WebSocket client disconnected: {websocket.remote_address}")
 
 async def broadcast_signals():
-    """Continuously broadcasts signals from the queue to all connected WebSocket clients."""
     while True:
         try:
             signal_data = signal_queue.get_nowait()
             if connected_clients:
                 message = json.dumps(signal_data)
-                await asyncio.gather(*[client.send(message) for client in connected_clients])
+                # Use asyncio.create_task to avoid blocking the broadcast loop
+                tasks = [asyncio.create_task(client.send(message)) for client in connected_clients]
+                await asyncio.gather(*tasks, return_exceptions=True)
         except queue.Empty:
             await asyncio.sleep(0.1)
         except Exception as e:
             log_error(f"Error in WebSocket broadcast: {e}")
 
 def start_websocket_server_sync(bot_state):
-    """Initializes and runs the WebSocket server in a synchronous context."""
+    # This function runs in a separate thread and manages its own event loop
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
+    
+    # Curry the bot_state into the ws_handler
     handler_with_state = lambda ws, path: ws_handler(ws, path, bot_state)
-    loop.run_until_complete(start_websocket_server_async(handler_with_state))
-
-
-async def start_websocket_server_async(handler):
-    """Starts the WebSocket server, with a fallback for environments that don't support reuse_port."""
+    
     try:
-        server = await websockets.serve(handler, "0.0.0.0", 8765, reuse_port=True)
-        log_info("WebSocket server started on ws://0.0.0.0:8765 with reuse_port.")
-    except (NotImplementedError, OSError):
-        log_warning("reuse_port is not available. Starting server without it.")
-        server = await websockets.serve(handler, "0.0.0.0", 8765)
-        log_info("WebSocket server started on ws://0.0.0.0:8765.")
+        # Try with reuse_port, fallback if not supported
+        try:
+            start_server = websockets.serve(handler_with_state, "0.0.0.0", 8765, reuse_port=True)
+        except (AttributeError, TypeError): # reuse_port might not be available
+            log_warning("reuse_port not supported on this system. Starting WebSocket server without it.")
+            start_server = websockets.serve(handler_with_state, "0.0.0.0", 8765)
 
-    await broadcast_signals()
+        server = loop.run_until_complete(start_server)
+        log_info("WebSocket Server started on ws://0.0.0.0:8765")
+        
+        # Run the broadcast task and the server concurrently
+        loop.run_until_complete(asyncio.gather(broadcast_signals(), server.wait_closed()))
+
+    except (OSError, websockets.exceptions.WebSocketException) as e:
+        log_error(f"Failed to start WebSocket server on port 8765: {e}")
+        log_error("Please check if the port is already in use or if you have permissions to bind to it.")
+    except Exception as e:
+        log_error(f"An unexpected error occurred in the WebSocket server thread: {e}")
+    finally:
+        loop.close()
 
 
 # --- Logic and Strategy Functions ---
 def validar_e_limpar_velas(velas_raw):
-    """Validates and cleans raw candle data from the API."""
     if not velas_raw: return []
     velas_limpas = []
     for v_raw in velas_raw:
         if not isinstance(v_raw, dict): continue
-        vela_padronizada = {
-            'open': v_raw.get('open'),
-            'close': v_raw.get('close'),
-            'high': v_raw.get('high') or v_raw.get('max'),
-            'low': v_raw.get('low') or v_raw.get('min')
-        }
-        if all(vela_padronizada.values()):
-            velas_limpas.append(vela_padronizada)
+        vela_padronizada = {'open': v_raw.get('open'), 'close': v_raw.get('close'), 'high': v_raw.get('high') or v_raw.get('max'), 'low': v_raw.get('low') or v_raw.get('min')}
+        if all(vela_padronizada.values()): velas_limpas.append(vela_padronizada)
     return velas_limpas
 
 def catalogar_estrategias(api, state, params):
-    """Analyzes historical data to determine the best trading strategy for each asset."""
     log_info("="*40); log_info("STARTING STRATEGY CATALOGING MODE..."); log_info("="*40)
-    TODAS_AS_ESTRATEGIAS = {
-        'mql_pullback': strategy_mql_pullback,
-        'flow': strategy_flow,
-        'patterns': strategy_patterns,
-        'rejection_candle': strategy_rejection_candle
-    }
+    TODAS_AS_ESTRATEGIAS = {'mql_pullback': strategy_mql_pullback, 'flow': strategy_flow, 'patterns': strategy_patterns, 'rejection_candle': strategy_rejection_candle}
     ativos_abertos = []
     all_assets = api.get_all_open_time()
     for tipo_mercado in ['binary', 'turbo']:
         if tipo_mercado in all_assets:
             for ativo, info in all_assets[tipo_mercado].items():
-                if info.get('open', False) and ativo not in ativos_abertos:
-                    ativos_abertos.append(ativo)
-
-    if not ativos_abertos:
-        log_error("No open currency pairs found to catalog.")
-        return
-
+                if info.get('open', False) and ativo not in ativos_abertos: ativos_abertos.append(ativo)
+    if not ativos_abertos: log_error("No open currency pairs found to catalog."); return
     log_info(f"Found {len(ativos_abertos)} open pairs for analysis.")
     for ativo in ativos_abertos:
         try:
             log_info(f"\n--- Analyzing pair: {w}{ativo}{c} ---")
             velas_historicas_raw = api.get_candles(ativo, 60, 500, time.time())
             todas_as_velas = validar_e_limpar_velas(velas_historicas_raw)
-            if not todas_as_velas or len(todas_as_velas) < 100:
-                log_warning(f"Could not get enough historical data for {ativo}.")
-                continue
-
+            if not todas_as_velas or len(todas_as_velas) < 100: log_warning(f"Could not get enough historical data for {ativo}."); continue
             resultados = {nome: {'win': 0, 'loss': 0} for nome in TODAS_AS_ESTRATEGIAS}
             for i in range(50, len(todas_as_velas) - 1):
-                velas_atuais = todas_as_velas[:i]
-                vela_sinal = velas_atuais[-1]
-                vela_resultado = todas_as_velas[i]
+                velas_atuais = todas_as_velas[:i]; vela_sinal = velas_atuais[-1]; vela_resultado = todas_as_velas[i]
                 for nome, funcao_estrategia in TODAS_AS_ESTRATEGIAS.items():
                     sinal = funcao_estrategia(velas_atuais, params)
                     if sinal:
@@ -240,7 +224,6 @@ def catalogar_estrategias(api, state, params):
                             resultados[nome]['win'] += 1
                         else:
                             resultados[nome]['loss'] += 1
-
             melhor_estrategia, maior_assertividade = None, 0
             for nome, res in resultados.items():
                 total = res['win'] + res['loss']
@@ -251,13 +234,10 @@ def catalogar_estrategias(api, state, params):
             if melhor_estrategia and maior_assertividade > 50:
                 log_success(f" >> Best strategy for {ativo}: '{melhor_estrategia}' with {maior_assertividade:.2f}% accuracy.")
                 state.strategy_performance[ativo] = {'best_strategy': melhor_estrategia}
-        except Exception as e:
-            log_error(f"An error occurred while analyzing pair {ativo}: {e}")
-            traceback.print_exc()
+        except Exception as e: log_error(f"An error occurred while analyzing the pair {ativo}: {e}"); traceback.print_exc()
     log_info("="*40); log_info("CATALOGING FINISHED!"); log_info("="*40); time.sleep(5)
 
 def sma_slope(closes, period):
-    """Calculates the slope of a Simple Moving Average."""
     if len(closes) < period + 1: return None
     sma1 = sum(closes[-(period+1):-1]) / period
     sma2 = sum(closes[-period:]) / period
@@ -265,7 +245,6 @@ def sma_slope(closes, period):
     return sma2 > sma1
 
 def detect_fractals(velas, max_levels):
-    """Detects fractal support and resistance levels."""
     highs, lows = [v['high'] for v in velas], [v['low'] for v in velas]
     res, sup = deque(maxlen=max_levels), deque(maxlen=max_levels)
     for i in range(len(velas) - 3, 2, -1):
@@ -274,7 +253,6 @@ def detect_fractals(velas, max_levels):
     return list(res), list(sup)
 
 def strategy_rejection_candle(velas, p):
-    """Strategy based on identifying rejection candles."""
     if len(velas) < p['MAPeriod'] + 2: return None
     nano_up = sma_slope([v['close'] for v in velas], p['MAPeriod'])
     if nano_up is None: return None
@@ -284,31 +262,25 @@ def strategy_rejection_candle(velas, p):
     corpo = abs(o - c); pavio_superior = h - max(o, c); pavio_inferior = min(o, c) - l
     if nano_up and ((pavio_inferior / range_total) >= p.get('RejectionWickMinRatio', 0.6)) and \
        ((corpo / range_total) <= p.get('RejectionBodyMaxRatio', 0.3)) and \
-       ((pavio_superior / range_total) <= p.get('RejectionOppositeWickMaxRatio', 0.15)):
-        return 'BUY'
+       ((pavio_superior / range_total) <= p.get('RejectionOppositeWickMaxRatio', 0.15)): return 'BUY'
     if not nano_up and ((pavio_superior / range_total) >= p.get('RejectionWickMinRatio', 0.6)) and \
        ((corpo / range_total) <= p.get('RejectionBodyMaxRatio', 0.3)) and \
-       ((pavio_inferior / range_total) <= p.get('RejectionOppositeWickMaxRatio', 0.15)):
-        return 'SELL'
+       ((pavio_inferior / range_total) <= p.get('RejectionOppositeWickMaxRatio', 0.15)): return 'SELL'
     return None
 
 def strategy_mql_pullback(velas, p):
-    """Strategy based on pullbacks to fractal levels."""
     if len(velas) < p['MAPeriod'] + 2: return None
     nano_up = sma_slope([v['close'] for v in velas], p['MAPeriod'])
     if nano_up is None: return None
     res_levels, sup_levels = detect_fractals(velas, p['MaxLevels'])
     last = velas[-1]
     if nano_up and sup_levels and last['close'] > last['open']:
-        if last['low'] <= sup_levels[0] + p['Proximity'] * p['Point'] and last['close'] >= sup_levels[0]:
-            return 'BUY'
+        if last['low'] <= sup_levels[0] + p['Proximity'] * p['Point'] and last['close'] >= sup_levels[0]: return 'BUY'
     if not nano_up and res_levels and last['close'] < last['open']:
-        if last['high'] >= res_levels[0] - p['Proximity'] * p['Point'] and last['close'] <= res_levels[0]:
-            return 'SELL'
+        if last['high'] >= res_levels[0] - p['Proximity'] * p['Point'] and last['close'] <= res_levels[0]: return 'SELL'
     return None
 
 def strategy_flow(velas, p):
-    """Strategy based on market flow (consecutive candles of the same color)."""
     if len(velas) < p['MAPeriod'] + 3: return None
     nano_up = sma_slope([v['close'] for v in velas], p['MAPeriod'])
     if nano_up is None: return None
@@ -318,37 +290,33 @@ def strategy_flow(velas, p):
     return None
 
 def strategy_patterns(velas, p):
-    """Strategy based on common candlestick patterns (e.g., engulfing)."""
     if len(velas) < p['MAPeriod'] + 2: return None
     nano_up = sma_slope([v['close'] for v in velas], p['MAPeriod'])
     if nano_up is None: return None
     penultimate, last = velas[-2], velas[-1]
+    # Engulfing patterns
     if nano_up:
-        # Bullish Engulfing variations
-        if (penultimate['close'] < penultimate['open'] and last['close'] > last['open'] and last['open'] < penultimate['close'] and last['close'] > penultimate['open']): return 'BUY'
-        if (penultimate['close'] < penultimate['open'] and last['close'] > last['open'] and last['open'] > penultimate['close'] and last['close'] < penultimate['open']): return 'BUY'
+        # Bullish Engulfing
+        if (penultimate['close'] < penultimate['open'] and last['close'] > last['open'] and \
+            last['open'] < penultimate['close'] and last['close'] > penultimate['open']): return 'BUY'
     if not nano_up:
-        # Bearish Engulfing variations
-        if (penultimate['close'] > penultimate['open'] and last['close'] < last['open'] and last['open'] > penultimate['close'] and last['close'] < penultimate['open']): return 'SELL'
-        if (penultimate['close'] > penultimate['open'] and last['close'] < last['open'] and last['open'] < penultimate['close'] and last['close'] > penultimate['open']): return 'SELL'
+        # Bearish Engulfing
+        if (penultimate['close'] > penultimate['open'] and last['close'] < last['open'] and \
+            last['open'] > penultimate['close'] and last['close'] < penultimate['open']): return 'SELL'
     return None
 
 def is_market_indecisive(velas, p):
-    """Determines if the market is currently indecisive based on recent candle bodies."""
-    if len(velas) < 3: return False
-    last_candles, indecisive_candles = velas[-3:], 0
+    if len(velas) < p.get('IndecisionCandles', 3): return False
+    last_candles = velas[-p.get('IndecisionCandles', 3):]
+    indecisive_candles = 0
     for vela in last_candles:
         range_total = vela['high'] - vela['low']
-        if range_total == 0:
-            indecisive_candles += 1
-            continue
+        if range_total == 0: indecisive_candles += 1; continue
         corpo = abs(vela['open'] - vela['close'])
-        if (corpo / range_total) <= 0.4:
-            indecisive_candles += 1
-    return indecisive_candles >= 2
+        if (corpo / range_total) <= p.get('IndecisionBodyMaxRatio', 0.4): indecisive_candles += 1
+    return indecisive_candles >= p.get('IndecisionMinCount', 2)
 
 class BotState:
-    """A class to hold the state of the bot."""
     def __init__(self):
         self.stop = False
         self.win_count = 0
@@ -357,9 +325,9 @@ class BotState:
         self.is_trading = False
         self.signal_history = {}
         self.strategy_performance = {}
+        self.lock = Lock()
 
 def get_config_from_env():
-    """Loads configuration from environment variables with sensible defaults."""
     return {
         'conta': os.getenv('EXNOVA_CONTA', 'PRACTICE').upper(),
         'pay_minimo': float(os.getenv('EXNOVA_PAY_MINIMO', 80)),
@@ -372,18 +340,14 @@ def get_config_from_env():
     }
 
 def compra_thread(api, ativo, valor, direcao, expiracao, tipo_op, state, config, cifrao, signal_id, target_entry_timestamp):
-    """Handles the logic for placing a trade and subsequent Martingale entries in a separate thread."""
     try:
         wait_time = target_entry_timestamp - time.time()
-        if wait_time > 0:
-            time.sleep(max(0, wait_time - 0.2))
-        while time.time() < target_entry_timestamp:
-            pass
+        if wait_time > 0: time.sleep(max(0, wait_time - 0.2))
+        while time.time() < target_entry_timestamp: pass
 
         entrada_atual = valor
-        niveis_mg = config['mg_niveis'] if config['usar_mg'] else 0
-        resultado_final = "ERRO" # Default result
-
+        direcao_atual, niveis_mg = direcao, config['mg_niveis'] if config['usar_mg'] else 0
+        resultado_final = None
         for i in range(niveis_mg + 1):
             if state.stop: break
             if i > 0:
@@ -391,21 +355,20 @@ def compra_thread(api, ativo, valor, direcao, expiracao, tipo_op, state, config,
                 signal_queue.put(gale_payload)
                 if signal_id in state.signal_history:
                     state.signal_history[signal_id]["gale_level"] = i
-
+            
             gale_info = f"(Gale {i})" if i > 0 else "(Main Entry)"
-            log_info(f"ORDER {gale_info}: {ativo} | {cifrao}{entrada_atual:.2f} | {direcao.upper()} | {expiracao}M")
+            log_info(f"ORDER {gale_info}: {ativo} | {cifrao}{entrada_atual:.2f} | {direcao_atual.upper()} | {expiracao}M")
 
             if tipo_op == 'digital':
-                check, id_ordem = api.buy_digital_spot(ativo, entrada_atual, direcao, expiracao)
-            else:
-                check, id_ordem = api.buy(entrada_atual, ativo, direcao, expiracao)
-
-            if not check:
-                log_error(f"Failed to open order in Gale {i}.")
-                break # Breaks the loop, result is "ERRO"
-
+                check, id_ordem = api.buy_digital_spot(ativo, entrada_atual, direcao_atual, expiracao)
+            else: # binary or turbo
+                check, id_ordem = api.buy(entrada_atual, ativo, direcao_atual, expiracao)
+            
+            if not check: log_error(f"Failed to open order in Gale {i}."); resultado_final = "ERROR"; break
+            
             resultado, status_encontrado = 0.0, False
-            tempo_limite = time.time() + expiracao * 60 + 15
+            # Wait for the result
+            tempo_limite = time.time() + expiracao * 60 + 15 # Add a 15-second buffer
             while time.time() < tempo_limite:
                 status, lucro = api.check_win_v4(id_ordem)
                 if status:
@@ -413,31 +376,33 @@ def compra_thread(api, ativo, valor, direcao, expiracao, tipo_op, state, config,
                     break
                 time.sleep(0.5)
 
-            if not status_encontrado:
-                log_error(f"Timeout on order {id_ordem}.")
-                break # Breaks the loop, result is "ERRO"
+            if not status_encontrado: log_error(f"Timeout on order {id_ordem}."); resultado_final = "ERROR"; break
 
             if resultado > 0:
                 log_success(f"RESULT: WIN {gale_info} | Profit: {cifrao}{resultado:.2f}")
-                state.win_count += 1
-                if i > 0: state.gale_wins[f'g{i}'] += 1
+                with state.lock:
+                    state.win_count += 1
+                    if i > 0: state.gale_wins[f'g{i}'] += 1
                 resultado_final = 'WIN'
-                break # Exit on win
+                break # Exit the martingale loop on a win
             elif resultado < 0:
                 log_error(f"RESULT: LOSS {gale_info} | Loss: {cifrao}{abs(resultado):.2f}")
                 if i < niveis_mg:
                     entrada_atual *= config['mg_fator']
                 else:
-                    state.loss_count += 1
+                    with state.lock:
+                        state.loss_count += 1
                     resultado_final = 'LOSS'
-            else: # Empate
+            else:
                 log_warning(f"RESULT: DRAW {gale_info}.")
-                # Decide if a draw should be treated as a loss for Martingale
-                # Here, it's treated as a neutral event, and we don't proceed to the next gale
-                resultado_final = 'DRAW'
-                break
-
-        if signal_id in state.signal_history and resultado_final != "ERRO":
+                # Treat draw as a loss for martingale purposes
+                if i < niveis_mg:
+                    # Don't increase the bet size on a draw, just re-enter
+                    log_info("Re-entering after a draw...")
+                else:
+                    resultado_final = 'DRAW'
+        
+        if resultado_final and resultado_final != "ERROR" and signal_id in state.signal_history:
             state.signal_history[signal_id]["result"] = resultado_final
             placar_payload = {
                 "type": "result",
@@ -454,43 +419,42 @@ def compra_thread(api, ativo, valor, direcao, expiracao, tipo_op, state, config,
         log_error(f"CRITICAL ERROR IN PURCHASE THREAD: {e}")
         traceback.print_exc()
     finally:
-        state.is_trading = False
+        with state.lock:
+            state.is_trading = False
 
 def obter_melhor_par(api, payout_minimo):
-    """Finds the best asset to trade based on the highest payout."""
+    all_profits = api.get_all_profit()
     all_assets = api.get_all_open_time()
-    melhor_ativo = None
-    melhor_payout = 0
-    melhor_tipo = None
+    ativos = {}
 
     for tipo_mercado in ['binary', 'turbo']:
         if tipo_mercado in all_assets:
             for ativo, info in all_assets[tipo_mercado].items():
                 if info.get('open', False):
                     try:
-                        payout = api.get_all_profit()[ativo][tipo_mercado] * 100
-                        if payout >= payout_minimo and payout > melhor_payout:
-                            melhor_payout = payout
-                            melhor_ativo = ativo
-                            melhor_tipo = 'binary' if tipo_mercado == 'turbo' else tipo_mercado
-                    except (KeyError, TypeError):
-                        continue
+                        payout = all_profits.get(ativo, {}).get(tipo_mercado, 0) * 100
+                        if payout >= payout_minimo:
+                            if ativo not in ativos or payout > ativos[ativo]['payout']:
+                                ativos[ativo] = {'payout': payout, 'tipo': 'digital' if tipo_mercado == 'digital' else 'turbo'}
+                    except Exception:
+                        continue # Ignore pairs that might cause issues
 
-    if melhor_ativo:
-        return melhor_ativo, melhor_tipo, melhor_payout
-    return None, None, None
-
+    if not ativos:
+        return None, None, None
+    
+    best_asset = max(ativos, key=lambda k: ativos[k]['payout'])
+    return best_asset, ativos[best_asset]['tipo'], ativos[best_asset]['payout']
 
 def main_bot_logic(state):
-    """The main logic loop for the trading bot."""
     exibir_banner()
-    # Use environment variables with defaults for easier testing
-    email = os.getenv('EXNOVA_EMAIL', 'test@example.com')
-    senha = os.getenv('EXNOVA_PASSWORD', 'password')
-    use_mock_api = os.getenv('USE_MOCK_API', 'true').lower() == 'true'
+    email = os.getenv('EXNOVA_EMAIL', 'test@example.com') # Fallback for testing
+    senha = os.getenv('EXNOVA_PASSWORD', 'password') # Fallback for testing
+    if not email or not senha:
+        log_error("Environment variables EXNOVA_EMAIL and EXNOVA_PASSWORD not set.")
+        sys.exit(1)
 
     config = get_config_from_env()
-    API = MockExnova(email, senha) if use_mock_api else Exnova(email, senha)
+    API = Exnova(email, senha)
 
     log_info("Attempting to connect to Exnova...")
     check, reason = API.connect()
@@ -498,9 +462,9 @@ def main_bot_logic(state):
         log_error(f"Connection failed: {reason}")
         sys.exit(1)
 
-    log_success("Successfully connected!")
+    log_success("Connection established successfully!")
     API.change_balance(config['conta'])
-
+    
     cifrao = "$"
     try:
         perfil = API.get_profile_ansyc()
@@ -525,48 +489,50 @@ def main_bot_logic(state):
 
             if minuto_atual != minuto_anterior:
                 minuto_anterior, analise_feita = minuto_atual, False
-                if not state.is_trading:
-                    msg = f"Observing the candle at {dt_objeto.strftime('%H:%M')}..."
+                with state.lock:
+                    is_trading = state.is_trading
+                if not is_trading:
+                    msg = f"Watching the {dt_objeto.strftime('%H:%M')} candle..."
                     signal_queue.put({"type": "analysis_status", "asset": "WAITING", "message": msg})
 
-            if segundo_atual >= 55 and not analise_feita and not state.is_trading:
+            with state.lock:
+                is_trading = state.is_trading
+            
+            if segundo_atual >= 55 and not analise_feita and not is_trading:
                 analise_feita = True
                 ativo, tipo_op, payout = obter_melhor_par(API, config['pay_minimo'])
                 if not ativo:
                     continue
 
                 velas = validar_e_limpar_velas(API.get_candles(ativo, 60, 150, time.time()))
-                if not velas or len(velas) < 20:
-                    continue
 
-                if is_market_indecisive(velas, PARAMS):
-                    continue
-
-                direcao_final, nome_estrategia_usada = None, None
-                strategies_to_check = {
-                    'mql_pullback': 'MQL Pullback',
-                    'flow': 'Flow',
-                    'patterns': 'Patterns',
-                    'rejection_candle': 'Rejection'
-                }
+                if not velas or len(velas) < 20: continue
+                if is_market_indecisive(velas, PARAMS): continue
                 
-                best_strat_code = state.strategy_performance.get(ativo, {}).get('best_strategy')
-
-                if best_strat_code:
-                    sinal = globals().get(f'strategy_{best_strat_code}')(velas, PARAMS)
+                direcao_final, nome_estrategia_usada = None, None
+                strategies_to_try = [('Pullback MQL', 'mql_pullback'), ('Flow', 'flow'), ('Patterns', 'patterns'), ('Rejection', 'rejection_candle')]
+                
+                # Check for a cataloged best strategy first
+                if ativo in state.strategy_performance:
+                    cod_est = state.strategy_performance[ativo]['best_strategy']
+                    sinal = globals().get(f'strategy_{cod_est}')(velas, PARAMS)
                     if sinal:
                         direcao_final = {'BUY': 'call', 'SELL': 'put'}.get(sinal)
-                        nome_estrategia_usada = strategies_to_check.get(best_strat_code, "Unknown Strategy")
-                else:
-                    for cod, nome in strategies_to_check.items():
+                        nome_estrategia_usada = cod_est.replace('_', ' ').title()
+                
+                # If no signal from the best strategy, try others
+                if not direcao_final:
+                    for nome, cod in strategies_to_try:
                         sinal = globals().get(f'strategy_{cod}')(velas, PARAMS)
                         if sinal:
                             direcao_final = {'BUY': 'call', 'SELL': 'put'}.get(sinal)
                             nome_estrategia_usada = nome
                             break
-
+                
                 if direcao_final:
-                    state.is_trading = True
+                    with state.lock:
+                        state.is_trading = True
+                    
                     horario_entrada_dt = dt_objeto.replace(second=0, microsecond=0) + timedelta(minutes=1)
                     horario_entrada_str = horario_entrada_dt.strftime('%H:%M')
                     log_success(f"SIGNAL FOUND: {direcao_final.upper()} on {ativo} for the {horario_entrada_str} candle")
@@ -588,42 +554,32 @@ def main_bot_logic(state):
                     state.signal_history[signal_id] = signal_payload
                     signal_queue.put(signal_payload)
 
-                    Thread(
-                        target=compra_thread,
-                        args=(API, ativo, config['valor_entrada'], direcao_final, config['expiracao'], tipo_op, state, config, cifrao, signal_id, target_entry_timestamp),
-                        daemon=True
-                    ).start()
-
+                    Thread(target=compra_thread, args=(API, ativo, config['valor_entrada'], direcao_final, config['expiracao'], tipo_op, state, config, cifrao, signal_id, target_entry_timestamp), daemon=True).start()
+            
             time.sleep(0.2)
+        
         except Exception as e:
             log_error(f"UNHANDLED ERROR IN MAIN LOOP: {e}")
             traceback.print_exc()
-            log_warning("Waiting 10 seconds before continuing...");
-            time.sleep(10)
+            log_warning("Waiting 10 seconds before continuing..."); time.sleep(10)
 
 def main():
-    """Main function to start the bot and its threads."""
     bot_state = BotState()
-
+    
     websocket_thread = Thread(target=start_websocket_server_sync, args=(bot_state,), daemon=True)
     websocket_thread.start()
-
-    main_logic_thread = Thread(target=main_bot_logic, args=(bot_state,), daemon=True)
-    main_logic_thread.start()
-
+    
     try:
-        # Keep the main thread alive to allow daemon threads to run
-        while main_logic_thread.is_alive():
-            main_logic_thread.join(timeout=1.0)
+        main_bot_logic(bot_state)
     except KeyboardInterrupt:
         log_warning("\nBot interrupted by user.")
-        bot_state.stop = True
     except Exception as e:
         log_error(f"Fatal error starting the bot: {e}")
         traceback.print_exc()
     finally:
-        log(b, "Shutting down the bot.")
-        # Allow some time for threads to finish up
+        bot_state.stop = True
+        log(b, "Shutting down the bot...")
+        # Give threads a moment to finish
         time.sleep(2)
         sys.exit()
 
