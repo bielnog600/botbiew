@@ -282,11 +282,9 @@ def main():
     websocket_thread = Thread(target=start_websocket_server_sync, args=(bot_state,), daemon=True)
     websocket_thread.start()
     
-    # ### CORREÇÃO FINAL ### Inicia a lógica principal numa thread separada
     bot_logic_thread = Thread(target=main_bot_logic, args=(bot_state,), daemon=True)
     bot_logic_thread.start()
 
-    # Mantém a thread principal viva para que as outras threads não morram
     try:
         while True:
             time.sleep(1)
