@@ -135,8 +135,10 @@ def get_config_from_env():
 def compra_thread(api, ativo, valor, direcao, expiracao, tipo_op, state, config, cifrao, signal_id, target_entry_timestamp):
     try:
         wait_time = target_entry_timestamp - time.time()
-        if wait_time > 0: time.sleep(max(0, wait_time - 0.2));
-        while time.time() < target_entry_timestamp: pass
+        if wait_time > 0:
+            time.sleep(max(0, wait_time - 0.2))
+        while time.time() < target_entry_timestamp:
+            pass
         
         entrada_atual = valor
         direcao_atual, niveis_mg = direcao, config['mg_niveis'] if config['usar_mg'] else 0
@@ -211,34 +213,35 @@ def main_bot_logic(state):
     
     log_success("Conexão estabelecida com sucesso!")
     API.change_balance(config['conta'])
-    perfil = API.get_profile_ansyc()
-    cifrao, nome_usuario = perfil['currency_char'], perfil['name']
-    log_info(f"Olá, {w}{nome_usuario}{c}! Bot a iniciar em modo de servidor.")
     
+    # ### CORREÇÃO ### Remove a chamada de get_profile_ansyc que bloqueia
+    cifrao = "$" # Define um valor padrão
+    try:
+        perfil = API.get_profile_ansyc()
+        cifrao = perfil.get('currency_char', '$')
+        nome_usuario = perfil.get('name', 'Utilizador')
+        log_info(f"Olá, {w}{nome_usuario}{c}! Bot a iniciar em modo de servidor.")
+    except Exception as e:
+        log_warning(f"Não foi possível obter o perfil do utilizador. A continuar com valores padrão. Erro: {e}")
+        log_info(f"Olá! Bot a iniciar em modo de servidor.")
+
     minuto_anterior, analise_feita = -1, False
     log_info("Bot iniciado. Aguardando janela de análise...")
     
     while state.stop:
         try:
-            log_info("Início do ciclo principal...")
             timestamp = time.time()
-            log_info(f"Timestamp do sistema obtido: {timestamp}")
             dt_objeto = datetime.fromtimestamp(timestamp)
             minuto_atual, segundo_atual = dt_objeto.minute, dt_objeto.second
-            log_info(f"Minuto atual: {minuto_atual}, Segundo atual: {segundo_atual}")
 
             if minuto_atual != minuto_anterior:
-                log_info(f"Minuto mudou. Anterior: {minuto_anterior}, Atual: {minuto_atual}")
                 minuto_anterior, analise_feita = minuto_atual, False
                 if not state.is_trading:
                     msg = f"Observando a vela das {dt_objeto.strftime('%H:%M')}..."
-                    log_info(f"Enviando status: {msg}")
                     signal_queue.put({"type": "analysis_status", "asset": "AGUARDANDO", "message": msg})
-            
-            log_info(f"Verificando janela de análise: seg={segundo_atual}, analise_feita={analise_feita}, is_trading={state.is_trading}")
+
             if segundo_atual >= 55 and not analise_feita and not state.is_trading:
                 analise_feita = True
-                log_info("Entrou na janela de análise.")
                 signal_queue.put({"type": "analysis_status", "asset": "BOT", "message": "Procurando melhor par..."})
                 ativo, tipo_op, payout = obter_melhor_par(API, config['pay_minimo'])
                 if not ativo:
@@ -272,7 +275,7 @@ def main_bot_logic(state):
                 else:
                     signal_queue.put({"type": "analysis_status", "asset": ativo, "message": "Nenhuma estratégia encontrou sinal."})
             
-            time.sleep(0.5) # Aumentei ligeiramente o sleep para reduzir o uso de CPU
+            time.sleep(0.2)
         
         except Exception as e:
             log_error(f"ERRO NÃO TRATADO NO LOOP PRINCIPAL: {e}")
