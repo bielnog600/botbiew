@@ -125,6 +125,9 @@ class WebSocketServer:
     def __init__(self, bot_state):
         self.bot_state = bot_state
 
+    # ######################################
+    # A LINHA CORRIGIDA ESTÁ AQUI
+    # ######################################
     async def handler(self, websocket, path):
         connected_clients.add(websocket)
         log_success(f"New WebSocket client connected: {websocket.remote_address} on path {path}")
@@ -165,7 +168,6 @@ def start_websocket_server_sync(bot_state):
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     
-    # Instancia a classe do servidor com o estado do bot
     server_instance = WebSocketServer(bot_state)
 
     async def main_async_logic():
@@ -176,7 +178,6 @@ def start_websocket_server_sync(bot_state):
         }
         
         try:
-            # Passa o método handler da instância do servidor
             start_server = websockets.serve(server_instance.handler, "0.0.0.0", 8765, **server_options)
         except (AttributeError, TypeError, OSError):
             log_warning("reuse_port not supported or failed. Starting WebSocket server without it.")
