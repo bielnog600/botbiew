@@ -9,6 +9,7 @@ import uuid
 from datetime import datetime, timedelta
 from collections import deque
 from threading import Thread, Lock
+from functools import partial
 
 import asyncio
 import websockets
@@ -134,7 +135,6 @@ async def ws_handler(websocket, path, bot_state):
             }
         }
         await websocket.send(json.dumps(initial_state))
-        # Keep the handler alive to listen for the connection to close
         await websocket.wait_closed()
     except websockets.exceptions.ConnectionClosed as e:
         log_warning(f"Connection closed with client {websocket.remote_address} (Code: {e.code}, Reason: {e.reason})")
@@ -148,9 +148,7 @@ async def broadcast_signals():
             signal_data = signal_queue.get_nowait()
             if connected_clients:
                 message = json.dumps(signal_data)
-                # Create a list of tasks to send messages to all clients
                 tasks = [client.send(message) for client in connected_clients]
-                # Gather and await them, ignoring exceptions for disconnected clients
                 await asyncio.gather(*tasks, return_exceptions=True)
         except queue.Empty:
             await asyncio.sleep(0.1)
@@ -164,10 +162,11 @@ def start_websocket_server_sync(bot_state):
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
-    handler_with_state = lambda ws, path: ws_handler(ws, path, bot_state)
+    # Usa functools.partial para criar o handler com o estado do bot injetado.
+    # O handler resultante espera os argumentos (websocket, path) que a biblioteca irá fornecer.
+    handler_with_state = partial(ws_handler, bot_state=bot_state)
 
     async def main_async_logic():
-        # Adiciona ping_interval e ping_timeout para manter a conexão viva
         server_options = {
             "ping_interval": 20,
             "ping_timeout": 20,
@@ -184,7 +183,6 @@ def start_websocket_server_sync(bot_state):
         server = await start_server
         log_success(f"WebSocket Server started successfully on {server.sockets[0].getsockname()} with keep-alive pings.")
 
-        # Run broadcast and server listening concurrently
         await asyncio.gather(
             broadcast_signals(),
             server.wait_closed()
