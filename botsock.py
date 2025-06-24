@@ -220,7 +220,6 @@ def main_bot_logic(state):
     
     while state.stop:
         try:
-            # ### CORREÇÃO FINAL ### Usa a hora do sistema para evitar bloqueios.
             timestamp = time.time()
             dt_objeto = datetime.fromtimestamp(timestamp)
             minuto_atual, segundo_atual = dt_objeto.minute, dt_objeto.second
@@ -282,12 +281,23 @@ def main():
     
     websocket_thread = Thread(target=start_websocket_server_sync, args=(bot_state,), daemon=True)
     websocket_thread.start()
-    main_bot_logic(bot_state)
+    
+    # ### CORREÇÃO FINAL ### Inicia a lógica principal numa thread separada
+    bot_logic_thread = Thread(target=main_bot_logic, args=(bot_state,), daemon=True)
+    bot_logic_thread.start()
+
+    # Mantém a thread principal viva para que as outras threads não morram
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        log_warning("\nBot interrompido pelo usuário.")
+        bot_state.stop = False
 
 if __name__ == "__main__":
     try:
         main()
-    except KeyboardInterrupt:
-        log_warning("\nBot interrompido pelo usuário.")
+    except Exception as e:
+        log_error(f"Erro fatal ao iniciar o bot: {e}")
     finally:
         log(b, "Encerrando o bot."); sys.exit()
