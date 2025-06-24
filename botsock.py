@@ -18,13 +18,12 @@ from colorama import init, Fore
 from configobj import ConfigObj
 from exnovaapi.stable_api import Exnova
 
-# --- Inicialização ---
 init(autoreset=True)
 g, y, r, w, c, b = Fore.GREEN, Fore.YELLOW, Fore.RED, Fore.WHITE, Fore.CYAN, Fore.BLUE
+
 signal_queue = queue.Queue()
 connected_clients = set()
 
-# --- Funções de Log ---
 def log(cor, mensagem):
     print(f"{cor}[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] {w}{mensagem}")
 
@@ -33,8 +32,8 @@ def log_success(msg): log(g, msg)
 def log_warning(msg): log(y, msg)
 def log_error(msg): log(r, msg)
 
-# --- Banner e Funções de WebSocket ---
 def exibir_banner():
+    # ... (código do banner mantido)
     print(c + "\n" + "="*88)
     print(y + "*"*88)
     print(g + '''
@@ -88,7 +87,6 @@ async def start_websocket_server_async(handler):
         log_info("Servidor WebSocket iniciado em ws://0.0.0.0:8765")
         await broadcast_signals()
 
-# --- Funções de Lógica e Estratégia ---
 def validar_e_limpar_velas(velas_raw):
     if not velas_raw: return []
     velas_limpas = []
@@ -154,32 +152,32 @@ def detect_fractals(velas, max_levels):
     return list(res), list(sup)
     
 def strategy_rejection_candle(velas, p):
-    if len(velas) < p['MAPeriod'] + 2: return None
-    nano_up = sma_slope([v['close'] for v in velas], p['MAPeriod'])
+    if len(velas) < p.get('MAPeriod', 5) + 2: return None
+    nano_up = sma_slope([v['close'] for v in velas], p.get('MAPeriod', 5))
     if nano_up is None: return None
     o, h, l, c = velas[-2]['open'], velas[-2]['high'], velas[-2]['low'], velas[-2]['close']
     range_total = h - l
     if range_total == 0: return None
     corpo = abs(o - c); pavio_superior = h - max(o, c); pavio_inferior = min(o, c) - l
-    if nano_up and ((pavio_inferior / range_total) >= p.get('RejectionWickMinRatio', 0.6)) and ((corpo / range_total) <= p.get('RejectionBodyMaxRatio', 0.3)) and ((pavio_superior / range_total) <= p.get('RejectionOppositeWickMaxRatio', 0.15)): return 'BUY'
-    if not nano_up and ((pavio_superior / range_total) >= p.get('RejectionWickMinRatio', 0.6)) and ((corpo / range_total) <= p.get('RejectionBodyMaxRatio', 0.3)) and ((pavio_inferior / range_total) <= p.get('RejectionOppositeWickMaxRatio', 0.15)): return 'SELL'
+    if nano_up and (pavio_inferior / range_total >= p.get('RejectionWickMinRatio', 0.6)) and (corpo / range_total <= p.get('RejectionBodyMaxRatio', 0.3)) and (pavio_superior / range_total <= p.get('RejectionOppositeWickMaxRatio', 0.15)): return 'BUY'
+    if not nano_up and (pavio_superior / range_total >= p.get('RejectionWickMinRatio', 0.6)) and (corpo / range_total <= p.get('RejectionBodyMaxRatio', 0.3)) and (pavio_inferior / range_total <= p.get('RejectionOppositeWickMaxRatio', 0.15)): return 'SELL'
     return None
 
 def strategy_mql_pullback(velas, p):
-    if len(velas) < p['MAPeriod'] + 2: return None
-    nano_up = sma_slope([v['close'] for v in velas], p['MAPeriod'])
+    if len(velas) < p.get('MAPeriod', 5) + 2: return None
+    nano_up = sma_slope([v['close'] for v in velas], p.get('MAPeriod', 5))
     if nano_up is None: return None
-    res_levels, sup_levels = detect_fractals(velas, p['MaxLevels'])
+    res_levels, sup_levels = detect_fractals(velas, p.get('MaxLevels', 10))
     last = velas[-1]
     if nano_up and sup_levels and last['close'] > last['open']:
-        if last['low'] <= sup_levels[0] + p['Proximity'] * p['Point'] and last['close'] >= sup_levels[0]: return 'BUY'
+        if last['low'] <= sup_levels[0] + p.get('Proximity', 7.0) * p.get('Point', 1e-6) and last['close'] >= sup_levels[0]: return 'BUY'
     if not nano_up and res_levels and last['close'] < last['open']:
-        if last['high'] >= res_levels[0] - p['Proximity'] * p['Point'] and last['close'] <= res_levels[0]: return 'SELL'
+        if last['high'] >= res_levels[0] - p.get('Proximity', 7.0) * p.get('Point', 1e-6) and last['close'] <= res_levels[0]: return 'SELL'
     return None
 
 def strategy_flow(velas, p):
-    if len(velas) < p['MAPeriod'] + 3: return None
-    nano_up = sma_slope([v['close'] for v in velas], p['MAPeriod'])
+    if len(velas) < p.get('MAPeriod', 5) + 3: return None
+    nano_up = sma_slope([v['close'] for v in velas], p.get('MAPeriod', 5))
     if nano_up is None: return None
     last_candles = velas[-3:]
     if nano_up and all(v['close'] > v['open'] for v in last_candles): return 'BUY'
@@ -187,8 +185,8 @@ def strategy_flow(velas, p):
     return None
 
 def strategy_patterns(velas, p):
-    if len(velas) < p['MAPeriod'] + 2: return None
-    nano_up = sma_slope([v['close'] for v in velas], p['MAPeriod'])
+    if len(velas) < p.get('MAPeriod', 5) + 2: return None
+    nano_up = sma_slope([v['close'] for v in velas], p.get('MAPeriod', 5))
     if nano_up is None: return None
     penultimate, last = velas[-2], velas[-1]
     if nano_up:
