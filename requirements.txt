@@ -2,4 +2,3 @@ websockets
 colorama
 configobj
 requests
-websocket-client
