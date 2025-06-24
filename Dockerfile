@@ -13,5 +13,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copiar todo o resto do código do seu projeto para o contentor
 COPY . .
 
+# Expor as portas para o WebSocket e para o Health Check
+EXPOSE 8765
+EXPOSE 8080
+
 # Comando que será executado quando o contentor iniciar
 CMD ["python", "botsock.py"]
