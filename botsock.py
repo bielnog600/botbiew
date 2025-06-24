@@ -8,11 +8,11 @@ import uuid
 from datetime import datetime, timedelta
 from collections import deque
 from threading import Thread, Lock
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
 import asyncio
 import websockets
 import queue
-from http.server import HTTPServer, BaseHTTPRequestHandler
 
 from colorama import init, Fore
 from configobj import ConfigObj
@@ -135,10 +135,8 @@ def get_config_from_env():
 def compra_thread(api, ativo, valor, direcao, expiracao, tipo_op, state, config, cifrao, signal_id, target_entry_timestamp):
     try:
         wait_time = target_entry_timestamp - time.time()
-        if wait_time > 0:
-            time.sleep(max(0, wait_time - 0.2)) 
-        while time.time() < target_entry_timestamp:
-            pass
+        if wait_time > 0: time.sleep(max(0, wait_time - 0.2));
+        while time.time() < target_entry_timestamp: pass
         
         entrada_atual = valor
         direcao_atual, niveis_mg = direcao, config['mg_niveis'] if config['usar_mg'] else 0
