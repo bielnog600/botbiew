@@ -135,10 +135,8 @@ def get_config_from_env():
 def compra_thread(api, ativo, valor, direcao, expiracao, tipo_op, state, config, cifrao, signal_id, target_entry_timestamp):
     try:
         wait_time = target_entry_timestamp - time.time()
-        if wait_time > 0:
-            time.sleep(max(0, wait_time - 0.2))
-        while time.time() < target_entry_timestamp:
-            pass
+        if wait_time > 0: time.sleep(max(0, wait_time - 0.2));
+        while time.time() < target_entry_timestamp: pass
         
         entrada_atual = valor
         direcao_atual, niveis_mg = direcao, config['mg_niveis'] if config['usar_mg'] else 0
@@ -214,8 +212,7 @@ def main_bot_logic(state):
     log_success("Conexão estabelecida com sucesso!")
     API.change_balance(config['conta'])
     
-    # ### CORREÇÃO ### Remove a chamada de get_profile_ansyc que bloqueia
-    cifrao = "$" # Define um valor padrão
+    cifrao = "$"
     try:
         perfil = API.get_profile_ansyc()
         cifrao = perfil.get('currency_char', '$')
@@ -224,9 +221,9 @@ def main_bot_logic(state):
     except Exception as e:
         log_warning(f"Não foi possível obter o perfil do utilizador. A continuar com valores padrão. Erro: {e}")
         log_info(f"Olá! Bot a iniciar em modo de servidor.")
-
+    
     minuto_anterior, analise_feita = -1, False
-    log_info("Bot iniciado. Aguardando janela de análise...")
+    log_info("Bot iniciado. A entrar no ciclo de análise...")
     
     while state.stop:
         try:
@@ -292,20 +289,19 @@ def main():
     websocket_thread = Thread(target=start_websocket_server_sync, args=(bot_state,), daemon=True)
     websocket_thread.start()
     
-    bot_logic_thread = Thread(target=main_bot_logic, args=(bot_state,), daemon=True)
-    bot_logic_thread.start()
-
+    # ### CORREÇÃO FINAL ### Executa a lógica principal diretamente para manter o programa vivo
     try:
-        while True:
-            time.sleep(1)
+        main_bot_logic(bot_state)
     except KeyboardInterrupt:
         log_warning("\nBot interrompido pelo usuário.")
         bot_state.stop = False
-
-if __name__ == "__main__":
-    try:
-        main()
     except Exception as e:
         log_error(f"Erro fatal ao iniciar o bot: {e}")
+        traceback.print_exc()
     finally:
-        log(b, "Encerrando o bot."); sys.exit()
+        log(b, "Encerrando o bot.");
+        sys.exit()
+
+
+if __name__ == "__main__":
+    main()
