@@ -108,7 +108,11 @@
                     } catch (error) { console.error("Erro ao processar mensagem JSON:", error); }
                 };
 
-                socket.onclose = () => { setTimeout(connectWebSocket, 5000); };
+                socket.onclose = () => { 
+                    removeAnalysisCard();
+                    console.log('[WebSocket] Conexão perdida. A reconectar...');
+                    setTimeout(connectWebSocket, 5000); 
+                };
             }
 
             if (loginForm) {
