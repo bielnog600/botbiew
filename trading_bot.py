@@ -140,7 +140,7 @@ async def ws_handler(websocket, *args, bot_state):
     except websockets.exceptions.ConnectionClosed as e:
         log_warning(f"Connection closed with client {websocket.remote_address}: {e}")
     finally:
-        connected_clients.remove(websocket)
+        connected_clients.discard(websocket)
         log_warning(f"WebSocket client disconnected: {websocket.remote_address}")
 
 async def broadcast_signals():
