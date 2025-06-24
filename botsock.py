@@ -176,7 +176,6 @@ def compra_thread(api, ativo, valor, direcao, expiracao, tipo_op, state, config,
                 if i < niveis_mg: entrada_atual *= config['mg_fator']
                 else: state.loss_count += 1; resultado_final = 'LOSS'
             else: log_warning(f"RESULTADO: EMPATE {gale_info}.")
-            # Ação para stop (não implementada, mas o ponto estaria aqui)
         if resultado_final and resultado_final != "ERRO":
             state.signal_history[signal_id]["result"] = resultado_final
             placar_payload = {"type": "result", "signal_id": signal_id, "result": resultado_final, "placar": {"wins": state.win_count, "losses": state.loss_count, "gale_wins": sum(state.gale_wins.values())}}
@@ -224,8 +223,6 @@ def main_bot_logic(state):
     perfil = API.get_profile_ansyc()
     cifrao, nome_usuario = perfil['currency_char'], perfil['name']
     log_info(f"Olá, {w}{nome_usuario}{c}! Bot a iniciar em modo de servidor.")
-    
-    if config['modo_operacao'] == '1': catalogar_estrategias(API, state, config)
     
     minuto_anterior, analise_feita = -1, False
     log_info("Bot iniciado. Aguardando janela de análise...")
