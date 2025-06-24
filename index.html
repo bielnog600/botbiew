@@ -3,90 +3,130 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MAROMBIEW - Bot Exnova</title>
+    <title>Painel de Sinais - MAROMBIEW BOT</title>
+    
+    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Google Fonts & Font Awesome Icons -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Roboto+Mono:wght@500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
     <style>
-        body { font-family: 'Inter', sans-serif; background-color: #111827; }
-        .glass-effect { background: rgba(31, 41, 55, 0.6); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); }
-        .candle { width: 20px; margin: 0 auto; position: relative; }
-        .candle-body { width: 100%; }
-        .candle-wick { width: 2px; background-color: currentColor; position: absolute; left: 50%; transform: translateX(-50%); }
-        .entry-time-display { font-family: 'monospace', 'Courier New'; font-size: 2.2rem; font-weight: 700; line-height: 1; }
-        .brand-text { color: #00ff87; }
-        .signal-card { border: 2px solid transparent; transition: border-color 0.3s; }
-        .signal-card.result-win { border-color: #22c55e; }
-        .signal-card.result-loss { border-color: #ef4444; }
-        #live-analysis-card {
-            filter: blur(1.5px);
-            opacity: 0.6;
-            transition: opacity 0.3s ease, transform 0.3s ease;
-            pointer-events: none;
+        /* Estilos e Animações Personalizadas */
+        body {
+            font-family: 'Poppins', sans-serif;
+            background-color: #0a0a0a;
+            color: #e5e7eb;
+            background-image: radial-gradient(#1e293b 1px, transparent 1px);
+            background-size: 20px 20px;
         }
-        .gale-notice {
-            position: absolute;
-            top: 8px;
-            right: 8px;
-            background-color: #f59e0b;
-            color: #111827;
-            padding: 2px 8px;
-            border-radius: 9999px;
-            font-size: 0.75rem;
-            font-weight: bold;
-            animation: pulse 1.5s infinite;
+
+        .font-mono {
+            font-family: 'Roboto Mono', monospace;
         }
-        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
+
+        .glass-card {
+            background: rgba(17, 24, 39, 0.6);
+            -webkit-backdrop-filter: blur(12px);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            transition: all 0.3s ease;
+        }
+
+        .glass-card:hover {
+            border-color: rgba(255, 255, 255, 0.15);
+        }
+
+        /* Animação para card de análise */
+        @keyframes shimmer {
+            0% { background-position: -1000px 0; }
+            100% { background-position: 1000px 0; }
+        }
+        .animate-shimmer {
+            background: linear-gradient(to right, #1f2937 25%, #374151 50%, #1f2937 75%);
+            background-size: 2000px 100%;
+            animation: shimmer 2s linear infinite;
+        }
+
+        /* Animação para borda de novo sinal */
+        @keyframes pulse-border-green {
+            0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7); }
+            70% { box-shadow: 0 0 0 6px rgba(34, 197, 94, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+        }
+        @keyframes pulse-border-red {
+            0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+            70% { box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
+        .pulse-call {
+            animation: pulse-border-green 2s infinite;
+        }
+        .pulse-put {
+            animation: pulse-border-red 2s infinite;
+        }
+
+        /* Animação de entrada para novos cards */
+        @keyframes card-enter {
+            from {
+                opacity: 0;
+                transform: scale(0.95) translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: scale(1) translateY(0);
+            }
+        }
+        .card-enter-animation {
+            animation: card-enter 0.4s ease-out forwards;
+        }
     </style>
 </head>
-<body class="text-gray-200">
+<body class="p-4 sm:p-6 lg:p-8">
 
-    <div id="login-screen" class="min-h-screen flex items-center justify-center bg-gray-900 p-4">
-        <div class="w-full max-w-sm glass-effect rounded-2xl p-8 shadow-2xl">
-            <div class="text-center mb-8">
-                <h1 class="text-3xl font-bold"><i class="fas fa-chart-line text-green-400"></i> MAROMBIEW <span class="text-green-400">BOT</span></h1>
-                <p class="text-gray-400 mt-2">Faça login para aceder ao painel</p>
-            </div>
-            <form id="login-form">
-                <div class="mb-4">
-                    <label for="username" class="block mb-2 text-sm font-medium text-gray-300">Utilizador</label>
-                    <input type="text" id="username" class="w-full bg-gray-700 border border-gray-600 text-white rounded-lg p-3" required>
+    <div class="max-w-7xl mx-auto">
+        <!-- CABEÇALHO -->
+        <header class="flex flex-col sm:flex-row justify-between items-center mb-8 gap-6">
+            <h1 class="text-3xl font-bold text-white">
+                <i class="fa-solid fa-robot text-teal-400"></i> MAROMBIEW <span class="text-teal-400">Signals</span>
+            </h1>
+            <div id="scoreboard" class="grid grid-cols-3 gap-4 w-full sm:w-auto glass-card p-3 rounded-xl">
+                <div class="text-center px-2">
+                    <p class="text-sm font-semibold text-green-400">WINS</p>
+                    <p id="score-wins" class="text-2xl font-bold font-mono">0</p>
                 </div>
-                <div class="mb-6">
-                    <label for="password" class="block mb-2 text-sm font-medium text-gray-300">Senha</label>
-                    <input type="password" id="password" class="w-full bg-gray-700 border border-gray-600 text-white rounded-lg p-3" required>
+                <div class="text-center px-2">
+                    <p class="text-sm font-semibold text-red-400">LOSSES</p>
+                    <p id="score-losses" class="text-2xl font-bold font-mono">0</p>
                 </div>
-                <button type="submit" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg">Entrar</button>
-            </form>
-        </div>
-    </div>
-
-    <div id="dashboard-screen" class="hidden min-h-screen p-4 sm:p-6 lg:p-8">
-        <header class="flex flex-wrap justify-between items-center mb-6 gap-4">
-            <h1 class="text-3xl font-bold"><i class="fas fa-chart-line text-green-400"></i> MAROMBIEW <span class="text-green-400">BOT</span></h1>
-            <div id="scoreboard" class="flex items-center gap-4 glass-effect p-3 rounded-lg">
-                <div class="text-center"><p class="text-sm text-green-400">WINS</p><p id="score-wins" class="text-2xl font-bold">0</p></div>
-                <div class="text-center"><p class="text-sm text-red-400">LOSS</p><p id="score-losses" class="text-2xl font-bold">0</p></div>
-                <div class="text-center"><p class="text-sm text-yellow-400">GALE WINS</p><p id="score-gale-wins" class="text-2xl font-bold">0</p></div>
+                <div class="text-center px-2">
+                    <p class="text-sm font-semibold text-amber-400">GALE WINS</p>
+                    <p id="score-gale-wins" class="text-2xl font-bold font-mono">0</p>
+                </div>
             </div>
         </header>
-        
-        <div id="signals-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6"></div>
+
+        <!-- GRELHA DE SINAIS -->
+        <main id="signals-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            <!-- Os cards serão injetados aqui pelo JavaScript -->
+        </main>
     </div>
 
     <script>
-        window.onload = function() {
-            const loginScreen = document.getElementById('login-screen');
-            const dashboardScreen = document.getElementById('dashboard-screen');
-            const loginForm = document.getElementById('login-form');
-            const signalsContainer = document.getElementById('signals-container');
-            
-            const scoreWins = document.getElementById('score-wins');
-            const scoreLosses = document.getElementById('score-losses');
-            const scoreGaleWins = document.getElementById('score-gale-wins');
-            
+        document.addEventListener('DOMContentLoaded', () => {
+            // --- ELEMENTOS DO DOM ---
+            const signalsGrid = document.getElementById('signals-grid');
+            const scoreWinsEl = document.getElementById('score-wins');
+            const scoreLossesEl = document.getElementById('score-losses');
+            const scoreGaleWinsEl = document.getElementById('score-gale-wins');
+
+            // --- ESTADO DA APLICAÇÃO ---
             let socket;
 
+            // --- LÓGICA DO WEBSOCKET ---
             function connectWebSocket() {
                 // ######################### ATENÇÃO #########################
                 // AQUI VAI O DOMÍNIO PÚBLICO DO SEU BOT CONFIGURADO NO COOLIFY.
@@ -98,162 +138,199 @@
                 console.log(`[WebSocket] Tentando conectar a ${websocketUrl}...`);
                 socket = new WebSocket(websocketUrl);
 
-                socket.onopen = () => console.log("[WebSocket] Conexão estabelecida.");
+                socket.onopen = () => {
+                    console.log('[WebSocket] Conexão estabelecida.');
+                };
 
                 socket.onmessage = (event) => {
                     try {
                         const message = JSON.parse(event.data);
-                        switch(message.type) {
-                            case 'init': handleInitialState(message.data); break;
-                            case 'signal': handleNewSignal(message); break;
-                            case 'result': handleResult(message); break;
-                            case 'gale': handleGale(message); break;
-                            case 'analysis_status': handleAnalysisStatus(message); break;
-                        }
-                    } catch (error) { console.error("Erro ao processar mensagem JSON:", error, "Data:", event.data); }
+                        handleWebSocketMessage(message);
+                    } catch (error) {
+                        console.error("Erro ao processar mensagem JSON:", error, "Data:", event.data);
+                    }
                 };
 
-                socket.onclose = () => { 
-                    removeAnalysisCard();
+                socket.onclose = () => {
                     console.log('[WebSocket] Conexão perdida. Tentando reconectar em 5 segundos...');
-                    setTimeout(connectWebSocket, 5000); 
+                    createOrUpdateAnalysisCard({ message: 'Reconectando...' });
+                    setTimeout(connectWebSocket, 5000);
                 };
 
                 socket.onerror = (error) => {
                     console.error("[WebSocket] Ocorreu um erro:", error);
-                    // O onclose será chamado logo após o onerror, então a lógica de reconexão já vai acontecer.
                 };
             }
 
-            if (loginForm) {
-                loginForm.addEventListener('submit', (e) => {
-                    e.preventDefault();
-                    if (e.target.username.value && e.target.password.value) {
-                        if (loginScreen) loginScreen.classList.add('hidden');
-                        if (dashboardScreen) dashboardScreen.classList.remove('hidden');
-                        connectWebSocket();
-                    }
-                });
+            // --- MANIPULADOR DE MENSAGENS ---
+            function handleWebSocketMessage(message) {
+                switch (message.type) {
+                    case 'init':
+                        handleInitialState(message.data);
+                        break;
+                    case 'analysis_status':
+                        createOrUpdateAnalysisCard(message);
+                        break;
+                    case 'signal':
+                        removeAnalysisCard();
+                        createSignalCard(message);
+                        break;
+                    case 'result':
+                        updateCardForResult(message);
+                        break;
+                    case 'gale':
+                        updateCardForGale(message);
+                        break;
+                }
+            }
+            
+            // --- FUNÇÕES DE RENDERIZAÇÃO ---
+            function updateScoreboard({ wins = 0, losses = 0, gale_wins = 0 } = {}) {
+                if (scoreWinsEl) scoreWinsEl.textContent = wins;
+                if (scoreLossesEl) scoreLossesEl.textContent = losses;
+                if (scoreGaleWinsEl) scoreGaleWinsEl.textContent = gale_wins;
+            }
+
+            function renderCandle(candle) {
+                if (!candle || !candle.high || !candle.low) return '<div class="h-full w-full flex items-center justify-center text-gray-500"><i class="fa-solid fa-image"></i></div>';
+                
+                const candleColor = candle.close >= candle.open ? '#22c55e' : '#ef4444';
+                const priceRange = candle.high - candle.low;
+                
+                // Previne divisão por zero se high == low
+                if (priceRange <= 0) {
+                     return `<svg viewBox="0 0 30 100" class="w-full h-full"><line x1="5" y1="50" x2="25" y2="50" stroke="${candleColor}" stroke-width="2"/></svg>`;
+                }
+
+                const bodyHeight = (Math.abs(candle.open - candle.close) / priceRange) * 100;
+                const bodyTop = ((candle.high - Math.max(candle.open, candle.close)) / priceRange) * 100;
+
+                return `
+                    <svg viewBox="0 0 30 100" class="w-full h-full">
+                        <!-- Wick -->
+                        <rect x="14" y="0" width="2" height="100" fill="${candleColor}" />
+                        <!-- Body -->
+                        <rect x="5" y="${bodyTop}" width="20" height="${bodyHeight}" fill="${candleColor}" />
+                    </svg>
+                `;
+            }
+
+            function createAnalysisCard(status) {
+                const cardId = 'analysis-card';
+                let card = document.getElementById(cardId);
+                if (!card) {
+                    card = document.createElement('div');
+                    card.id = cardId;
+                    card.className = 'glass-card rounded-2xl p-4 flex flex-col items-center justify-center h-full animate-shimmer';
+                    signalsGrid.prepend(card);
+                }
+                card.innerHTML = `
+                    <div class="text-5xl text-gray-400 mb-4"><i class="fa-solid fa-satellite-dish"></i></div>
+                    <p class="font-bold text-lg text-white">Analisando Mercado...</p>
+                    <p class="text-sm text-gray-400">${status.message || 'Aguardando o próximo sinal'}</p>
+                `;
             }
             
             function removeAnalysisCard() {
-                const analysisCard = document.getElementById('live-analysis-card');
-                if (analysisCard) analysisCard.remove();
-            }
-            
-            function handleInitialState(data) {
-                if (!signalsContainer || !data || !data.placar) return;
-                signalsContainer.innerHTML = '';
-                if (scoreWins) scoreWins.textContent = data.placar.wins;
-                if (scoreLosses) scoreLosses.textContent = data.placar.losses;
-                if (scoreGaleWins) scoreGaleWins.textContent = data.placar.gale_wins;
-                if (data.signals && Array.isArray(data.signals)) {
-                    data.signals.forEach(signal => createSignalCard(signal));
-                }
-            }
-            
-            function handleResult(result) {
-                if (!result || !result.placar) return;
-                if (scoreWins) scoreWins.textContent = result.placar.wins;
-                if (scoreLosses) scoreLosses.textContent = result.placar.losses;
-                if (scoreGaleWins) scoreGaleWins.textContent = result.placar.gale_wins;
-                
-                const card = document.getElementById(result.signal_id);
-                if (card) {
-                    const galeNotice = card.querySelector('.gale-notice');
-                    if (galeNotice) galeNotice.remove();
-                    
-                    const resultDisplay = card.querySelector('.entry-time-display');
-                    if (resultDisplay) {
-                        const resultClass = result.result === 'WIN' ? 'text-green-400' : 'text-red-400';
-                        const resultIcon = result.result === 'WIN' ? 'fa-check-circle' : 'fa-times-circle';
-                        resultDisplay.className = `entry-time-display mt-1 text-2xl font-bold ${resultClass}`;
-                        resultDisplay.innerHTML = `<i class="fas ${resultIcon}"></i> ${result.result}`;
-                    }
-                    card.classList.add(result.result === 'WIN' ? 'result-win' : 'result-loss');
-                }
+                const card = document.getElementById('analysis-card');
+                if (card) card.remove();
             }
 
-            function handleGale(gale) {
-                const card = document.getElementById(gale.signal_id);
-                if (card) {
-                    let existingNotice = card.querySelector('.gale-notice');
-                    if (existingNotice) existingNotice.remove();
-                    
-                    const notice = document.createElement('div');
-                    notice.className = 'gale-notice';
-                    notice.textContent = `GALE ${gale.gale_level}`;
-                    card.appendChild(notice);
-                }
-            }
-
-            function handleAnalysisStatus(status) {
-                if (!signalsContainer) return;
-                let analysisCard = document.getElementById('live-analysis-card');
-                if (!analysisCard) {
-                    removeAnalysisCard(); 
-                    analysisCard = document.createElement('div');
-                    analysisCard.id = 'live-analysis-card';
-                    analysisCard.className = 'signal-card glass-effect rounded-2xl p-6 flex flex-col items-center text-center relative';
-                    signalsContainer.prepend(analysisCard);
-                }
-                analysisCard.innerHTML = `
-                    <h3 class="text-xl font-bold mb-1">${status.asset || 'Aguardando'}</h3>
-                    <div class="h-28 w-full flex items-center justify-center text-5xl text-gray-400">
-                        <i class="fas fa-spinner fa-spin"></i>
-                    </div>
-                    <p class="text-lg text-gray-300">${status.message || 'Analisando mercado...'}</p>
-                `;
-            }
-
-            function handleNewSignal(signal) {
-                removeAnalysisCard(); 
-                createSignalCard(signal); 
-            }
-            
             function createSignalCard(signal) {
-                if (!signalsContainer || !signal || document.getElementById(signal.signal_id)) return;
+                if (!signal || document.getElementById(signal.signal_id)) return;
                 
                 const card = document.createElement('div');
                 card.id = signal.signal_id;
-                card.className = 'signal-card glass-effect rounded-2xl p-6 flex flex-col items-center text-center relative';
+                card.className = 'glass-card rounded-2xl p-4 flex flex-col text-center card-enter-animation';
                 
-                const directionClass = signal.direction === 'BUY' ? 'text-green-400' : 'text-red-400';
-                const directionIcon = signal.direction === 'BUY' ? 'fa-arrow-up' : 'fa-arrow-down';
-                
-                let statusHTML = `<div class="entry-time-display ${directionClass}">${signal.entry_time}</div>`;
-                if(signal.result) {
-                    const resultClass = signal.result === 'WIN' ? 'text-green-400' : 'text-red-400';
-                    const resultIcon = signal.result === 'WIN' ? 'fa-check-circle' : 'fa-times-circle';
-                    statusHTML = `<div class="entry-time-display mt-1 text-2xl font-bold ${resultClass}"><i class="fas ${resultIcon}"></i> ${signal.result}</div>`;
-                    card.classList.add(signal.result === 'WIN' ? 'result-win' : 'result-loss');
-                }
+                const isCall = signal.direction.toUpperCase() === 'CALL' || signal.direction.toUpperCase() === 'BUY';
+                const directionColor = isCall ? 'text-green-400' : 'text-red-400';
+                const pulseClass = isCall ? 'pulse-call' : 'pulse-put';
+                const directionIcon = isCall ? 'fa-arrow-trend-up' : 'fa-arrow-trend-down';
                 
                 card.innerHTML = `
-                    <h3 class="text-xl font-bold mb-1">${signal.pair}</h3>
-                    <p class="text-sm text-gray-400 mb-2">Estratégia: ${signal.strategy}</p>
-                    <div class="h-28 w-full flex items-center justify-center mb-2 candle-container"></div>
-                    <div class="mb-2"><span class="text-2xl font-bold ${directionClass}"><i class="fas ${directionIcon} mr-2"></i>${signal.direction}</span></div>
-                    <p class="text-gray-500 text-sm mb-1">Horário da Vela</p>
-                    ${statusHTML}
+                    <div class="flex justify-between items-center w-full mb-2">
+                        <p class="font-bold text-xl text-white">${signal.pair}</p>
+                        <p class="text-xs bg-gray-700 text-gray-300 px-2 py-1 rounded-md">${signal.strategy}</p>
+                    </div>
+                    <div class="w-16 h-28 mx-auto my-3">
+                        ${renderCandle(signal.candle)}
+                    </div>
+                    <div class="font-bold text-3xl ${directionColor} mb-2">
+                        <i class="fa-solid ${directionIcon} text-2xl mr-1"></i>
+                        ${signal.direction.toUpperCase()}
+                    </div>
+                    <div class="w-full mt-auto bg-gray-900/50 rounded-lg p-2">
+                        <p class="text-xs text-gray-400">ENTRADA</p>
+                        <p class="font-mono text-2xl font-bold text-white">${signal.entry_time}</p>
+                    </div>
                 `;
                 
-                const candleContainer = card.querySelector('.candle-container');
-                if (candleContainer && signal.candle) {
-                    const candleHeight = 80;
-                    const priceRange = signal.candle.high - signal.candle.low;
-                    if(priceRange > 0){
-                        const bodyTop = (signal.candle.high - Math.max(signal.candle.open, signal.candle.close)) / priceRange * candleHeight;
-                        const bodyHeight = Math.abs(signal.candle.open - signal.candle.close) / priceRange * candleHeight;
-                        candleContainer.innerHTML = `<div class="candle ${signal.candle.color}" style="height: ${candleHeight}px;"><div class="candle-wick" style="height: 100%; top: 0;"></div><div class="candle-body" style="height: ${bodyHeight}px; top: ${bodyTop}px; background-color: currentColor; position: absolute; width: 100%;"></div></div>`;
-                    }
-                }
-
-                if(signal.gale_level > 0) handleGale(signal);
+                signalsGrid.prepend(card);
                 
-                signalsContainer.prepend(card);
+                // Adiciona e remove a animação de pulso
+                card.classList.add(pulseClass);
+                setTimeout(() => card.classList.remove(pulseClass), 5000);
             }
-        };
+            
+            function updateCardForResult(result) {
+                updateScoreboard(result.placar);
+                const card = document.getElementById(result.signal_id);
+                if (!card) return;
+
+                const isWin = result.result === 'WIN';
+                const resultColor = isWin ? 'text-green-400' : 'text-red-400';
+                const resultIcon = isWin ? 'fa-solid fa-trophy' : 'fa-solid fa-shield-halved';
+
+                const statusContainer = card.querySelector('.mt-auto');
+                if (statusContainer) {
+                    statusContainer.innerHTML = `
+                        <p class="text-xs ${resultColor}">RESULTADO</p>
+                        <p class="font-mono text-2xl font-bold ${resultColor} flex items-center justify-center gap-2">
+                            <i class="${resultIcon}"></i>
+                            <span>${result.result}</span>
+                        </p>
+                    `;
+                    statusContainer.classList.add(isWin ? 'bg-green-500/10' : 'bg-red-500/10');
+                }
+            }
+
+            function updateCardForGale(gale) {
+                const card = document.getElementById(gale.signal_id);
+                if (!card) return;
+                
+                let galeNotice = card.querySelector('.gale-notice');
+                if (!galeNotice) {
+                    galeNotice = document.createElement('div');
+                    galeNotice.className = 'gale-notice absolute top-2 right-2 bg-amber-500 text-gray-900 text-xs font-bold px-2 py-0.5 rounded-full';
+                    card.prepend(galeNotice);
+                }
+                galeNotice.textContent = `GALE ${gale.gale_level}`;
+            }
+
+            // --- INICIALIZAÇÃO ---
+            function handleInitialState(data) {
+                if (!data) return;
+                signalsGrid.innerHTML = '';
+                updateScoreboard(data.placar);
+                if (data.signals && Array.isArray(data.signals)) {
+                    // Ordena para mostrar os mais recentes primeiro
+                    data.signals.sort((a, b) => b.entry_time.localeCompare(a.entry_time)).forEach(signal => {
+                        createSignalCard(signal);
+                        if (signal.result) {
+                            // Atraso pequeno para garantir que o card existe no DOM antes de atualizar
+                            setTimeout(() => updateCardForResult({ ...signal, placar: data.placar }), 50);
+                        }
+                        if (signal.gale_level > 0) {
+                            setTimeout(() => updateCardForGale(signal), 50);
+                        }
+                    });
+                }
+                 createOrUpdateAnalysisCard({ message: 'Conectado. Aguardando...' });
+            }
+
+            connectWebSocket();
+        });
     </script>
 </body>
 </html>
