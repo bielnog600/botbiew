@@ -273,8 +273,7 @@ def main():
     websocket_thread = Thread(target=start_websocket_server_sync, args=(bot_state,), daemon=True)
     websocket_thread.start()
     
-    # ### CORREÇÃO FINAL ### A lógica principal agora corre diretamente aqui
-    # para manter o programa principal vivo.
+    # ### CORREÇÃO FINAL ### Executa a lógica principal diretamente para manter o programa vivo
     try:
         main_bot_logic(bot_state)
     except KeyboardInterrupt:
