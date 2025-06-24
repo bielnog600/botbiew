@@ -88,9 +88,14 @@
             let socket;
 
             function connectWebSocket() {
-                // ### ATENÇÃO ### Verifique se este endereço está correto!
-                // Deve ser o endereço que o Coolify lhe deu para o BOT, começando com 'wss://'
-                const websocketUrl = 'wss://botexnova.marombiew.com';
+                // ######################### ATENÇÃO #########################
+                // AQUI VAI O DOMÍNIO PÚBLICO DO SEU BOT CONFIGURADO NO COOLIFY.
+                // DEVE COMEÇAR COM wss:// para uma conexão segura.
+                // Exemplo: wss://meu-bot-legal.coolify.app
+                const websocketUrl = 'wss://botexnova.marombiew.com'; // <-- MUDE AQUI!
+                // ###########################################################
+                
+                console.log(`[WebSocket] Tentando conectar a ${websocketUrl}...`);
                 socket = new WebSocket(websocketUrl);
 
                 socket.onopen = () => console.log("[WebSocket] Conexão estabelecida.");
@@ -105,13 +110,18 @@
                             case 'gale': handleGale(message); break;
                             case 'analysis_status': handleAnalysisStatus(message); break;
                         }
-                    } catch (error) { console.error("Erro ao processar mensagem JSON:", error); }
+                    } catch (error) { console.error("Erro ao processar mensagem JSON:", error, "Data:", event.data); }
                 };
 
                 socket.onclose = () => { 
                     removeAnalysisCard();
-                    console.log('[WebSocket] Conexão perdida. A reconectar...');
+                    console.log('[WebSocket] Conexão perdida. Tentando reconectar em 5 segundos...');
                     setTimeout(connectWebSocket, 5000); 
+                };
+
+                socket.onerror = (error) => {
+                    console.error("[WebSocket] Ocorreu um erro:", error);
+                    // O onclose será chamado logo após o onerror, então a lógica de reconexão já vai acontecer.
                 };
             }
 
@@ -119,8 +129,8 @@
                 loginForm.addEventListener('submit', (e) => {
                     e.preventDefault();
                     if (e.target.username.value && e.target.password.value) {
-                        loginScreen.classList.add('hidden');
-                        dashboardScreen.classList.remove('hidden');
+                        if (loginScreen) loginScreen.classList.add('hidden');
+                        if (dashboardScreen) dashboardScreen.classList.remove('hidden');
                         connectWebSocket();
                     }
                 });
@@ -132,26 +142,34 @@
             }
             
             function handleInitialState(data) {
+                if (!signalsContainer || !data || !data.placar) return;
                 signalsContainer.innerHTML = '';
-                scoreWins.textContent = data.placar.wins;
-                scoreLosses.textContent = data.placar.losses;
-                scoreGaleWins.textContent = data.placar.gale_wins;
-                data.signals.forEach(signal => createSignalCard(signal));
+                if (scoreWins) scoreWins.textContent = data.placar.wins;
+                if (scoreLosses) scoreLosses.textContent = data.placar.losses;
+                if (scoreGaleWins) scoreGaleWins.textContent = data.placar.gale_wins;
+                if (data.signals && Array.isArray(data.signals)) {
+                    data.signals.forEach(signal => createSignalCard(signal));
+                }
             }
             
             function handleResult(result) {
-                scoreWins.textContent = result.placar.wins;
-                scoreLosses.textContent = result.placar.losses;
-                scoreGaleWins.textContent = result.placar.gale_wins;
+                if (!result || !result.placar) return;
+                if (scoreWins) scoreWins.textContent = result.placar.wins;
+                if (scoreLosses) scoreLosses.textContent = result.placar.losses;
+                if (scoreGaleWins) scoreGaleWins.textContent = result.placar.gale_wins;
+                
                 const card = document.getElementById(result.signal_id);
                 if (card) {
                     const galeNotice = card.querySelector('.gale-notice');
                     if (galeNotice) galeNotice.remove();
+                    
                     const resultDisplay = card.querySelector('.entry-time-display');
-                    const resultClass = result.result === 'WIN' ? 'text-green-400' : 'text-red-400';
-                    const resultIcon = result.result === 'WIN' ? 'fa-check-circle' : 'fa-times-circle';
-                    resultDisplay.className = `entry-time-display mt-1 text-2xl font-bold ${resultClass}`;
-                    resultDisplay.innerHTML = `<i class="fas ${resultIcon}"></i> ${result.result}`;
+                    if (resultDisplay) {
+                        const resultClass = result.result === 'WIN' ? 'text-green-400' : 'text-red-400';
+                        const resultIcon = result.result === 'WIN' ? 'fa-check-circle' : 'fa-times-circle';
+                        resultDisplay.className = `entry-time-display mt-1 text-2xl font-bold ${resultClass}`;
+                        resultDisplay.innerHTML = `<i class="fas ${resultIcon}"></i> ${result.result}`;
+                    }
                     card.classList.add(result.result === 'WIN' ? 'result-win' : 'result-loss');
                 }
             }
@@ -161,6 +179,7 @@
                 if (card) {
                     let existingNotice = card.querySelector('.gale-notice');
                     if (existingNotice) existingNotice.remove();
+                    
                     const notice = document.createElement('div');
                     notice.className = 'gale-notice';
                     notice.textContent = `GALE ${gale.gale_level}`;
@@ -169,6 +188,7 @@
             }
 
             function handleAnalysisStatus(status) {
+                if (!signalsContainer) return;
                 let analysisCard = document.getElementById('live-analysis-card');
                 if (!analysisCard) {
                     removeAnalysisCard(); 
@@ -178,11 +198,11 @@
                     signalsContainer.prepend(analysisCard);
                 }
                 analysisCard.innerHTML = `
-                    <h3 class="text-xl font-bold mb-1">${status.asset}</h3>
+                    <h3 class="text-xl font-bold mb-1">${status.asset || 'Aguardando'}</h3>
                     <div class="h-28 w-full flex items-center justify-center text-5xl text-gray-400">
                         <i class="fas fa-spinner fa-spin"></i>
                     </div>
-                    <p class="text-lg text-gray-300">${status.message}</p>
+                    <p class="text-lg text-gray-300">${status.message || 'Analisando mercado...'}</p>
                 `;
             }
 
@@ -192,19 +212,23 @@
             }
             
             function createSignalCard(signal) {
-                if (document.getElementById(signal.signal_id)) return;
+                if (!signalsContainer || !signal || document.getElementById(signal.signal_id)) return;
+                
                 const card = document.createElement('div');
                 card.id = signal.signal_id;
                 card.className = 'signal-card glass-effect rounded-2xl p-6 flex flex-col items-center text-center relative';
+                
                 const directionClass = signal.direction === 'BUY' ? 'text-green-400' : 'text-red-400';
                 const directionIcon = signal.direction === 'BUY' ? 'fa-arrow-up' : 'fa-arrow-down';
+                
                 let statusHTML = `<div class="entry-time-display ${directionClass}">${signal.entry_time}</div>`;
                 if(signal.result) {
-                     const resultClass = signal.result === 'WIN' ? 'text-green-400' : 'text-red-400';
-                     const resultIcon = signal.result === 'WIN' ? 'fa-check-circle' : 'fa-times-circle';
-                     statusHTML = `<div class="entry-time-display mt-1 text-2xl font-bold ${resultClass}"><i class="fas ${resultIcon}"></i> ${signal.result}</div>`;
-                     card.classList.add(signal.result === 'WIN' ? 'result-win' : 'result-loss');
+                    const resultClass = signal.result === 'WIN' ? 'text-green-400' : 'text-red-400';
+                    const resultIcon = signal.result === 'WIN' ? 'fa-check-circle' : 'fa-times-circle';
+                    statusHTML = `<div class="entry-time-display mt-1 text-2xl font-bold ${resultClass}"><i class="fas ${resultIcon}"></i> ${signal.result}</div>`;
+                    card.classList.add(signal.result === 'WIN' ? 'result-win' : 'result-loss');
                 }
+                
                 card.innerHTML = `
                     <h3 class="text-xl font-bold mb-1">${signal.pair}</h3>
                     <p class="text-sm text-gray-400 mb-2">Estratégia: ${signal.strategy}</p>
@@ -213,15 +237,20 @@
                     <p class="text-gray-500 text-sm mb-1">Horário da Vela</p>
                     ${statusHTML}
                 `;
+                
                 const candleContainer = card.querySelector('.candle-container');
-                const candleHeight = 80;
-                const priceRange = signal.candle.high - signal.candle.low;
-                if(priceRange > 0){
-                    const bodyTop = (signal.candle.high - Math.max(signal.candle.open, signal.candle.close)) / priceRange * candleHeight;
-                    const bodyHeight = Math.abs(signal.candle.open - signal.candle.close) / priceRange * candleHeight;
-                    candleContainer.innerHTML = `<div class="candle ${signal.candle.color}" style="height: ${candleHeight}px;"><div class="candle-wick" style="height: 100%; top: 0;"></div><div class="candle-body" style="height: ${bodyHeight}px; top: ${bodyTop}px; background-color: currentColor; position: absolute; width: 100%;"></div></div>`;
+                if (candleContainer && signal.candle) {
+                    const candleHeight = 80;
+                    const priceRange = signal.candle.high - signal.candle.low;
+                    if(priceRange > 0){
+                        const bodyTop = (signal.candle.high - Math.max(signal.candle.open, signal.candle.close)) / priceRange * candleHeight;
+                        const bodyHeight = Math.abs(signal.candle.open - signal.candle.close) / priceRange * candleHeight;
+                        candleContainer.innerHTML = `<div class="candle ${signal.candle.color}" style="height: ${candleHeight}px;"><div class="candle-wick" style="height: 100%; top: 0;"></div><div class="candle-body" style="height: ${bodyHeight}px; top: ${bodyTop}px; background-color: currentColor; position: absolute; width: 100%;"></div></div>`;
+                    }
                 }
+
                 if(signal.gale_level > 0) handleGale(signal);
+                
                 signalsContainer.prepend(card);
             }
         };
