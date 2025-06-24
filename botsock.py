@@ -218,6 +218,7 @@ class BotState:
         self.strategy_performance = {}
 
 def get_config_from_env():
+    # Lê as configurações a partir das variáveis de ambiente
     return {
         'conta': os.getenv('EXNOVA_CONTA', 'PRACTICE').upper(),
         'pay_minimo': float(os.getenv('EXNOVA_PAY_MINIMO', 80)),
@@ -226,7 +227,7 @@ def get_config_from_env():
         'usar_mg': os.getenv('EXNOVA_USAR_MG', 'SIM').upper() == 'SIM',
         'mg_niveis': int(os.getenv('EXNOVA_MG_NIVEIS', 2)),
         'mg_fator': float(os.getenv('EXNOVA_MG_FATOR', 2.0)),
-        'modo_operacao': os.getenv('EXNOVA_MODO_OPERACAO', '2')
+        'modo_operacao': os.getenv('EXNOVA_MODO_OPERACAO', '2') # 1=Catalogar, 2=Operar
     }
 
 def compra_thread(api, ativo, valor, direcao, expiracao, tipo_op, state, config, cifrao, signal_id, target_entry_timestamp):
@@ -340,7 +341,6 @@ def main_bot_logic(state):
                 analise_feita = True
                 ativo, tipo_op, payout = obter_melhor_par(API, config['pay_minimo'])
                 if not ativo:
-                    signal_queue.put({"type": "analysis_status", "asset": "AVISO", "message": "Nenhum par com payout mínimo."})
                     continue
 
                 velas = validar_e_limpar_velas(API.get_candles(ativo, 60, 150, time.time()))
