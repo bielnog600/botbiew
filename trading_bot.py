@@ -179,6 +179,7 @@ def start_websocket_server_sync(bot_state):
         }
         
         try:
+            # Passa o método handler da instância do servidor
             start_server = websockets.serve(server_instance.handler, "0.0.0.0", 8765, **server_options)
         except (AttributeError, TypeError, OSError):
             log_warning("reuse_port not supported or failed. Starting WebSocket server without it.")
