@@ -8,7 +8,6 @@ import uuid
 from datetime import datetime, timedelta
 from collections import deque
 from threading import Thread, Lock
-from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
 import asyncio
 import websockets
@@ -58,9 +57,7 @@ def exibir_banner():
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
-        self.send_header('Content-type', 'text/plain')
         self.end_headers()
-        self.wfile.write(b'ok')
     def log_message(self, format, *args):
         return
 
@@ -128,8 +125,6 @@ def get_config_from_env():
         'conta': os.getenv('EXNOVA_CONTA', 'PRACTICE').upper(),
         'pay_minimo': float(os.getenv('EXNOVA_PAY_MINIMO', 80)),
         'valor_entrada': float(os.getenv('EXNOVA_VALOR_ENTRADA', 1)),
-        'stop_win': float(os.getenv('EXNOVA_STOP_WIN', 1000)),
-        'stop_loss': float(os.getenv('EXNOVA_STOP_LOSS', 500)),
         'expiracao': int(os.getenv('EXNOVA_EXPIRACAO', 1)),
         'usar_mg': os.getenv('EXNOVA_USAR_MG', 'SIM').upper() == 'SIM',
         'mg_niveis': int(os.getenv('EXNOVA_MG_NIVEIS', 2)),
@@ -140,8 +135,10 @@ def get_config_from_env():
 def compra_thread(api, ativo, valor, direcao, expiracao, tipo_op, state, config, cifrao, signal_id, target_entry_timestamp):
     try:
         wait_time = target_entry_timestamp - time.time()
-        if wait_time > 0: time.sleep(max(0, wait_time - 0.2));
-        while time.time() < target_entry_timestamp: pass
+        if wait_time > 0:
+            time.sleep(max(0, wait_time - 0.2)) 
+        while time.time() < target_entry_timestamp:
+            pass
         
         entrada_atual = valor
         direcao_atual, niveis_mg = direcao, config['mg_niveis'] if config['usar_mg'] else 0
@@ -208,17 +205,13 @@ def main_bot_logic(state):
     config = get_config_from_env()
     API = Exnova(email, senha)
     
-    def try_connect():
-        log_info("A tentar conectar à Exnova...")
-        check, reason = API.connect()
-        if not check:
-            log_error(f"Falha na conexão: {reason}")
-            return False
-        log_success("Conexão estabelecida com sucesso!")
-        return True
-
-    if not try_connect(): sys.exit(1)
+    log_info("A tentar conectar à Exnova...")
+    check, reason = API.connect()
+    if not check:
+        log_error(f"Falha na conexão: {reason}")
+        sys.exit(1)
     
+    log_success("Conexão estabelecida com sucesso!")
     API.change_balance(config['conta'])
     perfil = API.get_profile_ansyc()
     cifrao, nome_usuario = perfil['currency_char'], perfil['name']
@@ -227,20 +220,10 @@ def main_bot_logic(state):
     minuto_anterior, analise_feita = -1, False
     log_info("Bot iniciado. Aguardando janela de análise...")
     
-    executor = ThreadPoolExecutor(max_workers=1)
-
     while state.stop:
         try:
-            future = executor.submit(API.get_server_timestamp)
-            try:
-                timestamp = future.result(timeout=5)
-            except TimeoutError:
-                log_error("ERRO: A chamada para obter o tempo do servidor está bloqueada. A reiniciar conexão...")
-                if not try_connect():
-                    log_error("Falha na reconexão. A aguardar 10 segundos.")
-                    time.sleep(10)
-                continue
-
+            # ### CORREÇÃO FINAL ### Usa a hora do sistema para evitar bloqueios.
+            timestamp = time.time()
             dt_objeto = datetime.fromtimestamp(timestamp)
             minuto_atual, segundo_atual = dt_objeto.minute, dt_objeto.second
 
