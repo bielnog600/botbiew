@@ -8,6 +8,7 @@ import uuid
 from datetime import datetime, timedelta
 from collections import deque
 from threading import Thread, Lock
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
 import asyncio
 import websockets
@@ -52,6 +53,20 @@ def exibir_banner():
     ''')
     print(y + "*"*88)
     print(c + "="*88)
+
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b'ok')
+    def log_message(self, format, *args):
+        return
+
+def run_health_check_server():
+    server_address = ('', 8080)
+    httpd = HTTPServer(server_address, HealthCheckHandler)
+    log_info("Servidor de Health Check a correr na porta 8080...")
+    httpd.serve_forever()
 
 async def ws_handler(websocket, bot_state):
     connected_clients.add(websocket)
@@ -269,11 +284,12 @@ def main_bot_logic(state):
 def main():
     bot_state = BotState()
     
-    # Inicia os serviços de apoio em segundo plano (daemon=True)
+    health_check_thread = Thread(target=run_health_check_server, daemon=True)
+    health_check_thread.start()
+    
     websocket_thread = Thread(target=start_websocket_server_sync, args=(bot_state,), daemon=True)
     websocket_thread.start()
     
-    # ### CORREÇÃO FINAL ### Executa a lógica principal diretamente para manter o programa vivo
     try:
         main_bot_logic(bot_state)
     except KeyboardInterrupt:
