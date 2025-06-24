@@ -4,6 +4,9 @@ FROM python:3.11-slim
 # Definir o diretório de trabalho dentro do contentor
 WORKDIR /app
 
+# ### ATUALIZAÇÃO ### Instalar o 'curl' para que o Health Check do Coolify funcione
+RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+
 # Copiar primeiro o ficheiro de requisitos para otimizar o cache
 COPY requirements.txt .
 
