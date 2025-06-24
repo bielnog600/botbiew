@@ -3,82 +3,67 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MAROMBIEW - Bot Exnova</title>
+    <title>Painel de Sinais - Bot Exnova</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         body { font-family: 'Inter', sans-serif; background-color: #111827; }
-        .glass-effect { background: rgba(31, 41, 55, 0.6); backdrop-filter: blur(0px); border: 1px solid rgba(255, 255, 255, 0.1); }
-        .candle { width: 20px; margin: 0 auto; position: relative; }
-        .candle-body { width: 100%; }
-        .candle-wick { width: 2px; background-color: currentColor; position: absolute; left: 50%; transform: translateX(-50%); }
-        .entry-time-display { font-family: 'monospace', 'Courier New'; font-size: 2.2rem; font-weight: 700; line-height: 1; }
-        .brand-text { color: #00ff87; }
+        .glass-effect { background: rgba(31, 41, 55, 0.6); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); }
+        .btn-control { transition: background-color 0.2s, transform 0.2s; }
+        .btn-control:active { transform: scale(0.95); }
+        .btn-on { background-color: #16a34a; color: white; }
+        .btn-on:hover { background-color: #15803d; }
+        .btn-off { background-color: #dc2626; color: white; }
+        .btn-off:hover { background-color: #b91c1c; }
         .signal-card { border: 2px solid transparent; transition: border-color 0.3s; }
         .signal-card.result-win { border-color: #22c55e; }
         .signal-card.result-loss { border-color: #ef4444; }
-        /* Estilo do cartão de análise */
-        #live-analysis-card {
-            filter: blur(0px);
-            opacity: 0.6;
-            transition: opacity 0.3s ease;
-            pointer-events: none;
-        }
-        .gale-notice {
-            position: absolute;
-            top: 8px;
-            right: 8px;
-            background-color: #f59e0b;
-            color: #111827;
-            padding: 2px 8px;
-            border-radius: 9999px;
-            font-size: 0.75rem;
-            font-weight: bold;
-            animation: pulse 1.5s infinite;
-        }
-        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
+        .gale-notice { position: absolute; top: 8px; right: 8px; background-color: #f59e0b; color: #111827; padding: 2px 8px; border-radius: 9999px; font-size: 0.75rem; font-weight: bold; }
     </style>
 </head>
 <body class="text-gray-200">
 
     <div id="login-screen" class="min-h-screen flex items-center justify-center bg-gray-900 p-4">
+        <!-- ... (código do login mantido) ... -->
         <div class="w-full max-w-sm glass-effect rounded-2xl p-8 shadow-2xl">
             <div class="text-center mb-8">
-                <h1 class="text-3xl font-bold"><i class="fas fa-chart-line brand-text"></i> MAROMBIEW <span class="brand-text">BOT</span></h1>
-                <p class="text-gray-400 mt-2">Faça login para aceder aos sinais</p>
+                <h1 class="text-3xl font-bold"><i class="fas fa-chart-line text-green-400"></i> Signal <span class="text-green-400">Bot</span></h1>
+                <p class="text-gray-400 mt-2">Faça login para aceder ao painel</p>
             </div>
             <form id="login-form">
                 <div class="mb-4">
                     <label for="username" class="block mb-2 text-sm font-medium text-gray-300">Utilizador</label>
-                    <input type="text" id="username" name="username" class="w-full bg-gray-700 border border-gray-600 text-white rounded-lg p-3 focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none" placeholder="seu-utilizador" required>
+                    <input type="text" id="username" class="w-full bg-gray-700 border border-gray-600 text-white rounded-lg p-3" required>
                 </div>
                 <div class="mb-6">
                     <label for="password" class="block mb-2 text-sm font-medium text-gray-300">Senha</label>
-                    <input type="password" id="password" name="password" class="w-full bg-gray-700 border border-gray-600 text-white rounded-lg p-3 focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none" placeholder="••••••••" required>
+                    <input type="password" id="password" class="w-full bg-gray-700 border border-gray-600 text-white rounded-lg p-3" required>
                 </div>
-                <button type="submit" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg transition duration-300">Entrar</button>
+                <button type="submit" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg">Entrar</button>
             </form>
         </div>
     </div>
 
     <div id="dashboard-screen" class="hidden min-h-screen p-4 sm:p-6 lg:p-8">
         <header class="flex flex-wrap justify-between items-center mb-6 gap-4">
-            <h1 class="text-3xl font-bold"><i class="fas fa-chart-line brand-text"></i> MAROMBIEW <span class="brand-text">BOT</span></h1>
+            <h1 class="text-3xl font-bold"><i class="fas fa-chart-line text-green-400"></i> Sinal <span class="text-green-400">Bot</span></h1>
             <div id="scoreboard" class="flex items-center gap-4 glass-effect p-3 rounded-lg">
                 <div class="text-center"><p class="text-sm text-green-400">WINS</p><p id="score-wins" class="text-2xl font-bold">0</p></div>
                 <div class="text-center"><p class="text-sm text-red-400">LOSS</p><p id="score-losses" class="text-2xl font-bold">0</p></div>
                 <div class="text-center"><p class="text-sm text-yellow-400">GALE WINS</p><p id="score-gale-wins" class="text-2xl font-bold">0</p></div>
             </div>
-            <div>
-                <span class="text-gray-400 mr-4">Bem-vindo, <span id="user-display" class="font-semibold text-white"></span>!</span>
-                <button id="logout-button" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg transition duration-300">Sair</button>
-            </div>
         </header>
 
-        <div id="signals-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            <!-- O cartão de análise e os de sinal entram aqui -->
+        <!-- ### PAINEL DE CONTROLO ### -->
+        <div id="control-panel" class="flex items-center justify-center gap-4 mb-6 p-4 glass-effect rounded-lg">
+            <button id="toggle-trading-btn" class="btn-control font-bold py-2 px-6 rounded-lg btn-on"><i class="fas fa-play mr-2"></i>Ligar Análise</button>
+            <div id="bot-status" class="text-lg text-gray-300 text-center flex-grow">
+                <i class="fas fa-power-off text-red-500 mr-2"></i>Desligado
+            </div>
         </div>
+        
+        <div id="signals-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6"></div>
     </div>
 
     <script>
@@ -86,28 +71,35 @@
             const loginScreen = document.getElementById('login-screen');
             const dashboardScreen = document.getElementById('dashboard-screen');
             const loginForm = document.getElementById('login-form');
-            const logoutButton = document.getElementById('logout-button');
-            const userDisplay = document.getElementById('user-display');
             const signalsContainer = document.getElementById('signals-container');
             
             const scoreWins = document.getElementById('score-wins');
             const scoreLosses = document.getElementById('score-losses');
             const scoreGaleWins = document.getElementById('score-gale-wins');
+            
+            const toggleTradingBtn = document.getElementById('toggle-trading-btn');
+            const botStatus = document.getElementById('bot-status');
 
             let socket;
+            let isTrading = false;
 
             function connectWebSocket() {
-                socket = new WebSocket('wss://qsggss444w0ggs8k80wk0k8c.144.91.107.111.sslip.io');
-                socket.onopen = () => console.log("[WebSocket] Conexão estabelecida.");
+                socket = new WebSocket('ws://localhost:8765');
+                socket.onopen = () => {
+                    botStatus.innerHTML = `<i class="fas fa-check-circle text-green-500 mr-2"></i>Conectado. Bot está desligado.`;
+                };
+
                 socket.onmessage = (event) => {
                     try {
                         const message = JSON.parse(event.data);
                         switch(message.type) {
                             case 'init': handleInitialState(message.data); break;
-                            case 'signal': handleNewSignal(message); break;
+                            case 'signal': createSignalCard(message); break;
                             case 'result': handleResult(message); break;
                             case 'gale': handleGale(message); break;
-                            case 'analysis_status': handleAnalysisStatus(message); break;
+                            case 'status_update': 
+                                botStatus.innerHTML = `<i class="fas fa-spinner fa-spin mr-2"></i>${message.message}`;
+                                break;
                         }
                     } catch (error) { console.error("Erro ao processar mensagem JSON:", error); }
                 };
@@ -120,23 +112,26 @@
                     if (e.target.username.value && e.target.password.value) {
                         loginScreen.classList.add('hidden');
                         dashboardScreen.classList.remove('hidden');
-                        userDisplay.textContent = e.target.username.value;
                         connectWebSocket();
                     }
                 });
             }
 
-            if (logoutButton) {
-                logoutButton.addEventListener('click', () => {
-                    dashboardScreen.classList.add('hidden');
-                    loginScreen.classList.remove('hidden');
-                    if (socket) socket.close();
+            if(toggleTradingBtn) {
+                toggleTradingBtn.addEventListener('click', () => {
+                    isTrading = !isTrading;
+                    const command = isTrading ? "start_trading" : "stop_trading";
+                    socket.send(JSON.stringify({ type: command }));
+                    
+                    if(isTrading) {
+                        toggleTradingBtn.innerHTML = `<i class="fas fa-stop mr-2"></i>Parar Análise`;
+                        toggleTradingBtn.className = 'btn-control font-bold py-2 px-6 rounded-lg btn-off';
+                    } else {
+                        toggleTradingBtn.innerHTML = `<i class="fas fa-play mr-2"></i>Ligar Análise`;
+                        toggleTradingBtn.className = 'btn-control font-bold py-2 px-6 rounded-lg btn-on';
+                        botStatus.innerHTML = `<i class="fas fa-power-off text-red-500 mr-2"></i>Desligado`;
+                    }
                 });
-            }
-
-            function removeAnalysisCard() {
-                const analysisCard = document.getElementById('live-analysis-card');
-                if (analysisCard) analysisCard.remove();
             }
             
             function handleInitialState(data) {
@@ -151,24 +146,15 @@
                 scoreWins.textContent = result.placar.wins;
                 scoreLosses.textContent = result.placar.losses;
                 scoreGaleWins.textContent = result.placar.gale_wins;
-
                 const card = document.getElementById(result.signal_id);
                 if (card) {
                     const galeNotice = card.querySelector('.gale-notice');
                     if (galeNotice) galeNotice.remove();
-                    
-                    const timeDisplay = card.querySelector('.entry-time-display');
-                    if (timeDisplay) timeDisplay.classList.remove('text-green-400', 'text-red-400');
-                    
-                    let resultContainer = card.querySelector('.result-display');
-                    if (!resultContainer) {
-                        resultContainer = document.createElement('div');
-                        card.querySelector('.status-container').appendChild(resultContainer);
-                    }
+                    const resultDisplay = card.querySelector('.entry-time-display');
                     const resultClass = result.result === 'WIN' ? 'text-green-400' : 'text-red-400';
                     const resultIcon = result.result === 'WIN' ? 'fa-check-circle' : 'fa-times-circle';
-                    resultContainer.className = `result-display text-2xl font-bold mt-2 ${resultClass}`;
-                    resultContainer.innerHTML = `<i class="fas ${resultIcon}"></i> ${result.result}`;
+                    resultDisplay.className = `entry-time-display mt-1 text-2xl font-bold ${resultClass}`;
+                    resultDisplay.innerHTML = `<i class="fas ${resultIcon}"></i> ${result.result}`;
                     card.classList.add(result.result === 'WIN' ? 'result-win' : 'result-loss');
                 }
             }
@@ -184,61 +170,29 @@
                     card.appendChild(notice);
                 }
             }
-
-            function handleAnalysisStatus(status) {
-                let analysisCard = document.getElementById('live-analysis-card');
-                if (!analysisCard) {
-                    removeAnalysisCard(); 
-                    analysisCard = document.createElement('div');
-                    analysisCard.id = 'live-analysis-card';
-                    analysisCard.className = 'signal-card glass-effect rounded-2xl p-6 flex flex-col items-center text-center relative';
-                    signalsContainer.prepend(analysisCard);
-                }
-                analysisCard.innerHTML = `
-                    <h3 class="text-xl font-bold mb-1">${status.asset}</h3>
-                    <div class="h-28 w-full flex items-center justify-center text-5xl text-gray-400">
-                        <i class="fas fa-spinner fa-spin"></i>
-                    </div>
-                    <p class="text-lg text-gray-300">${status.message}</p>
-                `;
-            }
-
-            function handleNewSignal(signal) {
-                removeAnalysisCard(); 
-                createSignalCard(signal); 
-            }
-
+            
             function createSignalCard(signal) {
                 if (document.getElementById(signal.signal_id)) return;
-
                 const card = document.createElement('div');
                 card.id = signal.signal_id;
                 card.className = 'signal-card glass-effect rounded-2xl p-6 flex flex-col items-center text-center relative';
                 const directionClass = signal.direction === 'BUY' ? 'text-green-400' : 'text-red-400';
                 const directionIcon = signal.direction === 'BUY' ? 'fa-arrow-up' : 'fa-arrow-down';
-
-                let timeClass = directionClass;
-                let resultHTML = '';
-                if (signal.result) {
-                    timeClass = '';
-                    const resultClass = signal.result === 'WIN' ? 'text-green-400' : 'text-red-400';
-                    const resultIcon = signal.result === 'WIN' ? 'fa-check-circle' : 'fa-times-circle';
-                    resultHTML = `<div class="result-display text-2xl font-bold mt-2 ${resultClass}"><i class="fas ${resultIcon}"></i> ${signal.result}</div>`;
-                    card.classList.add(signal.result === 'WIN' ? 'result-win' : 'result-loss');
+                let statusHTML = `<div class="entry-time-display ${directionClass}">${signal.entry_time}</div>`;
+                if(signal.result) {
+                     const resultClass = signal.result === 'WIN' ? 'text-green-400' : 'text-red-400';
+                     const resultIcon = signal.result === 'WIN' ? 'fa-check-circle' : 'fa-times-circle';
+                     statusHTML = `<div class="entry-time-display mt-1 text-2xl font-bold ${resultClass}"><i class="fas ${resultIcon}"></i> ${signal.result}</div>`;
+                     card.classList.add(signal.result === 'WIN' ? 'result-win' : 'result-loss');
                 }
-
                 card.innerHTML = `
                     <h3 class="text-xl font-bold mb-1">${signal.pair}</h3>
                     <p class="text-sm text-gray-400 mb-2">Estratégia: ${signal.strategy}</p>
                     <div class="h-28 w-full flex items-center justify-center mb-2 candle-container"></div>
                     <div class="mb-2"><span class="text-2xl font-bold ${directionClass}"><i class="fas ${directionIcon} mr-2"></i>${signal.direction}</span></div>
-                    <div class="status-container">
-                        <p class="text-gray-500 text-sm mb-1">Horário da Vela</p>
-                        <div class="entry-time-display ${timeClass}">${signal.entry_time}</div>
-                        ${resultHTML}
-                    </div>
+                    <p class="text-gray-500 text-sm mb-1">Horário da Vela</p>
+                    ${statusHTML}
                 `;
-                
                 const candleContainer = card.querySelector('.candle-container');
                 const candleHeight = 80;
                 const priceRange = signal.candle.high - signal.candle.low;
@@ -247,11 +201,7 @@
                     const bodyHeight = Math.abs(signal.candle.open - signal.candle.close) / priceRange * candleHeight;
                     candleContainer.innerHTML = `<div class="candle ${signal.candle.color}" style="height: ${candleHeight}px;"><div class="candle-wick" style="height: 100%; top: 0;"></div><div class="candle-body" style="height: ${bodyHeight}px; top: ${bodyTop}px; background-color: currentColor; position: absolute; width: 100%;"></div></div>`;
                 }
-                
-                if(signal.gale_level > 0) {
-                    handleGale(signal);
-                }
-
+                if(signal.gale_level > 0) handleGale(signal);
                 signalsContainer.prepend(card);
             }
         };
