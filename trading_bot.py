@@ -130,16 +130,24 @@ async def ws_handler(websocket, *args, bot_state):
     except websockets.exceptions.ConnectionClosed as e:
         log_warning(f"Connection closed with client {websocket.remote_address}: {e}")
     finally:
-        connected_clients.discard(websocket)
+        connected_clients.discard(websocket) # Use discard to avoid errors
         log_warning(f"WebSocket client disconnected: {websocket.remote_address}")
 
+# ### FUNÇÃO ATUALIZADA COM LOG DE DEBUGGING ###
 async def broadcast_signals():
     while True:
         try:
             signal_data = signal_queue.get_nowait()
             if connected_clients:
                 message = json.dumps(signal_data)
-                tasks = [asyncio.create_task(client.send(message)) for client in connected_clients]
+                # Log para confirmar que a transmissão está a ser tentada
+                log_info(f"Broadcasting message: {message}")
+                
+                # Cria uma cópia do set para iterar, tornando-o seguro
+                # contra alterações durante a iteração.
+                clients_to_send = connected_clients.copy()
+                
+                tasks = [client.send(message) for client in clients_to_send]
                 await asyncio.gather(*tasks, return_exceptions=True)
         except queue.Empty:
             await asyncio.sleep(0.1)
@@ -498,13 +506,12 @@ def main_bot_logic(state):
             with state.lock:
                 is_trading = state.is_trading
             
-            if segundo_atual >= 45 and not analise_feita and not is_trading:
+            if segundo_atual >= 55 and not analise_feita and not is_trading:
                 analise_feita = True
                 ativo, tipo_op, payout = obter_melhor_par(API, config['pay_minimo'])
                 if not ativo:
                     continue
 
-                # Envia atualização de que um par foi selecionado para análise
                 signal_queue.put({"type": "analysis_update", "asset": ativo, "status": "Analisando estratégias..."})
 
                 velas = validar_e_limpar_velas(API.get_candles(ativo, 60, 150, time.time()))
@@ -512,7 +519,6 @@ def main_bot_logic(state):
                 if not velas or len(velas) < 20: continue
                 
                 if is_market_indecisive(velas, PARAMS):
-                    # Envia atualização de que o mercado está indeciso
                     signal_queue.put({"type": "analysis_update", "asset": ativo, "status": "Mercado indeciso, aguardando..."})
                     continue
                 
