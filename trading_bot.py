@@ -278,7 +278,7 @@ def strategy_flow(velas, p):
     if nano_up is None: return None
 
     # Pega as duas últimas velas fechadas para análise
-    flow_candles = velas[-2:]
+    flow_candles = velas[-3:]
     
     # Filtro 1: Força do Corpo da Vela
     min_body_ratio = p.get('FlowBodyMinRatio', 0.5)
