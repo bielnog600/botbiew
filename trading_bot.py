@@ -150,7 +150,7 @@ async def broadcast_signals():
 def start_websocket_server_sync(bot_state):
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    handler_with_state = lambda ws, path: ws_handler(ws, path, bot_state=bot_state)
+    handler_with_state = lambda websocket, *args: ws_handler(websocket, *args, bot_state=bot_state)
     async def main_async_logic():
         server_options = { "ping_interval": 20, "ping_timeout": 20, "reuse_port": True }
         try:
