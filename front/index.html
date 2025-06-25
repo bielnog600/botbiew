@@ -117,11 +117,54 @@
 
     <script>
         document.addEventListener('DOMContentLoaded', () => {
+            // ###########################################################
+            // ##           CONFIGURAÇÃO DE FUSO HORÁRIO                ##
+            // ###########################################################
+            // Defina aqui o fuso horário do servidor onde o BOT está a rodar.
+            // O formato é o deslocamento UTC, como "-03:00" para Brasília,
+            // ou "+01:00" para Portugal Continental.
+            const BOT_UTC_OFFSET = "-03:00";
+            // ###########################################################
+
             const signalsGrid = document.getElementById('signals-grid');
             const scoreWinsEl = document.getElementById('score-wins');
             const scoreLossesEl = document.getElementById('score-losses');
             const scoreGaleWinsEl = document.getElementById('score-gale-wins');
             let socket;
+
+            /**
+             * Converte uma string de tempo (HH:MM) do fuso horário do bot para o fuso do utilizador.
+             * @param {string} timeString - A hora enviada pelo bot (ex: "13:49").
+             * @returns {string} - A hora formatada para o fuso do utilizador.
+             */
+            function convertTimeToUserTimezone(timeString) {
+                if (!timeString || !timeString.includes(':')) {
+                    return timeString; // Retorna o original se for inválido
+                }
+                try {
+                    // Pega a data de hoje para construir uma data completa
+                    const todayStr = new Date().toISOString().slice(0, 10); // "AAAA-MM-DD"
+                    
+                    // Cria uma string de data e hora completa com o fuso horário do bot
+                    // Exemplo: "2024-06-25T13:49:00-03:00"
+                    const fullDateTimeString = `${todayStr}T${timeString}:00${BOT_UTC_OFFSET}`;
+                    
+                    // Cria um objeto Date a partir da string. O browser irá automaticamente
+                    // entender que esta hora pertence a outro fuso e guardá-la internamente em UTC.
+                    const dateObj = new Date(fullDateTimeString);
+                    
+                    // Formata a data para a localidade do utilizador, mostrando apenas a hora e os minutos.
+                    return dateObj.toLocaleTimeString([], {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        hour12: false
+                    });
+                } catch (e) {
+                    console.error("Erro ao converter hora:", e);
+                    return timeString; // Em caso de erro, retorna a hora original.
+                }
+            }
+
 
             function connectWebSocket() {
                 const websocketUrl = 'wss://botexnova.marombiew.com';
@@ -151,7 +194,7 @@
                         handleInitialState(message.data);
                         break;
                     case 'analysis_status':
-                    case 'analysis_update': // ### NOVO: Trata ambos os tipos de status
+                    case 'analysis_update':
                         createAnalysisCard(message);
                         break;
                     case 'signal':
@@ -194,7 +237,6 @@
                 `;
             }
 
-            // ### FUNÇÃO DE ANÁLISE ATUALIZADA ###
             function createAnalysisCard(statusInfo) {
                 const cardId = 'analysis-card';
                 let card = document.getElementById(cardId);
@@ -207,16 +249,12 @@
 
                 const asset = statusInfo.asset || "Mercado";
                 const statusText = statusInfo.status || "Aguardando próxima vela...";
-                const nextEntryTime = statusInfo.next_entry_time;
+                const nextEntryTime = statusInfo.next_entry_time ? convertTimeToUserTimezone(statusInfo.next_entry_time) : null;
                 
-                let iconClass = "fa-solid fa-satellite-dish text-gray-400"; // Padrão
-                if (statusText.includes("Analisando")) {
-                    iconClass = "fa-solid fa-magnifying-glass-chart text-sky-400 animate-pulse";
-                } else if (statusText.includes("indeciso")) {
-                    iconClass = "fa-solid fa-pause-circle text-amber-400";
-                } else if (statusText.includes("Reconectando")) {
-                    iconClass = "fa-solid fa-tower-broadcast text-red-500 animate-ping";
-                }
+                let iconClass = "fa-solid fa-satellite-dish text-gray-400";
+                if (statusText.includes("Analisando")) iconClass = "fa-solid fa-magnifying-glass-chart text-sky-400 animate-pulse";
+                else if (statusText.includes("indeciso")) iconClass = "fa-solid fa-pause-circle text-amber-400";
+                else if (statusText.includes("Reconectando")) iconClass = "fa-solid fa-tower-broadcast text-red-500 animate-ping";
                 
                 card.innerHTML = `
                     <p class="font-bold text-xl text-white mb-2">${asset}</p>
@@ -225,12 +263,8 @@
                     ${nextEntryTime ? `<p class="text-sm text-gray-400 mt-1">Próxima oportunidade: ${nextEntryTime}</p>` : ''}
                 `;
 
-                // Aplica shimmer apenas se estiver aguardando
-                if(statusText.includes("Aguardando")) {
-                    card.classList.add("animate-shimmer");
-                } else {
-                    card.classList.remove("animate-shimmer");
-                }
+                if(statusText.includes("Aguardando")) card.classList.add("animate-shimmer");
+                else card.classList.remove("animate-shimmer");
             }
             
             function removeAnalysisCard() {
@@ -258,7 +292,7 @@
                     <div class="grid grid-cols-2 gap-4 items-center my-3">
                         <div class="flex flex-col">
                            <p class="text-xs text-gray-500">Vela Analisada</p>
-                           <p class="font-mono text-lg font-semibold">${signal.analysis_time}</p>
+                           <p class="font-mono text-lg font-semibold">${convertTimeToUserTimezone(signal.analysis_time)}</p>
                         </div>
                         <div class="w-12 h-20 mx-auto">
                             ${renderCandle(signal.candle)}
@@ -270,7 +304,7 @@
                     </div>
                     <div class="w-full mt-auto bg-teal-500/10 rounded-lg p-2 border border-teal-500/30">
                         <p class="text-xs text-teal-300">ENTRAR ÀS</p>
-                        <p class="font-mono text-2xl font-bold text-white">${signal.entry_time}</p>
+                        <p class="font-mono text-2xl font-bold text-white">${convertTimeToUserTimezone(signal.entry_time)}</p>
                     </div>
                 `;
                 
@@ -316,7 +350,6 @@
                 galeNotice.textContent = `GALE ${gale.gale_level}`;
             }
 
-            // --- INICIALIZAÇÃO ---
             function handleInitialState(data) {
                 if (!data) return;
                 signalsGrid.innerHTML = '';
