@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Plataforma - MAROMBIEW BOT</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Roboto+Mono:wght@500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+    <style>
+        body { font-family: 'Poppins', sans-serif; background-color: #0a0a0a; color: #e5e7eb; background-image: radial-gradient(#1e293b 1px, transparent 1px); background-size: 20px 20px; }
+        .font-mono { font-family: 'Roboto Mono', monospace; }
+        .glass-card { background: rgba(17, 24, 39, 0.6); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.05); }
+        .hidden { display: none; }
+        .btn { padding: 0.75rem 1.5rem; border-radius: 0.5rem; font-weight: 600; transition: all 0.2s ease; }
+        .btn-primary { background-color: #14b8a6; color: white; }
+        .btn-primary:hover { background-color: #0d9488; }
+        .btn-danger { background-color: #ef4444; color: white; }
+        .btn-danger:hover { background-color: #dc2626; }
+        .btn-secondary { background-color: #4b5563; color: white; }
+        .btn-secondary:hover { background-color: #374151; }
+        .form-input { width: 100%; background-color: #1f2937; border: 1px solid #4b5563; color: white; border-radius: 0.5rem; padding: 0.75rem; }
+    </style>
+</head>
+<body class="p-4 sm:p-6 lg:p-8">
+
+    <!-- Ecrã de Carregamento Inicial -->
+    <div id="loading-screen" class="fixed inset-0 bg-gray-900 flex items-center justify-center z-50">
+        <i class="fa-solid fa-robot text-teal-400 text-6xl animate-pulse"></i>
+    </div>
+
+    <!-- Ecrã de Login / Registo -->
+    <div id="auth-view" class="hidden max-w-md mx-auto">
+        <div class="text-center mb-8">
+            <h1 class="text-3xl font-bold text-white"><i class="fa-solid fa-robot text-teal-400"></i> MAROMBIEW BOT</h1>
+            <p class="text-gray-400">A sua plataforma de automação</p>
+        </div>
+        
+        <!-- Formulário de Login -->
+        <form id="login-form" class="glass-card p-8 rounded-xl space-y-4">
+            <h2 class="text-xl font-semibold text-center">Login</h2>
+            <div>
+                <label for="login-email" class="block mb-1 text-sm">Email</label>
+                <input type="email" id="login-email" class="form-input" required>
+            </div>
+            <div>
+                <label for="login-password" class="block mb-1 text-sm">Senha</label>
+                <input type="password" id="login-password" class="form-input" required>
+            </div>
+            <button type="submit" class="btn btn-primary w-full">Entrar</button>
+            <p class="text-center text-sm">Não tem uma conta? <a href="#" id="show-register-link" class="text-teal-400 hover:underline">Registe-se</a></p>
+        </form>
+
+        <!-- Formulário de Registo -->
+        <form id="register-form" class="hidden glass-card p-8 rounded-xl space-y-4">
+             <h2 class="text-xl font-semibold text-center">Criar Conta</h2>
+            <div>
+                <label for="register-email" class="block mb-1 text-sm">Email</label>
+                <input type="email" id="register-email" class="form-input" required>
+            </div>
+            <div>
+                <label for="register-password" class="block mb-1 text-sm">Senha</label>
+                <input type="password" id="register-password" class="form-input" required>
+            </div>
+             <div>
+                <label for="register-expiry" class="block mb-1 text-sm">Data de Expiração do Plano</label>
+                <input type="date" id="register-expiry" class="form-input" required>
+            </div>
+            <button type="submit" class="btn btn-primary w-full">Criar Conta</button>
+            <p class="text-center text-sm">Já tem uma conta? <a href="#" id="show-login-link" class="text-teal-400 hover:underline">Faça login</a></p>
+        </form>
+        <div id="auth-error" class="mt-4 text-center text-red-400"></div>
+    </div>
+
+    <!-- Painel Principal (Dashboard) -->
+    <div id="dashboard-view" class="hidden max-w-7xl mx-auto">
+        <header class="flex flex-col sm:flex-row justify-between items-center mb-8 gap-6">
+            <h1 class="text-3xl font-bold text-white"><i class="fa-solid fa-robot text-teal-400"></i> MAROMBIEW <span class="text-teal-400">Signals</span></h1>
+            <div class="flex items-center gap-4">
+                <div id="bot-status" class="flex items-center gap-2 text-sm font-semibold glass-card p-2 px-3 rounded-lg">
+                    <span id="bot-status-indicator" class="w-3 h-3 rounded-full bg-gray-500"></span>
+                    <span id="bot-status-text">BOT DESLIGADO</span>
+                </div>
+                <button id="logout-button" class="btn btn-secondary">Sair</button>
+            </div>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <!-- Coluna de Configurações -->
+            <aside class="lg:col-span-1 space-y-6">
+                <form id="bot-config-form" class="glass-card p-6 rounded-xl">
+                    <h3 class="text-lg font-semibold mb-4">Configurações do Bot</h3>
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block mb-1 text-sm">Email da Corretora</label>
+                            <input type="email" name="exnova_email" class="form-input" required>
+                        </div>
+                        <div>
+                            <label class="block mb-1 text-sm">Senha da Corretora</label>
+                            <input type="password" name="exnova_password" class="form-input" required>
+                        </div>
+                         <div>
+                            <label class="block mb-1 text-sm">Modo de Operação</label>
+                            <select name="trade_mode" class="form-input">
+                                <option value="aggressive">Agressivo (Sem Catalogação)</option>
+                                <option value="conservative">Conservador (Com Catalogação)</option>
+                            </select>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block mb-1 text-sm">Valor Entrada</label>
+                                <input type="number" name="entry_value" step="0.01" class="form-input" value="1.0" required>
+                            </div>
+                             <div>
+                                <label class="block mb-1 text-sm">Fator MG</label>
+                                <input type="number" name="mg_factor" step="0.1" class="form-input" value="2.0" required>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4">
+                             <div>
+                                <label class="block mb-1 text-sm">Usar MG</label>
+                                <select name="use_martingale" class="form-input">
+                                    <option value="true">Sim</option>
+                                    <option value="false">Não</option>
+                                </select>
+                            </div>
+                             <div>
+                                <label class="block mb-1 text-sm">Níveis MG</label>
+                                <input type="number" name="mg_levels" class="form-input" value="2" required>
+                            </div>
+                        </div>
+                        <button type="submit" class="btn btn-secondary w-full">Guardar Configurações</button>
+                    </div>
+                </form>
+                <div class="glass-card p-4 rounded-xl flex gap-4">
+                     <button id="start-bot-button" class="btn btn-primary w-full">Ligar Bot</button>
+                     <button id="stop-bot-button" class="btn btn-danger w-full">Desligar Bot</button>
+                </div>
+                <div id="config-message" class="text-center text-sm"></div>
+            </aside>
+
+            <!-- Coluna de Sinais -->
+            <main class="lg:col-span-2">
+                <div id="scoreboard" class="grid grid-cols-3 gap-4 w-full glass-card p-3 rounded-xl mb-6">
+                    <div class="text-center px-2"><p class="text-sm font-semibold text-green-400">WINS</p><p id="score-wins" class="text-2xl font-bold font-mono">0</p></div>
+                    <div class="text-center px-2"><p class="text-sm font-semibold text-red-400">LOSSES</p><p id="score-losses" class="text-2xl font-bold font-mono">0</p></div>
+                    <div class="text-center px-2"><p class="text-sm font-semibold text-amber-400">GALE WINS</p><p id="score-gale-wins" class="text-2xl font-bold font-mono">0</p></div>
+                </div>
+                 <div id="signals-grid" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                    <!-- Cards de Sinais aqui -->
+                 </div>
+            </main>
+        </div>
+    </div>
+    
+    <!-- (O resto dos seus estilos CSS podem vir aqui) -->
+
+    <script>
+        // Lógica completa da aplicação
+        document.addEventListener('DOMContentLoaded', () => {
+            // (A sua lógica JS para o painel de sinais vai aqui,
+            // mas agora será ativada apenas após o login e conexão do bot)
+            
+            // Gerenciador de Vistas (Telas)
+            const views = {
+                loading: document.getElementById('loading-screen'),
+                auth: document.getElementById('auth-view'),
+                dashboard: document.getElementById('dashboard-view')
+            };
+
+            const showView = (viewName) => {
+                Object.values(views).forEach(view => view.classList.add('hidden'));
+                if (views[viewName]) {
+                    views[viewName].classList.remove('hidden');
+                }
+            };
+            
+            // Lógica de autenticação e API
+            const api = {
+                // (Aqui entraria a lógica `fetch` para comunicar com o seu backend FastAPI)
+            };
+
+            // Lógica do WebSocket
+            let socket;
+            const connectWebSocket = (token) => {
+                // (A lógica WebSocket que já temos, mas que se conecta a `/ws/${token}`)
+            };
+
+            // Inicialização da Aplicação
+            const initApp = () => {
+                const token = localStorage.getItem('accessToken');
+                if (token) {
+                    // Tenta validar o token com o backend. Se for válido, mostra o dashboard.
+                    // fetch('/users/me', { headers: {'Authorization': `Bearer ${token}`} }) ...
+                    showView('dashboard');
+                } else {
+                    showView('auth');
+                }
+            };
+
+            initApp();
+        });
+    </script>
+</body>
+</html>
