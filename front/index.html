@@ -83,6 +83,16 @@
         .card-enter-animation {
             animation: card-enter 0.4s ease-out forwards;
         }
+
+        /* ### NOVA ANIMAÇÃO: Feedback no Placar ### */
+        @keyframes score-pop {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.25); color: #ffffff; }
+            100% { transform: scale(1); }
+        }
+        .score-updated {
+            animation: score-pop 0.3s ease-in-out;
+        }
     </style>
 </head>
 <body class="p-4 sm:p-6 lg:p-8">
@@ -117,54 +127,25 @@
 
     <script>
         document.addEventListener('DOMContentLoaded', () => {
-            // ###########################################################
-            // ##           CONFIGURAÇÃO DE FUSO HORÁRIO                ##
-            // ###########################################################
-            // Defina aqui o fuso horário do servidor onde o BOT está a rodar.
-            // O formato é o deslocamento UTC, como "-03:00" para Brasília,
-            // ou "+01:00" para Portugal Continental.
             const BOT_UTC_OFFSET = "-00:00";
-            // ###########################################################
-
             const signalsGrid = document.getElementById('signals-grid');
             const scoreWinsEl = document.getElementById('score-wins');
             const scoreLossesEl = document.getElementById('score-losses');
             const scoreGaleWinsEl = document.getElementById('score-gale-wins');
             let socket;
 
-            /**
-             * Converte uma string de tempo (HH:MM) do fuso horário do bot para o fuso do utilizador.
-             * @param {string} timeString - A hora enviada pelo bot (ex: "13:49").
-             * @returns {string} - A hora formatada para o fuso do utilizador.
-             */
             function convertTimeToUserTimezone(timeString) {
-                if (!timeString || !timeString.includes(':')) {
-                    return timeString; // Retorna o original se for inválido
-                }
+                if (!timeString || !timeString.includes(':')) return timeString;
                 try {
-                    // Pega a data de hoje para construir uma data completa
-                    const todayStr = new Date().toISOString().slice(0, 10); // "AAAA-MM-DD"
-                    
-                    // Cria uma string de data e hora completa com o fuso horário do bot
-                    // Exemplo: "2024-06-25T13:49:00-03:00"
+                    const todayStr = new Date().toISOString().slice(0, 10);
                     const fullDateTimeString = `${todayStr}T${timeString}:00${BOT_UTC_OFFSET}`;
-                    
-                    // Cria um objeto Date a partir da string. O browser irá automaticamente
-                    // entender que esta hora pertence a outro fuso e guardá-la internamente em UTC.
                     const dateObj = new Date(fullDateTimeString);
-                    
-                    // Formata a data para a localidade do utilizador, mostrando apenas a hora e os minutos.
-                    return dateObj.toLocaleTimeString([], {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                        hour12: false
-                    });
+                    return dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
                 } catch (e) {
                     console.error("Erro ao converter hora:", e);
-                    return timeString; // Em caso de erro, retorna a hora original.
+                    return timeString;
                 }
             }
-
 
             function connectWebSocket() {
                 const websocketUrl = 'wss://botexnova.marombiew.com';
@@ -210,31 +191,33 @@
                 }
             }
             
+            // ### FUNÇÃO ATUALIZADA com Feedback Visual ###
             function updateScoreboard({ wins = 0, losses = 0, gale_wins = 0 } = {}) {
-                if (scoreWinsEl) scoreWinsEl.textContent = wins;
-                if (scoreLossesEl) scoreLossesEl.textContent = losses;
-                if (scoreGaleWinsEl) scoreGaleWinsEl.textContent = gale_wins;
+                if (scoreWinsEl && scoreWinsEl.textContent !== String(wins)) {
+                    scoreWinsEl.textContent = wins;
+                    scoreWinsEl.classList.add('score-updated');
+                    setTimeout(() => scoreWinsEl.classList.remove('score-updated'), 300);
+                }
+                if (scoreLossesEl && scoreLossesEl.textContent !== String(losses)) {
+                    scoreLossesEl.textContent = losses;
+                    scoreLossesEl.classList.add('score-updated');
+                    setTimeout(() => scoreLossesEl.classList.remove('score-updated'), 300);
+                }
+                if (scoreGaleWinsEl && scoreGaleWinsEl.textContent !== String(gale_wins)) {
+                    scoreGaleWinsEl.textContent = gale_wins;
+                    scoreGaleWinsEl.classList.add('score-updated');
+                    setTimeout(() => scoreGaleWinsEl.classList.remove('score-updated'), 300);
+                }
             }
 
             function renderCandle(candle) {
                 if (!candle || !candle.high || !candle.low) return '<div class="h-full w-full flex items-center justify-center text-gray-500"><i class="fa-solid fa-image"></i></div>';
-                
                 const candleColor = candle.close >= candle.open ? '#22c55e' : '#ef4444';
                 const priceRange = candle.high - candle.low;
-                
-                if (priceRange <= 0) {
-                     return `<svg viewBox="0 0 30 100" class="w-full h-full"><line x1="5" y1="50" x2="25" y2="50" stroke="${candleColor}" stroke-width="2"/></svg>`;
-                }
-
+                if (priceRange <= 0) return `<svg viewBox="0 0 30 100" class="w-full h-full"><line x1="5" y1="50" x2="25" y2="50" stroke="${candleColor}" stroke-width="2"/></svg>`;
                 const bodyHeight = (Math.abs(candle.open - candle.close) / priceRange) * 100;
                 const bodyTop = ((candle.high - Math.max(candle.open, candle.close)) / priceRange) * 100;
-
-                return `
-                    <svg viewBox="0 0 30 100" class="w-full h-full">
-                        <rect x="14" y="0" width="2" height="100" fill="${candleColor}" />
-                        <rect x="5" y="${bodyTop}" width="20" height="${bodyHeight}" fill="${candleColor}" />
-                    </svg>
-                `;
+                return `<svg viewBox="0 0 30 100" class="w-full h-full"><rect x="14" y="0" width="2" height="100" fill="${candleColor}" /><rect x="5" y="${bodyTop}" width="20" height="${bodyHeight}" fill="${candleColor}" /></svg>`;
             }
 
             function createAnalysisCard(statusInfo) {
@@ -246,23 +229,14 @@
                     card.className = 'glass-card rounded-2xl p-4 flex flex-col items-center justify-center text-center h-full min-h-[280px]';
                     signalsGrid.prepend(card);
                 }
-
                 const asset = statusInfo.asset || "Mercado";
                 const statusText = statusInfo.status || "Aguardando próxima vela...";
                 const nextEntryTime = statusInfo.next_entry_time ? convertTimeToUserTimezone(statusInfo.next_entry_time) : null;
-                
                 let iconClass = "fa-solid fa-satellite-dish text-gray-400";
                 if (statusText.includes("Analisando")) iconClass = "fa-solid fa-magnifying-glass-chart text-sky-400 animate-pulse";
                 else if (statusText.includes("indeciso")) iconClass = "fa-solid fa-pause-circle text-amber-400";
                 else if (statusText.includes("Reconectando")) iconClass = "fa-solid fa-tower-broadcast text-red-500 animate-ping";
-                
-                card.innerHTML = `
-                    <p class="font-bold text-xl text-white mb-2">${asset}</p>
-                    <div class="text-5xl my-4 ${iconClass}"></div>
-                    <p class="font-semibold text-lg text-white">${statusText}</p>
-                    ${nextEntryTime ? `<p class="text-sm text-gray-400 mt-1">Próxima oportunidade: ${nextEntryTime}</p>` : ''}
-                `;
-
+                card.innerHTML = `<p class="font-bold text-xl text-white mb-2">${asset}</p><div class="text-5xl my-4 ${iconClass}"></div><p class="font-semibold text-lg text-white">${statusText}</p>${nextEntryTime ? `<p class="text-sm text-gray-400 mt-1">Próxima oportunidade: ${nextEntryTime}</p>` : ''}`;
                 if(statusText.includes("Aguardando")) card.classList.add("animate-shimmer");
                 else card.classList.remove("animate-shimmer");
             }
@@ -273,15 +247,26 @@
             }
 
             function createSignalCard(signal) {
-                if (!signal || document.getElementById(signal.signal_id)) return;
+                const card = buildSignalCard(signal);
+                signalsGrid.prepend(card);
+                card.classList.add('card-enter-animation');
+                
+                const pulseClass = (signal.direction.toUpperCase() === 'CALL' || signal.direction.toUpperCase() === 'BUY') ? 'pulse-call' : 'pulse-put';
+                card.classList.add(pulseClass);
+                setTimeout(() => card.classList.remove(pulseClass), 5000);
+            }
+            
+            // ### NOVA FUNÇÃO DE CONSTRUÇÃO DE CARD ###
+            // Esta função apenas cria o HTML do card, sem o adicionar à grelha.
+            function buildSignalCard(signal) {
+                if (!signal) return null;
                 
                 const card = document.createElement('div');
                 card.id = signal.signal_id;
-                card.className = 'glass-card rounded-2xl p-4 flex flex-col text-center card-enter-animation';
+                card.className = 'glass-card rounded-2xl p-4 flex flex-col text-center';
                 
                 const isCall = signal.direction.toUpperCase() === 'CALL' || signal.direction.toUpperCase() === 'BUY';
                 const directionColor = isCall ? 'text-green-400' : 'text-red-400';
-                const pulseClass = isCall ? 'pulse-call' : 'pulse-put';
                 const directionIcon = isCall ? 'fa-arrow-trend-up' : 'fa-arrow-trend-down';
                 
                 card.innerHTML = `
@@ -307,11 +292,7 @@
                         <p class="font-mono text-2xl font-bold text-white">${convertTimeToUserTimezone(signal.entry_time)}</p>
                     </div>
                 `;
-                
-                signalsGrid.prepend(card);
-                
-                card.classList.add(pulseClass);
-                setTimeout(() => card.classList.remove(pulseClass), 5000);
+                return card;
             }
             
             function updateCardForResult(result) {
@@ -322,18 +303,11 @@
                 const isWin = result.result === 'WIN';
                 const resultColor = isWin ? 'text-green-400' : 'text-red-400';
                 const resultIcon = isWin ? 'fa-solid fa-trophy' : 'fa-solid fa-shield-halved';
-
                 const statusContainer = card.querySelector('.mt-auto');
                 if (statusContainer) {
                     statusContainer.className = "w-full mt-auto rounded-lg p-2 border";
                     statusContainer.classList.add(isWin ? 'bg-green-500/10' : 'bg-red-500/10', isWin ? 'border-green-500/30' : 'border-red-500/30');
-                    statusContainer.innerHTML = `
-                        <p class="text-xs ${resultColor}">RESULTADO</p>
-                        <p class="font-mono text-2xl font-bold ${resultColor} flex items-center justify-center gap-2">
-                            <i class="${resultIcon}"></i>
-                            <span>${result.result}</span>
-                        </p>
-                    `;
+                    statusContainer.innerHTML = `<p class="text-xs ${resultColor}">RESULTADO</p><p class="font-mono text-2xl font-bold ${resultColor} flex items-center justify-center gap-2"><i class="${resultIcon}"></i><span>${result.result}</span></p>`;
                 }
             }
 
@@ -350,20 +324,26 @@
                 galeNotice.textContent = `GALE ${gale.gale_level}`;
             }
 
+            // ### FUNÇÃO INICIAL ATUALIZADA para CORRIGIR a ORDEM ###
             function handleInitialState(data) {
                 if (!data) return;
                 signalsGrid.innerHTML = '';
                 updateScoreboard(data.placar);
                 if (data.signals && Array.isArray(data.signals)) {
-                    data.signals.sort((a, b) => b.entry_time.localeCompare(a.entry_time)).forEach(signal => {
-                        createSignalCard(signal);
-                        if (signal.result) {
-                            setTimeout(() => updateCardForResult({ ...signal, placar: data.placar }), 50);
-                        }
-                        if (signal.gale_level > 0) {
-                            setTimeout(() => updateCardForGale(signal), 50);
-                        }
-                    });
+                    data.signals
+                        .sort((a, b) => b.entry_time.localeCompare(a.entry_time))
+                        .forEach(signal => {
+                            const card = buildSignalCard(signal);
+                            if (card) {
+                                signalsGrid.appendChild(card); // Usa APPEND para manter a ordem correta
+                                if (signal.result) {
+                                    setTimeout(() => updateCardForResult({ ...signal, placar: data.placar }), 50);
+                                }
+                                if (signal.gale_level > 0) {
+                                    setTimeout(() => updateCardForGale(signal), 50);
+                                }
+                            }
+                        });
                 }
                  createAnalysisCard({ status: 'Conectado. Aguardando...' });
             }
