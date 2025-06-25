@@ -281,7 +281,7 @@ def strategy_flow(velas, p):
     flow_candles = velas[-2:]
     
     # Filtro 1: Força do Corpo da Vela
-    min_body_ratio = p.get('FlowBodyMinRatio', 0.5)
+    min_body_ratio = p.get('FlowBodyMinRatio', 0.8)
     def is_strong_candle(vela):
         range_total = vela['high'] - vela['low']
         if range_total == 0: return False
