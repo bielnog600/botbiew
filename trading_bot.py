@@ -118,8 +118,9 @@ def exibir_banner():
     print(y + "*"*88)
     print(c + "="*88)
 
-async def ws_handler(websocket, path, bot_state):
+async def ws_handler(websocket, *args, bot_state):
     try:
+        connected_clients.add(websocket)
         initial_state = {
             "type": "init",
             "data": {
@@ -156,7 +157,8 @@ def start_websocket_server_sync(bot_state):
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     
-    handler_with_state = lambda ws, path: ws_handler(ws, path, bot_state=bot_state)
+    handler_with_state = lambda websocket, *args: ws_handler(websocket, *args, bot_state=bot_state)
+
     
     async def main_async_logic():
         server_options = {
