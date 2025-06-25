@@ -117,23 +117,18 @@
 
     <script>
         document.addEventListener('DOMContentLoaded', () => {
-            // --- ELEMENTOS DO DOM ---
             const signalsGrid = document.getElementById('signals-grid');
             const scoreWinsEl = document.getElementById('score-wins');
             const scoreLossesEl = document.getElementById('score-losses');
             const scoreGaleWinsEl = document.getElementById('score-gale-wins');
+            let socket;
 
-            // --- LÓGICA DO WEBSOCKET ---
             function connectWebSocket() {
                 const websocketUrl = 'wss://botexnova.marombiew.com';
-                
                 console.log(`[WebSocket] Tentando conectar a ${websocketUrl}...`);
                 socket = new WebSocket(websocketUrl);
 
-                socket.onopen = () => {
-                    console.log('[WebSocket] Conexão estabelecida.');
-                };
-
+                socket.onopen = () => console.log('[WebSocket] Conexão estabelecida.');
                 socket.onmessage = (event) => {
                     try {
                         const message = JSON.parse(event.data);
@@ -142,25 +137,21 @@
                         console.error("Erro ao processar mensagem JSON:", error, "Data:", event.data);
                     }
                 };
-
                 socket.onclose = () => {
                     console.log('[WebSocket] Conexão perdida. Tentando reconectar em 5 segundos...');
-                    createAnalysisCard({ message: 'Reconectando...' });
+                    createAnalysisCard({ status: 'Reconectando...' });
                     setTimeout(connectWebSocket, 5000);
                 };
-
-                socket.onerror = (error) => {
-                    console.error("[WebSocket] Ocorreu um erro:", error);
-                };
+                socket.onerror = (error) => console.error("[WebSocket] Ocorreu um erro:", error);
             }
 
-            // --- MANIPULADOR DE MENSAGENS ---
             function handleWebSocketMessage(message) {
                 switch (message.type) {
                     case 'init':
                         handleInitialState(message.data);
                         break;
                     case 'analysis_status':
+                    case 'analysis_update': // ### NOVO: Trata ambos os tipos de status
                         createAnalysisCard(message);
                         break;
                     case 'signal':
@@ -176,7 +167,6 @@
                 }
             }
             
-            // --- FUNÇÕES DE RENDERIZAÇÃO ---
             function updateScoreboard({ wins = 0, losses = 0, gale_wins = 0 } = {}) {
                 if (scoreWinsEl) scoreWinsEl.textContent = wins;
                 if (scoreLossesEl) scoreLossesEl.textContent = losses;
@@ -204,25 +194,43 @@
                 `;
             }
 
-            // ### FUNÇÃO ATUALIZADA ###
-            function createAnalysisCard(status) {
+            // ### FUNÇÃO DE ANÁLISE ATUALIZADA ###
+            function createAnalysisCard(statusInfo) {
                 const cardId = 'analysis-card';
                 let card = document.getElementById(cardId);
                 if (!card) {
                     card = document.createElement('div');
                     card.id = cardId;
-                    card.className = 'glass-card rounded-2xl p-4 flex flex-col items-center justify-center h-full animate-shimmer';
+                    card.className = 'glass-card rounded-2xl p-4 flex flex-col items-center justify-center text-center h-full min-h-[280px]';
                     signalsGrid.prepend(card);
                 }
-                const nextEntryTime = status.next_entry_time ? 
-                    `<p class="text-sm text-gray-400 mt-2">Possível entrada às ${status.next_entry_time}</p>` :
-                    `<p class="text-sm text-gray-400 mt-2">${status.message || 'Aguardando...'}</p>`;
 
+                const asset = statusInfo.asset || "Mercado";
+                const statusText = statusInfo.status || "Aguardando próxima vela...";
+                const nextEntryTime = statusInfo.next_entry_time;
+                
+                let iconClass = "fa-solid fa-satellite-dish text-gray-400"; // Padrão
+                if (statusText.includes("Analisando")) {
+                    iconClass = "fa-solid fa-magnifying-glass-chart text-sky-400 animate-pulse";
+                } else if (statusText.includes("indeciso")) {
+                    iconClass = "fa-solid fa-pause-circle text-amber-400";
+                } else if (statusText.includes("Reconectando")) {
+                    iconClass = "fa-solid fa-tower-broadcast text-red-500 animate-ping";
+                }
+                
                 card.innerHTML = `
-                    <div class="text-5xl text-gray-400 mb-4"><i class="fa-solid fa-satellite-dish"></i></div>
-                    <p class="font-bold text-lg text-white">Analisando Mercado</p>
-                    ${nextEntryTime}
+                    <p class="font-bold text-xl text-white mb-2">${asset}</p>
+                    <div class="text-5xl my-4 ${iconClass}"></div>
+                    <p class="font-semibold text-lg text-white">${statusText}</p>
+                    ${nextEntryTime ? `<p class="text-sm text-gray-400 mt-1">Próxima oportunidade: ${nextEntryTime}</p>` : ''}
                 `;
+
+                // Aplica shimmer apenas se estiver aguardando
+                if(statusText.includes("Aguardando")) {
+                    card.classList.add("animate-shimmer");
+                } else {
+                    card.classList.remove("animate-shimmer");
+                }
             }
             
             function removeAnalysisCard() {
@@ -230,7 +238,6 @@
                 if (card) card.remove();
             }
 
-            // ### FUNÇÃO ATUALIZADA ###
             function createSignalCard(signal) {
                 if (!signal || document.getElementById(signal.signal_id)) return;
                 
@@ -284,9 +291,8 @@
 
                 const statusContainer = card.querySelector('.mt-auto');
                 if (statusContainer) {
-                    // Remove classes de borda e fundo anteriores antes de adicionar novas
-                    statusContainer.className = "w-full mt-auto rounded-lg p-2";
-                    statusContainer.classList.add(isWin ? 'bg-green-500/10' : 'bg-red-500/10', isWin ? 'border-green-500/30' : 'border-red-500/30', 'border');
+                    statusContainer.className = "w-full mt-auto rounded-lg p-2 border";
+                    statusContainer.classList.add(isWin ? 'bg-green-500/10' : 'bg-red-500/10', isWin ? 'border-green-500/30' : 'border-red-500/30');
                     statusContainer.innerHTML = `
                         <p class="text-xs ${resultColor}">RESULTADO</p>
                         <p class="font-mono text-2xl font-bold ${resultColor} flex items-center justify-center gap-2">
@@ -326,7 +332,7 @@
                         }
                     });
                 }
-                 createAnalysisCard({ message: 'Conectado. Aguardando...' });
+                 createAnalysisCard({ status: 'Conectado. Aguardando...' });
             }
 
             connectWebSocket();
