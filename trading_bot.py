@@ -282,13 +282,42 @@ def strategy_mql_pullback(velas, p):
         if last['high'] >= res_levels[0] - p['Proximity'] * p['Point'] and last['close'] <= res_levels[0]: return 'SELL'
     return None
 
+# ### FUNÇÃO ATUALIZADA ###
 def strategy_flow(velas, p):
-    if len(velas) < p['MAPeriod'] + 3: return None
+    """
+    Analisa um fluxo de 2 velas para entrar na 3ª.
+    Verifica se as velas do fluxo têm um corpo mínimo para evitar indecisão.
+    """
+    # Precisa de pelo menos 2 velas para analisar o fluxo + o período da média móvel
+    if len(velas) < p['MAPeriod'] + 2:
+        return None
+    
     nano_up = sma_slope([v['close'] for v in velas], p['MAPeriod'])
-    if nano_up is None: return None
-    last_candles = velas[-3:]
-    if nano_up and all(v['close'] > v['open'] for v in last_candles): return 'BUY'
-    if not nano_up and all(v['close'] < v['open'] for v in last_candles): return 'SELL'
+    if nano_up is None:
+        return None
+
+    # Pega as duas últimas velas fechadas
+    flow_candles = velas[-2:]
+    
+    # Pega o parâmetro de corpo mínimo, com um padrão de 0.5 (50%)
+    min_body_ratio = p.get('FlowBodyMinRatio', 0.5)
+
+    def is_strong_candle(vela):
+        """Verifica se o corpo da vela é uma porcentagem significativa do seu range total."""
+        range_total = vela['high'] - vela['low']
+        if range_total == 0:
+            return False  # Doji ou vela sem range não é forte
+        corpo = abs(vela['open'] - vela['close'])
+        return (corpo / range_total) >= min_body_ratio
+
+    # Verifica se a tendência é de alta, se as duas velas são de alta e se ambas são fortes
+    if nano_up and all(v['close'] > v['open'] for v in flow_candles) and all(is_strong_candle(v) for v in flow_candles):
+        return 'BUY'
+
+    # Verifica se a tendência é de baixa, se as duas velas são de baixa e se ambas são fortes
+    if not nano_up and all(v['close'] < v['open'] for v in flow_candles) and all(is_strong_candle(v) for v in flow_candles):
+        return 'SELL'
+        
     return None
 
 def strategy_patterns(velas, p):
