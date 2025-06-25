@@ -121,10 +121,15 @@ class WebSocketServer:
 
     # ### AQUI ESTÁ A CORREÇÃO FINAL E DEFINITIVA ###
     # O handler aceita os dois argumentos que a biblioteca fornece.
-    async def handler(self, websocket, path):
+    async def handler(self, websocket, *args):
+            # 1) Registra o cliente
         with clients_lock:
             connected_clients.add(websocket)
-        log_success(f"New WebSocket client connected: {websocket.remote_address} on path {path}")
+
+    # 2) Extrai o path, se houver
+        path = args[0] if args else None
+        log_success(f"New WebSocket client connected: {websocket.remote_address}" +
+                    (f" on path {path}" if path else ""))
         try:
             initial_state = {
                 "type": "init",
