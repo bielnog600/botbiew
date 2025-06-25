@@ -84,7 +84,7 @@
             animation: card-enter 0.4s ease-out forwards;
         }
 
-        /* ### NOVA ANIMAÇÃO: Feedback no Placar ### */
+        /* Animação: Feedback no Placar */
         @keyframes score-pop {
             0% { transform: scale(1); }
             50% { transform: scale(1.25); color: #ffffff; }
@@ -154,6 +154,8 @@
 
                 socket.onopen = () => console.log('[WebSocket] Conexão estabelecida.');
                 socket.onmessage = (event) => {
+                    // ### LOG DE DEBUGGING ADICIONADO ###
+                    console.log('[WebSocket] Mensagem recebida:', event.data);
                     try {
                         const message = JSON.parse(event.data);
                         handleWebSocketMessage(message);
@@ -170,6 +172,8 @@
             }
 
             function handleWebSocketMessage(message) {
+                // ### LOG DE DEBUGGING ADICIONADO ###
+                console.log(`[Handler] Processando mensagem do tipo: ${message.type}`);
                 switch (message.type) {
                     case 'init':
                         handleInitialState(message.data);
@@ -191,7 +195,6 @@
                 }
             }
             
-            // ### FUNÇÃO ATUALIZADA com Feedback Visual ###
             function updateScoreboard({ wins = 0, losses = 0, gale_wins = 0 } = {}) {
                 if (scoreWinsEl && scoreWinsEl.textContent !== String(wins)) {
                     scoreWinsEl.textContent = wins;
@@ -256,8 +259,6 @@
                 setTimeout(() => card.classList.remove(pulseClass), 5000);
             }
             
-            // ### NOVA FUNÇÃO DE CONSTRUÇÃO DE CARD ###
-            // Esta função apenas cria o HTML do card, sem o adicionar à grelha.
             function buildSignalCard(signal) {
                 if (!signal) return null;
                 
@@ -270,27 +271,25 @@
                 const directionIcon = isCall ? 'fa-arrow-trend-up' : 'fa-arrow-trend-down';
                 
                 card.innerHTML = `
-                    <div class="flex justify-between items-center w-full mb-2">
+                    <div class="flex justify-between items-center w-full mb-3">
                         <p class="font-bold text-xl text-white">${signal.pair}</p>
                         <p class="text-xs bg-gray-700 text-gray-300 px-2 py-1 rounded-md">${signal.strategy}</p>
                     </div>
-                    <div class="grid grid-cols-2 gap-4 items-center my-3">
-                        <div class="flex flex-col">
-                           <p class="text-xs text-gray-500">Vela Analisada</p>
-                           <p class="font-mono text-lg font-semibold">${convertTimeToUserTimezone(signal.analysis_time)}</p>
+                    
+                    <div class="flex-grow grid grid-cols-2 gap-4 items-center">
+                        <div class="flex flex-col justify-center h-full">
+                            <p class="text-xs text-gray-400">HORÁRIO DA ENTRADA</p>
+                            <p class="font-mono text-3xl font-bold text-white my-1">${convertTimeToUserTimezone(signal.entry_time)}</p>
+                            <div class="font-semibold text-2xl ${directionColor}">
+                                <i class="fa-solid ${directionIcon} mr-1"></i>
+                                ${signal.direction.toUpperCase()}
+                            </div>
                         </div>
-                        <div class="w-12 h-20 mx-auto">
+                        <div class="w-16 h-28 mx-auto">
                             ${renderCandle(signal.candle)}
                         </div>
                     </div>
-                    <div class="font-bold text-3xl ${directionColor} mb-2">
-                        <i class="fa-solid ${directionIcon} text-2xl mr-1"></i>
-                        ${signal.direction.toUpperCase()}
-                    </div>
-                    <div class="w-full mt-auto bg-teal-500/10 rounded-lg p-2 border border-teal-500/30">
-                        <p class="text-xs text-teal-300">ENTRAR ÀS</p>
-                        <p class="font-mono text-2xl font-bold text-white">${convertTimeToUserTimezone(signal.entry_time)}</p>
-                    </div>
+                    <div class="result-footer w-full mt-3 h-16"></div>
                 `;
                 return card;
             }
@@ -303,11 +302,12 @@
                 const isWin = result.result === 'WIN';
                 const resultColor = isWin ? 'text-green-400' : 'text-red-400';
                 const resultIcon = isWin ? 'fa-solid fa-trophy' : 'fa-solid fa-shield-halved';
-                const statusContainer = card.querySelector('.mt-auto');
-                if (statusContainer) {
-                    statusContainer.className = "w-full mt-auto rounded-lg p-2 border";
-                    statusContainer.classList.add(isWin ? 'bg-green-500/10' : 'bg-red-500/10', isWin ? 'border-green-500/30' : 'border-red-500/30');
-                    statusContainer.innerHTML = `<p class="text-xs ${resultColor}">RESULTADO</p><p class="font-mono text-2xl font-bold ${resultColor} flex items-center justify-center gap-2"><i class="${resultIcon}"></i><span>${result.result}</span></p>`;
+                
+                const footer = card.querySelector('.result-footer');
+                if (footer) {
+                    footer.className = "result-footer w-full mt-3 h-16 flex items-center justify-center rounded-lg border";
+                    footer.classList.add(isWin ? 'bg-green-500/10' : 'bg-red-500/10', isWin ? 'border-green-500/30' : 'border-red-500/30');
+                    footer.innerHTML = `<div class="text-center"><p class="text-xs ${resultColor}">RESULTADO</p><p class="font-mono text-2xl font-bold ${resultColor} flex items-center justify-center gap-2"><i class="${resultIcon}"></i><span>${result.result}</span></p></div>`;
                 }
             }
 
@@ -324,23 +324,25 @@
                 galeNotice.textContent = `GALE ${gale.gale_level}`;
             }
 
-            // ### FUNÇÃO INICIAL ATUALIZADA para CORRIGIR a ORDEM ###
+            // ### LÓGICA DE INICIALIZAÇÃO CORRIGIDA ###
             function handleInitialState(data) {
                 if (!data) return;
                 signalsGrid.innerHTML = '';
                 updateScoreboard(data.placar);
                 if (data.signals && Array.isArray(data.signals)) {
-                    data.signals
-                        .sort((a, b) => b.entry_time.localeCompare(a.entry_time))
+                    // Ordena do mais antigo para o mais novo
+                    data.signals.sort((a, b) => a.entry_time.localeCompare(b.entry_time))
                         .forEach(signal => {
+                            // Constrói e adiciona CADA card no TOPO da lista
+                            // O resultado final é a lista na ordem correta (mais novo no topo)
                             const card = buildSignalCard(signal);
                             if (card) {
-                                signalsGrid.appendChild(card); // Usa APPEND para manter a ordem correta
+                                signalsGrid.prepend(card);
                                 if (signal.result) {
-                                    setTimeout(() => updateCardForResult({ ...signal, placar: data.placar }), 50);
+                                    updateCardForResult({ ...signal, placar: data.placar });
                                 }
                                 if (signal.gale_level > 0) {
-                                    setTimeout(() => updateCardForGale(signal), 50);
+                                    updateCardForGale(signal);
                                 }
                             }
                         });
