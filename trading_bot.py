@@ -491,7 +491,7 @@ def main_bot_logic(state):
                     signal_queue.put({"type": "analysis_status", "status": f"Aguardando vela das {horario_proxima_vela}...", "next_entry_time": horario_proxima_vela})
 
             with state.lock: is_trading = state.is_trading
-            if segundo_atual >= 55 and not analise_feita and not is_trading:
+            if segundo_atual >= 50 and not analise_feita and not is_trading:
                 analise_feita = True; ativo, tipo_op, payout = obter_melhor_par(API, config['pay_minimo'])
                 if not ativo: continue
 
