@@ -119,8 +119,8 @@ def exibir_banner():
     print(c + "="*88)
 
 async def ws_handler(websocket, *args, bot_state):
+    log_success(f"New WebSocket client connected: {websocket.remote_address}")
     try:
-        connected_clients.add(websocket)
         initial_state = {
             "type": "init",
             "data": {
