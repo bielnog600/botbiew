@@ -1,12 +1,4 @@
-fastapi
-uvicorn[standard]
 websockets
 colorama
 configobj
 exnovaapi
-sqlalchemy
-psycopg2-binary
-passlib[bcrypt]
-cryptography
-python-jose[cryptography]
-python-multipart
