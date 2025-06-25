@@ -42,14 +42,12 @@ except ImportError:
             return self.profile
 
         def get_all_open_time(self):
-            # print("Mocking get_all_open_time")
             return {
                 'binary': {'EURUSD': {'open': True}, 'GBPUSD': {'open': True}},
                 'turbo': {'EURUSD-TURBO': {'open': True}}
             }
 
         def get_all_profit(self):
-            # print("Mocking get_all_profit")
             return {
                 'EURUSD': {'binary': 0.85, 'turbo': 0.90},
                 'GBPUSD': {'binary': 0.82},
@@ -57,7 +55,6 @@ except ImportError:
             }
 
         def get_candles(self, active, interval, count, endtime):
-            # print(f"Mocking get_candles for {active}")
             candles = []
             start_price = 1.1000
             for i in range(count):
@@ -69,16 +66,12 @@ except ImportError:
             return candles
 
         def buy_digital_spot(self, active, amount, action, duration):
-            print(f"Mocking buy_digital_spot: {active}, {amount}, {action}, {duration}")
             return True, "mock_order_id_" + str(uuid.uuid4())
 
         def buy(self, amount, active, action, duration):
-            print(f"Mocking buy: {amount}, {active}, {action}, {duration}")
             return True, "mock_order_id_" + str(uuid.uuid4())
 
         def check_win_v4(self, order_id):
-            # print(f"Mocking check_win_v4 for order {order_id}")
-            # Mocking a win scenario for demonstration
             return "win", 10.0
 
 # --- Initialization ---
@@ -157,8 +150,7 @@ def start_websocket_server_sync(bot_state):
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     
-    handler_with_state = lambda websocket, *args: ws_handler(websocket, *args, bot_state=bot_state)
-
+    handler_with_state = lambda ws, path: ws_handler(ws, path, bot_state=bot_state)
     
     async def main_async_logic():
         server_options = {
@@ -495,14 +487,10 @@ def main_bot_logic(state):
                 with state.lock:
                     is_trading = state.is_trading
                 if not is_trading:
-                    # ### MUDANÇA AQUI ###
-                    horario_vela_atual = dt_objeto.replace(second=0, microsecond=0).strftime('%H:%M')
                     horario_proxima_vela = (dt_objeto.replace(second=0, microsecond=0) + timedelta(minutes=1)).strftime('%H:%M')
-                    msg = f"Observando vela das {horario_vela_atual}"
                     signal_queue.put({
-                        "type": "analysis_status", 
-                        "asset": "AGUARDANDO", 
-                        "message": msg,
+                        "type": "analysis_status",
+                        "status": f"Aguardando próxima vela...",
                         "next_entry_time": horario_proxima_vela
                     })
 
@@ -516,10 +504,17 @@ def main_bot_logic(state):
                 if not ativo:
                     continue
 
+                # Envia atualização de que um par foi selecionado para análise
+                signal_queue.put({"type": "analysis_update", "asset": ativo, "status": "Analisando estratégias..."})
+
                 velas = validar_e_limpar_velas(API.get_candles(ativo, 60, 150, time.time()))
 
                 if not velas or len(velas) < 20: continue
-                if is_market_indecisive(velas, PARAMS): continue
+                
+                if is_market_indecisive(velas, PARAMS):
+                    # Envia atualização de que o mercado está indeciso
+                    signal_queue.put({"type": "analysis_update", "asset": ativo, "status": "Mercado indeciso, aguardando..."})
+                    continue
                 
                 direcao_final, nome_estrategia_usada = None, None
                 strategies_to_try = [('Pullback MQL', 'mql_pullback'), ('Flow', 'flow'), ('Patterns', 'patterns'), ('Rejection', 'rejection_candle')]
@@ -543,7 +538,6 @@ def main_bot_logic(state):
                     with state.lock:
                         state.is_trading = True
                     
-                    # ### MUDANÇA AQUI ###
                     horario_analise_dt = dt_objeto.replace(second=0, microsecond=0)
                     horario_analise_str = horario_analise_dt.strftime('%H:%M')
                     horario_entrada_dt = horario_analise_dt + timedelta(minutes=1)
