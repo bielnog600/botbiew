@@ -117,17 +117,12 @@ class WebSocketServer:
         self.bot_state = bot_state
 
     async def handler(self, websocket, *args):
-    # 1) Registra o cliente
         with clients_lock:
             connected_clients.add(websocket)
-
-    # 2) Extrai o path, se houver
         path = args[0] if args else None
         log_success(
-        f"New WebSocket client connected: {websocket.remote_address}"
-        + (f" on path {path}" if path else "")
-        )
-
+            (f" on path {path}" if path else "")
+    )
         try:
             initial_state = {
                 "type": "init",
