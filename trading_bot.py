@@ -268,10 +268,18 @@ def strategy_mql_pullback(velas, p):
         if last['high'] >= res_levels[0] - p['Proximity'] * p['Point'] and last['close'] <= res_levels[0]: return 'SELL'
     return None
 
+# #######################################################
+# ### ESTRATÉGIA DE FLUXO ATUALIZADA COM ANÁLISE DE S/R ###
+# #######################################################
 def strategy_flow(velas, p):
-    if len(velas) < p['MAPeriod'] + 2: return None
+    # Condições básicas
+    if len(velas) < p['MAPeriod'] + 2:
+        return None
     nano_up = sma_slope([v['close'] for v in velas], p['MAPeriod'])
-    if nano_up is None: return None
+    if nano_up is None:
+        return None
+
+    # Verifica a força das duas últimas velas
     flow_candles = velas[-2:]
     min_body_ratio = p.get('FlowBodyMinRatio', 0.5)
     def is_strong_candle(vela):
@@ -279,8 +287,32 @@ def strategy_flow(velas, p):
         if range_total == 0: return False
         corpo = abs(vela['open'] - vela['close'])
         return (corpo / range_total) >= min_body_ratio
-    if nano_up and all(v['close'] > v['open'] for v in flow_candles) and all(is_strong_candle(v) for v in flow_candles): return 'BUY'
-    if not nano_up and all(v['close'] < v['open'] for v in flow_candles) and all(is_strong_candle(v) for v in flow_candles): return 'SELL'
+
+    # Se as velas não forem fortes, a estratégia falha cedo
+    if not all(is_strong_candle(v) for v in flow_candles):
+        return None
+    
+    # ### NOVA LÓGICA: Verificação de Proximidade de Suporte/Resistência ###
+    res_levels, sup_levels = detect_fractals(velas, p['MaxLevels'])
+    last_candle = velas[-1]
+    proximity_zone = p['Proximity'] * p['Point']
+
+    # Lógica para SINAL DE COMPRA (CALL)
+    if nano_up and all(v['close'] > v['open'] for v in flow_candles):
+        if res_levels:
+            # Se o topo da última vela estiver muito perto da resistência, evita a entrada
+            if abs(last_candle['high'] - res_levels[0]) < proximity_zone:
+                return None  # Cancela o sinal de compra
+        return 'BUY'
+
+    # Lógica para SINAL DE VENDA (PUT)
+    if not nano_up and all(v['close'] < v['open'] for v in flow_candles):
+        if sup_levels:
+            # Se o fundo da última vela estiver muito perto do suporte, evita a entrada
+            if abs(last_candle['low'] - sup_levels[0]) < proximity_zone:
+                return None  # Cancela o sinal de venda
+        return 'SELL'
+        
     return None
 
 def strategy_patterns(velas, p):
