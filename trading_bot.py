@@ -487,7 +487,7 @@ def main_bot_logic(state):
         log_warning(f"Could not get user profile. Error: {e}")
         log_info(f"Hello! Bot starting in server mode.")
 
-    PARAMS = { 'MAPeriod': 5, 'MaxLevels': 10, 'Proximity': 7.0, 'Point': 1e-6, 'FlowBodyMinRatio': 0.5, 'RejectionWickMinRatio': 0.6, 'RejectionBodyMaxRatio': 0.3, 'RejectionOppositeWickMaxRatio': 0.15, 'IndecisionCandles': 3, 'IndecisionBodyMaxRatio': 0.4, 'IndecisionMinCount': 2 }
+    PARAMS = { 'MAPeriod': 5, 'MaxLevels': 15, 'Proximity': 5.0, 'Point': 1e-6, 'FlowBodyMinRatio': 0.7, 'RejectionWickMinRatio': 0.6, 'RejectionBodyMaxRatio': 0.3, 'RejectionOppositeWickMaxRatio': 0.15, 'IndecisionCandles': 3, 'IndecisionBodyMaxRatio': 0.4, 'IndecisionMinCount': 2 }
     if config['modo_operacao'] == '1':
         catalogar_estrategias(API, state, PARAMS)
 
