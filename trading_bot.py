@@ -118,11 +118,9 @@ def exibir_banner():
     print(y + "*"*88)
     print(c + "="*88)
 
-# ###########################################################
-# HANDLER CORRIGIDO PARA SER ROBUSTO A DIFERENÇAS DE AMBIENTE
-# ###########################################################
-async def ws_handler(websocket, *args, bot_state):
-    log_success(f"New WebSocket client connected: {websocket.remote_address}")
+async def ws_handler(websocket, path, bot_state):
+    connected_clients.add(websocket)
+    log_success(f"New WebSocket client connected: {websocket.remote_address} on path {path}")
     try:
         initial_state = {
             "type": "init",
@@ -140,7 +138,7 @@ async def ws_handler(websocket, *args, bot_state):
     except websockets.exceptions.ConnectionClosed as e:
         log_warning(f"Connection closed with client {websocket.remote_address}: {e}")
     finally:
-        connected_clients.discard(websocket)
+        connected_clients.remove(websocket)
         log_warning(f"WebSocket client disconnected: {websocket.remote_address}")
 
 async def broadcast_signals():
@@ -160,10 +158,7 @@ def start_websocket_server_sync(bot_state):
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     
-    # Usa uma lambda flexível que aceita qualquer argumento extra e os passa para o handler.
-    # Isso resolve o problema de TypeError, não importa como a biblioteca chame o handler.
-    # handler mais flexível, ignora quaisquer args extras
-    handler_with_state = lambda websocket, *args: ws_handler(websocket, *args, bot_state=bot_state)
+    handler_with_state = lambda ws, path: ws_handler(ws, path, bot_state=bot_state)
     
     async def main_async_logic():
         server_options = {
@@ -500,8 +495,17 @@ def main_bot_logic(state):
                 with state.lock:
                     is_trading = state.is_trading
                 if not is_trading:
-                    msg = f"Watching the {dt_objeto.strftime('%H:%M')} candle..."
-                    signal_queue.put({"type": "analysis_status", "asset": "WAITING", "message": msg})
+                    # ### MUDANÇA AQUI ###
+                    horario_vela_atual = dt_objeto.replace(second=0, microsecond=0).strftime('%H:%M')
+                    horario_proxima_vela = (dt_objeto.replace(second=0, microsecond=0) + timedelta(minutes=1)).strftime('%H:%M')
+                    msg = f"Observando vela das {horario_vela_atual}"
+                    signal_queue.put({
+                        "type": "analysis_status", 
+                        "asset": "AGUARDANDO", 
+                        "message": msg,
+                        "next_entry_time": horario_proxima_vela
+                    })
+
 
             with state.lock:
                 is_trading = state.is_trading
@@ -539,7 +543,10 @@ def main_bot_logic(state):
                     with state.lock:
                         state.is_trading = True
                     
-                    horario_entrada_dt = dt_objeto.replace(second=0, microsecond=0) + timedelta(minutes=1)
+                    # ### MUDANÇA AQUI ###
+                    horario_analise_dt = dt_objeto.replace(second=0, microsecond=0)
+                    horario_analise_str = horario_analise_dt.strftime('%H:%M')
+                    horario_entrada_dt = horario_analise_dt + timedelta(minutes=1)
                     horario_entrada_str = horario_entrada_dt.strftime('%H:%M')
                     log_success(f"SIGNAL FOUND: {direcao_final.upper()} on {ativo} for the {horario_entrada_str} candle")
 
@@ -550,6 +557,7 @@ def main_bot_logic(state):
                         "type": "signal", "signal_id": signal_id, "pair": ativo,
                         "strategy": nome_estrategia_usada, "direction": direcao_final.upper(),
                         "entry_time": horario_entrada_str,
+                        "analysis_time": horario_analise_str, # NOVO CAMPO
                         "candle": {
                             "open": vela_sinal['open'], "close": vela_sinal['close'],
                             "high": vela_sinal['high'], "low": vela_sinal['low'],
@@ -585,7 +593,6 @@ def main():
     finally:
         bot_state.stop = True
         log(b, "Shutting down the bot...")
-        # Give threads a moment to finish
         time.sleep(2)
         sys.exit()
 
