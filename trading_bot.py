@@ -79,7 +79,7 @@ init(autoreset=True)
 g, y, r, w, c, b = Fore.GREEN, Fore.YELLOW, Fore.RED, Fore.WHITE, Fore.CYAN, Fore.BLUE
 signal_queue = queue.Queue()
 connected_clients = set()
-clients_lock = Lock()
+clients_lock = Lock() 
 
 # --- Logging Functions ---
 def log(cor, mensagem):
@@ -112,24 +112,39 @@ def exibir_banner():
     print(y + "*"*88)
     print(c + "="*88)
 
-async def ws_handler(websocket, *args, bot_state):
-    log_success(f"New WebSocket client connected: {websocket.remote_address}")
-    try:
-        initial_state = {
-            "type": "init",
-            "data": {
-                "signals": list(bot_state.signal_history.values()),
-                "placar": { "wins": bot_state.win_count, "losses": bot_state.loss_count, "gale_wins": sum(bot_state.gale_wins.values()) }
-            }
-        }
-        await websocket.send(json.dumps(initial_state))
-        await websocket.wait_closed()
-    except websockets.exceptions.ConnectionClosed as e:
-        log_warning(f"Connection closed with client {websocket.remote_address}: {e}")
-    finally:
+# ######################################
+# ABORDAGEM FINAL COM CLASSE
+# ######################################
+class WebSocketServer:
+    def __init__(self, bot_state):
+        self.bot_state = bot_state
+
+    # ### AQUI ESTÁ A CORREÇÃO FINAL E DEFINITIVA ###
+    # O handler aceita os dois argumentos que a biblioteca fornece.
+    async def handler(self, websocket, path):
         with clients_lock:
-            connected_clients.discard(websocket)
-        log_warning(f"WebSocket client disconnected: {websocket.remote_address}")
+            connected_clients.add(websocket)
+        log_success(f"New WebSocket client connected: {websocket.remote_address} on path {path}")
+        try:
+            initial_state = {
+                "type": "init",
+                "data": {
+                    "signals": list(self.bot_state.signal_history.values()),
+                    "placar": {
+                        "wins": self.bot_state.win_count,
+                        "losses": self.bot_state.loss_count,
+                        "gale_wins": sum(self.bot_state.gale_wins.values())
+                    }
+                }
+            }
+            await websocket.send(json.dumps(initial_state))
+            await websocket.wait_closed()
+        except websockets.exceptions.ConnectionClosed as e:
+            log_warning(f"Connection closed with client {websocket.remote_address}: {e}")
+        finally:
+            with clients_lock:
+                connected_clients.discard(websocket)
+            log_warning(f"WebSocket client disconnected: {websocket.remote_address}")
 
 async def broadcast_signals():
     while True:
@@ -150,15 +165,15 @@ async def broadcast_signals():
 def start_websocket_server_sync(bot_state):
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    handler_with_state = lambda websocket, *args: ws_handler(websocket, *args, bot_state=bot_state)
+    server_instance = WebSocketServer(bot_state)
     async def main_async_logic():
         server_options = { "ping_interval": 20, "ping_timeout": 20, "reuse_port": True }
         try:
-            start_server = websockets.serve(handler_with_state, "0.0.0.0", 8765, **server_options)
+            start_server = websockets.serve(server_instance.handler, "0.0.0.0", 8765, **server_options)
         except (AttributeError, TypeError, OSError):
             log_warning("reuse_port not supported. Starting without it.")
             del server_options["reuse_port"]
-            start_server = websockets.serve(handler_with_state, "0.0.0.0", 8765, **server_options)
+            start_server = websockets.serve(server_instance.handler, "0.0.0.0", 8765, **server_options)
         server = await start_server
         log_success(f"WebSocket Server started successfully on {server.sockets[0].getsockname()} with keep-alive pings.")
         await asyncio.gather(broadcast_signals(), server.wait_closed())
@@ -469,7 +484,7 @@ def main_bot_logic(state):
                         signal_queue.put({"type": "analysis_update", "asset": ativo, "status_list": status_log})
                         break
                     else:
-                        status_log[-1] = f"{nome}: Sem sinal." # Atualiza a última entrada
+                        status_log[-1] = f"{nome}: Sem sinal."
 
                 if not direcao_final:
                     status_log.append("Nenhuma estratégia encontrou sinal.")
