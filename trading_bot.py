@@ -79,6 +79,7 @@ init(autoreset=True)
 g, y, r, w, c, b = Fore.GREEN, Fore.YELLOW, Fore.RED, Fore.WHITE, Fore.CYAN, Fore.BLUE
 signal_queue = queue.Queue()
 connected_clients = set()
+clients_lock = Lock()
 
 # --- Logging Functions ---
 def log(cor, mensagem):
@@ -118,11 +119,7 @@ async def ws_handler(websocket, *args, bot_state):
             "type": "init",
             "data": {
                 "signals": list(bot_state.signal_history.values()),
-                "placar": {
-                    "wins": bot_state.win_count,
-                    "losses": bot_state.loss_count,
-                    "gale_wins": sum(bot_state.gale_wins.values())
-                }
+                "placar": { "wins": bot_state.win_count, "losses": bot_state.loss_count, "gale_wins": sum(bot_state.gale_wins.values()) }
             }
         }
         await websocket.send(json.dumps(initial_state))
@@ -130,23 +127,19 @@ async def ws_handler(websocket, *args, bot_state):
     except websockets.exceptions.ConnectionClosed as e:
         log_warning(f"Connection closed with client {websocket.remote_address}: {e}")
     finally:
-        connected_clients.discard(websocket) # Use discard to avoid errors
+        with clients_lock:
+            connected_clients.discard(websocket)
         log_warning(f"WebSocket client disconnected: {websocket.remote_address}")
 
-# ### FUNÇÃO ATUALIZADA COM LOG DE DEBUGGING ###
 async def broadcast_signals():
     while True:
         try:
             signal_data = signal_queue.get_nowait()
-            if connected_clients:
+            with clients_lock:
+                clients_to_send = list(connected_clients)
+            if clients_to_send:
                 message = json.dumps(signal_data)
-                # Log para confirmar que a transmissão está a ser tentada
-                log_info(f"Broadcasting message: {message}")
-                
-                # Cria uma cópia do set para iterar, tornando-o seguro
-                # contra alterações durante a iteração.
-                clients_to_send = connected_clients.copy()
-                
+                log_info(f"Broadcasting message to {len(clients_to_send)} client(s): {message[:150]}...")
                 tasks = [client.send(message) for client in clients_to_send]
                 await asyncio.gather(*tasks, return_exceptions=True)
         except queue.Empty:
@@ -157,31 +150,18 @@ async def broadcast_signals():
 def start_websocket_server_sync(bot_state):
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    
-    handler_with_state = lambda websocket, *args: ws_handler(websocket, *args, bot_state=bot_state)
-    
+    handler_with_state = lambda ws, path: ws_handler(ws, path, bot_state=bot_state)
     async def main_async_logic():
-        server_options = {
-            "ping_interval": 20,
-            "ping_timeout": 20,
-            "reuse_port": True
-        }
-        
+        server_options = { "ping_interval": 20, "ping_timeout": 20, "reuse_port": True }
         try:
             start_server = websockets.serve(handler_with_state, "0.0.0.0", 8765, **server_options)
         except (AttributeError, TypeError, OSError):
-            log_warning("reuse_port not supported or failed. Starting WebSocket server without it.")
+            log_warning("reuse_port not supported. Starting without it.")
             del server_options["reuse_port"]
             start_server = websockets.serve(handler_with_state, "0.0.0.0", 8765, **server_options)
-        
         server = await start_server
         log_success(f"WebSocket Server started successfully on {server.sockets[0].getsockname()} with keep-alive pings.")
-
-        await asyncio.gather(
-            broadcast_signals(),
-            server.wait_closed()
-        )
-
+        await asyncio.gather(broadcast_signals(), server.wait_closed())
     try:
         loop.run_until_complete(main_async_logic())
     except Exception as e:
@@ -266,12 +246,8 @@ def strategy_rejection_candle(velas, p):
     range_total = h - l
     if range_total == 0: return None
     corpo = abs(o - c); pavio_superior = h - max(o, c); pavio_inferior = min(o, c) - l
-    if nano_up and ((pavio_inferior / range_total) >= p.get('RejectionWickMinRatio', 0.6)) and \
-       ((corpo / range_total) <= p.get('RejectionBodyMaxRatio', 0.3)) and \
-       ((pavio_superior / range_total) <= p.get('RejectionOppositeWickMaxRatio', 0.15)): return 'BUY'
-    if not nano_up and ((pavio_superior / range_total) >= p.get('RejectionWickMinRatio', 0.6)) and \
-       ((corpo / range_total) <= p.get('RejectionBodyMaxRatio', 0.3)) and \
-       ((pavio_inferior / range_total) <= p.get('RejectionOppositeWickMaxRatio', 0.15)): return 'SELL'
+    if nano_up and ((pavio_inferior / range_total) >= p.get('RejectionWickMinRatio', 0.6)) and ((corpo / range_total) <= p.get('RejectionBodyMaxRatio', 0.3)) and ((pavio_superior / range_total) <= p.get('RejectionOppositeWickMaxRatio', 0.15)): return 'BUY'
+    if not nano_up and ((pavio_superior / range_total) >= p.get('RejectionWickMinRatio', 0.6)) and ((corpo / range_total) <= p.get('RejectionBodyMaxRatio', 0.3)) and ((pavio_inferior / range_total) <= p.get('RejectionOppositeWickMaxRatio', 0.15)): return 'SELL'
     return None
 
 def strategy_mql_pullback(velas, p):
@@ -300,15 +276,8 @@ def strategy_patterns(velas, p):
     nano_up = sma_slope([v['close'] for v in velas], p['MAPeriod'])
     if nano_up is None: return None
     penultimate, last = velas[-2], velas[-1]
-    # Engulfing patterns
-    if nano_up:
-        # Bullish Engulfing
-        if (penultimate['close'] < penultimate['open'] and last['close'] > last['open'] and \
-            last['open'] < penultimate['close'] and last['close'] > penultimate['open']): return 'BUY'
-    if not nano_up:
-        # Bearish Engulfing
-        if (penultimate['close'] > penultimate['open'] and last['close'] < last['open'] and \
-            last['open'] > penultimate['close'] and last['close'] < penultimate['open']): return 'SELL'
+    if nano_up and (penultimate['close'] < penultimate['open'] and last['close'] > last['open'] and last['open'] < penultimate['close'] and last['close'] > penultimate['open']): return 'BUY'
+    if not nano_up and (penultimate['close'] > penultimate['open'] and last['close'] < last['open'] and last['open'] > penultimate['close'] and last['close'] < penultimate['open']): return 'SELL'
     return None
 
 def is_market_indecisive(velas, p):
@@ -408,19 +377,12 @@ def compra_thread(api, ativo, valor, direcao, expiracao, tipo_op, state, config,
         if resultado_final and resultado_final != "ERROR" and signal_id in state.signal_history:
             state.signal_history[signal_id]["result"] = resultado_final
             placar_payload = {
-                "type": "result",
-                "signal_id": signal_id,
-                "result": resultado_final,
-                "placar": {
-                    "wins": state.win_count,
-                    "losses": state.loss_count,
-                    "gale_wins": sum(state.gale_wins.values())
-                }
+                "type": "result", "signal_id": signal_id, "result": resultado_final,
+                "placar": { "wins": state.win_count, "losses": state.loss_count, "gale_wins": sum(state.gale_wins.values()) }
             }
             signal_queue.put(placar_payload)
     except Exception as e:
-        log_error(f"CRITICAL ERROR IN PURCHASE THREAD: {e}")
-        traceback.print_exc()
+        log_error(f"CRITICAL ERROR IN PURCHASE THREAD: {e}"); traceback.print_exc()
     finally:
         with state.lock:
             state.is_trading = False
@@ -441,160 +403,110 @@ def obter_melhor_par(api, payout_minimo):
                                 ativos[ativo] = {'payout': payout, 'tipo': 'digital' if tipo_mercado == 'digital' else 'turbo'}
                     except Exception:
                         continue
-
-    if not ativos:
-        return None, None, None
-    
+    if not ativos: return None, None, None
     best_asset = max(ativos, key=lambda k: ativos[k]['payout'])
     return best_asset, ativos[best_asset]['tipo'], ativos[best_asset]['payout']
 
 def main_bot_logic(state):
     exibir_banner()
-    email = os.getenv('EXNOVA_EMAIL', 'test@example.com') 
-    senha = os.getenv('EXNOVA_PASSWORD', 'password') 
-    if not email or not senha:
-        log_error("Environment variables EXNOVA_EMAIL and EXNOVA_PASSWORD not set.")
-        sys.exit(1)
+    email = os.getenv('EXNOVA_EMAIL', 'test@example.com'); senha = os.getenv('EXNOVA_PASSWORD', 'password')
+    if not email or not senha: log_error("Environment variables EXNOVA_EMAIL and EXNOVA_PASSWORD not set."); sys.exit(1)
 
-    config = get_config_from_env()
-    API = Exnova(email, senha)
+    config = get_config_from_env(); API = Exnova(email, senha)
+    log_info("Attempting to connect to Exnova..."); check, reason = API.connect()
+    if not check: log_error(f"Connection failed: {reason}"); sys.exit(1)
 
-    log_info("Attempting to connect to Exnova...")
-    check, reason = API.connect()
-    if not check:
-        log_error(f"Connection failed: {reason}")
-        sys.exit(1)
-
-    log_success("Connection established successfully!")
-    API.change_balance(config['conta'])
-    
+    log_success("Connection established successfully!"); API.change_balance(config['conta'])
     cifrao = "$"
     try:
-        perfil = API.get_profile_ansyc()
-        cifrao = perfil.get('currency_char', '$')
+        perfil = API.get_profile_ansyc(); cifrao = perfil.get('currency_char', '$')
         log_info(f"Hello, {perfil.get('name', 'User')}! Bot starting in server mode.")
     except Exception as e:
-        log_warning(f"Could not get user profile. Error: {e}")
-        log_info(f"Hello! Bot starting in server mode.")
+        log_warning(f"Could not get user profile. Error: {e}"); log_info(f"Hello! Bot starting in server mode.")
 
     PARAMS = { 'MAPeriod': 5, 'MaxLevels': 10, 'Proximity': 7.0, 'Point': 1e-6, 'FlowCandles': 3, 'RejectionWickMinRatio': 0.6, 'RejectionBodyMaxRatio': 0.3, 'RejectionOppositeWickMaxRatio': 0.15, 'IndecisionCandles': 3, 'IndecisionBodyMaxRatio': 0.4, 'IndecisionMinCount': 2 }
-    if config['modo_operacao'] == '1':
-        catalogar_estrategias(API, state, PARAMS)
+    if config['modo_operacao'] == '1': catalogar_estrategias(API, state, PARAMS)
 
-    minuto_anterior, analise_feita = -1, False
-    log_info("Bot started. Entering analysis loop...")
+    minuto_anterior, analise_feita = -1, False; log_info("Bot started. Entering analysis loop...")
 
     while not state.stop:
         try:
-            timestamp = time.time()
-            dt_objeto = datetime.fromtimestamp(timestamp)
+            timestamp = time.time(); dt_objeto = datetime.fromtimestamp(timestamp)
             minuto_atual, segundo_atual = dt_objeto.minute, dt_objeto.second
 
             if minuto_atual != minuto_anterior:
                 minuto_anterior, analise_feita = minuto_atual, False
-                with state.lock:
-                    is_trading = state.is_trading
+                with state.lock: is_trading = state.is_trading
                 if not is_trading:
                     horario_proxima_vela = (dt_objeto.replace(second=0, microsecond=0) + timedelta(minutes=1)).strftime('%H:%M')
-                    signal_queue.put({
-                        "type": "analysis_status",
-                        "status": f"Aguardando próxima vela...",
-                        "next_entry_time": horario_proxima_vela
-                    })
+                    signal_queue.put({"type": "analysis_status", "status": f"Aguardando vela das {horario_proxima_vela}...", "next_entry_time": horario_proxima_vela})
 
-
-            with state.lock:
-                is_trading = state.is_trading
-            
+            with state.lock: is_trading = state.is_trading
             if segundo_atual >= 55 and not analise_feita and not is_trading:
-                analise_feita = True
-                ativo, tipo_op, payout = obter_melhor_par(API, config['pay_minimo'])
-                if not ativo:
-                    continue
+                analise_feita = True; ativo, tipo_op, payout = obter_melhor_par(API, config['pay_minimo'])
+                if not ativo: continue
 
-                signal_queue.put({"type": "analysis_update", "asset": ativo, "status": "Analisando estratégias..."})
-
+                signal_queue.put({"type": "analysis_update", "asset": ativo, "status_list": ["Analisando par..."]})
                 velas = validar_e_limpar_velas(API.get_candles(ativo, 60, 150, time.time()))
 
                 if not velas or len(velas) < 20: continue
-                
                 if is_market_indecisive(velas, PARAMS):
-                    signal_queue.put({"type": "analysis_update", "asset": ativo, "status": "Mercado indeciso, aguardando..."})
+                    signal_queue.put({"type": "analysis_update", "asset": ativo, "status_list": ["Analisando par...", "Resultado: Mercado indeciso. Pulando..."]})
                     continue
                 
                 direcao_final, nome_estrategia_usada = None, None
-                strategies_to_try = [('Pullback MQL', 'mql_pullback'), ('Flow', 'flow'), ('Patterns', 'patterns'), ('Rejection', 'rejection_candle')]
+                strategies_to_try = [('Pullback MQL', 'mql_pullback'), ('Fluxo', 'flow'), ('Padrões', 'patterns'), ('Rejeição', 'rejection_candle')]
+                status_log = ["Analisando par..."]
                 
-                if ativo in state.strategy_performance:
-                    cod_est = state.strategy_performance[ativo]['best_strategy']
-                    sinal = globals().get(f'strategy_{cod_est}')(velas, PARAMS)
-                    if sinal:
-                        direcao_final = {'BUY': 'call', 'SELL': 'put'}.get(sinal)
-                        nome_estrategia_usada = cod_est.replace('_', ' ').title()
-                
-                if not direcao_final:
-                    for nome, cod in strategies_to_try:
-                        sinal = globals().get(f'strategy_{cod}')(velas, PARAMS)
-                        if sinal:
-                            direcao_final = {'BUY': 'call', 'SELL': 'put'}.get(sinal)
-                            nome_estrategia_usada = nome
-                            break
-                
-                if direcao_final:
-                    with state.lock:
-                        state.is_trading = True
+                for nome, cod in strategies_to_try:
+                    status_log.append(f"Testando: {nome}...")
+                    signal_queue.put({"type": "analysis_update", "asset": ativo, "status_list": status_log})
                     
-                    horario_analise_dt = dt_objeto.replace(second=0, microsecond=0)
-                    horario_analise_str = horario_analise_dt.strftime('%H:%M')
-                    horario_entrada_dt = horario_analise_dt + timedelta(minutes=1)
-                    horario_entrada_str = horario_entrada_dt.strftime('%H:%M')
+                    sinal = globals().get(f'strategy_{cod}')(velas, PARAMS)
+                    if sinal:
+                        direcao_final = {'BUY': 'call', 'SELL': 'put'}.get(sinal); nome_estrategia_usada = nome
+                        status_log.append(f"SINAL ENCONTRADO com {nome}!")
+                        signal_queue.put({"type": "analysis_update", "asset": ativo, "status_list": status_log})
+                        break
+                    else:
+                        status_log[-1] = f"{nome}: Sem sinal." # Atualiza a última entrada
+
+                if not direcao_final:
+                    status_log.append("Nenhuma estratégia encontrou sinal.")
+                    signal_queue.put({"type": "analysis_update", "asset": ativo, "status_list": status_log})
+
+                if direcao_final:
+                    with state.lock: state.is_trading = True
+                    horario_analise_dt = dt_objeto.replace(second=0, microsecond=0); horario_analise_str = horario_analise_dt.strftime('%H:%M')
+                    horario_entrada_dt = horario_analise_dt + timedelta(minutes=1); horario_entrada_str = horario_entrada_dt.strftime('%H:%M')
                     log_success(f"SIGNAL FOUND: {direcao_final.upper()} on {ativo} for the {horario_entrada_str} candle")
 
-                    target_entry_timestamp = (timestamp // 60 + 1) * 60
-                    signal_id = str(uuid.uuid4())
-                    vela_sinal = velas[-1]
+                    target_entry_timestamp = (timestamp // 60 + 1) * 60; signal_id = str(uuid.uuid4()); vela_sinal = velas[-1]
                     signal_payload = {
-                        "type": "signal", "signal_id": signal_id, "pair": ativo,
-                        "strategy": nome_estrategia_usada, "direction": direcao_final.upper(),
-                        "entry_time": horario_entrada_str,
-                        "analysis_time": horario_analise_str, # NOVO CAMPO
-                        "candle": {
-                            "open": vela_sinal['open'], "close": vela_sinal['close'],
-                            "high": vela_sinal['high'], "low": vela_sinal['low'],
-                            "color": 'text-green-400' if vela_sinal['close'] > vela_sinal['open'] else 'text-red-400'
-                        },
+                        "type": "signal", "signal_id": signal_id, "pair": ativo, "strategy": nome_estrategia_usada, "direction": direcao_final.upper(),
+                        "entry_time": horario_entrada_str, "analysis_time": horario_analise_str, 
+                        "candle": { "open": vela_sinal['open'], "close": vela_sinal['close'], "high": vela_sinal['high'], "low": vela_sinal['low'], "color": 'text-green-400' if vela_sinal['close'] > vela_sinal['open'] else 'text-red-400' },
                         "result": None, "gale_level": 0
                     }
                     state.signal_history[signal_id] = signal_payload
                     signal_queue.put(signal_payload)
-
                     Thread(target=compra_thread, args=(API, ativo, config['valor_entrada'], direcao_final, config['expiracao'], tipo_op, state, config, cifrao, signal_id, target_entry_timestamp), daemon=True).start()
-            
             time.sleep(0.2)
-        
         except Exception as e:
-            log_error(f"UNHANDLED ERROR IN MAIN LOOP: {e}")
-            traceback.print_exc()
+            log_error(f"UNHANDLED ERROR IN MAIN LOOP: {e}"); traceback.print_exc()
             log_warning("Waiting 10 seconds before continuing..."); time.sleep(10)
 
 def main():
     bot_state = BotState()
-    
-    websocket_thread = Thread(target=start_websocket_server_sync, args=(bot_state,), daemon=True)
-    websocket_thread.start()
-    
+    websocket_thread = Thread(target=start_websocket_server_sync, args=(bot_state,), daemon=True); websocket_thread.start()
     try:
         main_bot_logic(bot_state)
     except KeyboardInterrupt:
         log_warning("\nBot interrupted by user.")
     except Exception as e:
-        log_error(f"Fatal error starting the bot: {e}")
-        traceback.print_exc()
+        log_error(f"Fatal error starting the bot: {e}"); traceback.print_exc()
     finally:
-        bot_state.stop = True
-        log(b, "Shutting down the bot...")
-        time.sleep(2)
-        sys.exit()
+        bot_state.stop = True; log(b, "Shutting down the bot..."); time.sleep(2); sys.exit()
 
 if __name__ == "__main__":
     main()
