@@ -273,14 +273,14 @@ def strategy_mql_pullback(velas, p):
 # #######################################################
 def strategy_flow(velas, p):
     # Condições básicas
-    if len(velas) < p['MAPeriod'] + 2:
-        return None
+    if len(velas) < p['MAPeriod'] + 2: return None
     nano_up = sma_slope([v['close'] for v in velas], p['MAPeriod'])
-    if nano_up is None:
-        return None
+    if nano_up is None: return None
 
-    # Verifica a força das duas últimas velas
+    # Pega as duas últimas velas fechadas para análise
     flow_candles = velas[-2:]
+    
+    # Filtro 1: Força do Corpo da Vela
     min_body_ratio = p.get('FlowBodyMinRatio', 0.5)
     def is_strong_candle(vela):
         range_total = vela['high'] - vela['low']
@@ -292,25 +292,28 @@ def strategy_flow(velas, p):
     if not all(is_strong_candle(v) for v in flow_candles):
         return None
     
-    # ### NOVA LÓGICA: Verificação de Proximidade de Suporte/Resistência ###
-    res_levels, sup_levels = detect_fractals(velas, p['MaxLevels'])
-    last_candle = velas[-1]
-    proximity_zone = p['Proximity'] * p['Point']
+    # Filtro 2: Análise de Pavio de Reversão
+    last_flow_candle = flow_candles[-1] # A vela mais recente do fluxo
+    range_total_last = last_flow_candle['high'] - last_flow_candle['low']
+    if range_total_last > 0:
+        pavio_superior = last_flow_candle['high'] - max(last_flow_candle['open'], last_flow_candle['close'])
+        pavio_inferior = min(last_flow_candle['open'], last_flow_candle['close']) - last_flow_candle['low']
+        max_opposite_wick_ratio = p.get('FlowOppositeWickMaxRatio', 0.4)
+    else: # Vela sem range (doji)
+        return None
 
-    # Lógica para SINAL DE COMPRA (CALL)
+    # Verifica o fluxo de ALTA (CALL)
     if nano_up and all(v['close'] > v['open'] for v in flow_candles):
-        if res_levels:
-            # Se o topo da última vela estiver muito perto da resistência, evita a entrada
-            if abs(last_candle['high'] - res_levels[0]) < proximity_zone:
-                return None  # Cancela o sinal de compra
+        # Se o pavio superior for grande, indica pressão vendedora. Aborta.
+        if (pavio_superior / range_total_last) > max_opposite_wick_ratio:
+            return None
         return 'BUY'
 
-    # Lógica para SINAL DE VENDA (PUT)
+    # Verifica o fluxo de BAIXA (PUT)
     if not nano_up and all(v['close'] < v['open'] for v in flow_candles):
-        if sup_levels:
-            # Se o fundo da última vela estiver muito perto do suporte, evita a entrada
-            if abs(last_candle['low'] - sup_levels[0]) < proximity_zone:
-                return None  # Cancela o sinal de venda
+        # Se o pavio inferior for grande, indica pressão compradora. Aborta.
+        if (pavio_inferior / range_total_last) > max_opposite_wick_ratio:
+            return None
         return 'SELL'
         
     return None
