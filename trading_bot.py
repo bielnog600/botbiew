@@ -278,7 +278,7 @@ def strategy_flow(velas, p):
     if nano_up is None: return None
 
     # Pega as duas últimas velas fechadas para análise
-    flow_candles = velas[-3:]
+    flow_candles = velas[-2:]
     
     # Filtro 1: Força do Corpo da Vela
     min_body_ratio = p.get('FlowBodyMinRatio', 0.5)
@@ -299,21 +299,27 @@ def strategy_flow(velas, p):
         pavio_superior = last_flow_candle['high'] - max(last_flow_candle['open'], last_flow_candle['close'])
         pavio_inferior = min(last_flow_candle['open'], last_flow_candle['close']) - last_flow_candle['low']
         max_opposite_wick_ratio = p.get('FlowOppositeWickMaxRatio', 0.4)
-    else: # Vela sem range (doji)
-        return None
+    else:
+        return None # Vela sem range (doji)
 
+    # Filtro 3: Análise de Suporte e Resistência
+    res_levels, sup_levels = detect_fractals(velas, p['MaxLevels'])
+    proximity_zone = p['Proximity'] * p['Point']
+    
     # Verifica o fluxo de ALTA (CALL)
     if nano_up and all(v['close'] > v['open'] for v in flow_candles):
         # Se o pavio superior for grande, indica pressão vendedora. Aborta.
-        if (pavio_superior / range_total_last) > max_opposite_wick_ratio:
-            return None
+        if (pavio_superior / range_total_last) > max_opposite_wick_ratio: return None
+        # Se estiver muito perto da resistência, aborta.
+        if res_levels and abs(last_flow_candle['high'] - res_levels[0]) < proximity_zone: return None
         return 'BUY'
 
     # Verifica o fluxo de BAIXA (PUT)
     if not nano_up and all(v['close'] < v['open'] for v in flow_candles):
         # Se o pavio inferior for grande, indica pressão compradora. Aborta.
-        if (pavio_inferior / range_total_last) > max_opposite_wick_ratio:
-            return None
+        if (pavio_inferior / range_total_last) > max_opposite_wick_ratio: return None
+        # Se estiver muito perto do suporte, aborta.
+        if sup_levels and abs(last_flow_candle['low'] - sup_levels[0]) < proximity_zone: return None
         return 'SELL'
         
     return None
