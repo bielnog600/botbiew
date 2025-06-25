@@ -119,8 +119,6 @@ def exibir_banner():
     print(c + "="*88)
 
 async def ws_handler(websocket, path, bot_state):
-    connected_clients.add(websocket)
-    log_success(f"New WebSocket client connected: {websocket.remote_address} on path {path}")
     try:
         initial_state = {
             "type": "init",
@@ -138,7 +136,7 @@ async def ws_handler(websocket, path, bot_state):
     except websockets.exceptions.ConnectionClosed as e:
         log_warning(f"Connection closed with client {websocket.remote_address}: {e}")
     finally:
-        connected_clients.remove(websocket)
+        connected_clients.discard(websocket)
         log_warning(f"WebSocket client disconnected: {websocket.remote_address}")
 
 async def broadcast_signals():
