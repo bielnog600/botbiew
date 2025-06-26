@@ -101,7 +101,7 @@
         <!-- CABEÇALHO -->
         <header class="flex flex-col sm:flex-row justify-between items-center mb-8 gap-6">
             <h1 class="text-3xl font-bold text-white">
-                <i class="fa-solid fa-robot text-teal-400"></i> MAROMBIEW <span class="text-teal-400">BOT</span>
+                <i class="fa-solid fa-robot text-teal-400"></i> MAROMBIEW <span class="text-teal-400">Signals</span>
             </h1>
             <div id="scoreboard" class="grid grid-cols-3 gap-4 w-full sm:w-auto glass-card p-3 rounded-xl">
                 <div class="text-center px-2">
@@ -197,7 +197,7 @@
                 if (!card) {
                     card = document.createElement('div');
                     card.id = cardId;
-                    card.className = 'glass-card rounded-2xl p-4 flex flex-col text-center h-full min-h-[280px]';
+                    card.className = 'glass-card rounded-2xl p-4 flex flex-col items-center justify-center text-center h-full min-h-[280px]';
                     signalsGrid.prepend(card);
                 }
                 const asset = statusInfo.asset || "Mercado";
@@ -264,19 +264,26 @@
                 galeNotice.textContent = `GALE ${gale.gale_level}`;
             }
 
+            // ### LÓGICA DE INICIALIZAÇÃO CORRIGIDA PARA GARANTIR ORDEM E ATUALIZAÇÃO ###
             function handleInitialState(data) {
                 if (!data) return;
-                signalsGrid.innerHTML = '';
+                signalsGrid.innerHTML = ''; // Limpa a grelha antes de adicionar
                 updateScoreboard(data.placar);
                 if (data.signals && Array.isArray(data.signals)) {
-                    // Ordena do mais recente para o mais antigo para inserir na ordem correta
-                    data.signals.sort((a, b) => b.entry_time.localeCompare(a.entry_time))
+                    // Ordena do mais antigo para o mais novo para usar prepend
+                    data.signals.sort((a, b) => a.entry_time.localeCompare(b.entry_time))
                         .forEach(signal => {
+                            // Constrói e adiciona CADA card no TOPO da lista
+                            // O resultado final é a lista na ordem correta (mais novo no topo)
                             const card = buildSignalCard(signal);
                             if (card) {
-                                signalsGrid.appendChild(card); // Usa appendChild para manter a ordem cronológica
-                                if (signal.result) { setTimeout(() => updateCardForResult({ ...signal, placar: data.placar }), 50); }
-                                if (signal.gale_level > 0) { setTimeout(() => updateCardForGale(signal), 50); }
+                                signalsGrid.prepend(card);
+                                if (signal.result) {
+                                    updateCardForResult({ ...signal, placar: data.placar });
+                                }
+                                if (signal.gale_level > 0) {
+                                    updateCardForGale(signal);
+                                }
                             }
                         });
                 }
