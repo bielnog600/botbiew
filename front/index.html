@@ -36,7 +36,19 @@
         const BOT_UTC_OFFSET = "-00:00";
         const WEBSOCKET_URL = 'wss://botexnova.marombiew.com';
 
-        // ### NOVO: Componente de Segurança (Error Boundary) ###
+        function convertTimeToUserTimezone(timeString) {
+            if (!timeString || !timeString.includes(':')) return timeString;
+            try {
+                const todayStr = new Date().toISOString().slice(0, 10);
+                const fullDateTimeString = `${todayStr}T${timeString}:00${BOT_UTC_OFFSET}`;
+                const dateObj = new Date(fullDateTimeString);
+                return dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+            } catch (e) {
+                console.error("Erro ao converter hora:", e);
+                return timeString;
+            }
+        }
+
         class ErrorBoundary extends Component {
             constructor(props) {
                 super(props);
@@ -67,10 +79,21 @@
             }
         }
 
-        // --- Componentes da UI (sem alterações) ---
+        // --- Componentes da UI ---
         const Header = () => (<header className="flex flex-col sm:flex-row justify-between items-center mb-8 gap-6"><h1 className="text-3xl font-bold text-white"><i className="fa-solid fa-robot text-teal-400"></i> MAROMBIEW <span className="text-teal-400">Platform</span></h1></header>);
         const TabButton = ({ icon, label, isActive, onClick }) => (<button onClick={onClick} className={`flex flex-col items-center gap-1 w-24 py-2 rounded-lg transition-all duration-200 ${isActive ? 'text-teal-400 bg-teal-500/10' : 'text-gray-400 hover:bg-gray-700/50'}`}><i className={`${icon} text-xl`}></i><span className="text-xs font-semibold">{label}</span></button>);
-        const TabBar = ({ activeTab, setActiveTab }) => (<nav className="fixed bottom-0 left-0 right-0 lg:relative lg:bottom-auto lg:left-auto lg:right-auto bg-gray-900/80 backdrop-blur-sm lg:bg-transparent lg:backdrop-filter-none border-t border-gray-700 lg:border-none p-2 lg:p-0 lg:mb-8"><div className="flex justify-around lg:justify-center lg:gap-6 max-w-md mx-auto lg:max-w-none"><TabButton icon="fa-solid fa-house" label="Home" isActive={activeTab === 'home'} onClick={() => setActiveTab('home')} /><TabButton icon="fa-solid fa-chart-pie" label="Relatórios" isActive={activeTab === 'reports'} onClick={() => setActiveTab('reports')} /><TabButton icon="fa-solid fa-shield-halved" label="Gerenciamento" isActive={activeTab === 'risk'} onClick={() => setActiveTab('risk')} /></div></nav>);
+        
+        // ### CORREÇÃO AQUI ###
+        // Adicionada a classe z-50 para garantir que o menu fica sempre à frente.
+        const TabBar = ({ activeTab, setActiveTab }) => (
+            <nav className="fixed bottom-0 left-0 right-0 z-50 lg:relative lg:bottom-auto lg:left-auto lg:right-auto bg-gray-900/80 backdrop-blur-sm lg:bg-transparent lg:backdrop-filter-none border-t border-gray-700 lg:border-none p-2 lg:p-0 lg:mb-8">
+                <div className="flex justify-around lg:justify-center lg:gap-6 max-w-md mx-auto lg:max-w-none">
+                    <TabButton icon="fa-solid fa-house" label="Home" isActive={activeTab === 'home'} onClick={() => setActiveTab('home')} />
+                    <TabButton icon="fa-solid fa-chart-pie" label="Relatórios" isActive={activeTab === 'reports'} onClick={() => setActiveTab('reports')} />
+                    <TabButton icon="fa-solid fa-shield-halved" label="Gerenciamento" isActive={activeTab === 'risk'} onClick={() => setActiveTab('risk')} />
+                </div>
+            </nav>
+        );
 
         const Scoreboard = ({ scoreboard }) => {
             const animateScore = (ref, value) => {
@@ -85,8 +108,8 @@
             return (<div className="grid grid-cols-3 gap-4 w-full glass-card p-3 rounded-xl mb-6"><div className="text-center px-2"><p className="text-sm font-semibold text-green-400">WINS</p><p ref={winsRef} className="text-2xl font-bold font-mono">{scoreboard.wins}</p></div><div className="text-center px-2"><p className="text-sm font-semibold text-red-400">LOSSES</p><p ref={lossesRef} className="text-2xl font-bold font-mono">{scoreboard.losses}</p></div><div className="text-center px-2"><p className="text-sm font-semibold text-amber-400">GALE WINS</p><p ref={galesRef} className="text-2xl font-bold font-mono">{scoreboard.gale_wins}</p></div></div>);
         };
 
-        const SignalCard = React.memo(({ signal, convertTime }) => {
-            if (!signal || !signal.direction || !signal.pair) return null; // Validação defensiva
+        const SignalCard = React.memo(({ signal }) => {
+            if (!signal || !signal.direction || !signal.pair) return null;
             const isCall = signal.direction.toUpperCase() === 'CALL' || signal.direction.toUpperCase() === 'BUY';
             const directionColor = isCall ? 'text-green-400' : 'text-red-400';
             const directionIcon = isCall ? 'fa-arrow-trend-up' : 'fa-arrow-trend-down';
@@ -107,14 +130,14 @@
                 const resultBg = isWin ? 'bg-green-500/10 border-green-500/30' : 'bg-red-500/10 border-red-500/30';
                 return (<div className={`w-full mt-3 h-16 flex items-center justify-center rounded-lg border ${resultBg}`}><div className="text-center"><p className={`text-xs ${resultColor}`}>RESULTADO</p><p className={`font-mono text-2xl font-bold ${resultColor} flex items-center justify-center gap-2`}><i className={resultIcon}></i><span>{signal.result}</span></p></div></div>);
             };
-            return (<div id={signal.signal_id} className="glass-card rounded-2xl p-4 flex flex-col text-center card-enter-animation relative">{signal.gale_level > 0 && <div className="absolute top-2 right-2 bg-amber-500 text-gray-900 text-xs font-bold px-2 py-0.5 rounded-full">GALE {signal.gale_level}</div>}<div className="flex justify-between items-center w-full mb-3"><p className="font-bold text-xl text-white">{signal.pair}</p><p className="text-xs bg-gray-700 text-gray-300 px-2 py-1 rounded-md">{signal.strategy}</p></div><div className="flex-grow grid grid-cols-2 gap-4 items-center"><div className="flex flex-col justify-center h-full"><p className="text-xs text-gray-400">HORÁRIO DA ENTRADA</p><p className="font-mono text-3xl font-bold text-white my-1">{convertTime(signal.entry_time)}</p><div className={`font-semibold text-2xl ${directionColor}`}><i className={`fa-solid ${directionIcon} mr-1`}></i>{signal.direction.toUpperCase()}</div></div><div className="w-16 h-28 mx-auto" dangerouslySetInnerHTML={{ __html: renderCandle(signal.candle) }}></div></div><ResultFooter /></div>);
+            return (<div id={signal.signal_id} className="glass-card rounded-2xl p-4 flex flex-col text-center card-enter-animation relative">{signal.gale_level > 0 && <div className="absolute top-2 right-2 bg-amber-500 text-gray-900 text-xs font-bold px-2 py-0.5 rounded-full">GALE {signal.gale_level}</div>}<div className="flex justify-between items-center w-full mb-3"><p className="font-bold text-xl text-white">{signal.pair}</p><p className="text-xs bg-gray-700 text-gray-300 px-2 py-1 rounded-md">{signal.strategy}</p></div><div className="flex-grow grid grid-cols-2 gap-4 items-center"><div className="flex flex-col justify-center h-full"><p className="text-xs text-gray-400">HORÁRIO DA ENTRADA</p><p className="font-mono text-3xl font-bold text-white my-1">{convertTimeToUserTimezone(signal.entry_time)}</p><div className={`font-semibold text-2xl ${directionColor}`}><i className={`fa-solid ${directionIcon} mr-1`}></i>{signal.direction.toUpperCase()}</div></div><div className="w-16 h-28 mx-auto" dangerouslySetInnerHTML={{ __html: renderCandle(signal.candle) }}></div></div><ResultFooter /></div>);
         });
 
-        const AnalysisCard = ({ statusInfo, convertTime }) => {
+        const AnalysisCard = ({ statusInfo }) => {
             if (!statusInfo) return null;
             const asset = statusInfo.asset || "Mercado";
             const statusList = statusInfo.status_list || [statusInfo.status || "Aguardando..."];
-            const nextEntryTime = statusInfo.next_entry_time ? convertTime(statusInfo.next_entry_time) : null;
+            const nextEntryTime = statusInfo.next_entry_time ? convertTimeToUserTimezone(statusInfo.next_entry_time) : null;
             let iconClass = "fa-solid fa-satellite-dish text-gray-400";
             if (statusList.some(s => s.includes("Analisando"))) iconClass = "fa-solid fa-magnifying-glass-chart text-sky-400 fa-beat";
             if (statusList.some(s => s.includes("indeciso"))) iconClass = "fa-solid fa-pause-circle text-amber-400";
@@ -122,16 +145,15 @@
             return (<div className="glass-card rounded-2xl p-4 flex flex-col text-center h-full min-h-[280px] card-enter-animation"><p className="font-bold text-xl text-white mb-2">{asset}</p><div className="text-4xl my-3"><i className={iconClass}></i></div><div className="bg-gray-900/50 rounded-lg p-2 w-full text-left flex-grow"><ul className="space-y-1">{statusList.map((item, index) => (<li key={index} className={`text-sm ${item.includes('Sem sinal') || item.includes('indeciso') ? 'text-gray-500' : 'text-gray-300'}`}>{item}</li>))}</ul></div>{nextEntryTime && <p className="text-sm text-gray-400 mt-2">Próxima entrada possível: {nextEntryTime}</p>}</div>);
         };
         
-        // --- Componentes de Visualização (Views) ---
-        function HomeView({ signals, scoreboard, analysisInfo, convertTime }) {
-            return (<><Scoreboard scoreboard={scoreboard} /><div id="signals-grid" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 pb-24 lg:pb-0">{analysisInfo && <AnalysisCard statusInfo={analysisInfo} convertTime={convertTime} />}{signals.map(signal => <SignalCard key={signal.signal_id} signal={signal} convertTime={convertTime} />)}</div></>);
+        function HomeView({ signals, scoreboard, analysisInfo }) {
+            return (<><Scoreboard scoreboard={scoreboard} /><div id="signals-grid" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 pb-24 lg:pb-0">{analysisInfo && <AnalysisCard statusInfo={analysisInfo} />}{signals.map(signal => <SignalCard key={signal.signal_id} signal={signal} />)}</div></>);
         }
 
         function ReportsView({ signals }) {
             const reports = useMemo(() => {
                 const strategyReport = {}; const pairReport = {};
                 signals.forEach(signal => {
-                    if (!signal.result || signal.result === 'DRAW') return;
+                    if (!signal.result || signal.result === 'DRAW' || !signal.strategy) return;
                     const isWin = signal.result === 'WIN';
                     if (!strategyReport[signal.strategy]) strategyReport[signal.strategy] = { wins: 0, losses: 0 };
                     if (isWin) strategyReport[signal.strategy].wins++; else strategyReport[signal.strategy].losses++;
@@ -157,11 +179,8 @@
             const [analysisInfo, setAnalysisInfo] = useState(null);
             const socketRef = useRef(null);
 
-            const convertTime = useCallback((timeString) => convertTimeToUserTimezone(timeString), []);
-
             const handleMessage = useCallback((message) => {
                 if (!message || !message.type) return;
-
                 switch (message.type) {
                     case 'init':
                         const initialData = message.data || {};
@@ -210,7 +229,7 @@
                     case 'risk': return <RiskManagementView />;
                     case 'home':
                     default: 
-                        return <HomeView signals={signals} scoreboard={scoreboard} analysisInfo={analysisInfo} convertTime={convertTime} />;
+                        return <HomeView signals={signals} scoreboard={scoreboard} analysisInfo={analysisInfo} />;
                 }
             };
             
