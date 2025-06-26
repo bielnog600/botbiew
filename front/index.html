@@ -31,80 +31,65 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect, useCallback, useMemo, useRef } = React;
+        const { useState, useEffect, useCallback, useMemo, useRef, Component } = React;
         
-        // --- Constantes de Configuração ---
         const BOT_UTC_OFFSET = "-00:00";
         const WEBSOCKET_URL = 'wss://botexnova.marombiew.com';
 
-        // --- Componentes da UI ---
+        // ### NOVO: Componente de Segurança (Error Boundary) ###
+        class ErrorBoundary extends Component {
+            constructor(props) {
+                super(props);
+                this.state = { hasError: false, error: null };
+            }
 
-        const Header = () => (
-            <header className="flex flex-col sm:flex-row justify-between items-center mb-8 gap-6">
-                <h1 className="text-3xl font-bold text-white">
-                    <i className="fa-solid fa-robot text-teal-400"></i> MAROMBIEW <span className="text-teal-400">Platform</span>
-                </h1>
-            </header>
-        );
+            static getDerivedStateFromError(error) {
+                return { hasError: true, error: error };
+            }
 
-        const TabBar = ({ activeTab, setActiveTab }) => (
-            <nav className="fixed bottom-0 left-0 right-0 lg:relative lg:bottom-auto lg:left-auto lg:right-auto bg-gray-900/80 backdrop-blur-sm lg:bg-transparent lg:backdrop-filter-none border-t border-gray-700 lg:border-none p-2 lg:p-0 lg:mb-8">
-                <div className="flex justify-around lg:justify-center lg:gap-6 max-w-md mx-auto lg:max-w-none">
-                    <TabButton icon="fa-solid fa-house" label="Home" isActive={activeTab === 'home'} onClick={() => setActiveTab('home')} />
-                    <TabButton icon="fa-solid fa-chart-pie" label="Relatórios" isActive={activeTab === 'reports'} onClick={() => setActiveTab('reports')} />
-                    <TabButton icon="fa-solid fa-shield-halved" label="Gerenciamento" isActive={activeTab === 'risk'} onClick={() => setActiveTab('risk')} />
-                </div>
-            </nav>
-        );
+            componentDidCatch(error, errorInfo) {
+                console.error("React Tree Error:", error, errorInfo);
+            }
 
-        const TabButton = ({ icon, label, isActive, onClick }) => (
-            <button onClick={onClick} className={`flex flex-col items-center gap-1 w-24 py-2 rounded-lg transition-all duration-200 ${isActive ? 'text-teal-400 bg-teal-500/10' : 'text-gray-400 hover:bg-gray-700/50'}`}>
-                <i className={`${icon} text-xl`}></i>
-                <span className="text-xs font-semibold">{label}</span>
-            </button>
-        );
+            render() {
+                if (this.state.hasError) {
+                    return (
+                        <div className="text-center text-red-400 p-8 glass-card rounded-xl max-w-lg mx-auto">
+                            <h1 className="text-2xl font-bold mb-2"><i className="fa-solid fa-triangle-exclamation mr-2"></i>Oops! Algo correu mal.</h1>
+                            <p>A aplicação encontrou um erro. Por favor, tente atualizar a página.</p>
+                            <pre className="mt-4 text-xs text-left bg-gray-900 p-2 rounded overflow-auto">
+                                {this.state.error && this.state.error.toString()}
+                            </pre>
+                        </div>
+                    );
+                }
+                return this.props.children;
+            }
+        }
+
+        // --- Componentes da UI (sem alterações) ---
+        const Header = () => (<header className="flex flex-col sm:flex-row justify-between items-center mb-8 gap-6"><h1 className="text-3xl font-bold text-white"><i className="fa-solid fa-robot text-teal-400"></i> MAROMBIEW <span className="text-teal-400">Platform</span></h1></header>);
+        const TabButton = ({ icon, label, isActive, onClick }) => (<button onClick={onClick} className={`flex flex-col items-center gap-1 w-24 py-2 rounded-lg transition-all duration-200 ${isActive ? 'text-teal-400 bg-teal-500/10' : 'text-gray-400 hover:bg-gray-700/50'}`}><i className={`${icon} text-xl`}></i><span className="text-xs font-semibold">{label}</span></button>);
+        const TabBar = ({ activeTab, setActiveTab }) => (<nav className="fixed bottom-0 left-0 right-0 lg:relative lg:bottom-auto lg:left-auto lg:right-auto bg-gray-900/80 backdrop-blur-sm lg:bg-transparent lg:backdrop-filter-none border-t border-gray-700 lg:border-none p-2 lg:p-0 lg:mb-8"><div className="flex justify-around lg:justify-center lg:gap-6 max-w-md mx-auto lg:max-w-none"><TabButton icon="fa-solid fa-house" label="Home" isActive={activeTab === 'home'} onClick={() => setActiveTab('home')} /><TabButton icon="fa-solid fa-chart-pie" label="Relatórios" isActive={activeTab === 'reports'} onClick={() => setActiveTab('reports')} /><TabButton icon="fa-solid fa-shield-halved" label="Gerenciamento" isActive={activeTab === 'risk'} onClick={() => setActiveTab('risk')} /></div></nav>);
 
         const Scoreboard = ({ scoreboard }) => {
-            const winsRef = useRef();
-            const lossesRef = useRef();
-            const galesRef = useRef();
-
-            useEffect(() => {
-                if (winsRef.current && winsRef.current.textContent !== String(scoreboard.wins)) {
-                    winsRef.current.classList.add('score-updated');
-                    setTimeout(() => winsRef.current.classList.remove('score-updated'), 300);
+            const animateScore = (ref, value) => {
+                if (ref.current && ref.current.textContent !== String(value)) {
+                    ref.current.classList.add('score-updated');
+                    setTimeout(() => ref.current.classList.remove('score-updated'), 300);
                 }
-            }, [scoreboard.wins]);
-
-            useEffect(() => {
-                if (lossesRef.current && lossesRef.current.textContent !== String(scoreboard.losses)) {
-                    lossesRef.current.classList.add('score-updated');
-                    setTimeout(() => lossesRef.current.classList.remove('score-updated'), 300);
-                }
-            }, [scoreboard.losses]);
-
-            useEffect(() => {
-                if (galesRef.current && galesRef.current.textContent !== String(scoreboard.gale_wins)) {
-                    galesRef.current.classList.add('score-updated');
-                    setTimeout(() => galesRef.current.classList.remove('score-updated'), 300);
-                }
-            }, [scoreboard.gale_wins]);
-
-
-            return (
-                <div className="grid grid-cols-3 gap-4 w-full glass-card p-3 rounded-xl mb-6">
-                    <div className="text-center px-2"><p className="text-sm font-semibold text-green-400">WINS</p><p ref={winsRef} className="text-2xl font-bold font-mono">{scoreboard.wins}</p></div>
-                    <div className="text-center px-2"><p className="text-sm font-semibold text-red-400">LOSSES</p><p ref={lossesRef} className="text-2xl font-bold font-mono">{scoreboard.losses}</p></div>
-                    <div className="text-center px-2"><p className="text-sm font-semibold text-amber-400">GALE WINS</p><p ref={galesRef} className="text-2xl font-bold font-mono">{scoreboard.gale_wins}</p></div>
-                </div>
-            );
+            };
+            const winsRef = useRef(); useEffect(() => animateScore(winsRef, scoreboard.wins), [scoreboard.wins]);
+            const lossesRef = useRef(); useEffect(() => animateScore(lossesRef, scoreboard.losses), [scoreboard.losses]);
+            const galesRef = useRef(); useEffect(() => animateScore(galesRef, scoreboard.gale_wins), [scoreboard.gale_wins]);
+            return (<div className="grid grid-cols-3 gap-4 w-full glass-card p-3 rounded-xl mb-6"><div className="text-center px-2"><p className="text-sm font-semibold text-green-400">WINS</p><p ref={winsRef} className="text-2xl font-bold font-mono">{scoreboard.wins}</p></div><div className="text-center px-2"><p className="text-sm font-semibold text-red-400">LOSSES</p><p ref={lossesRef} className="text-2xl font-bold font-mono">{scoreboard.losses}</p></div><div className="text-center px-2"><p className="text-sm font-semibold text-amber-400">GALE WINS</p><p ref={galesRef} className="text-2xl font-bold font-mono">{scoreboard.gale_wins}</p></div></div>);
         };
 
         const SignalCard = React.memo(({ signal, convertTime }) => {
+            if (!signal || !signal.direction || !signal.pair) return null; // Validação defensiva
             const isCall = signal.direction.toUpperCase() === 'CALL' || signal.direction.toUpperCase() === 'BUY';
             const directionColor = isCall ? 'text-green-400' : 'text-red-400';
             const directionIcon = isCall ? 'fa-arrow-trend-up' : 'fa-arrow-trend-down';
-
             const renderCandle = (candle) => {
                 if (!candle || !candle.high || !candle.low) return '<div class="h-full w-full flex items-center justify-center text-gray-500"><i class="fa-solid fa-image"></i></div>';
                 const candleColor = candle.close >= candle.open ? '#22c55e' : '#ef4444';
@@ -114,90 +99,37 @@
                 const bodyTop = ((candle.high - Math.max(candle.open, candle.close)) / priceRange) * 100;
                 return `<svg viewBox="0 0 30 100" class="w-full h-full"><rect x="14" y="0" width="2" height="100" fill="${candleColor}" /><rect x="5" y="${bodyTop}" width="20" height="${bodyHeight}" fill="${candleColor}" /></svg>`;
             };
-
             const ResultFooter = () => {
                 if (!signal.result) return <div className="w-full mt-3 h-16"></div>;
-
                 const isWin = signal.result === 'WIN';
                 const resultColor = isWin ? 'text-green-400' : 'text-red-400';
                 const resultIcon = isWin ? 'fa-solid fa-trophy' : 'fa-solid fa-shield-halved';
                 const resultBg = isWin ? 'bg-green-500/10 border-green-500/30' : 'bg-red-500/10 border-red-500/30';
-                
-                return (
-                     <div className={`w-full mt-3 h-16 flex items-center justify-center rounded-lg border ${resultBg}`}>
-                        <div className="text-center">
-                            <p className={`text-xs ${resultColor}`}>RESULTADO</p>
-                            <p className={`font-mono text-2xl font-bold ${resultColor} flex items-center justify-center gap-2`}>
-                                <i className={resultIcon}></i>
-                                <span>{signal.result}</span>
-                            </p>
-                        </div>
-                    </div>
-                );
+                return (<div className={`w-full mt-3 h-16 flex items-center justify-center rounded-lg border ${resultBg}`}><div className="text-center"><p className={`text-xs ${resultColor}`}>RESULTADO</p><p className={`font-mono text-2xl font-bold ${resultColor} flex items-center justify-center gap-2`}><i className={resultIcon}></i><span>{signal.result}</span></p></div></div>);
             };
-
-            return (
-                <div id={signal.signal_id} className="glass-card rounded-2xl p-4 flex flex-col text-center card-enter-animation relative">
-                    {signal.gale_level > 0 && <div className="absolute top-2 right-2 bg-amber-500 text-gray-900 text-xs font-bold px-2 py-0.5 rounded-full">GALE {signal.gale_level}</div>}
-                    <div className="flex justify-between items-center w-full mb-3"><p className="font-bold text-xl text-white">{signal.pair}</p><p className="text-xs bg-gray-700 text-gray-300 px-2 py-1 rounded-md">{signal.strategy}</p></div>
-                    <div className="flex-grow grid grid-cols-2 gap-4 items-center">
-                        <div className="flex flex-col justify-center h-full"><p className="text-xs text-gray-400">HORÁRIO DA ENTRADA</p><p className="font-mono text-3xl font-bold text-white my-1">{convertTime(signal.entry_time)}</p><div className={`font-semibold text-2xl ${directionColor}`}><i className={`fa-solid ${directionIcon} mr-1`}></i>{signal.direction.toUpperCase()}</div></div>
-                        <div className="w-16 h-28 mx-auto" dangerouslySetInnerHTML={{ __html: renderCandle(signal.candle) }}></div>
-                    </div>
-                    <ResultFooter />
-                </div>
-            );
+            return (<div id={signal.signal_id} className="glass-card rounded-2xl p-4 flex flex-col text-center card-enter-animation relative">{signal.gale_level > 0 && <div className="absolute top-2 right-2 bg-amber-500 text-gray-900 text-xs font-bold px-2 py-0.5 rounded-full">GALE {signal.gale_level}</div>}<div className="flex justify-between items-center w-full mb-3"><p className="font-bold text-xl text-white">{signal.pair}</p><p className="text-xs bg-gray-700 text-gray-300 px-2 py-1 rounded-md">{signal.strategy}</p></div><div className="flex-grow grid grid-cols-2 gap-4 items-center"><div className="flex flex-col justify-center h-full"><p className="text-xs text-gray-400">HORÁRIO DA ENTRADA</p><p className="font-mono text-3xl font-bold text-white my-1">{convertTime(signal.entry_time)}</p><div className={`font-semibold text-2xl ${directionColor}`}><i className={`fa-solid ${directionIcon} mr-1`}></i>{signal.direction.toUpperCase()}</div></div><div className="w-16 h-28 mx-auto" dangerouslySetInnerHTML={{ __html: renderCandle(signal.candle) }}></div></div><ResultFooter /></div>);
         });
 
-        // ### COMPONENTE CORRIGIDO ###
-        // Este componente estava em falta, causando o ReferenceError.
         const AnalysisCard = ({ statusInfo, convertTime }) => {
             if (!statusInfo) return null;
-
             const asset = statusInfo.asset || "Mercado";
             const statusList = statusInfo.status_list || [statusInfo.status || "Aguardando..."];
             const nextEntryTime = statusInfo.next_entry_time ? convertTime(statusInfo.next_entry_time) : null;
-
             let iconClass = "fa-solid fa-satellite-dish text-gray-400";
             if (statusList.some(s => s.includes("Analisando"))) iconClass = "fa-solid fa-magnifying-glass-chart text-sky-400 fa-beat";
             if (statusList.some(s => s.includes("indeciso"))) iconClass = "fa-solid fa-pause-circle text-amber-400";
             if (statusInfo.status === 'Reconectando...') iconClass = "fa-solid fa-tower-broadcast text-red-500 animate-ping";
-            
-            return (
-                 <div className="glass-card rounded-2xl p-4 flex flex-col text-center h-full min-h-[280px] card-enter-animation">
-                    <p className="font-bold text-xl text-white mb-2">{asset}</p>
-                    <div className="text-4xl my-3"><i className={iconClass}></i></div>
-                    <div className="bg-gray-900/50 rounded-lg p-2 w-full text-left flex-grow">
-                        <ul className="space-y-1">
-                            {statusList.map((item, index) => (
-                                <li key={index} className={`text-sm ${item.includes('Sem sinal') || item.includes('indeciso') ? 'text-gray-500' : 'text-gray-300'}`}>
-                                    {item}
-                                </li>
-                            ))}
-                        </ul>
-                    </div>
-                    {nextEntryTime && <p className="text-sm text-gray-400 mt-2">Próxima entrada possível: {nextEntryTime}</p>}
-                </div>
-            );
+            return (<div className="glass-card rounded-2xl p-4 flex flex-col text-center h-full min-h-[280px] card-enter-animation"><p className="font-bold text-xl text-white mb-2">{asset}</p><div className="text-4xl my-3"><i className={iconClass}></i></div><div className="bg-gray-900/50 rounded-lg p-2 w-full text-left flex-grow"><ul className="space-y-1">{statusList.map((item, index) => (<li key={index} className={`text-sm ${item.includes('Sem sinal') || item.includes('indeciso') ? 'text-gray-500' : 'text-gray-300'}`}>{item}</li>))}</ul></div>{nextEntryTime && <p className="text-sm text-gray-400 mt-2">Próxima entrada possível: {nextEntryTime}</p>}</div>);
         };
         
         // --- Componentes de Visualização (Views) ---
         function HomeView({ signals, scoreboard, analysisInfo, convertTime }) {
-            return (
-                <>
-                    <Scoreboard scoreboard={scoreboard} />
-                    <div id="signals-grid" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 pb-24 lg:pb-0">
-                        {analysisInfo && <AnalysisCard statusInfo={analysisInfo} convertTime={convertTime} />}
-                        {signals.map(signal => <SignalCard key={signal.signal_id} signal={signal} convertTime={convertTime} />)}
-                    </div>
-                </>
-            );
+            return (<><Scoreboard scoreboard={scoreboard} /><div id="signals-grid" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 pb-24 lg:pb-0">{analysisInfo && <AnalysisCard statusInfo={analysisInfo} convertTime={convertTime} />}{signals.map(signal => <SignalCard key={signal.signal_id} signal={signal} convertTime={convertTime} />)}</div></>);
         }
 
         function ReportsView({ signals }) {
             const reports = useMemo(() => {
-                const strategyReport = {};
-                const pairReport = {};
+                const strategyReport = {}; const pairReport = {};
                 signals.forEach(signal => {
                     if (!signal.result || signal.result === 'DRAW') return;
                     const isWin = signal.result === 'WIN';
@@ -208,71 +140,16 @@
                 });
                 return { strategyReport, pairReport };
             }, [signals]);
-
-            const ReportCard = ({ title, data }) => (
-                <div className="glass-card rounded-xl p-6">
-                    <h3 className="text-xl font-bold mb-4">{title}</h3>
-                    <div className="space-y-4">
-                        {Object.entries(data).length > 0 ? Object.entries(data).map(([key, value]) => {
-                            const total = value.wins + value.losses;
-                            const winRate = total > 0 ? ((value.wins / total) * 100).toFixed(1) : 0;
-                            return (
-                                <div key={key}>
-                                    <div className="flex justify-between items-center mb-1 text-sm"><span className="font-semibold">{key}</span><span className="font-mono text-gray-400">{value.wins}W / {value.losses}L</span></div>
-                                    <div className="w-full bg-gray-700 rounded-full h-2.5"><div className="bg-teal-500 h-2.5 rounded-full" style={{ width: `${winRate}%` }}></div></div>
-                                    <p className="text-xs text-right mt-1 text-teal-400">{winRate}% de Acerto</p>
-                                </div>
-                            );
-                        }) : <p className="text-gray-500 text-center">Nenhum dado disponível.</p>}
-                    </div>
-                </div>
-            );
-
-            return (
-                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pb-24 lg:pb-0 card-enter-animation">
-                    <ReportCard title="Performance por Estratégia" data={reports.strategyReport} />
-                    <ReportCard title="Performance por Par" data={reports.pairReport} />
-                </div>
-            );
+            const ReportCard = ({ title, data }) => (<div className="glass-card rounded-xl p-6"><h3 className="text-xl font-bold mb-4">{title}</h3><div className="space-y-4">{Object.entries(data).length > 0 ? Object.entries(data).map(([key, value]) => {const total = value.wins + value.losses; const winRate = total > 0 ? ((value.wins / total) * 100).toFixed(1) : 0; return (<div key={key}><div className="flex justify-between items-center mb-1 text-sm"><span className="font-semibold">{key}</span><span className="font-mono text-gray-400">{value.wins}W / {value.losses}L</span></div><div className="w-full bg-gray-700 rounded-full h-2.5"><div className="bg-teal-500 h-2.5 rounded-full" style={{ width: `${winRate}%` }}></div></div><p className="text-xs text-right mt-1 text-teal-400">{winRate}% de Acerto</p></div>);}) : <p className="text-gray-500 text-center">Nenhum dado disponível.</p>}</div></div>);
+            return (<div className="grid grid-cols-1 md:grid-cols-2 gap-8 pb-24 lg:pb-0 card-enter-animation"><ReportCard title="Performance por Estratégia" data={reports.strategyReport} /><ReportCard title="Performance por Par" data={reports.pairReport} /></div>);
         }
         
         function RiskManagementView() {
-            const [capital, setCapital] = useState(1000);
-            const [risk, setRisk] = useState(2);
-            const [payout, setPayout] = useState(85);
-            const [stopLoss, setStopLoss] = useState(5);
-            const [stopWin, setStopWin] = useState(10);
-
-            const entryValue = (capital * risk) / 100;
-            const stopLossValue = (capital * stopLoss) / 100;
-            const stopWinValue = (capital * stopWin) / 100;
-            const profitPerTrade = entryValue * (payout / 100);
-            
-            return (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pb-24 lg:pb-0 card-enter-animation">
-                    <div className="glass-card rounded-xl p-6 space-y-4">
-                        <h3 className="text-xl font-bold">Configuração de Risco</h3>
-                        <div><label className="text-sm">Capital Inicial ($)</label><input type="number" value={capital} onChange={e => setCapital(e.target.value)} className="form-input mt-1" /></div>
-                        <div><label className="text-sm">Risco por Operação (%)</label><input type="number" value={risk} onChange={e => setRisk(e.target.value)} className="form-input mt-1" /></div>
-                        <div><label className="text-sm">Payout da Corretora (%)</label><input type="number" value={payout} onChange={e => setPayout(e.target.value)} className="form-input mt-1" /></div>
-                        <div><label className="text-sm">Stop Loss do Dia (%)</label><input type="number" value={stopLoss} onChange={e => setStopLoss(e.target.value)} className="form-input mt-1" /></div>
-                        <div><label className="text-sm">Stop Win do Dia (%)</label><input type="number" value={stopWin} onChange={e => setStopWin(e.target.value)} className="form-input mt-1" /></div>
-                    </div>
-                     <div className="glass-card rounded-xl p-6 flex flex-col justify-center">
-                        <h3 className="text-xl font-bold mb-6">Seu Plano Diário</h3>
-                        <div className="space-y-5">
-                            <div className="flex justify-between items-center text-lg"><span className="text-gray-400">Valor da Entrada:</span><span className="font-mono font-bold text-white">${entryValue.toFixed(2)}</span></div>
-                            <div className="flex justify-between items-center text-lg"><span className="text-gray-400">Lucro por Operação:</span><span className="font-mono font-bold text-green-400">+${profitPerTrade.toFixed(2)}</span></div>
-                            <hr className="border-gray-700" />
-                            <div className="flex justify-between items-center text-xl"><span className="text-gray-400">Meta de Lucro (Stop Win):</span><span className="font-mono font-bold text-green-400">+${stopWinValue.toFixed(2)}</span></div>
-                            <div className="flex justify-between items-center text-xl"><span className="text-gray-400">Limite de Perda (Stop Loss):</span><span className="font-mono font-bold text-red-400">-${stopLossValue.toFixed(2)}</span></div>
-                        </div>
-                    </div>
-                </div>
-            );
+            const [capital, setCapital] = useState(1000); const [risk, setRisk] = useState(2); const [payout, setPayout] = useState(85); const [stopLoss, setStopLoss] = useState(5); const [stopWin, setStopWin] = useState(10);
+            const entryValue = (capital * risk) / 100; const stopLossValue = (capital * stopLoss) / 100; const stopWinValue = (capital * stopWin) / 100; const profitPerTrade = entryValue * (payout / 100);
+            return (<div className="grid grid-cols-1 md:grid-cols-2 gap-8 pb-24 lg:pb-0 card-enter-animation"><div className="glass-card rounded-xl p-6 space-y-4"><h3 className="text-xl font-bold">Configuração de Risco</h3><div><label className="text-sm">Capital Inicial ($)</label><input type="number" value={capital} onChange={e => setCapital(e.target.value)} className="form-input mt-1" /></div><div><label className="text-sm">Risco por Operação (%)</label><input type="number" value={risk} onChange={e => setRisk(e.target.value)} className="form-input mt-1" /></div><div><label className="text-sm">Payout da Corretora (%)</label><input type="number" value={payout} onChange={e => setPayout(e.target.value)} className="form-input mt-1" /></div><div><label className="text-sm">Stop Loss do Dia (%)</label><input type="number" value={stopLoss} onChange={e => setStopLoss(e.target.value)} className="form-input mt-1" /></div><div><label className="text-sm">Stop Win do Dia (%)</label><input type="number" value={stopWin} onChange={e => setStopWin(e.target.value)} className="form-input mt-1" /></div></div><div className="glass-card rounded-xl p-6 flex flex-col justify-center"><h3 className="text-xl font-bold mb-6">Seu Plano Diário</h3><div className="space-y-5"><div className="flex justify-between items-center text-lg"><span className="text-gray-400">Valor da Entrada:</span><span className="font-mono font-bold text-white">${entryValue.toFixed(2)}</span></div><div className="flex justify-between items-center text-lg"><span className="text-gray-400">Lucro por Operação:</span><span className="font-mono font-bold text-green-400">+${profitPerTrade.toFixed(2)}</span></div><hr className="border-gray-700" /><div className="flex justify-between items-center text-xl"><span className="text-gray-400">Meta de Lucro (Stop Win):</span><span className="font-mono font-bold text-green-400">+${stopWinValue.toFixed(2)}</span></div><div className="flex justify-between items-center text-xl"><span className="text-gray-400">Limite de Perda (Stop Loss):</span><span className="font-mono font-bold text-red-400">-${stopLossValue.toFixed(2)}</span></div></div></div></div>);
         }
 
-        // --- Componente Principal da Aplicação ---
         function App() {
             const [activeTab, setActiveTab] = useState('home');
             const [signals, setSignals] = useState([]);
@@ -283,10 +160,15 @@
             const convertTime = useCallback((timeString) => convertTimeToUserTimezone(timeString), []);
 
             const handleMessage = useCallback((message) => {
+                if (!message || !message.type) return;
+
                 switch (message.type) {
                     case 'init':
-                        setScoreboard(message.data.placar);
-                        setSignals(message.data.signals.sort((a,b) => b.entry_time.localeCompare(a.entry_time)));
+                        const initialData = message.data || {};
+                        const initialSignals = initialData.signals || [];
+                        const initialPlacar = initialData.placar || { wins: 0, losses: 0, gale_wins: 0 };
+                        setScoreboard(initialPlacar);
+                        setSignals(initialSignals.sort((a,b) => (b.entry_time || "").localeCompare(a.entry_time || "")));
                         setAnalysisInfo({ status: 'Conectado. Aguardando...' });
                         break;
                     case 'analysis_status':
@@ -298,7 +180,7 @@
                         setSignals(prev => [message, ...prev]);
                         break;
                     case 'result':
-                        setScoreboard(message.placar);
+                        if (message.placar) setScoreboard(message.placar);
                         setSignals(prev => prev.map(s => s.signal_id === message.signal_id ? { ...s, result: message.result } : s));
                         break;
                     case 'gale':
@@ -314,6 +196,12 @@
                     const message = JSON.parse(event.data);
                     handleMessage(message);
                 };
+                return () => {
+                    if (socketRef.current) {
+                        socketRef.current.close();
+                        socketRef.current = null;
+                    }
+                }
             }, []);
 
             const renderView = () => {
@@ -326,17 +214,11 @@
                 }
             };
             
-            return (
-                <div className="max-w-7xl mx-auto">
-                    <Header />
-                    <TabBar activeTab={activeTab} setActiveTab={setActiveTab} />
-                    <main>{renderView()}</main>
-                </div>
-            );
+            return (<div className="max-w-7xl mx-auto"><Header /><TabBar activeTab={activeTab} setActiveTab={setActiveTab} /><main>{renderView()}</main></div>);
         }
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
+        root.render(<ErrorBoundary><App /></ErrorBoundary>);
 
     </script>
 </body>
