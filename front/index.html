@@ -230,7 +230,13 @@
 
             function createSignalCard(signal) {
                 const card = buildSignalCard(signal);
-                signalsGrid.prepend(card);
+                // Insere sempre o novo sinal no topo, logo a seguir ao card de análise, se ele existir
+                const analysisCard = document.getElementById('analysis-card');
+                if (analysisCard) {
+                    analysisCard.insertAdjacentElement('afterend', card);
+                } else {
+                    signalsGrid.prepend(card);
+                }
                 card.classList.add('card-enter-animation');
                 const pulseClass = (signal.direction.toUpperCase() === 'CALL' || signal.direction.toUpperCase() === 'BUY') ? 'pulse-call' : 'pulse-put';
                 card.classList.add(pulseClass);
@@ -264,29 +270,34 @@
                 galeNotice.textContent = `GALE ${gale.gale_level}`;
             }
 
-            // ### LÓGICA DE INICIALIZAÇÃO CORRIGIDA PARA GARANTIR ORDEM E ATUALIZAÇÃO ###
+            // ### LÓGICA DE INICIALIZAÇÃO CORRIGIDA E SIMPLIFICADA ###
             function handleInitialState(data) {
                 if (!data) return;
-                signalsGrid.innerHTML = ''; // Limpa a grelha antes de adicionar
+                signalsGrid.innerHTML = ''; // Limpa a grelha completamente
                 updateScoreboard(data.placar);
-                if (data.signals && Array.isArray(data.signals)) {
-                    // Ordena do mais antigo para o mais novo para usar prepend
-                    data.signals.sort((a, b) => a.entry_time.localeCompare(b.entry_time))
-                        .forEach(signal => {
-                            // Constrói e adiciona CADA card no TOPO da lista
-                            // O resultado final é a lista na ordem correta (mais novo no topo)
-                            const card = buildSignalCard(signal);
-                            if (card) {
-                                signalsGrid.prepend(card);
-                                if (signal.result) {
-                                    updateCardForResult({ ...signal, placar: data.placar });
-                                }
-                                if (signal.gale_level > 0) {
-                                    updateCardForGale(signal);
-                                }
+                
+                if (data.signals && Array.isArray(data.signals) && data.signals.length > 0) {
+                    // Ordena os sinais do MAIS RECENTE para o mais antigo
+                    const sortedSignals = data.signals.sort((a, b) => b.entry_time.localeCompare(a.entry_time));
+
+                    // Adiciona cada card à grelha. Como a lista está ordenada,
+                    // o resultado visual será o mais recente no topo.
+                    sortedSignals.forEach(signal => {
+                        const card = buildSignalCard(signal);
+                        if (card) {
+                            signalsGrid.appendChild(card);
+                            
+                            // Aplica o status (WIN/LOSS/GALE) após a inserção
+                            if (signal.result) {
+                                updateCardForResult({ ...signal, placar: data.placar });
                             }
-                        });
+                            if (signal.gale_level > 0) {
+                                updateCardForGale(signal);
+                            }
+                        }
+                    });
                 }
+                 // Adiciona o card de análise no TOPO da grelha, garantindo que ele é o primeiro
                  createAnalysisCard({ status: 'Conectado. Aguardando...' });
             }
 
