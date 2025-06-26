@@ -3,185 +3,109 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Painel de Sinais - MAROMBIEW BOT</title>
+    <title>Plataforma - MAROMBIEW BOT</title>
     
-    <!-- Tailwind CSS -->
+    <!-- Tailwind CSS & Font Awesome -->
     <script src="https://cdn.tailwindcss.com"></script>
-    
-    <!-- Google Fonts & Font Awesome Icons -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Roboto+Mono:wght@500;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-
+    
+    <!-- React & Babel for in-browser JSX transformation -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
     <style>
-        /* Estilos e Animações Personalizadas */
-        body {
-            font-family: 'Poppins', sans-serif;
-            background-color: #0a0a0a;
-            color: #e5e7eb;
-            background-image: radial-gradient(#1e293b 1px, transparent 1px);
-            background-size: 20px 20px;
-        }
-
-        .font-mono {
-            font-family: 'Roboto Mono', monospace;
-        }
-
-        .glass-card {
-            background: rgba(17, 24, 39, 0.6);
-            -webkit-backdrop-filter: blur(12px);
-            backdrop-filter: blur(12px);
-            border: 1px solid rgba(255, 255, 255, 0.05);
-            transition: all 0.3s ease;
-        }
-
-        .glass-card:hover {
-            border-color: rgba(255, 255, 255, 0.15);
-        }
-
-        /* Animação para card de análise */
-        @keyframes shimmer {
-            0% { background-position: -1000px 0; }
-            100% { background-position: 1000px 0; }
-        }
-        .animate-shimmer {
-            background: linear-gradient(to right, #1f2937 25%, #374151 50%, #1f2937 75%);
-            background-size: 2000px 100%;
-            animation: shimmer 2s linear infinite;
-        }
-
-        /* Animação para borda de novo sinal */
-        @keyframes pulse-border-green {
-            0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7); }
-            70% { box-shadow: 0 0 0 6px rgba(34, 197, 94, 0); }
-            100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
-        }
-        @keyframes pulse-border-red {
-            0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
-            70% { box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
-            100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
-        }
-        .pulse-call {
-            animation: pulse-border-green 2s infinite;
-        }
-        .pulse-put {
-            animation: pulse-border-red 2s infinite;
-        }
-
-        /* Animação de entrada para novos cards */
-        @keyframes card-enter {
-            from {
-                opacity: 0;
-                transform: scale(0.95) translateY(-10px);
-            }
-            to {
-                opacity: 1;
-                transform: scale(1) translateY(0);
-            }
-        }
-        .card-enter-animation {
-            animation: card-enter 0.4s ease-out forwards;
-        }
-
-        /* Animação: Feedback no Placar */
-        @keyframes score-pop {
-            0% { transform: scale(1); }
-            50% { transform: scale(1.25); color: #ffffff; }
-            100% { transform: scale(1); }
-        }
-        .score-updated {
-            animation: score-pop 0.3s ease-in-out;
-        }
+        body { font-family: 'Poppins', sans-serif; background-color: #0a0a0a; color: #e5e7eb; background-image: radial-gradient(#1e293b 1px, transparent 1px); background-size: 20px 20px; }
+        .font-mono { font-family: 'Roboto Mono', monospace; }
+        .glass-card { background: rgba(17, 24, 39, 0.6); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.05); }
+        @keyframes card-enter { from { opacity: 0; transform: scale(0.95) translateY(10px); } to { opacity: 1; transform: scale(1) translateY(0); } }
+        .card-enter-animation { animation: card-enter 0.4s ease-out forwards; }
+        @keyframes score-pop { 0% { transform: scale(1); } 50% { transform: scale(1.25); color: #ffffff; } 100% { transform: scale(1); } }
+        .score-updated { animation: score-pop 0.3s ease-in-out; }
     </style>
 </head>
 <body class="p-4 sm:p-6 lg:p-8">
+    <div id="root"></div>
 
-    <div class="max-w-7xl mx-auto">
-        <!-- CABEÇALHO -->
-        <header class="flex flex-col sm:flex-row justify-between items-center mb-8 gap-6">
-            <h1 class="text-3xl font-bold text-white">
-                <i class="fa-solid fa-robot text-teal-400"></i> MAROMBIEW <span class="text-teal-400">Signals</span>
-            </h1>
-            <div id="scoreboard" class="grid grid-cols-3 gap-4 w-full sm:w-auto glass-card p-3 rounded-xl">
-                <div class="text-center px-2">
-                    <p class="text-sm font-semibold text-green-400">WINS</p>
-                    <p id="score-wins" class="text-2xl font-bold font-mono">0</p>
+    <script type="text/babel">
+        const { useState, useEffect, useCallback, useMemo, useRef } = React;
+        
+        // --- Constantes de Configuração ---
+        const BOT_UTC_OFFSET = "-00:00";
+        const WEBSOCKET_URL = 'wss://botexnova.marombiew.com';
+
+        // --- Componentes da UI ---
+
+        const Header = () => (
+            <header className="flex flex-col sm:flex-row justify-between items-center mb-8 gap-6">
+                <h1 className="text-3xl font-bold text-white">
+                    <i className="fa-solid fa-robot text-teal-400"></i> MAROMBIEW <span className="text-teal-400">Platform</span>
+                </h1>
+            </header>
+        );
+
+        const TabBar = ({ activeTab, setActiveTab }) => (
+            <nav className="fixed bottom-0 left-0 right-0 lg:relative lg:bottom-auto lg:left-auto lg:right-auto bg-gray-900/80 backdrop-blur-sm lg:bg-transparent lg:backdrop-filter-none border-t border-gray-700 lg:border-none p-2 lg:p-0 lg:mb-8">
+                <div className="flex justify-around lg:justify-center lg:gap-6 max-w-md mx-auto lg:max-w-none">
+                    <TabButton icon="fa-solid fa-house" label="Home" isActive={activeTab === 'home'} onClick={() => setActiveTab('home')} />
+                    <TabButton icon="fa-solid fa-chart-pie" label="Relatórios" isActive={activeTab === 'reports'} onClick={() => setActiveTab('reports')} />
+                    <TabButton icon="fa-solid fa-shield-halved" label="Gerenciamento" isActive={activeTab === 'risk'} onClick={() => setActiveTab('risk')} />
                 </div>
-                <div class="text-center px-2">
-                    <p class="text-sm font-semibold text-red-400">LOSSES</p>
-                    <p id="score-losses" class="text-2xl font-bold font-mono">0</p>
-                </div>
-                <div class="text-center px-2">
-                    <p class="text-sm font-semibold text-amber-400">GALE WINS</p>
-                    <p id="score-gale-wins" class="text-2xl font-bold font-mono">0</p>
-                </div>
-            </div>
-        </header>
+            </nav>
+        );
 
-        <!-- GRELHA DE SINAIS -->
-        <main id="signals-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            <!-- Os cards serão injetados aqui pelo JavaScript -->
-        </main>
-    </div>
+        const TabButton = ({ icon, label, isActive, onClick }) => (
+            <button onClick={onClick} className={`flex flex-col items-center gap-1 w-24 py-2 rounded-lg transition-all duration-200 ${isActive ? 'text-teal-400 bg-teal-500/10' : 'text-gray-400 hover:bg-gray-700/50'}`}>
+                <i className={`${icon} text-xl`}></i>
+                <span className="text-xs font-semibold">{label}</span>
+            </button>
+        );
 
-    <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            const BOT_UTC_OFFSET = "-00:00";
-            const signalsGrid = document.getElementById('signals-grid');
-            const scoreWinsEl = document.getElementById('score-wins');
-            const scoreLossesEl = document.getElementById('score-losses');
-            const scoreGaleWinsEl = document.getElementById('score-gale-wins');
-            let socket;
+        const Scoreboard = ({ scoreboard }) => {
+            const winsRef = useRef();
+            const lossesRef = useRef();
+            const galesRef = useRef();
 
-            function convertTimeToUserTimezone(timeString) {
-                if (!timeString || !timeString.includes(':')) return timeString;
-                try {
-                    const todayStr = new Date().toISOString().slice(0, 10);
-                    const fullDateTimeString = `${todayStr}T${timeString}:00${BOT_UTC_OFFSET}`;
-                    const dateObj = new Date(fullDateTimeString);
-                    return dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
-                } catch (e) { console.error("Erro ao converter hora:", e); return timeString; }
-            }
-
-            function connectWebSocket() {
-                const websocketUrl = 'wss://botexnova.marombiew.com';
-                console.log(`[WebSocket] Tentando conectar a ${websocketUrl}...`);
-                socket = new WebSocket(websocketUrl);
-
-                socket.onopen = () => console.log('[WebSocket] Conexão estabelecida.');
-                socket.onmessage = (event) => {
-                    console.log('[WebSocket] Mensagem recebida:', event.data.substring(0, 200));
-                    try { const message = JSON.parse(event.data); handleWebSocketMessage(message); } 
-                    catch (error) { console.error("Erro ao processar mensagem JSON:", error, "Data:", event.data); }
-                };
-                socket.onclose = () => {
-                    console.log('[WebSocket] Conexão perdida. Tentando reconectar...');
-                    createAnalysisCard({ status: 'Reconectando...', status_list: [] });
-                    setTimeout(connectWebSocket, 5000);
-                };
-                socket.onerror = (error) => console.error("[WebSocket] Ocorreu um erro:", error);
-            }
-
-            function handleWebSocketMessage(message) {
-                console.log(`[Handler] Processando mensagem do tipo: ${message.type}`);
-                switch (message.type) {
-                    case 'init': handleInitialState(message.data); break;
-                    case 'analysis_status':
-                    case 'analysis_update': createAnalysisCard(message); break;
-                    case 'signal': removeAnalysisCard(); createSignalCard(message); break;
-                    case 'result': updateCardForResult(message); break;
-                    case 'gale': updateCardForGale(message); break;
+            useEffect(() => {
+                if (winsRef.current && winsRef.current.textContent !== String(scoreboard.wins)) {
+                    winsRef.current.classList.add('score-updated');
+                    setTimeout(() => winsRef.current.classList.remove('score-updated'), 300);
                 }
-            }
-            
-            function updateScoreboard({ wins = 0, losses = 0, gale_wins = 0 } = {}) {
-                if (scoreWinsEl && scoreWinsEl.textContent !== String(wins)) { scoreWinsEl.textContent = wins; scoreWinsEl.classList.add('score-updated'); setTimeout(() => scoreWinsEl.classList.remove('score-updated'), 300); }
-                if (scoreLossesEl && scoreLossesEl.textContent !== String(losses)) { scoreLossesEl.textContent = losses; scoreLossesEl.classList.add('score-updated'); setTimeout(() => scoreLossesEl.classList.remove('score-updated'), 300); }
-                if (scoreGaleWinsEl && scoreGaleWinsEl.textContent !== String(gale_wins)) { scoreGaleWinsEl.textContent = gale_wins; scoreGaleWinsEl.classList.add('score-updated'); setTimeout(() => scoreGaleWinsEl.classList.remove('score-updated'), 300); }
-            }
+            }, [scoreboard.wins]);
 
-            function renderCandle(candle) {
+            useEffect(() => {
+                if (lossesRef.current && lossesRef.current.textContent !== String(scoreboard.losses)) {
+                    lossesRef.current.classList.add('score-updated');
+                    setTimeout(() => lossesRef.current.classList.remove('score-updated'), 300);
+                }
+            }, [scoreboard.losses]);
+
+            useEffect(() => {
+                if (galesRef.current && galesRef.current.textContent !== String(scoreboard.gale_wins)) {
+                    galesRef.current.classList.add('score-updated');
+                    setTimeout(() => galesRef.current.classList.remove('score-updated'), 300);
+                }
+            }, [scoreboard.gale_wins]);
+
+
+            return (
+                <div className="grid grid-cols-3 gap-4 w-full glass-card p-3 rounded-xl mb-6">
+                    <div className="text-center px-2"><p className="text-sm font-semibold text-green-400">WINS</p><p ref={winsRef} className="text-2xl font-bold font-mono">{scoreboard.wins}</p></div>
+                    <div className="text-center px-2"><p className="text-sm font-semibold text-red-400">LOSSES</p><p ref={lossesRef} className="text-2xl font-bold font-mono">{scoreboard.losses}</p></div>
+                    <div className="text-center px-2"><p className="text-sm font-semibold text-amber-400">GALE WINS</p><p ref={galesRef} className="text-2xl font-bold font-mono">{scoreboard.gale_wins}</p></div>
+                </div>
+            );
+        };
+
+        const SignalCard = React.memo(({ signal, convertTime }) => {
+            const isCall = signal.direction.toUpperCase() === 'CALL' || signal.direction.toUpperCase() === 'BUY';
+            const directionColor = isCall ? 'text-green-400' : 'text-red-400';
+            const directionIcon = isCall ? 'fa-arrow-trend-up' : 'fa-arrow-trend-down';
+
+            const renderCandle = (candle) => {
                 if (!candle || !candle.high || !candle.low) return '<div class="h-full w-full flex items-center justify-center text-gray-500"><i class="fa-solid fa-image"></i></div>';
                 const candleColor = candle.close >= candle.open ? '#22c55e' : '#ef4444';
                 const priceRange = candle.high - candle.low;
@@ -189,120 +113,231 @@
                 const bodyHeight = (Math.abs(candle.open - candle.close) / priceRange) * 100;
                 const bodyTop = ((candle.high - Math.max(candle.open, candle.close)) / priceRange) * 100;
                 return `<svg viewBox="0 0 30 100" class="w-full h-full"><rect x="14" y="0" width="2" height="100" fill="${candleColor}" /><rect x="5" y="${bodyTop}" width="20" height="${bodyHeight}" fill="${candleColor}" /></svg>`;
-            }
+            };
 
-            function createAnalysisCard(statusInfo) {
-                const cardId = 'analysis-card';
-                let card = document.getElementById(cardId);
-                if (!card) {
-                    card = document.createElement('div');
-                    card.id = cardId;
-                    card.className = 'glass-card rounded-2xl p-4 flex flex-col items-center justify-center text-center h-full min-h-[280px]';
-                    signalsGrid.prepend(card);
-                }
-                const asset = statusInfo.asset || "Mercado";
-                const statusList = statusInfo.status_list || [statusInfo.status || "Aguardando..."];
-                const nextEntryTime = statusInfo.next_entry_time ? convertTimeToUserTimezone(statusInfo.next_entry_time) : null;
-                const listItems = statusList.map(item => `<li class="text-sm ${item.includes('Sem sinal') || item.includes('indeciso') ? 'text-gray-500' : 'text-gray-300'}">${item}</li>`).join('');
-                let iconClass = "fa-solid fa-satellite-dish text-gray-400";
-                if (statusList.some(s => s.includes("Analisando"))) iconClass = "fa-solid fa-magnifying-glass-chart text-sky-400 fa-beat";
-                if (statusList.some(s => s.includes("indeciso"))) iconClass = "fa-solid fa-pause-circle text-amber-400";
-                if (statusInfo.status === 'Reconectando...') iconClass = "fa-solid fa-tower-broadcast text-red-500 animate-ping";
-                card.innerHTML = `<p class="font-bold text-xl text-white mb-2">${asset}</p><div class="text-4xl my-3 ${iconClass}"></div><div class="bg-gray-900/50 rounded-lg p-2 w-full text-left flex-grow"><ul class="space-y-1">${listItems}</ul></div>${nextEntryTime ? `<p class="text-sm text-gray-400 mt-2">Próxima entrada possível: ${nextEntryTime}</p>` : ''}`;
-            }
-            
-            function removeAnalysisCard() {
-                const card = document.getElementById('analysis-card');
-                if (card) card.remove();
-            }
+            const ResultFooter = () => {
+                if (!signal.result) return <div className="w-full mt-3 h-16"></div>;
 
-            function buildSignalCard(signal) {
-                if (!signal) return null;
-                const card = document.createElement('div');
-                card.id = signal.signal_id;
-                card.className = 'glass-card rounded-2xl p-4 flex flex-col text-center';
-                const isCall = signal.direction.toUpperCase() === 'CALL' || signal.direction.toUpperCase() === 'BUY';
-                const directionColor = isCall ? 'text-green-400' : 'text-red-400';
-                const directionIcon = isCall ? 'fa-arrow-trend-up' : 'fa-arrow-trend-down';
-                card.innerHTML = `<div class="flex justify-between items-center w-full mb-3"><p class="font-bold text-xl text-white">${signal.pair}</p><p class="text-xs bg-gray-700 text-gray-300 px-2 py-1 rounded-md">${signal.strategy}</p></div><div class="flex-grow grid grid-cols-2 gap-4 items-center"><div class="flex flex-col justify-center h-full"><p class="text-xs text-gray-400">HORÁRIO DA ENTRADA</p><p class="font-mono text-3xl font-bold text-white my-1">${convertTimeToUserTimezone(signal.entry_time)}</p><div class="font-semibold text-2xl ${directionColor}"><i class="fa-solid ${directionIcon} mr-1"></i>${signal.direction.toUpperCase()}</div></div><div class="w-16 h-28 mx-auto">${renderCandle(signal.candle)}</div></div><div class="result-footer w-full mt-3 h-16"></div>`;
-                return card;
-            }
-
-            function createSignalCard(signal) {
-                const card = buildSignalCard(signal);
-                // Insere sempre o novo sinal no topo, logo a seguir ao card de análise, se ele existir
-                const analysisCard = document.getElementById('analysis-card');
-                if (analysisCard) {
-                    analysisCard.insertAdjacentElement('afterend', card);
-                } else {
-                    signalsGrid.prepend(card);
-                }
-                card.classList.add('card-enter-animation');
-                const pulseClass = (signal.direction.toUpperCase() === 'CALL' || signal.direction.toUpperCase() === 'BUY') ? 'pulse-call' : 'pulse-put';
-                card.classList.add(pulseClass);
-                setTimeout(() => card.classList.remove(pulseClass), 5000);
-            }
-            
-            function updateCardForResult(result) {
-                updateScoreboard(result.placar);
-                const card = document.getElementById(result.signal_id);
-                if (!card) return;
-                const isWin = result.result === 'WIN';
+                const isWin = signal.result === 'WIN';
                 const resultColor = isWin ? 'text-green-400' : 'text-red-400';
                 const resultIcon = isWin ? 'fa-solid fa-trophy' : 'fa-solid fa-shield-halved';
-                const footer = card.querySelector('.result-footer');
-                if (footer) {
-                    footer.className = "result-footer w-full mt-3 h-16 flex items-center justify-center rounded-lg border";
-                    footer.classList.add(isWin ? 'bg-green-500/10' : 'bg-red-500/10', isWin ? 'border-green-500/30' : 'border-red-500/30');
-                    footer.innerHTML = `<div class="text-center"><p class="text-xs ${resultColor}">RESULTADO</p><p class="font-mono text-2xl font-bold ${resultColor} flex items-center justify-center gap-2"><i class="${resultIcon}"></i><span>${result.result}</span></p></div>`;
-                }
-            }
-
-            function updateCardForGale(gale) {
-                const card = document.getElementById(gale.signal_id);
-                if (!card) return;
-                let galeNotice = card.querySelector('.gale-notice');
-                if (!galeNotice) {
-                    galeNotice = document.createElement('div');
-                    galeNotice.className = 'gale-notice absolute top-2 right-2 bg-amber-500 text-gray-900 text-xs font-bold px-2 py-0.5 rounded-full';
-                    card.prepend(galeNotice);
-                }
-                galeNotice.textContent = `GALE ${gale.gale_level}`;
-            }
-
-            // ### LÓGICA DE INICIALIZAÇÃO CORRIGIDA E SIMPLIFICADA ###
-            function handleInitialState(data) {
-                if (!data) return;
-                signalsGrid.innerHTML = ''; // Limpa a grelha completamente
-                updateScoreboard(data.placar);
+                const resultBg = isWin ? 'bg-green-500/10 border-green-500/30' : 'bg-red-500/10 border-red-500/30';
                 
-                if (data.signals && Array.isArray(data.signals) && data.signals.length > 0) {
-                    // Ordena os sinais do MAIS RECENTE para o mais antigo
-                    const sortedSignals = data.signals.sort((a, b) => b.entry_time.localeCompare(a.entry_time));
+                return (
+                     <div className={`w-full mt-3 h-16 flex items-center justify-center rounded-lg border ${resultBg}`}>
+                        <div className="text-center">
+                            <p className={`text-xs ${resultColor}`}>RESULTADO</p>
+                            <p className={`font-mono text-2xl font-bold ${resultColor} flex items-center justify-center gap-2`}>
+                                <i className={resultIcon}></i>
+                                <span>{signal.result}</span>
+                            </p>
+                        </div>
+                    </div>
+                );
+            };
 
-                    // Adiciona cada card à grelha. Como a lista está ordenada,
-                    // o resultado visual será o mais recente no topo.
-                    sortedSignals.forEach(signal => {
-                        const card = buildSignalCard(signal);
-                        if (card) {
-                            signalsGrid.appendChild(card);
-                            
-                            // Aplica o status (WIN/LOSS/GALE) após a inserção
-                            if (signal.result) {
-                                updateCardForResult({ ...signal, placar: data.placar });
-                            }
-                            if (signal.gale_level > 0) {
-                                updateCardForGale(signal);
-                            }
-                        }
-                    });
-                }
-                 // Adiciona o card de análise no TOPO da grelha, garantindo que ele é o primeiro
-                 createAnalysisCard({ status: 'Conectado. Aguardando...' });
-            }
-
-            connectWebSocket();
+            return (
+                <div id={signal.signal_id} className="glass-card rounded-2xl p-4 flex flex-col text-center card-enter-animation relative">
+                    {signal.gale_level > 0 && <div className="absolute top-2 right-2 bg-amber-500 text-gray-900 text-xs font-bold px-2 py-0.5 rounded-full">GALE {signal.gale_level}</div>}
+                    <div className="flex justify-between items-center w-full mb-3"><p className="font-bold text-xl text-white">{signal.pair}</p><p className="text-xs bg-gray-700 text-gray-300 px-2 py-1 rounded-md">{signal.strategy}</p></div>
+                    <div className="flex-grow grid grid-cols-2 gap-4 items-center">
+                        <div className="flex flex-col justify-center h-full"><p className="text-xs text-gray-400">HORÁRIO DA ENTRADA</p><p className="font-mono text-3xl font-bold text-white my-1">{convertTime(signal.entry_time)}</p><div className={`font-semibold text-2xl ${directionColor}`}><i className={`fa-solid ${directionIcon} mr-1`}></i>{signal.direction.toUpperCase()}</div></div>
+                        <div className="w-16 h-28 mx-auto" dangerouslySetInnerHTML={{ __html: renderCandle(signal.candle) }}></div>
+                    </div>
+                    <ResultFooter />
+                </div>
+            );
         });
+
+        // ### COMPONENTE CORRIGIDO ###
+        // Este componente estava em falta, causando o ReferenceError.
+        const AnalysisCard = ({ statusInfo, convertTime }) => {
+            if (!statusInfo) return null;
+
+            const asset = statusInfo.asset || "Mercado";
+            const statusList = statusInfo.status_list || [statusInfo.status || "Aguardando..."];
+            const nextEntryTime = statusInfo.next_entry_time ? convertTime(statusInfo.next_entry_time) : null;
+
+            let iconClass = "fa-solid fa-satellite-dish text-gray-400";
+            if (statusList.some(s => s.includes("Analisando"))) iconClass = "fa-solid fa-magnifying-glass-chart text-sky-400 fa-beat";
+            if (statusList.some(s => s.includes("indeciso"))) iconClass = "fa-solid fa-pause-circle text-amber-400";
+            if (statusInfo.status === 'Reconectando...') iconClass = "fa-solid fa-tower-broadcast text-red-500 animate-ping";
+            
+            return (
+                 <div className="glass-card rounded-2xl p-4 flex flex-col text-center h-full min-h-[280px] card-enter-animation">
+                    <p className="font-bold text-xl text-white mb-2">{asset}</p>
+                    <div className="text-4xl my-3"><i className={iconClass}></i></div>
+                    <div className="bg-gray-900/50 rounded-lg p-2 w-full text-left flex-grow">
+                        <ul className="space-y-1">
+                            {statusList.map((item, index) => (
+                                <li key={index} className={`text-sm ${item.includes('Sem sinal') || item.includes('indeciso') ? 'text-gray-500' : 'text-gray-300'}`}>
+                                    {item}
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
+                    {nextEntryTime && <p className="text-sm text-gray-400 mt-2">Próxima entrada possível: {nextEntryTime}</p>}
+                </div>
+            );
+        };
+        
+        // --- Componentes de Visualização (Views) ---
+        function HomeView({ signals, scoreboard, analysisInfo, convertTime }) {
+            return (
+                <>
+                    <Scoreboard scoreboard={scoreboard} />
+                    <div id="signals-grid" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 pb-24 lg:pb-0">
+                        {analysisInfo && <AnalysisCard statusInfo={analysisInfo} convertTime={convertTime} />}
+                        {signals.map(signal => <SignalCard key={signal.signal_id} signal={signal} convertTime={convertTime} />)}
+                    </div>
+                </>
+            );
+        }
+
+        function ReportsView({ signals }) {
+            const reports = useMemo(() => {
+                const strategyReport = {};
+                const pairReport = {};
+                signals.forEach(signal => {
+                    if (!signal.result || signal.result === 'DRAW') return;
+                    const isWin = signal.result === 'WIN';
+                    if (!strategyReport[signal.strategy]) strategyReport[signal.strategy] = { wins: 0, losses: 0 };
+                    if (isWin) strategyReport[signal.strategy].wins++; else strategyReport[signal.strategy].losses++;
+                    if (!pairReport[signal.pair]) pairReport[signal.pair] = { wins: 0, losses: 0 };
+                    if (isWin) pairReport[signal.pair].wins++; else pairReport[signal.pair].losses++;
+                });
+                return { strategyReport, pairReport };
+            }, [signals]);
+
+            const ReportCard = ({ title, data }) => (
+                <div className="glass-card rounded-xl p-6">
+                    <h3 className="text-xl font-bold mb-4">{title}</h3>
+                    <div className="space-y-4">
+                        {Object.entries(data).length > 0 ? Object.entries(data).map(([key, value]) => {
+                            const total = value.wins + value.losses;
+                            const winRate = total > 0 ? ((value.wins / total) * 100).toFixed(1) : 0;
+                            return (
+                                <div key={key}>
+                                    <div className="flex justify-between items-center mb-1 text-sm"><span className="font-semibold">{key}</span><span className="font-mono text-gray-400">{value.wins}W / {value.losses}L</span></div>
+                                    <div className="w-full bg-gray-700 rounded-full h-2.5"><div className="bg-teal-500 h-2.5 rounded-full" style={{ width: `${winRate}%` }}></div></div>
+                                    <p className="text-xs text-right mt-1 text-teal-400">{winRate}% de Acerto</p>
+                                </div>
+                            );
+                        }) : <p className="text-gray-500 text-center">Nenhum dado disponível.</p>}
+                    </div>
+                </div>
+            );
+
+            return (
+                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pb-24 lg:pb-0 card-enter-animation">
+                    <ReportCard title="Performance por Estratégia" data={reports.strategyReport} />
+                    <ReportCard title="Performance por Par" data={reports.pairReport} />
+                </div>
+            );
+        }
+        
+        function RiskManagementView() {
+            const [capital, setCapital] = useState(1000);
+            const [risk, setRisk] = useState(2);
+            const [payout, setPayout] = useState(85);
+            const [stopLoss, setStopLoss] = useState(5);
+            const [stopWin, setStopWin] = useState(10);
+
+            const entryValue = (capital * risk) / 100;
+            const stopLossValue = (capital * stopLoss) / 100;
+            const stopWinValue = (capital * stopWin) / 100;
+            const profitPerTrade = entryValue * (payout / 100);
+            
+            return (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pb-24 lg:pb-0 card-enter-animation">
+                    <div className="glass-card rounded-xl p-6 space-y-4">
+                        <h3 className="text-xl font-bold">Configuração de Risco</h3>
+                        <div><label className="text-sm">Capital Inicial ($)</label><input type="number" value={capital} onChange={e => setCapital(e.target.value)} className="form-input mt-1" /></div>
+                        <div><label className="text-sm">Risco por Operação (%)</label><input type="number" value={risk} onChange={e => setRisk(e.target.value)} className="form-input mt-1" /></div>
+                        <div><label className="text-sm">Payout da Corretora (%)</label><input type="number" value={payout} onChange={e => setPayout(e.target.value)} className="form-input mt-1" /></div>
+                        <div><label className="text-sm">Stop Loss do Dia (%)</label><input type="number" value={stopLoss} onChange={e => setStopLoss(e.target.value)} className="form-input mt-1" /></div>
+                        <div><label className="text-sm">Stop Win do Dia (%)</label><input type="number" value={stopWin} onChange={e => setStopWin(e.target.value)} className="form-input mt-1" /></div>
+                    </div>
+                     <div className="glass-card rounded-xl p-6 flex flex-col justify-center">
+                        <h3 className="text-xl font-bold mb-6">Seu Plano Diário</h3>
+                        <div className="space-y-5">
+                            <div className="flex justify-between items-center text-lg"><span className="text-gray-400">Valor da Entrada:</span><span className="font-mono font-bold text-white">${entryValue.toFixed(2)}</span></div>
+                            <div className="flex justify-between items-center text-lg"><span className="text-gray-400">Lucro por Operação:</span><span className="font-mono font-bold text-green-400">+${profitPerTrade.toFixed(2)}</span></div>
+                            <hr className="border-gray-700" />
+                            <div className="flex justify-between items-center text-xl"><span className="text-gray-400">Meta de Lucro (Stop Win):</span><span className="font-mono font-bold text-green-400">+${stopWinValue.toFixed(2)}</span></div>
+                            <div className="flex justify-between items-center text-xl"><span className="text-gray-400">Limite de Perda (Stop Loss):</span><span className="font-mono font-bold text-red-400">-${stopLossValue.toFixed(2)}</span></div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // --- Componente Principal da Aplicação ---
+        function App() {
+            const [activeTab, setActiveTab] = useState('home');
+            const [signals, setSignals] = useState([]);
+            const [scoreboard, setScoreboard] = useState({ wins: 0, losses: 0, gale_wins: 0 });
+            const [analysisInfo, setAnalysisInfo] = useState(null);
+            const socketRef = useRef(null);
+
+            const convertTime = useCallback((timeString) => convertTimeToUserTimezone(timeString), []);
+
+            const handleMessage = useCallback((message) => {
+                switch (message.type) {
+                    case 'init':
+                        setScoreboard(message.data.placar);
+                        setSignals(message.data.signals.sort((a,b) => b.entry_time.localeCompare(a.entry_time)));
+                        setAnalysisInfo({ status: 'Conectado. Aguardando...' });
+                        break;
+                    case 'analysis_status':
+                    case 'analysis_update':
+                        setAnalysisInfo(message);
+                        break;
+                    case 'signal':
+                        setAnalysisInfo(null);
+                        setSignals(prev => [message, ...prev]);
+                        break;
+                    case 'result':
+                        setScoreboard(message.placar);
+                        setSignals(prev => prev.map(s => s.signal_id === message.signal_id ? { ...s, result: message.result } : s));
+                        break;
+                    case 'gale':
+                         setSignals(prev => prev.map(s => s.signal_id === message.signal_id ? { ...s, gale_level: message.gale_level } : s));
+                        break;
+                }
+            }, []);
+
+            useEffect(() => {
+                if (socketRef.current) return;
+                socketRef.current = new WebSocket(WEBSOCKET_URL);
+                socketRef.current.onmessage = (event) => {
+                    const message = JSON.parse(event.data);
+                    handleMessage(message);
+                };
+            }, []);
+
+            const renderView = () => {
+                switch(activeTab) {
+                    case 'reports': return <ReportsView signals={signals} />;
+                    case 'risk': return <RiskManagementView />;
+                    case 'home':
+                    default: 
+                        return <HomeView signals={signals} scoreboard={scoreboard} analysisInfo={analysisInfo} convertTime={convertTime} />;
+                }
+            };
+            
+            return (
+                <div className="max-w-7xl mx-auto">
+                    <Header />
+                    <TabBar activeTab={activeTab} setActiveTab={setActiveTab} />
+                    <main>{renderView()}</main>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+
     </script>
 </body>
 </html>
