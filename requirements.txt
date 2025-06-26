@@ -1,3 +1,5 @@
 websockets
 colorama
 configobj
+exnovaapi
+requests
