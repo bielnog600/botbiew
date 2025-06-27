@@ -2,8 +2,17 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>MAROMBIEW BOT</title>
+    <!-- ### ALTERAÇÃO AQUI: Desativa o zoom do utilizador ### -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Plataforma - MAROMBIEW BOT</title>
+    
+    <!-- ### NOVAS TAGS PARA INSTALAÇÃO EM IOS (PWA) ### -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Marombiew">
+    <link rel="apple-touch-icon" href="https://placehold.co/180x180/0a0a0a/14b8a6?text=M">
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#0d9488">
     
     <!-- Tailwind CSS & Font Awesome -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -25,12 +34,11 @@
             color: #e5e7eb; 
             background-image: radial-gradient(#1e293b 1px, transparent 1px); 
             background-size: 20px 20px;
-            -webkit-user-select: none;
-            -ms-user-select: none;
+            /* Desativa a seleção de texto e o realce de toque */
+            -webkit-user-select: none; /* Safari */
+            -ms-user-select: none; /* IE 10+ */
             user-select: none;
-            touch-action: manipulation;
-            /* ### NOVO: Ajuda o browser a renderizar controlos de formulário para temas escuros ### */
-            color-scheme: dark;
+            -webkit-tap-highlight-color: transparent;
         }
 
         .font-mono { font-family: 'Roboto Mono', monospace; }
@@ -40,9 +48,9 @@
         @keyframes score-pop { 0% { transform: scale(1); } 50% { transform: scale(1.25); color: #ffffff; } 100% { transform: scale(1); } }
         .score-updated { animation: score-pop 0.3s ease-in-out; }
         
-        /* ### ALTERAÇÃO AQUI: Garante que os inputs de número sejam sempre legíveis ### */
         .form-input {
-             color: white;
+             color: white !important;
+             background-color: #1f2937 !important;
         }
         input[type="number"] {
             -moz-appearance: textfield; /* Firefox */
@@ -185,7 +193,8 @@
         function RiskManagementView() {
             const [capital, setCapital] = useState(1000); const [risk, setRisk] = useState(2); const [payout, setPayout] = useState(85); const [stopLoss, setStopLoss] = useState(5); const [stopWin, setStopWin] = useState(10);
             const entryValue = (capital * risk) / 100; const stopLossValue = (capital * stopLoss) / 100; const stopWinValue = (capital * stopWin) / 100; const profitPerTrade = entryValue * (payout / 100);
-            return (<div className="grid grid-cols-1 md:grid-cols-2 gap-8 pb-24 lg:pb-0 card-enter-animation"><div className="glass-card rounded-xl p-6 space-y-4"><h3 className="text-xl font-bold">Configuração de Risco</h3><div><label className="text-sm">Capital Inicial ($)</label><input type="number" value={capital} onChange={e => setCapital(e.target.value)} className="form-input mt-1" /></div><div><label className="text-sm">Risco por Operação (%)</label><input type="number" value={risk} onChange={e => setRisk(e.target.value)} className="form-input mt-1" /></div><div><label className="text-sm">Payout da Corretora (%)</label><input type="number" value={payout} onChange={e => setPayout(e.target.value)} className="form-input mt-1" /></div><div><label className="text-sm">Stop Loss do Dia (%)</label><input type="number" value={stopLoss} onChange={e => setStopLoss(e.target.value)} className="form-input mt-1" /></div><div><label className="text-sm">Stop Win do Dia (%)</label><input type="number" value={stopWin} onChange={e => setStopWin(e.target.value)} className="form-input mt-1" /></div></div><div className="glass-card rounded-xl p-6 flex flex-col justify-center"><h3 className="text-xl font-bold mb-6">Seu Plano Diário</h3><div className="space-y-5"><div className="flex justify-between items-center text-lg"><span className="text-gray-400">Valor da Entrada:</span><span className="font-mono font-bold text-white">${entryValue.toFixed(2)}</span></div><div className="flex justify-between items-center text-lg"><span className="text-gray-400">Lucro por Operação:</span><span className="font-mono font-bold text-green-400">+${profitPerTrade.toFixed(2)}</span></div><hr className="border-gray-700" /><div className="flex justify-between items-center text-xl"><span className="text-gray-400">Meta de Lucro (Stop Win):</span><span className="font-mono font-bold text-green-400">+${stopWinValue.toFixed(2)}</span></div><div className="flex justify-between items-center text-xl"><span className="text-gray-400">Limite de Perda (Stop Loss):</span><span className="font-mono font-bold text-red-400">-${stopLossValue.toFixed(2)}</span></div></div></div></div>);
+            const FormInput = ({label, ...props}) => (<div><label className="text-sm">{label}</label><input {...props} className="form-input mt-1" /></div>);
+            return (<div className="grid grid-cols-1 md:grid-cols-2 gap-8 pb-24 lg:pb-0 card-enter-animation"><div className="glass-card rounded-xl p-6 space-y-4"><h3 className="text-xl font-bold">Configuração de Risco</h3><FormInput label="Capital Inicial (R$)" type="number" value={capital} onChange={e => setCapital(e.target.value)} /><FormInput label="Risco por Operação (%)" type="number" value={risk} onChange={e => setRisk(e.target.value)} /><FormInput label="Payout da Corretora (%)" type="number" value={payout} onChange={e => setPayout(e.target.value)} /><FormInput label="Stop Loss do Dia (%)" type="number" value={stopLoss} onChange={e => setStopLoss(e.target.value)} /><FormInput label="Stop Win do Dia (%)" type="number" value={stopWin} onChange={e => setStopWin(e.target.value)} /></div><div className="glass-card rounded-xl p-6 flex flex-col justify-center"><h3 className="text-xl font-bold mb-6">Seu Plano Diário</h3><div className="space-y-5"><div className="flex justify-between items-center text-lg"><span className="text-gray-400">Valor da Entrada:</span><span className="font-mono font-bold text-white">R$ {entryValue.toFixed(2)}</span></div><div className="flex justify-between items-center text-lg"><span className="text-gray-400">Lucro por Operação:</span><span className="font-mono font-bold text-green-400">+ R$ {profitPerTrade.toFixed(2)}</span></div><hr className="border-gray-700" /><div className="flex justify-between items-center text-xl"><span className="text-gray-400">Meta de Lucro (Stop Win):</span><span className="font-mono font-bold text-green-400">+ R$ {stopWinValue.toFixed(2)}</span></div><div className="flex justify-between items-center text-xl"><span className="text-gray-400">Limite de Perda (Stop Loss):</span><span className="font-mono font-bold text-red-400">- R$ {stopLossValue.toFixed(2)}</span></div></div></div></div>);
         }
 
         function App() {
@@ -255,6 +264,21 @@
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<ErrorBoundary><App /></ErrorBoundary>);
 
+    </script>
+    
+    <!-- ### NOVO SCRIPT PARA REGISTAR O SERVICE WORKER ### -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/sw.js')
+                    .then(registration => {
+                        console.log('Service Worker registado com sucesso:', registration);
+                    })
+                    .catch(error => {
+                        console.log('Falha ao registar Service Worker:', error);
+                    });
+            });
+        }
     </script>
 </body>
 </html>
