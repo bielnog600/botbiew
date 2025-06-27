@@ -525,7 +525,7 @@ def main_bot_logic(state):
                                         continue
 
                                     for nome_estrategia, assertividade in state.strategy_performance[normalized_name].items():
-                                        if assertividade >= 45: 
+                                        if assertividade >= 25: 
                                             cod_map = {'Pullback MQL': 'mql_pullback', 'Fluxo': 'flow', 'Padrões': 'patterns', 'Rejeição': 'rejection_candle'}
                                             cod_est = next((cod for cod, nome in cod_map.items() if nome == nome_estrategia), None)
                                             if not cod_est: continue
