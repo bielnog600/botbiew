@@ -414,7 +414,7 @@ def get_config_from_env():
 
 def compra_thread(api, ativo, valor, direcao, expiracao, tipo_op, state, config, cifrao, signal_id, target_entry_timestamp):
     try:
-        wait_time = target_entry_timestamp - time.time() - 5.0
+        wait_time = target_entry_timestamp - time.time() - 2.0
         
         if wait_time > 0:
             log_info(f"Aguardando {wait_time:.2f}s para entrada precisa em {ativo} (envio 5s antes)...")
