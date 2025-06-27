@@ -107,7 +107,7 @@ def exibir_banner():
       ██║   ██╔══██╗██║██╔══██║██║         ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║   ██║   ██║
       ██║   ██║  ██║██║██║  ██║███████╗     ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝   ██║
       ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝      ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝    ╚═╝ '''+y+'''
-                  azkzero@gmail.com
+              azkzero@gmail.com - Versão com Diagnóstico Avançado
     ''')
     print(y + "*"*88)
     print(c + "="*88)
@@ -216,10 +216,13 @@ def catalogar_estrategias(api, state, params):
             performance_do_par = {}
             for nome, res in resultados.items():
                 total = res['win'] + res['loss']
-                if total > 2:
+                # SUGESTÃO DE DIAGNÓSTICO 1.2 APLICADA
+                if total > 3: # Regra um pouco mais flexível que 5
                     assertividade = (res['win'] / total) * 100
                     performance_do_par[nome] = assertividade
                     log_info(f"  -> Strategy '{nome}' for {ativo}: {assertividade:.2f}% accuracy ({res['win']}W / {res['loss']}L)")
+                else:
+                    log_warning(f"  -> Strategy '{nome}' for {ativo}: Amostra muito pequena ({total} sinais). Ignorando.")
             if performance_do_par:
                 state.strategy_performance[ativo] = performance_do_par
         except Exception as e: log_error(f"An error occurred while analyzing the pair {ativo}: {e}"); traceback.print_exc()
@@ -383,8 +386,13 @@ def obter_melhor_par(api, payout_minimo):
                         if payout >= payout_minimo:
                             if ativo not in ativos or payout > ativos[ativo]['payout']: ativos[ativo] = {'payout': payout, 'tipo': 'digital' if tipo_mercado == 'digital' else 'turbo'}
                     except Exception: continue
-    if not ativos: return None
+    # SUGESTÃO DE DIAGNÓSTICO 4 APLICADA
+    if not ativos: 
+        log_error(f"Nenhum ativo encontrado com payout >= {payout_minimo}%. Verifique a corretora ou o valor mínimo.")
+        return None
+    
     sorted_assets = sorted(ativos.items(), key=lambda item: item[1]['payout'], reverse=True)
+    log_info(f"Ativos com bom payout encontrados: {[f'{ativo}({details['payout']:.0f}%)' for ativo, details in sorted_assets]}")
     return sorted_assets
 
 def main_bot_logic(state):
@@ -414,11 +422,12 @@ def main_bot_logic(state):
         log_warning(f"Could not get user profile. Error: {e}")
         log_info(f"Hello! Bot starting in server mode.")
     
+    # SUGESTÃO DE DIAGNÓSTICO 2 APLICADA
     PARAMS = { 
         'MAPeriod': 5, 'MaxLevels': 10, 'Proximity': 10.0, 'Point': 1e-6, 
         'FlowBodyMinRatio': 0.4, 'FlowOppositeWickMaxRatio': 0.45, 
         'RejectionWickMinRatio': 0.58, 'RejectionBodyMaxRatio': 0.3, 'RejectionOppositeWickMaxRatio': 0.2, 
-        'IndecisionCandles': 3, 'IndecisionBodyMaxRatio': 0.4, 'IndecisionMinCount': 2 
+        'IndecisionCandles': 3, 'IndecisionBodyMaxRatio': 0.2, 'IndecisionMinCount': 3 
     }
     
     last_catalog_time = 0
@@ -473,11 +482,16 @@ def main_bot_logic(state):
                             for ativo, info in open_assets[tipo_mercado].items():
                                 if info.get('open', False) and ativo in state.strategy_performance:
                                     velas = validar_e_limpar_velas(API.get_candles(ativo, 60, 150, time.time()))
-                                    if not velas or len(velas) < 20 or is_market_indecisive(velas, PARAMS):
+                                    
+                                    if not velas or len(velas) < 20: continue
+                                    
+                                    # SUGESTÃO DE DIAGNÓSTICO 1.1 APLICADA
+                                    if is_market_indecisive(velas, PARAMS):
+                                        log_warning(f"-> {ativo}: MERCADO CONSIDERADO INDECISO. Análise descartada.")
                                         continue
 
                                     for nome_estrategia, assertividade in state.strategy_performance[ativo].items():
-                                        if assertividade >= 20:
+                                        if assertividade >= 45: # ASSERTIVIDADE AJUSTADA
                                             cod_map = {'Pullback MQL': 'mql_pullback', 'Fluxo': 'flow', 'Padrões': 'patterns', 'Rejeição': 'rejection_candle'}
                                             cod_est = next((cod for cod, nome in cod_map.items() if nome == nome_estrategia), None)
                                             if not cod_est: continue
@@ -486,7 +500,13 @@ def main_bot_logic(state):
                                             if sinal:
                                                 payout = all_profits.get(ativo, {}).get(tipo_mercado, 0) * 100
                                                 potential_trades.append({'ativo': ativo, 'tipo_op': tipo_mercado, 'velas': velas, 'payout': payout, 'direcao': {'BUY': 'call', 'SELL': 'put'}.get(sinal), 'nome_estrategia': nome_estrategia, 'assertividade': assertividade})
+                                            # SUGESTÃO DE DIAGNÓSTICO 1.3 APLICADA
+                                            else:
+                                                log_info(f"-> {ativo}: Estratégia '{nome_estrategia}' ({assertividade:.2f}%) foi checada, mas não gerou sinal agora.")
+                    
+                    # SUGESTÃO DE DIAGNÓSTICO 3 APLICADA
                     if potential_trades:
+                        log_success(f"ENCONTRADOS {len(potential_trades)} SINAIS VÁLIDOS. Priorizando os melhores...")
                         sorted_trades = sorted(potential_trades, key=lambda x: (x['assertividade'], x['payout']), reverse=True)
                         sinais_para_executar = sorted_trades
                 
