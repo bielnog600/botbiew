@@ -170,11 +170,9 @@ def start_websocket_server_sync(bot_state):
     try:
         loop.run_until_complete(main_async_logic())
     except Exception as e:
-        log_error(f"CRITICAL ERROR in WebSocket server thread: {e}")
-        traceback.print_exc()
+        log_error(f"CRITICAL ERROR in WebSocket server thread: {e}"); traceback.print_exc()
     finally:
-        log_warning("WebSocket server loop is shutting down.")
-        loop.close()
+        log_warning("WebSocket server loop is shutting down."); loop.close()
 
 
 # --- Logic and Strategy Functions ---
@@ -201,7 +199,7 @@ def catalogar_estrategias(api, state, params):
     for ativo in ativos_abertos:
         try:
             log_info(f"\n--- Analyzing pair: {w}{ativo}{c} ---")
-            velas_historicas_raw = api.get_candles(ativo, 60, 500, time.time())
+            velas_historicas_raw = api.get_candles(ativo, 60, 240, time.time())
             todas_as_velas = validar_e_limpar_velas(velas_historicas_raw)
             if not todas_as_velas or len(todas_as_velas) < 100: log_warning(f"Could not get enough historical data for {ativo}."); continue
             resultados = {nome: {'win': 0, 'loss': 0} for nome in TODAS_AS_ESTRATEGIAS.values()}
@@ -229,8 +227,7 @@ def catalogar_estrategias(api, state, params):
 
 def sma_slope(closes, period):
     if len(closes) < period + 1: return None
-    sma1 = sum(closes[-(period+1):-1]) / period
-    sma2 = sum(closes[-period:]) / period
+    sma1 = sum(closes[-(period+1):-1]) / period; sma2 = sum(closes[-period:]) / period
     if sma1 == sma2: return None
     return sma2 > sma1
 
@@ -270,7 +267,7 @@ def strategy_flow(velas, p):
     if len(velas) < p['MAPeriod'] + 2: return None
     nano_up = sma_slope([v['close'] for v in velas], p['MAPeriod'])
     if nano_up is None: return None
-    flow_candles = velas[-2:]; min_body_ratio = p.get('FlowBodyMinRatio', 0.5)
+    flow_candles = velas[-2:]; min_body_ratio = p.get('FlowBodyMinRatio', 0.4)
     def is_strong_candle(vela):
         range_total = vela['high'] - vela['low']
         if range_total == 0: return False
@@ -281,7 +278,7 @@ def strategy_flow(velas, p):
     if range_total_last > 0:
         pavio_superior = last_flow_candle['high'] - max(last_flow_candle['open'], last_flow_candle['close'])
         pavio_inferior = min(last_flow_candle['open'], last_flow_candle['close']) - last_flow_candle['low']
-        max_opposite_wick_ratio = p.get('FlowOppositeWickMaxRatio', 0.4)
+        max_opposite_wick_ratio = p.get('FlowOppositeWickMaxRatio', 0.45)
     else: return None
     res_levels, sup_levels = detect_fractals(velas, p['MaxLevels']); proximity_zone = p['Proximity'] * p['Point']
     if nano_up and all(v['close'] > v['open'] for v in flow_candles):
@@ -318,7 +315,8 @@ class BotState:
     def __init__(self):
         self.stop = False; self.win_count = 0; self.loss_count = 0
         self.gale_wins = {f"g{i}": 0 for i in range(1, 11)}
-        self.is_trading = False; self.signal_history = {}; self.strategy_performance = {}; self.lock = Lock()
+        self.active_trades = 0
+        self.signal_history = {}; self.strategy_performance = {}; self.lock = Lock()
 
 def get_config_from_env():
     return {
@@ -377,7 +375,6 @@ def compra_thread(api, ativo, valor, direcao, expiracao, tipo_op, state, config,
                 resultado_final = "ERROR"
                 break
             
-            # ### CORREÇÃO DE INDENTAÇÃO AQUI ###
             if resultado > 0:
                 log_success(f"RESULT: WIN {gale_info} | Profit: {cifrao}{resultado:.2f}")
                 with state.lock:
@@ -413,7 +410,7 @@ def compra_thread(api, ativo, valor, direcao, expiracao, tipo_op, state, config,
         traceback.print_exc()
     finally:
         with state.lock:
-            state.is_trading = False
+            state.active_trades -= 1
 
 def obter_melhor_par(api, payout_minimo):
     all_profits = api.get_all_profit()
@@ -431,9 +428,9 @@ def obter_melhor_par(api, payout_minimo):
                     except Exception:
                         continue
     if not ativos:
-        return None, None, None
-    best_asset = max(ativos, key=lambda k: ativos[k]['payout'])
-    return best_asset, ativos[best_asset]['tipo'], ativos[best_asset]['payout']
+        return None
+    sorted_assets = sorted(ativos.items(), key=lambda item: item[1]['payout'], reverse=True)
+    return sorted_assets
 
 def main_bot_logic(state):
     exibir_banner()
@@ -463,19 +460,34 @@ def main_bot_logic(state):
         log_info(f"Hello! Bot starting in server mode.")
     
     PARAMS = { 
-        'MAPeriod': 5, 'MaxLevels': 10, 'Proximity': 7.0, 'Point': 1e-6, 
-        'FlowBodyMinRatio': 0.5, 'FlowOppositeWickMaxRatio': 0.4, 
-        'RejectionWickMinRatio': 0.6, 'RejectionBodyMaxRatio': 0.3, 'RejectionOppositeWickMaxRatio': 0.15, 
+        'MAPeriod': 5, 'MaxLevels': 10, 'Proximity': 10.0, 'Point': 1e-6, 
+        'FlowBodyMinRatio': 0.4, 'FlowOppositeWickMaxRatio': 0.45, 
+        'RejectionWickMinRatio': 0.58, 'RejectionBodyMaxRatio': 0.3, 'RejectionOppositeWickMaxRatio': 0.2, 
         'IndecisionCandles': 3, 'IndecisionBodyMaxRatio': 0.4, 'IndecisionMinCount': 2 
     }
+    
+    last_catalog_time = 0
     if config['modo_operacao'] == '1':
         catalogar_estrategias(API, state, PARAMS)
+        last_catalog_time = time.time()
 
     minuto_anterior, analise_feita = -1, False
     log_info("Bot started. Entering analysis loop...")
 
     while not state.stop:
         try:
+            if config['modo_operacao'] == '1' and (time.time() - last_catalog_time) > (4 * 3600):
+                with state.lock:
+                    is_trading_check = state.active_trades > 0
+                if not is_trading_check:
+                    log_info("="*50); log_info("PERIODIC RE-CATALOGING (4H) INITIATED"); log_info("="*50)
+                    signal_queue.put({"type": "analysis_status", "status": "Recatalogando estratégias (4h)..."})
+                    catalogar_estrategias(API, state, PARAMS)
+                    last_catalog_time = time.time()
+                    log_info("="*50); log_info("PERIODIC RE-CATALOGING FINISHED"); log_info("="*50)
+                else:
+                    log_warning("Re-cataloging postponed: trade in progress.")
+
             timestamp = time.time()
             dt_objeto = datetime.fromtimestamp(timestamp)
             minuto_atual, segundo_atual = dt_objeto.minute, dt_objeto.second
@@ -483,116 +495,87 @@ def main_bot_logic(state):
             if minuto_atual != minuto_anterior:
                 minuto_anterior, analise_feita = minuto_atual, False
                 with state.lock:
-                    is_trading = state.is_trading
-                if not is_trading:
+                    active_trades_count = state.active_trades
+                if active_trades_count == 0:
                     horario_proxima_vela = (dt_objeto.replace(second=0, microsecond=0) + timedelta(minutes=1)).strftime('%H:%M')
                     signal_queue.put({"type": "analysis_status", "status": f"Aguardando vela das {horario_proxima_vela}...", "next_entry_time": horario_proxima_vela})
             
             with state.lock:
-                is_trading = state.is_trading
+                active_trades_count = state.active_trades
 
-            if segundo_atual >= 55 and not analise_feita and not is_trading:
+            if segundo_atual >= 50 and not analise_feita and active_trades_count < 5:
                 analise_feita = True
-                sinal_final = None
+                sinais_para_executar = []
 
                 if config['modo_operacao'] == '1': # MODO CONSERVADOR (CATALOGADO)
-                    potential_trades = []
                     open_assets = API.get_all_open_time()
-                    all_profits = API.get_all_profit()
-                    
-                    for tipo_mercado in ['binary', 'turbo']:
-                        if tipo_mercado in open_assets:
-                            for ativo, info in open_assets[tipo_mercado].items():
-                                if info.get('open', False) and ativo in state.strategy_performance:
-                                    status_log = [f"Analisando par catalogado: {ativo}"]
-                                    signal_queue.put({"type": "analysis_update", "asset": ativo, "status_list": status_log})
-                                    
-                                    velas = validar_e_limpar_velas(API.get_candles(ativo, 60, 150, time.time()))
+                    for tipo_mercado_loop in ['binary', 'turbo']:
+                        if tipo_mercado_loop in open_assets:
+                            for ativo_loop, info in open_assets[tipo_mercado_loop].items():
+                                if info.get('open', False) and ativo_loop in state.strategy_performance:
+                                    velas = validar_e_limpar_velas(API.get_candles(ativo_loop, 60, 150, time.time()))
                                     if not velas or len(velas) < 20 or is_market_indecisive(velas, PARAMS):
                                         continue
 
-                                    for nome_estrategia, assertividade in state.strategy_performance[ativo].items():
-                                        if assertividade >= 70:
+                                    for nome_estrategia, assertividade in state.strategy_performance[ativo_loop].items():
+                                        if assertividade >= 30:
                                             cod_map = {'Pullback MQL': 'mql_pullback', 'Fluxo': 'flow', 'Padrões': 'patterns', 'Rejeição': 'rejection_candle'}
                                             cod_estrategia = next((cod for cod, nome in cod_map.items() if nome == nome_estrategia), None)
                                             if not cod_estrategia: continue
-
-                                            status_log.append(f"Testando {nome_estrategia} ({assertividade:.1f}%)...")
-                                            signal_queue.put({"type": "analysis_update", "asset": ativo, "status_list": status_log})
-
+                                            
                                             sinal = globals().get(f'strategy_{cod_estrategia}')(velas, PARAMS)
                                             if sinal:
-                                                payout = all_profits.get(ativo, {}).get(tipo_mercado, 0) * 100
-                                                potential_trades.append({
-                                                    'ativo': ativo, 'tipo_op': tipo_mercado, 'payout': payout,
+                                                sinais_para_executar.append({
+                                                    'ativo': ativo_loop, 'tipo_op': tipo_mercado_loop, 'velas': velas,
                                                     'direcao': {'BUY': 'call', 'SELL': 'put'}.get(sinal),
                                                     'nome_estrategia': nome_estrategia
                                                 })
-                                                status_log.append(f"SINAL ENCONTRADO com {nome_estrategia}!")
-                                                signal_queue.put({"type": "analysis_update", "asset": ativo, "status_list": status_log})
-                                                break
-                                            else:
-                                                 status_log[-1] = f"{nome_estrategia}: Sem sinal."
-                                    if any('SINAL ENCONTRADO' in s for s in status_log): break
-                            if any('SINAL ENCONTRADO' in s for s in status_log): break
-                    
-                    if potential_trades:
-                        sinal_final = max(potential_trades, key=lambda x: x['payout'])
+                                                break 
+                                if len(sinais_para_executar) + active_trades_count >= 2: break
+                            if len(sinais_para_executar) + active_trades_count >= 2: break
                 
                 else: # MODO AGRESSIVO (PADRÃO)
-                    ativo, tipo_op, payout = obter_melhor_par(API, config['pay_minimo'])
-                    if ativo:
-                        signal_queue.put({"type": "analysis_update", "asset": ativo, "status_list": ["Analisando par..."]})
-                        velas = validar_e_limpar_velas(API.get_candles(ativo, 60, 150, time.time()))
-                        if velas and len(velas) >= 20 and not is_market_indecisive(velas, PARAMS):
-                            strategies_to_try = [('Pullback MQL', 'mql_pullback'), ('Fluxo', 'flow'), ('Padrões', 'patterns'), ('Rejeição', 'rejection_candle')]
-                            status_log = ["Analisando par..."]
-                            for nome, cod in strategies_to_try:
-                                status_log.append(f"Testando: {nome}...")
-                                signal_queue.put({"type": "analysis_update", "asset": ativo, "status_list": status_log})
-                                sinal = globals().get(f'strategy_{cod}')(velas, PARAMS)
-                                if sinal:
-                                    sinal_final = {
-                                        'ativo': ativo, 'tipo_op': tipo_op, 'payout': payout,
-                                        'direcao': {'BUY': 'call', 'SELL': 'put'}.get(sinal),
-                                        'nome_estrategia': nome
-                                    }
-                                    status_log.append(f"SINAL ENCONTRADO com {nome}!")
-                                    signal_queue.put({"type": "analysis_update", "asset": ativo, "status_list": status_log})
-                                    break
-                                else:
-                                    status_log[-1] = f"{nome}: Sem sinal."
-                            if not sinal_final:
-                                status_log.append("Nenhuma estratégia encontrou sinal.")
-                                signal_queue.put({"type": "analysis_update", "asset": ativo, "status_list": status_log})
-
-                if sinal_final:
+                    sorted_assets = obter_melhor_par(API, config['pay_minimo'])
+                    if sorted_assets:
+                        for ativo, details in sorted_assets:
+                            if len(sinais_para_executar) + active_trades_count >= 2: break
+                            velas = validar_e_limpar_velas(API.get_candles(ativo, 60, 150, time.time()))
+                            if velas and len(velas) >= 20 and not is_market_indecisive(velas, PARAMS):
+                                strategies_to_try = [('Pullback MQL', 'mql_pullback'), ('Fluxo', 'flow'), ('Padrões', 'patterns'), ('Rejeição', 'rejection_candle')]
+                                for nome, cod in strategies_to_try:
+                                    sinal = globals().get(f'strategy_{cod}')(velas, PARAMS)
+                                    if sinal:
+                                        sinais_para_executar.append({
+                                            'ativo': ativo, 'tipo_op': details['tipo'], 'velas': velas,
+                                            'direcao': {'BUY': 'call', 'SELL': 'put'}.get(sinal),
+                                            'nome_estrategia': nome
+                                        })
+                                        break
+                
+                # Executa os sinais encontrados até o limite
+                for sinal_info in sinais_para_executar:
+                    if state.active_trades >= 2: break
                     with state.lock:
-                        state.is_trading = True
-                    
-                    ativo = sinal_final['ativo']
-                    direcao_final = sinal_final['direcao']
-                    nome_estrategia_usada = sinal_final['nome_estrategia']
-                    tipo_op = sinal_final['tipo_op']
+                        state.active_trades += 1
                     
                     horario_analise_dt = dt_objeto.replace(second=0, microsecond=0)
                     horario_analise_str = horario_analise_dt.strftime('%H:%M')
                     horario_entrada_dt = horario_analise_dt + timedelta(minutes=1)
                     horario_entrada_str = horario_entrada_dt.strftime('%H:%M')
-                    log_success(f"SIGNAL FOUND: {direcao_final.upper()} on {ativo} for the {horario_entrada_str} candle")
+                    log_success(f"SIGNAL FOUND: {sinal_info['direcao'].upper()} on {sinal_info['ativo']} for the {horario_entrada_str} candle")
                     
                     target_entry_timestamp = (timestamp // 60 + 1) * 60
                     signal_id = str(uuid.uuid4())
-                    vela_sinal = velas[-1]
+                    vela_sinal = sinal_info['velas'][-1]
                     signal_payload = {
-                        "type": "signal", "signal_id": signal_id, "pair": ativo, "strategy": nome_estrategia_usada, "direction": direcao_final.upper(),
+                        "type": "signal", "signal_id": signal_id, "pair": sinal_info['ativo'], "strategy": sinal_info['nome_estrategia'], "direction": sinal_info['direcao'].upper(),
                         "entry_time": horario_entrada_str, "analysis_time": horario_analise_str, 
                         "candle": { "open": vela_sinal['open'], "close": vela_sinal['close'], "high": vela_sinal['high'], "low": vela_sinal['low'], "color": 'text-green-400' if vela_sinal['close'] > vela_sinal['open'] else 'text-red-400' },
                         "result": None, "gale_level": 0
                     }
                     state.signal_history[signal_id] = signal_payload
                     signal_queue.put(signal_payload)
-                    Thread(target=compra_thread, args=(API, ativo, config['valor_entrada'], direcao_final, config['expiracao'], tipo_op, state, config, cifrao, signal_id, target_entry_timestamp), daemon=True).start()
+                    Thread(target=compra_thread, args=(API, sinal_info['ativo'], config['valor_entrada'], sinal_info['direcao'], config['expiracao'], sinal_info['tipo_op'], state, config, cifrao, signal_id, target_entry_timestamp), daemon=True).start()
             
             time.sleep(0.2)
         
