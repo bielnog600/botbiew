@@ -449,8 +449,8 @@ def main_bot_logic(state):
         
         # Filtro de indecisão menos rigoroso
         'IndecisionCandles': 3,          # Analisa as últimas 3 velas
-        'IndecisionBodyMaxRatio': 0.15,  # Corpo tem que ser MUITO pequeno (15%) para ser indecisão
-        'IndecisionMinCount': 2          # Precisa de 2 (em vez de 3) velas de indecisão para parar
+        'IndecisionBodyMaxRatio': 0.05,  # Corpo tem que ser MUITO pequeno (15%) para ser indecisão
+        'IndecisionMinCount': 3          # Precisa de 2 (em vez de 3) velas de indecisão para parar
     }
     
     last_catalog_time = 0
