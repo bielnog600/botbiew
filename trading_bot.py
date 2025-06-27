@@ -389,7 +389,7 @@ def is_trade_confirmed_by_previous_candle(sinal, vela_anterior, p):
     if sinal == 'BUY':
         # Rejeita se a vela anterior for de baixa ou tiver um grande pavio superior
         if vela_anterior['close'] < vela_anterior['open']: return False
-        if pavio_superior > corpo * p.get('ConfirmationMaxOppositeWickRatio', 1.5): return False
+        if pavio_superior > corpo * p.get('ConfirmationMaxOppositeWickRatio', 0.2): return False
     
     if sinal == 'SELL':
         # Rejeita se a vela anterior for de alta ou tiver um grande pavio inferior
