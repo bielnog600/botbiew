@@ -43,15 +43,16 @@ except ImportError:
 
         def get_all_open_time(self):
             return {
-                'binary': {'EURUSD': {'open': True}, 'GBPUSD': {'open': True}},
-                'turbo': {'EURUSD-TURBO': {'open': True}}
+                'binary': {'EURUSD-op': {'open': True}, 'GBPUSD': {'open': True}},
+                'turbo': {'EURUSD-TURBO': {'open': True}, 'EURGBP-OTC': {'open': True}}
             }
 
         def get_all_profit(self):
             return {
                 'EURUSD': {'binary': 0.85, 'turbo': 0.90},
                 'GBPUSD': {'binary': 0.82},
-                'EURUSD-TURBO': {'turbo': 0.92}
+                'EURUSD-TURBO': {'turbo': 0.92},
+                'EURGBP-OTC': {'binary': 0.88}
             }
 
         def get_candles(self, active, interval, count, endtime):
@@ -107,7 +108,7 @@ def exibir_banner():
       ██║   ██╔══██╗██║██╔══██║██║         ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║   ██║   ██║
       ██║   ██║  ██║██║██║  ██║███████╗     ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝   ██║
       ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝      ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝    ╚═╝ '''+y+'''
-              azkzero@gmail.com - v10 (Correção de Sintaxe)
+              azkzero@gmail.com - v11 (Normalização de Ativos)
     ''')
     print(y + "*"*88)
     print(c + "="*88)
@@ -189,6 +190,11 @@ def start_websocket_server_sync(bot_state):
 
 
 # --- Logic and Strategy Functions ---
+
+# NOVA FUNÇÃO: Normaliza o nome do ativo para criar uma chave consistente
+def normalize_asset(name):
+    return name.replace('-OTC', '').replace('-op', '').replace('-OP', '')
+
 def validar_e_limpar_velas(velas_raw):
     if not velas_raw: return []
     velas_limpas = []
@@ -209,12 +215,12 @@ def catalogar_estrategias(api, state, params):
                 if info.get('open', False) and ativo not in ativos_abertos: ativos_abertos.append(ativo)
     if not ativos_abertos: log_error("No open currency pairs found to catalog."); return
     log_info(f"Found {len(ativos_abertos)} open pairs for analysis.")
-    for ativo in ativos_abertos:
+    for ativo_original in ativos_abertos:
         try:
-            log_info(f"\n--- Analyzing pair: {w}{ativo}{c} ---")
-            velas_historicas_raw = api.get_candles(ativo, 60, 240, time.time())
+            log_info(f"\n--- Analyzing pair: {w}{ativo_original}{c} ---")
+            velas_historicas_raw = api.get_candles(ativo_original, 60, 240, time.time())
             todas_as_velas = validar_e_limpar_velas(velas_historicas_raw)
-            if not todas_as_velas or len(todas_as_velas) < 100: log_warning(f"Could not get enough historical data for {ativo}."); continue
+            if not todas_as_velas or len(todas_as_velas) < 100: log_warning(f"Could not get enough historical data for {ativo_original}."); continue
             resultados = {nome: {'win': 0, 'loss': 0} for nome in TODAS_AS_ESTRATEGIAS.values()}
             for i in range(50, len(todas_as_velas) - 1):
                 velas_atuais = todas_as_velas[:i]; vela_sinal = velas_atuais[-1]; vela_resultado = todas_as_velas[i]
@@ -232,15 +238,17 @@ def catalogar_estrategias(api, state, params):
                 if total > 1: 
                     assertividade = (res['win'] / total) * 100
                     performance_do_par[nome] = assertividade
-                    log_info(f"  -> Strategy '{nome}' for {ativo}: {assertividade:.2f}% accuracy ({res['win']}W / {res['loss']}L)")
+                    log_info(f"  -> Strategy '{nome}' for {ativo_original}: {assertividade:.2f}% accuracy ({res['win']}W / {res['loss']}L)")
                 else:
                     msg = f"Amostra muito pequena para '{nome}' ({total} sinais). Ignorando."
                     log_warning(f"  -> {msg}")
-                    log_payload = {"type": "log", "data": {"level": "warning", "message": msg, "pair": ativo}}
+                    log_payload = {"type": "log", "data": {"level": "warning", "message": msg, "pair": ativo_original}}
                     signal_queue.put(log_payload)
             if performance_do_par:
-                state.strategy_performance[ativo] = performance_do_par
-        except Exception as e: log_error(f"An error occurred while analyzing the pair {ativo}: {e}"); traceback.print_exc()
+                # Usa o nome normalizado como chave do dicionário
+                normalized_name = normalize_asset(ativo_original)
+                state.strategy_performance[normalized_name] = performance_do_par
+        except Exception as e: log_error(f"An error occurred while analyzing the pair {ativo_original}: {e}"); traceback.print_exc()
     log_info("="*40); log_info("CATALOGING FINISHED!"); log_info("="*40); time.sleep(5)
 
 def sma_slope(closes, period):
@@ -504,33 +512,36 @@ def main_bot_logic(state):
                     all_profits = API.get_all_profit()
                     for tipo_mercado in ['binary', 'turbo']:
                         if tipo_mercado in open_assets:
-                            for ativo, info in open_assets[tipo_mercado].items():
-                                if info.get('open', False) and ativo in state.strategy_performance:
-                                    velas = validar_e_limpar_velas(API.get_candles(ativo, 60, 150, time.time()))
+                            for ativo_original, info in open_assets[tipo_mercado].items():
+                                # Usa o nome normalizado para verificar na memória
+                                normalized_name = normalize_asset(ativo_original)
+                                if info.get('open', False) and normalized_name in state.strategy_performance:
+                                    velas = validar_e_limpar_velas(API.get_candles(ativo_original, 60, 150, time.time()))
                                     
                                     if not velas or len(velas) < 20: continue
                                     
-                                    #if is_market_indecisive(velas, PARAMS):
-                                        #msg = "MERCADO CONSIDERADO INDECISO. Análise descartada."
-                                        #log_warning(f"-> {ativo}: {msg}")
-                                        #log_payload = {"type": "log", "data": {"level": "warning", "message": msg, "pair": ativo}}
-                                        #signal_queue.put(log_payload)
-                                        #continue
-
-                                    for nome_estrategia, assertividade in state.strategy_performance[ativo].items():
-                                        if assertividade >= 25: 
+                                    if is_market_indecisive(velas, PARAMS):
+                                        msg = "MERCADO CONSIDERADO INDECISO. Análise descartada."
+                                        log_warning(f"-> {ativo_original}: {msg}")
+                                        log_payload = {"type": "log", "data": {"level": "warning", "message": msg, "pair": ativo_original}}
+                                        signal_queue.put(log_payload)
+                                        continue
+                                    
+                                    # Busca as estratégias aprovadas para o nome normalizado
+                                    for nome_estrategia, assertividade in state.strategy_performance[normalized_name].items():
+                                        if assertividade >= 45: 
                                             cod_map = {'Pullback MQL': 'mql_pullback', 'Fluxo': 'flow', 'Padrões': 'patterns', 'Rejeição': 'rejection_candle'}
                                             cod_est = next((cod for cod, nome in cod_map.items() if nome == nome_estrategia), None)
                                             if not cod_est: continue
                                             
                                             sinal = globals().get(f'strategy_{cod_est}')(velas, PARAMS)
                                             if sinal:
-                                                payout = all_profits.get(ativo, {}).get(tipo_mercado, 0) * 100
-                                                potential_trades.append({'ativo': ativo, 'tipo_op': tipo_mercado, 'velas': velas, 'payout': payout, 'direcao': {'BUY': 'call', 'SELL': 'put'}.get(sinal), 'nome_estrategia': nome_estrategia, 'assertividade': assertividade})
+                                                payout = all_profits.get(ativo_original, {}).get(tipo_mercado, 0) * 100
+                                                potential_trades.append({'ativo': ativo_original, 'tipo_op': tipo_mercado, 'velas': velas, 'payout': payout, 'direcao': {'BUY': 'call', 'SELL': 'put'}.get(sinal), 'nome_estrategia': nome_estrategia, 'assertividade': assertividade})
                                             else:
                                                 msg = f"Estratégia '{nome_estrategia}' ({assertividade:.2f}%) checada, mas sem sinal."
-                                                log_info(f"-> {ativo}: {msg}")
-                                                log_payload = {"type": "log", "data": {"level": "info", "message": msg, "pair": ativo}}
+                                                log_info(f"-> {ativo_original}: {msg}")
+                                                log_payload = {"type": "log", "data": {"level": "info", "message": msg, "pair": ativo_original}}
                                                 signal_queue.put(log_payload)
                     
                     if potential_trades:
@@ -546,7 +557,6 @@ def main_bot_logic(state):
                                 break
                             velas = validar_e_limpar_velas(API.get_candles(ativo, 60, 150, time.time()))
                             if velas and len(velas) >= 20 and not is_market_indecisive(velas, PARAMS):
-                                # CORREÇÃO DE SINTAXE APLICADA AQUI
                                 strategies_to_try = [('Pullback MQL', 'mql_pullback'), ('Fluxo', 'flow'), ('Padrões', 'patterns'), ('Rejeição', 'rejection_candle')]
                                 for nome, cod in strategies_to_try:
                                     sinal = globals().get(f'strategy_{cod}')(velas, PARAMS)
