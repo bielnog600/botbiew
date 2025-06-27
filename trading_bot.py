@@ -107,7 +107,7 @@ def exibir_banner():
       ██║   ██╔══██╗██║██╔══██║██║         ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║   ██║   ██║
       ██║   ██║  ██║██║██║  ██║███████╗     ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝   ██║
       ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝      ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝    ╚═╝ '''+y+'''
-              azkzero@gmail.com - v3 com Logs no Frontend
+              azkzero@gmail.com - v4 com Logs no Frontend (Corrigido)
     ''')
     print(y + "*"*88)
     print(c + "="*88)
@@ -136,22 +136,38 @@ class WebSocketServer:
                 connected_clients.discard(websocket)
             log_warning(f"WebSocket client disconnected: {websocket.remote_address}")
 
+# CORREÇÃO APLICADA AQUI
 async def broadcast_signals():
     while True:
         try:
             signal_data = signal_queue.get_nowait()
+            message_to_send = json.dumps(signal_data)
+            
             with clients_lock:
+                if not connected_clients:
+                    continue
                 clients_to_send = list(connected_clients)
-            if clients_to_send:
-                message = json.dumps(signal_data)
-                if signal_data.get("type") != "log": # Don't flood console with log broadcasts
-                    log_info(f"Broadcasting message to {len(clients_to_send)} client(s): {message[:150]}...")
-                tasks = [client.send(message) for client in clients_to_send]
-                await asyncio.gather(*tasks, return_exceptions=True)
+
+            # Log de confirmação de envio
+            if signal_data.get("type") == "log":
+                log_info(f"Broadcasting LOG to {len(clients_to_send)} client(s)...")
+            else:
+                log_info(f"Broadcasting message to {len(clients_to_send)} client(s): {message_to_send[:150]}...")
+
+            # Envia a mensagem para todos os clientes conectados
+            tasks = [client.send(message_to_send) for client in clients_to_send]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # Opcional: verifica se houve erros durante o envio para algum cliente específico
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    log_error(f"Failed to send to client {clients_to_send[i].remote_address}: {result}")
+
         except queue.Empty:
             await asyncio.sleep(0.1)
         except Exception as e:
             log_error(f"Error in WebSocket broadcast: {e}")
+
 
 def start_websocket_server_sync(bot_state):
     loop = asyncio.new_event_loop()
@@ -224,7 +240,6 @@ def catalogar_estrategias(api, state, params):
                 else:
                     msg = f"Amostra muito pequena para '{nome}' ({total} sinais). Ignorando."
                     log_warning(f"  -> {msg}")
-                    # NOVO: Envia log para o frontend
                     log_payload = {"type": "log", "data": {"level": "warning", "message": msg, "pair": ativo}}
                     signal_queue.put(log_payload)
             if performance_do_par:
@@ -393,7 +408,6 @@ def obter_melhor_par(api, payout_minimo):
     if not ativos: 
         msg = f"Nenhum ativo encontrado com payout >= {payout_minimo}%. Verifique a corretora ou o valor mínimo."
         log_error(msg)
-        # NOVO: Envia log para o frontend
         log_payload = {"type": "log", "data": {"level": "error", "message": msg, "pair": "Sistema"}}
         signal_queue.put(log_payload)
         return None
@@ -495,7 +509,6 @@ def main_bot_logic(state):
                                     if is_market_indecisive(velas, PARAMS):
                                         msg = "MERCADO CONSIDERADO INDECISO. Análise descartada."
                                         log_warning(f"-> {ativo}: {msg}")
-                                        # NOVO: Envia log para o frontend
                                         log_payload = {"type": "log", "data": {"level": "warning", "message": msg, "pair": ativo}}
                                         signal_queue.put(log_payload)
                                         continue
@@ -513,7 +526,6 @@ def main_bot_logic(state):
                                             else:
                                                 msg = f"Estratégia '{nome_estrategia}' ({assertividade:.2f}%) checada, mas sem sinal."
                                                 log_info(f"-> {ativo}: {msg}")
-                                                # NOVO: Envia log para o frontend
                                                 log_payload = {"type": "log", "data": {"level": "info", "message": msg, "pair": ativo}}
                                                 signal_queue.put(log_payload)
                     
