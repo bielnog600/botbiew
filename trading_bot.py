@@ -107,7 +107,7 @@ def exibir_banner():
       ██║   ██╔══██╗██║██╔══██║██║         ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║   ██║   ██║
       ██║   ██║  ██║██║██║  ██║███████╗     ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝   ██║
       ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝      ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝    ╚═╝ '''+y+'''
-              azkzero@gmail.com - Versão com Diagnóstico Avançado
+              azkzero@gmail.com - v3 com Logs no Frontend
     ''')
     print(y + "*"*88)
     print(c + "="*88)
@@ -144,7 +144,8 @@ async def broadcast_signals():
                 clients_to_send = list(connected_clients)
             if clients_to_send:
                 message = json.dumps(signal_data)
-                log_info(f"Broadcasting message to {len(clients_to_send)} client(s): {message[:150]}...")
+                if signal_data.get("type") != "log": # Don't flood console with log broadcasts
+                    log_info(f"Broadcasting message to {len(clients_to_send)} client(s): {message[:150]}...")
                 tasks = [client.send(message) for client in clients_to_send]
                 await asyncio.gather(*tasks, return_exceptions=True)
         except queue.Empty:
@@ -216,13 +217,16 @@ def catalogar_estrategias(api, state, params):
             performance_do_par = {}
             for nome, res in resultados.items():
                 total = res['win'] + res['loss']
-                # SUGESTÃO DE DIAGNÓSTICO 1.2 APLICADA
-                if total > 3: # Regra um pouco mais flexível que 5
+                if total > 3: 
                     assertividade = (res['win'] / total) * 100
                     performance_do_par[nome] = assertividade
                     log_info(f"  -> Strategy '{nome}' for {ativo}: {assertividade:.2f}% accuracy ({res['win']}W / {res['loss']}L)")
                 else:
-                    log_warning(f"  -> Strategy '{nome}' for {ativo}: Amostra muito pequena ({total} sinais). Ignorando.")
+                    msg = f"Amostra muito pequena para '{nome}' ({total} sinais). Ignorando."
+                    log_warning(f"  -> {msg}")
+                    # NOVO: Envia log para o frontend
+                    log_payload = {"type": "log", "data": {"level": "warning", "message": msg, "pair": ativo}}
+                    signal_queue.put(log_payload)
             if performance_do_par:
                 state.strategy_performance[ativo] = performance_do_par
         except Exception as e: log_error(f"An error occurred while analyzing the pair {ativo}: {e}"); traceback.print_exc()
@@ -341,37 +345,37 @@ def compra_thread(api, ativo, valor, direcao, expiracao, tipo_op, state, config,
                 gale_payload = {"type": "gale", "signal_id": signal_id, "gale_level": i}
                 signal_queue.put(gale_payload)
                 if signal_id in state.signal_history: state.signal_history[signal_id]["gale_level"] = i
-            gale_info = f"(Gale {i})" if i > 0 else "(Main Entry)"; log_info(f"ORDER {gale_info}: {ativo} | {cifrao}{entrada_atual:.2f} | {direcao_atual.upper()} | {expiracao}M")
+            gale_info = f"(Gale {i})" if i > 0 else "(Entrada Principal)"; log_info(f"ORDEM {gale_info}: {ativo} | {cifrao}{entrada_atual:.2f} | {direcao_atual.upper()} | {expiracao}M")
             if tipo_op == 'digital': check, id_ordem = api.buy_digital_spot(ativo, entrada_atual, direcao_atual, expiracao)
             else: check, id_ordem = api.buy(entrada_atual, ativo, direcao_atual, expiracao)
-            if not check: log_error(f"Failed to open order in Gale {i}."); resultado_final = "ERROR"; break
+            if not check: log_error(f"Falha ao abrir ordem no Gale {i}."); resultado_final = "ERROR"; break
             resultado, status_encontrado = 0.0, False; tempo_limite = time.time() + expiracao * 60 + 15
             while time.time() < tempo_limite:
                 status, lucro = api.check_win_v4(id_ordem)
                 if status: resultado, status_encontrado = lucro, True; break
                 time.sleep(0.5)
-            if not status_encontrado: log_error(f"Timeout on order {id_ordem}."); resultado_final = "ERROR"; break
+            if not status_encontrado: log_error(f"Timeout na ordem {id_ordem}."); resultado_final = "ERROR"; break
             if resultado > 0:
-                log_success(f"RESULT: WIN {gale_info} | Profit: {cifrao}{resultado:.2f}")
+                log_success(f"RESULTADO: WIN {gale_info} | Lucro: {cifrao}{resultado:.2f}")
                 with state.lock:
                     state.win_count += 1
                     if i > 0: state.gale_wins[f'g{i}'] += 1
                 resultado_final = 'WIN'; break
             elif resultado < 0:
-                log_error(f"RESULT: LOSS {gale_info} | Loss: {cifrao}{abs(resultado):.2f}")
+                log_error(f"RESULTADO: LOSS {gale_info} | Perda: {cifrao}{abs(resultado):.2f}")
                 if i < niveis_mg: entrada_atual *= config['mg_fator']
                 else:
                     with state.lock: state.loss_count += 1
                     resultado_final = 'LOSS'
             else:
-                log_warning(f"RESULT: DRAW {gale_info}.")
-                if i < niveis_mg: log_info("Re-entering after a draw...")
+                log_warning(f"RESULTADO: EMPATE {gale_info}.")
+                if i < niveis_mg: log_info("Re-entrando após empate...")
                 else: resultado_final = 'DRAW'
         if resultado_final and resultado_final != "ERROR" and signal_id in state.signal_history:
             state.signal_history[signal_id]["result"] = resultado_final
             placar_payload = { "type": "result", "signal_id": signal_id, "result": resultado_final, "placar": { "wins": state.win_count, "losses": state.loss_count, "gale_wins": sum(state.gale_wins.values()) } }
             signal_queue.put(placar_payload)
-    except Exception as e: log_error(f"CRITICAL ERROR IN PURCHASE THREAD: {e}"); traceback.print_exc()
+    except Exception as e: log_error(f"ERRO CRÍTICO NA THREAD DE COMPRA: {e}"); traceback.print_exc()
     finally:
         with state.lock: state.active_trades -= 1
 
@@ -386,13 +390,15 @@ def obter_melhor_par(api, payout_minimo):
                         if payout >= payout_minimo:
                             if ativo not in ativos or payout > ativos[ativo]['payout']: ativos[ativo] = {'payout': payout, 'tipo': 'digital' if tipo_mercado == 'digital' else 'turbo'}
                     except Exception: continue
-    # SUGESTÃO DE DIAGNÓSTICO 4 APLICADA
     if not ativos: 
-        log_error(f"Nenhum ativo encontrado com payout >= {payout_minimo}%. Verifique a corretora ou o valor mínimo.")
+        msg = f"Nenhum ativo encontrado com payout >= {payout_minimo}%. Verifique a corretora ou o valor mínimo."
+        log_error(msg)
+        # NOVO: Envia log para o frontend
+        log_payload = {"type": "log", "data": {"level": "error", "message": msg, "pair": "Sistema"}}
+        signal_queue.put(log_payload)
         return None
     
     sorted_assets = sorted(ativos.items(), key=lambda item: item[1]['payout'], reverse=True)
-    # CORREÇÃO DE ERRO DE SINTAXE (f-string)
     payout_list_str = ", ".join([f"{ativo}({details['payout']:.0f}%)" for ativo, details in sorted_assets])
     log_info(f"Ativos com bom payout encontrados: {payout_list_str}")
     return sorted_assets
@@ -402,29 +408,28 @@ def main_bot_logic(state):
     email = os.getenv('EXNOVA_EMAIL', 'test@example.com')
     senha = os.getenv('EXNOVA_PASSWORD', 'password')
     if not email or not senha:
-        log_error("Environment variables EXNOVA_EMAIL and EXNOVA_PASSWORD not set.")
+        log_error("Variáveis de ambiente EXNOVA_EMAIL e EXNOVA_PASSWORD não definidas.")
         sys.exit(1)
 
     config = get_config_from_env()
     API = Exnova(email, senha)
-    log_info("Attempting to connect to Exnova...")
+    log_info("Tentando conectar à Exnova...")
     check, reason = API.connect()
     if not check:
-        log_error(f"Connection failed: {reason}")
+        log_error(f"Falha na conexão: {reason}")
         sys.exit(1)
 
-    log_success("Connection established successfully!")
+    log_success("Conexão estabelecida com sucesso!")
     API.change_balance(config['conta'])
     cifrao = "$"
     try:
         perfil = API.get_profile_ansyc()
         cifrao = perfil.get('currency_char', '$')
-        log_info(f"Hello, {perfil.get('name', 'User')}! Bot starting in server mode.")
+        log_info(f"Olá, {perfil.get('name', 'User')}! Iniciando bot em modo servidor.")
     except Exception as e:
-        log_warning(f"Could not get user profile. Error: {e}")
-        log_info(f"Hello! Bot starting in server mode.")
+        log_warning(f"Não foi possível obter o perfil do usuário. Erro: {e}")
+        log_info(f"Olá! Iniciando bot em modo servidor.")
     
-    # SUGESTÃO DE DIAGNÓSTICO 2 APLICADA
     PARAMS = { 
         'MAPeriod': 5, 'MaxLevels': 10, 'Proximity': 10.0, 'Point': 1e-6, 
         'FlowBodyMinRatio': 0.4, 'FlowOppositeWickMaxRatio': 0.45, 
@@ -438,7 +443,7 @@ def main_bot_logic(state):
         last_catalog_time = time.time()
 
     minuto_anterior, analise_feita = -1, False
-    log_info("Bot started. Entering analysis loop...")
+    log_info("Bot iniciado. Entrando no loop de análise...")
 
     while not state.stop:
         try:
@@ -448,13 +453,13 @@ def main_bot_logic(state):
                 with state.lock:
                     is_trading_check = state.active_trades > 0
                 if not is_trading_check:
-                    log_info("="*50); log_info("PERIODIC RE-CATALOGING (4H) INITIATED"); log_info("="*50)
+                    log_info("="*50); log_info("RECATALOGAÇÃO PERIÓDICA (4H) INICIADA"); log_info("="*50)
                     signal_queue.put({"type": "analysis_status", "status": "Recatalogando estratégias (4h)..."})
                     catalogar_estrategias(API, state, PARAMS)
                     last_catalog_time = time.time()
-                    log_info("="*50); log_info("PERIODIC RE-CATALOGING FINISHED"); log_info("="*50)
+                    log_info("="*50); log_info("RECATALOGAÇÃO PERIÓDICA FINALIZADA"); log_info("="*50)
                 else:
-                    log_warning("Re-cataloging postponed: trade in progress.")
+                    log_warning("Recatalogação adiada: operação em andamento.")
 
             timestamp = time.time()
             dt_objeto = datetime.fromtimestamp(timestamp)
@@ -487,9 +492,12 @@ def main_bot_logic(state):
                                     
                                     if not velas or len(velas) < 20: continue
                                     
-                                    # SUGESTÃO DE DIAGNÓSTICO 1.1 APLICADA
                                     if is_market_indecisive(velas, PARAMS):
-                                        log_warning(f"-> {ativo}: MERCADO CONSIDERADO INDECISO. Análise descartada.")
+                                        msg = "MERCADO CONSIDERADO INDECISO. Análise descartada."
+                                        log_warning(f"-> {ativo}: {msg}")
+                                        # NOVO: Envia log para o frontend
+                                        log_payload = {"type": "log", "data": {"level": "warning", "message": msg, "pair": ativo}}
+                                        signal_queue.put(log_payload)
                                         continue
 
                                     for nome_estrategia, assertividade in state.strategy_performance[ativo].items():
@@ -502,11 +510,13 @@ def main_bot_logic(state):
                                             if sinal:
                                                 payout = all_profits.get(ativo, {}).get(tipo_mercado, 0) * 100
                                                 potential_trades.append({'ativo': ativo, 'tipo_op': tipo_mercado, 'velas': velas, 'payout': payout, 'direcao': {'BUY': 'call', 'SELL': 'put'}.get(sinal), 'nome_estrategia': nome_estrategia, 'assertividade': assertividade})
-                                            # SUGESTÃO DE DIAGNÓSTICO 1.3 APLICADA
                                             else:
-                                                log_info(f"-> {ativo}: Estratégia '{nome_estrategia}' ({assertividade:.2f}%) foi checada, mas não gerou sinal agora.")
+                                                msg = f"Estratégia '{nome_estrategia}' ({assertividade:.2f}%) checada, mas sem sinal."
+                                                log_info(f"-> {ativo}: {msg}")
+                                                # NOVO: Envia log para o frontend
+                                                log_payload = {"type": "log", "data": {"level": "info", "message": msg, "pair": ativo}}
+                                                signal_queue.put(log_payload)
                     
-                    # SUGESTÃO DE DIAGNÓSTICO 3 APLICADA
                     if potential_trades:
                         log_success(f"ENCONTRADOS {len(potential_trades)} SINAIS VÁLIDOS. Priorizando os melhores...")
                         sorted_trades = sorted(potential_trades, key=lambda x: (x['assertividade'], x['payout']), reverse=True)
@@ -540,7 +550,7 @@ def main_bot_logic(state):
                     horario_analise_str = horario_analise_dt.strftime('%H:%M')
                     horario_entrada_dt = horario_analise_dt + timedelta(minutes=1)
                     horario_entrada_str = horario_entrada_dt.strftime('%H:%M')
-                    log_success(f"SIGNAL FOUND: {sinal_info['direcao'].upper()} on {sinal_info['ativo']} for the {horario_entrada_str} candle")
+                    log_success(f"SINAL ENCONTRADO: {sinal_info['direcao'].upper()} em {sinal_info['ativo']} para a vela das {horario_entrada_str}")
                     
                     target_entry_timestamp = (timestamp // 60 + 1) * 60
                     signal_id = str(uuid.uuid4())
@@ -558,9 +568,9 @@ def main_bot_logic(state):
             time.sleep(0.2)
         
         except Exception as e:
-            log_error(f"UNHANDLED ERROR IN MAIN LOOP: {e}")
+            log_error(f"ERRO NÃO TRATADO NO LOOP PRINCIPAL: {e}")
             traceback.print_exc()
-            log_warning("Waiting 10 seconds before continuing...")
+            log_warning("Aguardando 10 segundos antes de continuar...")
             time.sleep(10)
 
 def main():
@@ -571,13 +581,13 @@ def main():
     try:
         main_bot_logic(bot_state)
     except KeyboardInterrupt:
-        log_warning("\nBot interrupted by user.")
+        log_warning("\nBot interrompido pelo usuário.")
     except Exception as e:
-        log_error(f"Fatal error starting the bot: {e}")
+        log_error(f"Erro fatal ao iniciar o bot: {e}")
         traceback.print_exc()
     finally:
         bot_state.stop = True
-        log(b, "Shutting down the bot...")
+        log(b, "Desligando o bot...")
         time.sleep(2)
         sys.exit()
 
