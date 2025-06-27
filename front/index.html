@@ -23,6 +23,10 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     
     <style>
+        html, body, #root {
+            height: 100%;
+            overflow: hidden; /* Impede o scroll no corpo da página */
+        }
         body { 
             font-family: 'Poppins', sans-serif; 
             background-color: #0a0a0a; 
@@ -44,17 +48,38 @@
         .form-input { color: white !important; background-color: #1f2937 !important; }
         input[type="number"] { -moz-appearance: textfield; }
         input::-webkit-outer-spin-button, input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-        @keyframes log-enter { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
-        .log-item { animation: log-enter 0.3s ease-out; }
+        
+        @keyframes log-slide-in {
+            from {
+                opacity: 0;
+                transform: translateY(15px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        .log-item-enter {
+            animation: log-slide-in 0.4s ease-out forwards;
+        }
+
+        /* CSS PARA ESCONDER A SCROLLBAR */
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;  /* IE and Edge */
+            scrollbar-width: none;  /* Firefox */
+        }
     </style>
 </head>
-<body class="p-4 sm:p-6 lg:p-8">
+<body>
     <div id="root"></div>
 
     <script type="text/babel">
         const { useState, useEffect, useCallback, useMemo, useRef, Component } = React;
         
-        const BOT_UTC_OFFSET = "-00:00"; // Assume o horário do bot como UTC
+        const BOT_UTC_OFFSET = "-00:00";
         const WEBSOCKET_URL = 'wss://botexnova.marombiew.com';
 
         function convertTimeToUserTimezone(timeString) {
@@ -63,7 +88,7 @@
                 const todayStr = new Date().toISOString().slice(0, 10);
                 const fullDateTimeString = `${todayStr}T${timeString}:00${BOT_UTC_OFFSET}`;
                 const dateObj = new Date(fullDateTimeString);
-                if (isNaN(dateObj)) return timeString; // Retorna original se a data for inválida
+                if (isNaN(dateObj)) return timeString;
                 return dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
             } catch (e) {
                 console.error("Erro ao converter hora:", e);
@@ -86,22 +111,22 @@
             }
         }
 
-        const Header = () => (<header className="flex flex-col sm:flex-row justify-between items-center mb-8 gap-6"><h1 className="text-3xl font-bold text-white"><i className="fa-solid fa-robot text-teal-400"></i> MAROMBIEW <span className="text-teal-400">BOT</span></h1></header>);
+        const Header = () => (<header className="flex flex-col sm:flex-row justify-between items-center gap-6"><h1 className="text-3xl font-bold text-white"><i className="fa-solid fa-robot text-teal-400"></i> MAROMBIEW <span className="text-teal-400">BOT</span></h1></header>);
         const TabButton = ({ icon, label, isActive, onClick }) => (<button onClick={onClick} className={`flex flex-col items-center gap-1 w-24 py-2 rounded-lg transition-all duration-200 ${isActive ? 'text-teal-400 bg-teal-500/10' : 'text-gray-400 hover:bg-gray-700/50'}`}><i className={`${icon} text-xl`}></i><span className="text-xs font-semibold">{label}</span></button>);
-        const TabBar = ({ activeTab, setActiveTab }) => (<nav className="fixed bottom-0 left-0 right-0 z-50 lg:relative lg:bottom-auto lg:left-auto lg:right-auto bg-gray-900/80 backdrop-blur-sm lg:bg-transparent lg:backdrop-filter-none border-t border-gray-700 lg:border-none p-2 lg:p-0 lg:mb-8"><div className="flex justify-around lg:justify-center lg:gap-6 max-w-md mx-auto lg:max-w-none"><TabButton icon="fa-solid fa-house" label="Home" isActive={activeTab === 'home'} onClick={() => setActiveTab('home')} /><TabButton icon="fa-solid fa-chart-pie" label="Relatórios" isActive={activeTab === 'reports'} onClick={() => setActiveTab('reports')} /><TabButton icon="fa-solid fa-shield-halved" label="Gerenciamento" isActive={activeTab === 'risk'} onClick={() => setActiveTab('risk')} /></div></nav>);
+        const TabBar = ({ activeTab, setActiveTab }) => (<nav className="w-full lg:mb-4"><div className="flex justify-around lg:justify-center lg:gap-6 max-w-md mx-auto lg:max-w-none glass-card p-2 rounded-xl lg:bg-transparent lg:p-0 lg:glass-card-none"><TabButton icon="fa-solid fa-house" label="Home" isActive={activeTab === 'home'} onClick={() => setActiveTab('home')} /><TabButton icon="fa-solid fa-chart-pie" label="Relatórios" isActive={activeTab === 'reports'} onClick={() => setActiveTab('reports')} /><TabButton icon="fa-solid fa-shield-halved" label="Gerenciamento" isActive={activeTab === 'risk'} onClick={() => setActiveTab('risk')} /></div></nav>);
 
         const Scoreboard = ({ scoreboard }) => {
             const animateScore = (ref, value) => { if (ref.current && ref.current.textContent !== String(value)) { ref.current.classList.add('score-updated'); setTimeout(() => ref.current.classList.remove('score-updated'), 300); }};
             const winsRef = useRef(); useEffect(() => animateScore(winsRef, scoreboard.wins), [scoreboard.wins]);
             const lossesRef = useRef(); useEffect(() => animateScore(lossesRef, scoreboard.losses), [scoreboard.losses]);
             const galesRef = useRef(); useEffect(() => animateScore(galesRef, scoreboard.gale_wins), [scoreboard.gale_wins]);
-            return (<div className="grid grid-cols-3 gap-4 w-full glass-card p-3 rounded-xl mb-6"><div className="text-center px-2"><p className="text-sm font-semibold text-green-400">WINS</p><p ref={winsRef} className="text-2xl font-bold font-mono">{scoreboard.wins}</p></div><div className="text-center px-2"><p className="text-sm font-semibold text-red-400">LOSS</p><p ref={lossesRef} className="text-2xl font-bold font-mono">{scoreboard.losses}</p></div><div className="text-center px-2"><p className="text-sm font-semibold text-amber-400">GALE WINS</p><p ref={galesRef} className="text-2xl font-bold font-mono">{scoreboard.gale_wins}</p></div></div>);
+            return (<div className="grid grid-cols-3 gap-4 w-full glass-card p-3 rounded-xl"><div className="text-center px-2"><p className="text-sm font-semibold text-green-400">WINS</p><p ref={winsRef} className="text-2xl font-bold font-mono">{scoreboard.wins}</p></div><div className="text-center px-2"><p className="text-sm font-semibold text-red-400">LOSSES</p><p ref={lossesRef} className="text-2xl font-bold font-mono">{scoreboard.losses}</p></div><div className="text-center px-2"><p className="text-sm font-semibold text-amber-400">GALE WINS</p><p ref={galesRef} className="text-2xl font-bold font-mono">{scoreboard.gale_wins}</p></div></div>);
         };
         
-        // COMPONENTE ATUALIZADO
         const LogFeed = React.memo(({ logs }) => {
             const getIcon = (level) => {
                 switch(level) {
+                    case 'success': return 'fa-solid fa-check-circle text-teal-400';
                     case 'warning': return 'fa-solid fa-triangle-exclamation text-amber-400';
                     case 'error': return 'fa-solid fa-circle-xmark text-red-500';
                     case 'info':
@@ -109,11 +134,12 @@
                 }
             };
             return (
-                <div className="glass-card rounded-2xl p-4 flex flex-col text-center h-full min-h-[280px] card-enter-animation">
-                    <h3 className="text-xl font-bold text-white mb-3 text-left flex items-center gap-2"><i className="fa-solid fa-terminal"></i>Terminal do Bot</h3>
-                    <div className="bg-gray-900/50 rounded-lg p-3 w-full text-left flex-grow font-mono text-sm space-y-2 overflow-y-auto">
+                <div className="glass-card rounded-2xl p-4 flex flex-col text-center h-[340px] card-enter-animation">
+                    <h3 className="text-xl font-bold text-white mb-3 text-left flex items-center gap-2 flex-shrink-0"><i className="fa-solid fa-terminal"></i>Terminal do Bot</h3>
+                    <div className="bg-gray-900/50 rounded-lg p-3 w-full text-left flex-grow font-mono text-sm space-y-2 overflow-y-auto flex flex-col-reverse no-scrollbar">
+                        <div>
                         {logs.map((log, index) => (
-                            <div key={index} className="flex items-start gap-2 log-item">
+                            <div key={log.id} className="flex items-start gap-2 log-item-enter">
                                 <i className={`${getIcon(log.level)} mt-1`}></i>
                                 <p className="flex-1">
                                     <span className="font-bold mr-2 text-gray-400">{log.pair}:</span>
@@ -121,6 +147,7 @@
                                 </p>
                             </div>
                         ))}
+                        </div>
                     </div>
                 </div>
             );
@@ -145,11 +172,14 @@
                 const isWin = signal.result === 'WIN'; const resultColor = isWin ? 'text-green-400' : 'text-red-400'; const resultIcon = isWin ? 'fa-solid fa-trophy' : 'fa-solid fa-shield-halved'; const resultBg = isWin ? 'bg-green-500/10 border-green-500/30' : 'bg-red-500/10 border-red-500/30';
                 return (<div className={`w-full mt-3 h-16 flex items-center justify-center rounded-lg border ${resultBg}`}><div className="text-center"><p className={`text-xs ${resultColor}`}>RESULTADO</p><p className={`font-mono text-2xl font-bold ${resultColor} flex items-center justify-center gap-2`}><i className={resultIcon}></i><span>{signal.result}</span></p></div></div>);
             };
-            return (<div id={signal.signal_id} className="glass-card rounded-2xl p-4 flex flex-col text-center card-enter-animation relative">{signal.gale_level > 0 && <div className="absolute top-2 right-2 bg-amber-500 text-gray-900 text-xs font-bold px-2 py-0.5 rounded-full">GALE {signal.gale_level}</div>}<div className="flex justify-between items-center w-full mb-3"><p className="font-bold text-xl text-white">{signal.pair}</p><p className="text-xs bg-gray-700 text-gray-300 px-2 py-1 rounded-md">{signal.strategy}</p></div><div className="flex-grow grid grid-cols-2 gap-4 items-center"><div className="flex flex-col justify-center h-full"><p className="text-xs text-gray-400">HORÁRIO DA ENTRADA</p><p className="font-mono text-3xl font-bold text-white my-1">{convertTimeToUserTimezone(signal.entry_time)}</p><div className={`font-semibold text-2xl ${directionColor}`}><i className={`fa-solid ${directionIcon} mr-1`}></i>{signal.direction.toUpperCase()}</div></div><div className="w-16 h-28 mx-auto" dangerouslySetInnerHTML={{ __html: renderCandle(signal.candle) }}></div></div><ResultFooter /></div>);
+            return (<div id={signal.signal_id} className="glass-card rounded-2xl p-4 flex flex-col text-center card-enter-animation relative h-[340px]">{signal.gale_level > 0 && <div className="absolute top-2 right-2 bg-amber-500 text-gray-900 text-xs font-bold px-2 py-0.5 rounded-full">GALE {signal.gale_level}</div>}<div className="flex justify-between items-center w-full mb-3"><p className="font-bold text-xl text-white">{signal.pair}</p><p className="text-xs bg-gray-700 text-gray-300 px-2 py-1 rounded-md">{signal.strategy}</p></div><div className="flex-grow grid grid-cols-2 gap-4 items-center"><div className="flex flex-col justify-center h-full"><p className="text-xs text-gray-400">HORÁRIO DA ENTRADA</p><p className="font-mono text-3xl font-bold text-white my-1">{convertTimeToUserTimezone(signal.entry_time)}</p><div className={`font-semibold text-2xl ${directionColor}`}><i className={`fa-solid ${directionIcon} mr-1`}></i>{signal.direction.toUpperCase()}</div></div><div className="w-16 h-28 mx-auto" dangerouslySetInnerHTML={{ __html: renderCandle(signal.candle) }}></div></div><ResultFooter /></div>);
         });
         
-        function HomeView({ signals, scoreboard, logMessages }) {
-            return (<><Scoreboard scoreboard={scoreboard} /><div id="signals-grid" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 pb-24 lg:pb-0"><LogFeed logs={logMessages} />{signals.map(signal => <SignalCard key={signal.signal_id} signal={signal} />)}</div></>);
+        function HomeView({ signals, logMessages }) {
+            return (<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                        <LogFeed logs={logMessages} />
+                        {signals.map(signal => <SignalCard key={signal.signal_id} signal={signal} />)}
+                    </div>);
         }
 
         function ReportsView({ signals }) {
@@ -166,14 +196,14 @@
                 return { strategyReport, pairReport };
             }, [signals]);
             const ReportCard = ({ title, data }) => (<div className="glass-card rounded-xl p-6"><h3 className="text-xl font-bold mb-4">{title}</h3><div className="space-y-4">{Object.entries(data).length > 0 ? Object.entries(data).map(([key, value]) => {const total = value.wins + value.losses; const winRate = total > 0 ? ((value.wins / total) * 100).toFixed(1) : 0; return (<div key={key}><div className="flex justify-between items-center mb-1 text-sm"><span className="font-semibold">{key}</span><span className="font-mono text-gray-400">{value.wins}W / {value.losses}L</span></div><div className="w-full bg-gray-700 rounded-full h-2.5"><div className="bg-teal-500 h-2.5 rounded-full" style={{ width: `${winRate}%` }}></div></div><p className="text-xs text-right mt-1 text-teal-400">{winRate}% de Acerto</p></div>);}) : <p className="text-gray-500 text-center">Nenhum dado disponível.</p>}</div></div>);
-            return (<div className="grid grid-cols-1 md:grid-cols-2 gap-8 pb-24 lg:pb-0 card-enter-animation"><ReportCard title="Performance por Estratégia" data={reports.strategyReport} /><ReportCard title="Performance por Par" data={reports.pairReport} /></div>);
+            return (<div className="grid grid-cols-1 md:grid-cols-2 gap-8 card-enter-animation"><ReportCard title="Performance por Estratégia" data={reports.strategyReport} /><ReportCard title="Performance por Par" data={reports.pairReport} /></div>);
         }
         
         function RiskManagementView() {
             const [capital, setCapital] = useState(1000); const [risk, setRisk] = useState(2); const [payout, setPayout] = useState(85); const [stopLoss, setStopLoss] = useState(5); const [stopWin, setStopWin] = useState(10);
             const entryValue = (capital * risk) / 100; const stopLossValue = (capital * stopLoss) / 100; const stopWinValue = (capital * stopWin) / 100; const profitPerTrade = entryValue * (payout / 100);
             const FormInput = ({label, ...props}) => (<div><label className="text-sm">{label}</label><input {...props} className="form-input mt-1" /></div>);
-            return (<div className="grid grid-cols-1 md:grid-cols-2 gap-8 pb-24 lg:pb-0 card-enter-animation"><div className="glass-card rounded-xl p-6 space-y-4"><h3 className="text-xl font-bold">Configuração de Risco</h3><FormInput label="Capital Inicial (R$)" type="number" value={capital} onChange={e => setCapital(e.target.value)} /><FormInput label="Risco por Operação (%)" type="number" value={risk} onChange={e => setRisk(e.target.value)} /><FormInput label="Payout da Corretora (%)" type="number" value={payout} onChange={e => setPayout(e.target.value)} /><FormInput label="Stop Loss do Dia (%)" type="number" value={stopLoss} onChange={e => setStopLoss(e.target.value)} /><FormInput label="Stop Win do Dia (%)" type="number" value={stopWin} onChange={e => setStopWin(e.target.value)} /></div><div className="glass-card rounded-xl p-6 flex flex-col justify-center"><h3 className="text-xl font-bold mb-6">Seu Plano Diário</h3><div className="space-y-5"><div className="flex justify-between items-center text-lg"><span className="text-gray-400">Valor da Entrada:</span><span className="font-mono font-bold text-white">R$ {entryValue.toFixed(2)}</span></div><div className="flex justify-between items-center text-lg"><span className="text-gray-400">Lucro por Operação:</span><span className="font-mono font-bold text-green-400">+ R$ {profitPerTrade.toFixed(2)}</span></div><hr className="border-gray-700" /><div className="flex justify-between items-center text-xl"><span className="text-gray-400">Meta de Lucro (Stop Win):</span><span className="font-mono font-bold text-green-400">+ R$ {stopWinValue.toFixed(2)}</span></div><div className="flex justify-between items-center text-xl"><span className="text-gray-400">Limite de Perda (Stop Loss):</span><span className="font-mono font-bold text-red-400">- R$ {stopLossValue.toFixed(2)}</span></div></div></div></div>);
+            return (<div className="grid grid-cols-1 md:grid-cols-2 gap-8 card-enter-animation"><div className="glass-card rounded-xl p-6 space-y-4"><h3 className="text-xl font-bold">Configuração de Risco</h3><FormInput label="Capital Inicial (R$)" type="number" value={capital} onChange={e => setCapital(e.target.value)} /><FormInput label="Risco por Operação (%)" type="number" value={risk} onChange={e => setRisk(e.target.value)} /><FormInput label="Payout da Corretora (%)" type="number" value={payout} onChange={e => setPayout(e.target.value)} /><FormInput label="Stop Loss do Dia (%)" type="number" value={stopLoss} onChange={e => setStopLoss(e.target.value)} /><FormInput label="Stop Win do Dia (%)" type="number" value={stopWin} onChange={e => setStopWin(e.target.value)} /></div><div className="glass-card rounded-xl p-6 flex flex-col justify-center"><h3 className="text-xl font-bold mb-6">Seu Plano Diário</h3><div className="space-y-5"><div className="flex justify-between items-center text-lg"><span className="text-gray-400">Valor da Entrada:</span><span className="font-mono font-bold text-white">R$ {entryValue.toFixed(2)}</span></div><div className="flex justify-between items-center text-lg"><span className="text-gray-400">Lucro por Operação:</span><span className="font-mono font-bold text-green-400">+ R$ {profitPerTrade.toFixed(2)}</span></div><hr className="border-gray-700" /><div className="flex justify-between items-center text-xl"><span className="text-gray-400">Meta de Lucro (Stop Win):</span><span className="font-mono font-bold text-green-400">+ R$ {stopWinValue.toFixed(2)}</span></div><div className="flex justify-between items-center text-xl"><span className="text-gray-400">Limite de Perda (Stop Loss):</span><span className="font-mono font-bold text-red-400">- R$ {stopLossValue.toFixed(2)}</span></div></div></div></div>);
         }
 
         function App() {
@@ -191,24 +221,21 @@
                         const initialData = message.data || {};
                         setScoreboard(initialData.placar || { wins: 0, losses: 0, gale_wins: 0 });
                         setSignals((initialData.signals || []).sort((a,b) => (b.entry_time || "").localeCompare(a.entry_time || "")));
-                        setLogMessages([{level: 'info', pair: 'Sistema', message: 'Conectado com sucesso.', timestamp: new Date()}]);
+                        setLogMessages([{id: Date.now(), level: 'info', pair: 'Sistema', message: 'Conectado com sucesso.'}]);
                         break;
-                    
                     case 'analysis_status':
                         let finalStatus = message.status;
                         if (message.next_entry_time && message.status.includes('%s')) {
                              const localTime = convertTimeToUserTimezone(message.next_entry_time);
                              finalStatus = message.status.replace('%s', localTime);
                         }
-                        const newStatusLog = { level: 'info', pair: 'Sistema', message: finalStatus, timestamp: new Date() };
-                        setLogMessages(prev => [newStatusLog, ...prev].slice(0, 5));
+                        const newStatusLog = { id: Date.now(), level: 'info', pair: 'Sistema', message: finalStatus };
+                        setLogMessages(prev => [newStatusLog, ...prev].slice(0, 10));
                         break;
-                    
                     case 'log':
-                        const newLog = { ...message.data, timestamp: new Date() };
-                        setLogMessages(prev => [newLog, ...prev].slice(0, 5));
+                        const newLog = { id: Date.now(), ...message.data };
+                        setLogMessages(prev => [newLog, ...prev].slice(0, 10));
                         break;
-
                     case 'signal':
                         setSignals(prev => [message, ...prev]);
                         break;
@@ -231,14 +258,14 @@
                 socketRef.current.onopen = () => console.log("WebSocket conectado.");
                 socketRef.current.onclose = () => {
                      console.log("WebSocket desconectado. Tentando reconectar...");
-                     const disconnectLog = {level: 'error', pair: 'Sistema', message: 'Desconectado. Tentando reconectar...', timestamp: new Date()};
-                     setLogMessages(prev => [disconnectLog, ...prev].slice(0,5));
+                     const disconnectLog = {id: Date.now(), level: 'error', pair: 'Sistema', message: 'Desconectado. Tentando reconectar...'};
+                     setLogMessages(prev => [disconnectLog, ...prev].slice(0,10));
                      setTimeout(connect, 5000);
                 };
                  socketRef.current.onerror = (err) => {
                     console.error("Erro no WebSocket:", err);
-                    const errorLog = {level: 'error', pair: 'Sistema', message: 'Erro de conexão.', timestamp: new Date()};
-                    setLogMessages(prev => [errorLog, ...prev].slice(0,5));
+                    const errorLog = {id: Date.now(), level: 'error', pair: 'Sistema', message: 'Erro de conexão.'};
+                    setLogMessages(prev => [errorLog, ...prev].slice(0,10));
                 };
             }, [handleMessage]);
 
@@ -266,11 +293,30 @@
                     case 'risk': return <RiskManagementView />;
                     case 'home':
                     default: 
-                        return <HomeView signals={signals} scoreboard={scoreboard} logMessages={logMessages} />;
+                        return <HomeView signals={signals} logMessages={logMessages} />;
                 }
             };
             
-            return (<div className="max-w-7xl mx-auto"><Header /><TabBar activeTab={activeTab} setActiveTab={setActiveTab} /><main>{renderView()}</main></div>);
+            // ESTRUTURA DE LAYOUT ATUALIZADA
+            return (
+              <div className="h-screen w-screen flex flex-col p-4 sm:p-6 lg:p-8 gap-6">
+                {/* Parte Fixa (Topo) */}
+                <div className="flex-shrink-0">
+                  <Header />
+                  <Scoreboard scoreboard={scoreboard} />
+                </div>
+                
+                {/* Parte Rolável (Conteúdo Principal) */}
+                <main className="flex-grow overflow-y-auto pb-20 lg:pb-0 no-scrollbar">
+                    {renderView()}
+                </main>
+                
+                {/* TabBar Fixa (em baixo em mobile, no topo em desktop) */}
+                <div className="fixed bottom-0 left-0 right-0 lg:static lg:order-first z-50">
+                    <TabBar activeTab={activeTab} setActiveTab={setActiveTab} />
+                </div>
+              </div>
+            );
         }
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
