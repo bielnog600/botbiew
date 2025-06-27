@@ -108,7 +108,7 @@ def exibir_banner():
       ██║   ██╔══██╗██║██╔══██║██║         ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║   ██║   ██║
       ██║   ██║  ██║██║██║  ██║███████╗     ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝   ██║
       ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝      ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝    ╚═╝ '''+y+'''
-              azkzero@gmail.com - v15 (Ajuste de Sincronização de Entrada)
+              azkzero@gmail.com - v16 (Análise Antecipada)
     ''')
     print(y + "*"*88)
     print(c + "="*88)
@@ -388,10 +388,8 @@ def get_config_from_env():
         'mg_fator': float(os.getenv('EXNOVA_MG_FATOR', 2.0)), 'modo_operacao': os.getenv('EXNOVA_MODO_OPERACAO', '2')
     }
 
-# LÓGICA DE SINCRONIZAÇÃO ATUALIZADA AQUI
 def compra_thread(api, ativo, valor, direcao, expiracao, tipo_op, state, config, cifrao, signal_id, target_entry_timestamp):
     try:
-        # Enviar a ordem 800ms ANTES da vela começar para compensar a latência
         wait_time = target_entry_timestamp - time.time() - 0.8
         
         if wait_time > 0:
@@ -509,7 +507,7 @@ def main_bot_logic(state):
 
     while not state.stop:
         try:
-            MAX_SIMULTANEOUS_TRADES = 5
+            MAX_SIMULTANEOUS_TRADES = 2
 
             if config['modo_operacao'] == '1' and (time.time() - last_catalog_time) > (4 * 3600):
                 with state.lock:
@@ -542,8 +540,9 @@ def main_bot_logic(state):
             
             with state.lock:
                 active_trades_count = state.active_trades
-
-            if segundo_atual >= 50 and not analise_feita and active_trades_count < MAX_SIMULTANEOUS_TRADES:
+            
+            # ALTERAÇÃO CRÍTICA AQUI: Análise antecipada
+            if segundo_atual >= 30 and not analise_feita and active_trades_count < MAX_SIMULTANEOUS_TRADES:
                 analise_feita = True
                 sinais_para_executar = []
 
@@ -574,7 +573,7 @@ def main_bot_logic(state):
                                         assertividade = 0
                                         if normalized_name in state.strategy_performance and nome_estrategia in state.strategy_performance[normalized_name]:
                                             assertividade = state.strategy_performance[normalized_name][nome_estrategia]
-                                            if assertividade >= 60:
+                                            if assertividade >= 45:
                                                 is_approved = True
 
                                         sinal = globals().get(f'strategy_{cod_est}')(velas, PARAMS)
