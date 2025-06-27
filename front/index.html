@@ -2,64 +2,48 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <!-- ### ALTERAÇÃO AQUI: Desativa o zoom do utilizador ### -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Plataforma - MAROMBIEW BOT</title>
+    <title>MAROMBIEW BOT</title>
     
-    <!-- ### NOVAS TAGS PARA INSTALAÇÃO EM IOS (PWA) ### -->
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="Marombiew">
+    <meta name="apple-mobile-web-app-title" content="MAROMBIEW BOT">
     <link rel="apple-touch-icon" href="https://placehold.co/180x180/0a0a0a/14b8a6?text=M">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#0d9488">
     
-    <!-- Tailwind CSS & Font Awesome -->
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Roboto+Mono:wght@500;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     
-    <!-- React & Babel for in-browser JSX transformation -->
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     
     <style>
-        /* Estilos para uma experiência de App */
         body { 
             font-family: 'Poppins', sans-serif; 
             background-color: #0a0a0a; 
             color: #e5e7eb; 
             background-image: radial-gradient(#1e293b 1px, transparent 1px); 
             background-size: 20px 20px;
-            /* Desativa a seleção de texto e o realce de toque */
-            -webkit-user-select: none; /* Safari */
-            -ms-user-select: none; /* IE 10+ */
+            -webkit-user-select: none;
+            -ms-user-select: none;
             user-select: none;
             -webkit-tap-highlight-color: transparent;
+            color-scheme: dark;
         }
-
         .font-mono { font-family: 'Roboto Mono', monospace; }
         .glass-card { background: rgba(17, 24, 39, 0.6); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.05); }
         @keyframes card-enter { from { opacity: 0; transform: scale(0.95) translateY(10px); } to { opacity: 1; transform: scale(1) translateY(0); } }
         .card-enter-animation { animation: card-enter 0.4s ease-out forwards; }
         @keyframes score-pop { 0% { transform: scale(1); } 50% { transform: scale(1.25); color: #ffffff; } 100% { transform: scale(1); } }
         .score-updated { animation: score-pop 0.3s ease-in-out; }
-        
-        .form-input {
-             color: white !important;
-             background-color: #1f2937 !important;
-        }
-        input[type="number"] {
-            -moz-appearance: textfield; /* Firefox */
-        }
-        input::-webkit-outer-spin-button,
-        input::-webkit-inner-spin-button {
-            -webkit-appearance: none;
-            margin: 0;
-        }
+        .form-input { color: white !important; background-color: #1f2937 !important; }
+        input[type="number"] { -moz-appearance: textfield; }
+        input::-webkit-outer-spin-button, input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
     </style>
 </head>
 <body class="p-4 sm:p-6 lg:p-8">
@@ -89,43 +73,22 @@
                 super(props);
                 this.state = { hasError: false, error: null };
             }
-
-            static getDerivedStateFromError(error) {
-                return { hasError: true, error: error };
-            }
-
-            componentDidCatch(error, errorInfo) {
-                console.error("React Tree Error:", error, errorInfo);
-            }
-
+            static getDerivedStateFromError(error) { return { hasError: true, error: error }; }
+            componentDidCatch(error, errorInfo) { console.error("React Tree Error:", error, errorInfo); }
             render() {
                 if (this.state.hasError) {
-                    return (
-                        <div className="text-center text-red-400 p-8 glass-card rounded-xl max-w-lg mx-auto">
-                            <h1 className="text-2xl font-bold mb-2"><i className="fa-solid fa-triangle-exclamation mr-2"></i>Oops! Algo correu mal.</h1>
-                            <p>A aplicação encontrou um erro. Por favor, tente atualizar a página.</p>
-                            <pre className="mt-4 text-xs text-left bg-gray-900 p-2 rounded overflow-auto">
-                                {this.state.error && this.state.error.toString()}
-                            </pre>
-                        </div>
-                    );
+                    return (<div className="text-center text-red-400 p-8 glass-card rounded-xl max-w-lg mx-auto"><h1 className="text-2xl font-bold mb-2"><i className="fa-solid fa-triangle-exclamation mr-2"></i>Oops! Algo correu mal.</h1><p>A aplicação encontrou um erro. Por favor, tente atualizar a página.</p><pre className="mt-4 text-xs text-left bg-gray-900 p-2 rounded overflow-auto">{this.state.error && this.state.error.toString()}</pre></div>);
                 }
                 return this.props.children;
             }
         }
 
-        // --- Componentes da UI ---
         const Header = () => (<header className="flex flex-col sm:flex-row justify-between items-center mb-8 gap-6"><h1 className="text-3xl font-bold text-white"><i className="fa-solid fa-robot text-teal-400"></i> MAROMBIEW <span className="text-teal-400">BOT</span></h1></header>);
         const TabButton = ({ icon, label, isActive, onClick }) => (<button onClick={onClick} className={`flex flex-col items-center gap-1 w-24 py-2 rounded-lg transition-all duration-200 ${isActive ? 'text-teal-400 bg-teal-500/10' : 'text-gray-400 hover:bg-gray-700/50'}`}><i className={`${icon} text-xl`}></i><span className="text-xs font-semibold">{label}</span></button>);
         const TabBar = ({ activeTab, setActiveTab }) => (<nav className="fixed bottom-0 left-0 right-0 z-50 lg:relative lg:bottom-auto lg:left-auto lg:right-auto bg-gray-900/80 backdrop-blur-sm lg:bg-transparent lg:backdrop-filter-none border-t border-gray-700 lg:border-none p-2 lg:p-0 lg:mb-8"><div className="flex justify-around lg:justify-center lg:gap-6 max-w-md mx-auto lg:max-w-none"><TabButton icon="fa-solid fa-house" label="Home" isActive={activeTab === 'home'} onClick={() => setActiveTab('home')} /><TabButton icon="fa-solid fa-chart-pie" label="Relatórios" isActive={activeTab === 'reports'} onClick={() => setActiveTab('reports')} /><TabButton icon="fa-solid fa-shield-halved" label="Gerenciamento" isActive={activeTab === 'risk'} onClick={() => setActiveTab('risk')} /></div></nav>);
 
         const Scoreboard = ({ scoreboard }) => {
-            const animateScore = (ref, value) => {
-                if (ref.current && ref.current.textContent !== String(value)) {
-                    ref.current.classList.add('score-updated');
-                    setTimeout(() => ref.current.classList.remove('score-updated'), 300);
-                }
-            };
+            const animateScore = (ref, value) => { if (ref.current && ref.current.textContent !== String(value)) { ref.current.classList.add('score-updated'); setTimeout(() => ref.current.classList.remove('score-updated'), 300); }};
             const winsRef = useRef(); useEffect(() => animateScore(winsRef, scoreboard.wins), [scoreboard.wins]);
             const lossesRef = useRef(); useEffect(() => animateScore(lossesRef, scoreboard.losses), [scoreboard.losses]);
             const galesRef = useRef(); useEffect(() => animateScore(galesRef, scoreboard.gale_wins), [scoreboard.gale_wins]);
@@ -148,10 +111,7 @@
             };
             const ResultFooter = () => {
                 if (!signal.result) return <div className="w-full mt-3 h-16"></div>;
-                const isWin = signal.result === 'WIN';
-                const resultColor = isWin ? 'text-green-400' : 'text-red-400';
-                const resultIcon = isWin ? 'fa-solid fa-trophy' : 'fa-solid fa-shield-halved';
-                const resultBg = isWin ? 'bg-green-500/10 border-green-500/30' : 'bg-red-500/10 border-red-500/30';
+                const isWin = signal.result === 'WIN'; const resultColor = isWin ? 'text-green-400' : 'text-red-400'; const resultIcon = isWin ? 'fa-solid fa-trophy' : 'fa-solid fa-shield-halved'; const resultBg = isWin ? 'bg-green-500/10 border-green-500/30' : 'bg-red-500/10 border-red-500/30';
                 return (<div className={`w-full mt-3 h-16 flex items-center justify-center rounded-lg border ${resultBg}`}><div className="text-center"><p className={`text-xs ${resultColor}`}>RESULTADO</p><p className={`font-mono text-2xl font-bold ${resultColor} flex items-center justify-center gap-2`}><i className={resultIcon}></i><span>{signal.result}</span></p></div></div>);
             };
             return (<div id={signal.signal_id} className="glass-card rounded-2xl p-4 flex flex-col text-center card-enter-animation relative">{signal.gale_level > 0 && <div className="absolute top-2 right-2 bg-amber-500 text-gray-900 text-xs font-bold px-2 py-0.5 rounded-full">GALE {signal.gale_level}</div>}<div className="flex justify-between items-center w-full mb-3"><p className="font-bold text-xl text-white">{signal.pair}</p><p className="text-xs bg-gray-700 text-gray-300 px-2 py-1 rounded-md">{signal.strategy}</p></div><div className="flex-grow grid grid-cols-2 gap-4 items-center"><div className="flex flex-col justify-center h-full"><p className="text-xs text-gray-400">HORÁRIO DA ENTRADA</p><p className="font-mono text-3xl font-bold text-white my-1">{convertTimeToUserTimezone(signal.entry_time)}</p><div className={`font-semibold text-2xl ${directionColor}`}><i className={`fa-solid ${directionIcon} mr-1`}></i>{signal.direction.toUpperCase()}</div></div><div className="w-16 h-28 mx-auto" dangerouslySetInnerHTML={{ __html: renderCandle(signal.candle) }}></div></div><ResultFooter /></div>);
@@ -209,14 +169,11 @@
                 switch (message.type) {
                     case 'init':
                         const initialData = message.data || {};
-                        const initialSignals = initialData.signals || [];
-                        const initialPlacar = initialData.placar || { wins: 0, losses: 0, gale_wins: 0 };
-                        setScoreboard(initialPlacar);
-                        setSignals(initialSignals.sort((a,b) => (b.entry_time || "").localeCompare(a.entry_time || "")));
+                        setScoreboard(initialData.placar || { wins: 0, losses: 0, gale_wins: 0 });
+                        setSignals((initialData.signals || []).sort((a,b) => (b.entry_time || "").localeCompare(a.entry_time || "")));
                         setAnalysisInfo({ status: 'Conectado. Aguardando...' });
                         break;
-                    case 'analysis_status':
-                    case 'analysis_update':
+                    case 'analysis_status': case 'analysis_update':
                         setAnalysisInfo(message);
                         break;
                     case 'signal':
@@ -233,20 +190,41 @@
                 }
             }, []);
 
-            useEffect(() => {
-                if (socketRef.current) return;
+            const connect = useCallback(() => {
+                console.log("Tentando conectar WebSocket...");
+                if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+                    console.log("WebSocket já está aberto.");
+                    return;
+                }
                 socketRef.current = new WebSocket(WEBSOCKET_URL);
-                socketRef.current.onmessage = (event) => {
-                    const message = JSON.parse(event.data);
-                    handleMessage(message);
+                socketRef.current.onmessage = (event) => handleMessage(JSON.parse(event.data));
+                socketRef.current.onopen = () => console.log("WebSocket conectado.");
+                socketRef.current.onclose = () => {
+                     console.log("WebSocket desconectado. Tentando reconectar...");
+                     setTimeout(connect, 5000);
                 };
+            }, [handleMessage]);
+
+            useEffect(() => {
+                connect(); // Conecta na primeira vez
+
+                // ### LÓGICA DE RECONEXÃO AO VOLTAR PARA O APP ###
+                const handleVisibilityChange = () => {
+                    if (document.visibilityState === 'visible' && socketRef.current && socketRef.current.readyState === WebSocket.CLOSED) {
+                        console.log("App visível, reconectando WebSocket...");
+                        connect();
+                    }
+                };
+
+                document.addEventListener('visibilitychange', handleVisibilityChange);
+                
                 return () => {
+                    document.removeEventListener('visibilitychange', handleVisibilityChange);
                     if (socketRef.current) {
                         socketRef.current.close();
-                        socketRef.current = null;
                     }
-                }
-            }, []);
+                };
+            }, [connect]);
 
             const renderView = () => {
                 switch(activeTab) {
@@ -266,17 +244,12 @@
 
     </script>
     
-    <!-- ### NOVO SCRIPT PARA REGISTAR O SERVICE WORKER ### -->
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register('/sw.js')
-                    .then(registration => {
-                        console.log('Service Worker registado com sucesso:', registration);
-                    })
-                    .catch(error => {
-                        console.log('Falha ao registar Service Worker:', error);
-                    });
+                    .then(registration => console.log('Service Worker registado com sucesso:', registration))
+                    .catch(error => console.log('Falha ao registar Service Worker:', error));
             });
         }
     </script>
