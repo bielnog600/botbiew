@@ -108,7 +108,7 @@ def exibir_banner():
       ██║   ██╔══██╗██║██╔══██║██║         ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║   ██║   ██║
       ██║   ██║  ██║██║██║  ██║███████╗     ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝   ██║
       ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝      ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝    ╚═╝ '''+y+'''
-              azkzero@gmail.com - v17 (Entrada Antecipada 5s)
+              azkzero@gmail.com - v18 (Filtros Avançados de Confirmação)
     ''')
     print(y + "*"*88)
     print(c + "="*88)
@@ -362,17 +362,41 @@ def strategy_patterns(velas, p):
             
     return None
 
-def is_market_indecisive(velas, p):
-    if len(velas) < p.get('IndecisionCandles', 3): return False
-    last_candles = velas[-p.get('IndecisionCandles', 3):]
-    indecisive_candles = 0
+# NOVO FILTRO GLOBAL
+def is_market_too_volatile(velas, p):
+    last_candles = velas[-p.get('VolatilityCandles', 3):]
+    volatile_count = 0
     for vela in last_candles:
         range_total = vela['high'] - vela['low']
-        if range_total == 0: indecisive_candles += 1; continue
+        if range_total == 0: continue
         corpo = abs(vela['open'] - vela['close'])
-        if (corpo / range_total) <= p.get('IndecisionBodyMaxRatio', 0.15):
-             indecisive_candles += 1
-    return indecisive_candles >= p.get('IndecisionMinCount', 2)
+        pavio_total = range_total - corpo
+        if (pavio_total / range_total) > p.get('MaxWickRatio', 0.65):
+            volatile_count += 1
+    return volatile_count >= p.get('MinVolatileCandles', 2)
+
+# NOVO FILTRO DE CONFIRMAÇÃO
+def is_trade_confirmed_by_previous_candle(sinal, vela_anterior, p):
+    if not vela_anterior: return False
+    
+    corpo = abs(vela_anterior['open'] - vela_anterior['close'])
+    range_total = vela_anterior['high'] - vela_anterior['low']
+    if range_total == 0: return True # Se for um doji, não contradiz
+    
+    pavio_superior = vela_anterior['high'] - max(vela_anterior['open'], vela_anterior['close'])
+    pavio_inferior = min(vela_anterior['open'], vela_anterior['close']) - vela_anterior['low']
+    
+    if sinal == 'BUY':
+        # Rejeita se a vela anterior for de baixa ou tiver um grande pavio superior
+        if vela_anterior['close'] < vela_anterior['open']: return False
+        if pavio_superior > corpo * p.get('ConfirmationMaxOppositeWickRatio', 1.5): return False
+    
+    if sinal == 'SELL':
+        # Rejeita se a vela anterior for de alta ou tiver um grande pavio inferior
+        if vela_anterior['close'] > vela_anterior['open']: return False
+        if pavio_inferior > corpo * p.get('ConfirmationMaxOppositeWickRatio', 1.5): return False
+        
+    return True
 
 class BotState:
     def __init__(self):
@@ -390,8 +414,7 @@ def get_config_from_env():
 
 def compra_thread(api, ativo, valor, direcao, expiracao, tipo_op, state, config, cifrao, signal_id, target_entry_timestamp):
     try:
-        # ATUALIZAÇÃO: Enviar a ordem 5 segundos ANTES da vela começar
-        wait_time = target_entry_timestamp - time.time() - 3.0
+        wait_time = target_entry_timestamp - time.time() - 5.0
         
         if wait_time > 0:
             log_info(f"Aguardando {wait_time:.2f}s para entrada precisa em {ativo} (envio 5s antes)...")
@@ -489,13 +512,13 @@ def main_bot_logic(state):
         log_warning(f"Não foi possível obter o perfil do usuário. Erro: {e}")
         log_info(f"Olá! Iniciando bot em modo servidor.")
     
+    # PARÂMETROS COM OS NOVOS FILTROS
     PARAMS = { 
         'MAPeriod': 5, 'MaxLevels': 10, 'Proximity': 10.0, 'Point': 1e-6, 
         'FlowBodyMinRatio': 0.4, 'FlowOppositeWickMaxRatio': 0.45, 
         'RejectionWickMinRatio': 0.58, 'RejectionBodyMaxRatio': 0.3, 'RejectionOppositeWickMaxRatio': 0.2, 
-        'IndecisionCandles': 3,
-        'IndecisionBodyMaxRatio': 0.05,
-        'IndecisionMinCount': 3
+        'VolatilityCandles': 3, 'MaxWickRatio': 0.65, 'MinVolatileCandles': 2,
+        'ConfirmationMaxOppositeWickRatio': 1.5
     }
     
     last_catalog_time = 0
@@ -508,7 +531,7 @@ def main_bot_logic(state):
 
     while not state.stop:
         try:
-            MAX_SIMULTANEOUS_TRADES = 1
+            MAX_SIMULTANEOUS_TRADES = 2
 
             if config['modo_operacao'] == '1' and (time.time() - last_catalog_time) > (4 * 3600):
                 with state.lock:
@@ -560,8 +583,8 @@ def main_bot_logic(state):
                                     
                                     if not velas or len(velas) < 20: continue
                                     
-                                    if is_market_indecisive(velas, PARAMS):
-                                        msg = "MERCADO CONSIDERADO INDECISO. Análise descartada."
+                                    if is_market_too_volatile(velas, PARAMS):
+                                        msg = "MERCADO MUITO VOLÁTIL (grandes pavios). Análise descartada."
                                         log_warning(f"-> {ativo_original}: {msg}")
                                         log_payload = {"type": "log", "data": {"level": "warning", "message": msg, "pair": ativo_original}}
                                         signal_queue.put(log_payload)
@@ -573,31 +596,37 @@ def main_bot_logic(state):
                                         assertividade = 0
                                         if normalized_name in state.strategy_performance and nome_estrategia in state.strategy_performance[normalized_name]:
                                             assertividade = state.strategy_performance[normalized_name][nome_estrategia]
-                                            if assertividade >= 80:
+                                            if assertividade >= 70:
                                                 is_approved = True
 
                                         sinal = globals().get(f'strategy_{cod_est}')(velas, PARAMS)
                                         
-                                        if sinal and is_approved:
-                                            msg = f"SINAL VÁLIDO ENCONTRADO com '{nome_estrategia}' ({assertividade:.2f}%)"
-                                            log_success(f"-> {ativo_original}: {msg}")
-                                            log_payload = {"type": "log", "data": {"level": "success", "message": msg, "pair": ativo_original}}
-                                            signal_queue.put(log_payload)
-                                            
-                                            payout = all_profits.get(ativo_original, {}).get(tipo_mercado, 0) * 100
-                                            potential_trades.append({'ativo': ativo_original, 'tipo_op': tipo_mercado, 'velas': velas, 'payout': payout, 'direcao': {'BUY': 'call', 'SELL': 'put'}.get(sinal), 'nome_estrategia': nome_estrategia, 'assertividade': assertividade})
-                                        
-                                        elif sinal and not is_approved:
-                                            msg = f"Sinal encontrado com '{nome_estrategia}', mas a estratégia não foi aprovada (Assertividade: {assertividade:.2f}%)."
-                                            log_warning(f"-> {ativo_original}: {msg}")
-                                            log_payload = {"type": "log", "data": {"level": "warning", "message": msg, "pair": ativo_original}}
-                                            signal_queue.put(log_payload)
-                                            
+                                        if sinal:
+                                            # FILTRO DE CONFIRMAÇÃO DA VELA ANTERIOR
+                                            if is_trade_confirmed_by_previous_candle(sinal, velas[-2], PARAMS):
+                                                if is_approved:
+                                                    msg = f"SINAL VÁLIDO ENCONTRADO com '{nome_estrategia}' ({assertividade:.2f}%)"
+                                                    log_success(f"-> {ativo_original}: {msg}")
+                                                    log_payload = {"type": "log", "data": {"level": "success", "message": msg, "pair": ativo_original}}
+                                                    signal_queue.put(log_payload)
+                                                    
+                                                    payout = all_profits.get(ativo_original, {}).get(tipo_mercado, 0) * 100
+                                                    potential_trades.append({'ativo': ativo_original, 'tipo_op': tipo_mercado, 'velas': velas, 'payout': payout, 'direcao': {'BUY': 'call', 'SELL': 'put'}.get(sinal), 'nome_estrategia': nome_estrategia, 'assertividade': assertividade})
+                                                else:
+                                                    msg = f"Sinal encontrado com '{nome_estrategia}', mas a estratégia não foi aprovada (Assertividade: {assertividade:.2f}%)."
+                                                    log_warning(f"-> {ativo_original}: {msg}")
+                                                    log_payload = {"type": "log", "data": {"level": "warning", "message": msg, "pair": ativo_original}}
+                                                    signal_queue.put(log_payload)
+                                            else:
+                                                msg = f"Sinal de '{nome_estrategia}' REJEITADO por contradição na vela anterior."
+                                                log_warning(f"-> {ativo_original}: {msg}")
+                                                log_payload = {"type": "log", "data": {"level": "warning", "message": msg, "pair": ativo_original}}
+                                                signal_queue.put(log_payload)
                                         elif not sinal:
-                                            msg = f"Estratégia '{nome_estrategia}' checada, mas sem sinal no momento."
-                                            log_info(f"-> {ativo_original}: {msg}")
-                                            log_payload = {"type": "log", "data": {"level": "info", "message": msg, "pair": ativo_original}}
-                                            signal_queue.put(log_payload)
+                                            # Este log pode ser removido para uma UI mais limpa, mas é bom para depuração
+                                            # msg = f"Estratégia '{nome_estrategia}' checada, mas sem sinal no momento."
+                                            # log_info(f"-> {ativo_original}: {msg}")
+                                            pass
                     
                     if potential_trades:
                         log_success(f"ENCONTRADOS {len(potential_trades)} SINAIS VÁLIDOS. Priorizando os melhores...")
@@ -611,11 +640,11 @@ def main_bot_logic(state):
                             if len(sinais_para_executar) + active_trades_count >= MAX_SIMULTANEOUS_TRADES:
                                 break
                             velas = validar_e_limpar_velas(API.get_candles(ativo, 60, 150, time.time()))
-                            if velas and len(velas) >= 20 and not is_market_indecisive(velas, PARAMS):
+                            if velas and len(velas) >= 20 and not is_market_too_volatile(velas, PARAMS):
                                 strategies_to_try = [('Pullback MQL', 'mql_pullback'), ('Fluxo', 'flow'), ('Padrões', 'patterns'), ('Rejeição', 'rejection_candle')]
                                 for nome, cod in strategies_to_try:
                                     sinal = globals().get(f'strategy_{cod}')(velas, PARAMS)
-                                    if sinal:
+                                    if sinal and is_trade_confirmed_by_previous_candle(sinal, velas[-2], PARAMS):
                                         sinais_para_executar.append({
                                             'ativo': ativo, 'tipo_op': details['tipo'], 'velas': velas,
                                             'direcao': {'BUY': 'call', 'SELL': 'put'}.get(sinal),
