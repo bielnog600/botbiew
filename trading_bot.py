@@ -107,7 +107,7 @@ def exibir_banner():
       ██║   ██╔══██╗██║██╔══██║██║         ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║   ██║   ██║
       ██║   ██║  ██║██║██║  ██║███████╗     ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝   ██║
       ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝      ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝    ╚═╝ '''+y+'''
-              azkzero@gmail.com - v9 com Ajuste de Amostra Mínima
+              azkzero@gmail.com - v10 (Correção de Sintaxe)
     ''')
     print(y + "*"*88)
     print(c + "="*88)
@@ -229,8 +229,6 @@ def catalogar_estrategias(api, state, params):
             performance_do_par = {}
             for nome, res in resultados.items():
                 total = res['win'] + res['loss']
-                # ALTERAÇÃO: Revertido para um ponto de equilíbrio mais seguro.
-                # Exige pelo menos 2 sinais no histórico (total > 1) para considerar a estratégia.
                 if total > 1: 
                     assertividade = (res['win'] / total) * 100
                     performance_do_par[nome] = assertividade
@@ -513,9 +511,9 @@ def main_bot_logic(state):
                                     if not velas or len(velas) < 20: continue
                                     
                                     #if is_market_indecisive(velas, PARAMS):
-                                     #   msg = "MERCADO CONSIDERADO INDECISO. Análise descartada."
-                                      #  log_warning(f"-> {ativo}: {msg}")
-                                       # log_payload = {"type": "log", "data": {"level": "warning", "message": msg, "pair": ativo}}
+                                        #msg = "MERCADO CONSIDERADO INDECISO. Análise descartada."
+                                        #log_warning(f"-> {ativo}: {msg}")
+                                        #log_payload = {"type": "log", "data": {"level": "warning", "message": msg, "pair": ativo}}
                                         #signal_queue.put(log_payload)
                                         #continue
 
@@ -548,7 +546,8 @@ def main_bot_logic(state):
                                 break
                             velas = validar_e_limpar_velas(API.get_candles(ativo, 60, 150, time.time()))
                             if velas and len(velas) >= 20 and not is_market_indecisive(velas, PARAMS):
-                                strategies_to_try = [('Pullback MQL', 'mql_pullback'), ('Fluxo', 'flow'), ('Padrões': 'patterns'), ('Rejeição', 'rejection_candle')]
+                                # CORREÇÃO DE SINTAXE APLICADA AQUI
+                                strategies_to_try = [('Pullback MQL', 'mql_pullback'), ('Fluxo', 'flow'), ('Padrões', 'patterns'), ('Rejeição', 'rejection_candle')]
                                 for nome, cod in strategies_to_try:
                                     sinal = globals().get(f'strategy_{cod}')(velas, PARAMS)
                                     if sinal:
