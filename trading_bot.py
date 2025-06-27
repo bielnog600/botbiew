@@ -108,7 +108,7 @@ def exibir_banner():
       ██║   ██╔══██╗██║██╔══██║██║         ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║   ██║   ██║
       ██║   ██║  ██║██║██║  ██║███████╗     ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝   ██║
       ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝      ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝    ╚═╝ '''+y+'''
-              azkzero@gmail.com - v11 (Normalização de Ativos)
+              azkzero@gmail.com - v12 (Tolerância Máxima de Indecisão)
     ''')
     print(y + "*"*88)
     print(c + "="*88)
@@ -190,8 +190,6 @@ def start_websocket_server_sync(bot_state):
 
 
 # --- Logic and Strategy Functions ---
-
-# NOVA FUNÇÃO: Normaliza o nome do ativo para criar uma chave consistente
 def normalize_asset(name):
     return name.replace('-OTC', '').replace('-op', '').replace('-OP', '')
 
@@ -245,7 +243,6 @@ def catalogar_estrategias(api, state, params):
                     log_payload = {"type": "log", "data": {"level": "warning", "message": msg, "pair": ativo_original}}
                     signal_queue.put(log_payload)
             if performance_do_par:
-                # Usa o nome normalizado como chave do dicionário
                 normalized_name = normalize_asset(ativo_original)
                 state.strategy_performance[normalized_name] = performance_do_par
         except Exception as e: log_error(f"An error occurred while analyzing the pair {ativo_original}: {e}"); traceback.print_exc()
@@ -449,13 +446,14 @@ def main_bot_logic(state):
         log_warning(f"Não foi possível obter o perfil do usuário. Erro: {e}")
         log_info(f"Olá! Iniciando bot em modo servidor.")
     
+    # PARÂMETROS DE INDECISÃO AJUSTADOS AQUI PARA TOLERÂNCIA MÁXIMA
     PARAMS = { 
         'MAPeriod': 5, 'MaxLevels': 10, 'Proximity': 10.0, 'Point': 1e-6, 
         'FlowBodyMinRatio': 0.4, 'FlowOppositeWickMaxRatio': 0.45, 
         'RejectionWickMinRatio': 0.58, 'RejectionBodyMaxRatio': 0.3, 'RejectionOppositeWickMaxRatio': 0.2, 
         'IndecisionCandles': 3,
-        'IndecisionBodyMaxRatio': 0.15,
-        'IndecisionMinCount': 2
+        'IndecisionBodyMaxRatio': 0.05,  # Exige um corpo quase inexistente (doji)
+        'IndecisionMinCount': 3          # Exige que TODAS as 3 velas sejam dojis
     }
     
     last_catalog_time = 0
@@ -513,7 +511,6 @@ def main_bot_logic(state):
                     for tipo_mercado in ['binary', 'turbo']:
                         if tipo_mercado in open_assets:
                             for ativo_original, info in open_assets[tipo_mercado].items():
-                                # Usa o nome normalizado para verificar na memória
                                 normalized_name = normalize_asset(ativo_original)
                                 if info.get('open', False) and normalized_name in state.strategy_performance:
                                     velas = validar_e_limpar_velas(API.get_candles(ativo_original, 60, 150, time.time()))
@@ -526,8 +523,7 @@ def main_bot_logic(state):
                                         log_payload = {"type": "log", "data": {"level": "warning", "message": msg, "pair": ativo_original}}
                                         signal_queue.put(log_payload)
                                         continue
-                                    
-                                    # Busca as estratégias aprovadas para o nome normalizado
+
                                     for nome_estrategia, assertividade in state.strategy_performance[normalized_name].items():
                                         if assertividade >= 45: 
                                             cod_map = {'Pullback MQL': 'mql_pullback', 'Fluxo': 'flow', 'Padrões': 'patterns', 'Rejeição': 'rejection_candle'}
