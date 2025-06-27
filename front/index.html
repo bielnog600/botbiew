@@ -54,7 +54,7 @@
     <script type="text/babel">
         const { useState, useEffect, useCallback, useMemo, useRef, Component } = React;
         
-        const BOT_UTC_OFFSET = "-00:00";
+        const BOT_UTC_OFFSET = "-00:00"; // Assume o horário do bot como UTC
         const WEBSOCKET_URL = 'wss://botexnova.marombiew.com';
 
         function convertTimeToUserTimezone(timeString) {
@@ -63,6 +63,7 @@
                 const todayStr = new Date().toISOString().slice(0, 10);
                 const fullDateTimeString = `${todayStr}T${timeString}:00${BOT_UTC_OFFSET}`;
                 const dateObj = new Date(fullDateTimeString);
+                if (isNaN(dateObj)) return timeString; // Retorna original se a data for inválida
                 return dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
             } catch (e) {
                 console.error("Erro ao converter hora:", e);
@@ -97,7 +98,7 @@
             return (<div className="grid grid-cols-3 gap-4 w-full glass-card p-3 rounded-xl mb-6"><div className="text-center px-2"><p className="text-sm font-semibold text-green-400">WINS</p><p ref={winsRef} className="text-2xl font-bold font-mono">{scoreboard.wins}</p></div><div className="text-center px-2"><p className="text-sm font-semibold text-red-400">LOSSES</p><p ref={lossesRef} className="text-2xl font-bold font-mono">{scoreboard.losses}</p></div><div className="text-center px-2"><p className="text-sm font-semibold text-amber-400">GALE WINS</p><p ref={galesRef} className="text-2xl font-bold font-mono">{scoreboard.gale_wins}</p></div></div>);
         };
         
-        // NOVO COMPONENTE: Terminal de Logs
+        // COMPONENTE ATUALIZADO
         const LogFeed = React.memo(({ logs }) => {
             const getIcon = (level) => {
                 switch(level) {
@@ -112,10 +113,10 @@
                     <h3 className="text-xl font-bold text-white mb-3 text-left flex items-center gap-2"><i className="fa-solid fa-terminal"></i>Terminal do Bot</h3>
                     <div className="bg-gray-900/50 rounded-lg p-3 w-full text-left flex-grow font-mono text-sm space-y-2 overflow-y-auto">
                         {logs.map((log, index) => (
-                            <div key={index} className="flex gap-2 items-start log-item">
-                                <i className={getIcon(log.level)}></i>
+                            <div key={index} className="flex items-start gap-2 log-item">
+                                <i className={`${getIcon(log.level)} mt-1`}></i>
                                 <p className="flex-1">
-                                    <span className="font-bold mr-2 text-gray-500">{log.pair}:</span>
+                                    <span className="font-bold mr-2 text-gray-400">{log.pair}:</span>
                                     <span className="text-gray-300">{log.message}</span>
                                 </p>
                             </div>
@@ -146,8 +147,6 @@
             };
             return (<div id={signal.signal_id} className="glass-card rounded-2xl p-4 flex flex-col text-center card-enter-animation relative">{signal.gale_level > 0 && <div className="absolute top-2 right-2 bg-amber-500 text-gray-900 text-xs font-bold px-2 py-0.5 rounded-full">GALE {signal.gale_level}</div>}<div className="flex justify-between items-center w-full mb-3"><p className="font-bold text-xl text-white">{signal.pair}</p><p className="text-xs bg-gray-700 text-gray-300 px-2 py-1 rounded-md">{signal.strategy}</p></div><div className="flex-grow grid grid-cols-2 gap-4 items-center"><div className="flex flex-col justify-center h-full"><p className="text-xs text-gray-400">HORÁRIO DA ENTRADA</p><p className="font-mono text-3xl font-bold text-white my-1">{convertTimeToUserTimezone(signal.entry_time)}</p><div className={`font-semibold text-2xl ${directionColor}`}><i className={`fa-solid ${directionIcon} mr-1`}></i>{signal.direction.toUpperCase()}</div></div><div className="w-16 h-28 mx-auto" dangerouslySetInnerHTML={{ __html: renderCandle(signal.candle) }}></div></div><ResultFooter /></div>);
         });
-        
-        // O COMPONENTE AnalysisCard FOI REMOVIDO E SUBSTITUÍDO PELO LogFeed
         
         function HomeView({ signals, scoreboard, logMessages }) {
             return (<><Scoreboard scoreboard={scoreboard} /><div id="signals-grid" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 pb-24 lg:pb-0"><LogFeed logs={logMessages} />{signals.map(signal => <SignalCard key={signal.signal_id} signal={signal} />)}</div></>);
@@ -181,31 +180,33 @@
             const [activeTab, setActiveTab] = useState('home');
             const [signals, setSignals] = useState([]);
             const [scoreboard, setScoreboard] = useState({ wins: 0, losses: 0, gale_wins: 0 });
-            // NOVO ESTADO PARA ARMAZENAR LOGS
             const [logMessages, setLogMessages] = useState([]);
             const socketRef = useRef(null);
 
             const handleMessage = useCallback((message) => {
                 if (!message || !message.type) return;
-                
-                // O `console.log` ABAIXO É PARA DEBUG. Pode remover depois de confirmar que funciona.
-                console.log("Mensagem recebida do bot:", message);
 
                 switch (message.type) {
                     case 'init':
                         const initialData = message.data || {};
                         setScoreboard(initialData.placar || { wins: 0, losses: 0, gale_wins: 0 });
                         setSignals((initialData.signals || []).sort((a,b) => (b.entry_time || "").localeCompare(a.entry_time || "")));
-                        setLogMessages([{level: 'info', pair: 'Sistema', message: 'Conectado com sucesso.'}]);
-                        break;
-                    case 'analysis_status':
-                        // Adiciona a análise de status ao log feed
-                        setLogMessages(prev => [{ level: 'info', pair: 'Sistema', message: message.status }, ...prev].slice(0, 5));
+                        setLogMessages([{level: 'info', pair: 'Sistema', message: 'Conectado com sucesso.', timestamp: new Date()}]);
                         break;
                     
-                    // NOVA LÓGICA PARA TRATAR MENSAGENS DO TIPO 'log'
+                    case 'analysis_status':
+                        let finalStatus = message.status;
+                        if (message.next_entry_time && message.status.includes('%s')) {
+                             const localTime = convertTimeToUserTimezone(message.next_entry_time);
+                             finalStatus = message.status.replace('%s', localTime);
+                        }
+                        const newStatusLog = { level: 'info', pair: 'Sistema', message: finalStatus, timestamp: new Date() };
+                        setLogMessages(prev => [newStatusLog, ...prev].slice(0, 5));
+                        break;
+                    
                     case 'log':
-                        setLogMessages(prev => [message.data, ...prev].slice(0, 5));
+                        const newLog = { ...message.data, timestamp: new Date() };
+                        setLogMessages(prev => [newLog, ...prev].slice(0, 5));
                         break;
 
                     case 'signal':
@@ -223,21 +224,21 @@
 
             const connect = useCallback(() => {
                 console.log("Tentando conectar WebSocket...");
-                if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-                    console.log("WebSocket já está aberto.");
-                    return;
-                }
+                if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) return;
+                
                 socketRef.current = new WebSocket(WEBSOCKET_URL);
                 socketRef.current.onmessage = (event) => handleMessage(JSON.parse(event.data));
                 socketRef.current.onopen = () => console.log("WebSocket conectado.");
                 socketRef.current.onclose = () => {
                      console.log("WebSocket desconectado. Tentando reconectar...");
-                     setLogMessages(prev => [{level: 'error', pair: 'Sistema', message: 'Desconectado. Tentando reconectar...'}, ...prev].slice(0,5));
+                     const disconnectLog = {level: 'error', pair: 'Sistema', message: 'Desconectado. Tentando reconectar...', timestamp: new Date()};
+                     setLogMessages(prev => [disconnectLog, ...prev].slice(0,5));
                      setTimeout(connect, 5000);
                 };
                  socketRef.current.onerror = (err) => {
                     console.error("Erro no WebSocket:", err);
-                    setLogMessages(prev => [{level: 'error', pair: 'Sistema', message: 'Erro de conexão.'}, ...prev].slice(0,5));
+                    const errorLog = {level: 'error', pair: 'Sistema', message: 'Erro de conexão.', timestamp: new Date()};
+                    setLogMessages(prev => [errorLog, ...prev].slice(0,5));
                 };
             }, [handleMessage]);
 
@@ -265,7 +266,6 @@
                     case 'risk': return <RiskManagementView />;
                     case 'home':
                     default: 
-                        // Passando as mensagens de log para a view principal
                         return <HomeView signals={signals} scoreboard={scoreboard} logMessages={logMessages} />;
                 }
             };
