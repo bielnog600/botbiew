@@ -507,7 +507,7 @@ def main_bot_logic(state):
 
     while not state.stop:
         try:
-            MAX_SIMULTANEOUS_TRADES = 2
+            MAX_SIMULTANEOUS_TRADES = 4
 
             if config['modo_operacao'] == '1' and (time.time() - last_catalog_time) > (4 * 3600):
                 with state.lock:
@@ -573,7 +573,7 @@ def main_bot_logic(state):
                                         assertividade = 0
                                         if normalized_name in state.strategy_performance and nome_estrategia in state.strategy_performance[normalized_name]:
                                             assertividade = state.strategy_performance[normalized_name][nome_estrategia]
-                                            if assertividade >= 65:
+                                            if assertividade >= 75:
                                                 is_approved = True
 
                                         sinal = globals().get(f'strategy_{cod_est}')(velas, PARAMS)
