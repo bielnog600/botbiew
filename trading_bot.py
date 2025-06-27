@@ -512,12 +512,12 @@ def main_bot_logic(state):
                                     
                                     if not velas or len(velas) < 20: continue
                                     
-                                    if is_market_indecisive(velas, PARAMS):
-                                        msg = "MERCADO CONSIDERADO INDECISO. Análise descartada."
-                                        log_warning(f"-> {ativo}: {msg}")
-                                        log_payload = {"type": "log", "data": {"level": "warning", "message": msg, "pair": ativo}}
-                                        signal_queue.put(log_payload)
-                                        continue
+                                    #if is_market_indecisive(velas, PARAMS):
+                                     #   msg = "MERCADO CONSIDERADO INDECISO. Análise descartada."
+                                      #  log_warning(f"-> {ativo}: {msg}")
+                                       # log_payload = {"type": "log", "data": {"level": "warning", "message": msg, "pair": ativo}}
+                                        #signal_queue.put(log_payload)
+                                        #continue
 
                                     for nome_estrategia, assertividade in state.strategy_performance[ativo].items():
                                         if assertividade >= 45: 
