@@ -477,7 +477,7 @@ def main_bot_logic(state):
                                     if not velas or len(velas) < 20 or is_market_indecisive(velas, PARAMS): continue
 
                                     for nome_estrategia, assertividade in state.strategy_performance[ativo].items():
-                                        if assertividade >= 70:
+                                        if assertividade >= 50:
                                             cod_map = {'Pullback MQL': 'mql_pullback', 'Fluxo': 'flow', 'Padrões': 'patterns', 'Rejeição': 'rejection_candle'}
                                             cod_estrategia = next((cod for cod, nome in cod_map.items() if nome == nome_estrategia), None)
                                             if not cod_estrategia: continue
