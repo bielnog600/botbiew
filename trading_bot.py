@@ -216,7 +216,7 @@ def catalogar_estrategias(api, state, params):
             performance_do_par = {}
             for nome, res in resultados.items():
                 total = res['win'] + res['loss']
-                if total > 5:
+                if total > 5: # Apenas considera estratégias com mais de 5 ocorrências
                     assertividade = (res['win'] / total) * 100
                     performance_do_par[nome] = assertividade
                     log_info(f"  -> Strategy '{nome}' for {ativo}: {assertividade:.2f}% accuracy ({res['win']}W / {res['loss']}L)")
@@ -225,10 +225,10 @@ def catalogar_estrategias(api, state, params):
         except Exception as e: log_error(f"An error occurred while analyzing the pair {ativo}: {e}"); traceback.print_exc()
     log_info("="*40); log_info("CATALOGING FINISHED!"); log_info("="*40); time.sleep(5)
 
-
 def sma_slope(closes, period):
     if len(closes) < period + 1: return None
-    sma1 = sum(closes[-(period+1):-1]); sma2 = sum(closes[-period:])
+    sma1 = sum(closes[-(period+1):-1]) / period
+    sma2 = sum(closes[-period:]) / period
     if sma1 == sma2: return None
     return sma2 > sma1
 
@@ -329,51 +329,94 @@ def get_config_from_env():
 def compra_thread(api, ativo, valor, direcao, expiracao, tipo_op, state, config, cifrao, signal_id, target_entry_timestamp):
     try:
         wait_time = target_entry_timestamp - time.time()
-        if wait_time > 0: time.sleep(max(0, wait_time - 0.2))
-        while time.time() < target_entry_timestamp: pass
-        entrada_atual = valor; direcao_atual, niveis_mg = direcao, config['mg_niveis'] if config['usar_mg'] else 0
+        if wait_time > 0:
+            time.sleep(max(0, wait_time - 0.2))
+        while time.time() < target_entry_timestamp:
+            pass
+        
+        entrada_atual = valor
+        direcao_atual, niveis_mg = direcao, config['mg_niveis'] if config['usar_mg'] else 0
         resultado_final = None
+        
         for i in range(niveis_mg + 1):
-            if state.stop: break
+            if state.stop:
+                break
             if i > 0:
                 gale_payload = {"type": "gale", "signal_id": signal_id, "gale_level": i}
                 signal_queue.put(gale_payload)
-                if signal_id in state.signal_history: state.signal_history[signal_id]["gale_level"] = i
-            gale_info = f"(Gale {i})" if i > 0 else "(Main Entry)"; log_info(f"ORDER {gale_info}: {ativo} | {cifrao}{entrada_atual:.2f} | {direcao_atual.upper()} | {expiracao}M")
-            if tipo_op == 'digital': check, id_ordem = api.buy_digital_spot(ativo, entrada_atual, direcao_atual, expiracao)
-            else: check, id_ordem = api.buy(entrada_atual, ativo, direcao_atual, expiracao)
-            if not check: log_error(f"Failed to open order in Gale {i}."); resultado_final = "ERROR"; break
-            resultado, status_encontrado = 0.0, False; tempo_limite = time.time() + expiracao * 60 + 15
+                if signal_id in state.signal_history:
+                    state.signal_history[signal_id]["gale_level"] = i
+            
+            gale_info = f"(Gale {i})" if i > 0 else "(Main Entry)"
+            log_info(f"ORDER {gale_info}: {ativo} | {cifrao}{entrada_atual:.2f} | {direcao_atual.upper()} | {expiracao}M")
+
+            if tipo_op == 'digital':
+                check, id_ordem = api.buy_digital_spot(ativo, entrada_atual, direcao_atual, expiracao)
+            else:
+                check, id_ordem = api.buy(entrada_atual, ativo, direcao_atual, expiracao)
+            
+            if not check:
+                log_error(f"Failed to open order in Gale {i}.")
+                resultado_final = "ERROR"
+                break
+            
+            resultado, status_encontrado = 0.0, False
+            tempo_limite = time.time() + expiracao * 60 + 15
+            
             while time.time() < tempo_limite:
                 status, lucro = api.check_win_v4(id_ordem)
-                if status: resultado, status_encontrado = lucro, True; break
+                if status:
+                    resultado, status_encontrado = lucro, True
+                    break
                 time.sleep(0.5)
-            if not status_encontrado: log_error(f"Timeout on order {id_ordem}."); resultado_final = "ERROR"; break
+
+            if not status_encontrado:
+                log_error(f"Timeout on order {id_ordem}.")
+                resultado_final = "ERROR"
+                break
+            
+            # ### BLOCO DE RESULTADO CORRIGIDO ###
             if resultado > 0:
                 log_success(f"RESULT: WIN {gale_info} | Profit: {cifrao}{resultado:.2f}")
-                with state.lock: state.win_count += 1;
-                    if i > 0: state.gale_wins[f'g{i}'] += 1
-                resultado_final = 'WIN'; break
+                with state.lock:
+                    state.win_count += 1
+                    if i > 0:
+                        state.gale_wins[f'g{i}'] += 1
+                resultado_final = 'WIN'
+                break
             elif resultado < 0:
                 log_error(f"RESULT: LOSS {gale_info} | Loss: {cifrao}{abs(resultado):.2f}")
-                if i < niveis_mg: entrada_atual *= config['mg_fator']
+                if i < niveis_mg:
+                    entrada_atual *= config['mg_fator']
                 else:
-                    with state.lock: state.loss_count += 1
+                    with state.lock:
+                        state.loss_count += 1
                     resultado_final = 'LOSS'
             else:
                 log_warning(f"RESULT: DRAW {gale_info}.")
-                if i < niveis_mg: log_info("Re-entering after a draw...")
-                else: resultado_final = 'DRAW'
+                if i < niveis_mg:
+                    log_info("Re-entering after a draw...")
+                else:
+                    resultado_final = 'DRAW'
+        
         if resultado_final and resultado_final != "ERROR" and signal_id in state.signal_history:
             state.signal_history[signal_id]["result"] = resultado_final
-            placar_payload = { "type": "result", "signal_id": signal_id, "result": resultado_final, "placar": { "wins": state.win_count, "losses": state.loss_count, "gale_wins": sum(state.gale_wins.values()) } }
+            placar_payload = {
+                "type": "result", "signal_id": signal_id, "result": resultado_final,
+                "placar": { "wins": state.win_count, "losses": state.loss_count, "gale_wins": sum(state.gale_wins.values()) }
+            }
             signal_queue.put(placar_payload)
-    except Exception as e: log_error(f"CRITICAL ERROR IN PURCHASE THREAD: {e}"); traceback.print_exc()
+    except Exception as e:
+        log_error(f"CRITICAL ERROR IN PURCHASE THREAD: {e}")
+        traceback.print_exc()
     finally:
-        with state.lock: state.is_trading = False
+        with state.lock:
+            state.is_trading = False
 
 def obter_melhor_par(api, payout_minimo):
-    all_profits = api.get_all_profit(); all_assets = api.get_all_open_time(); ativos = {}
+    all_profits = api.get_all_profit()
+    all_assets = api.get_all_open_time()
+    ativos = {}
     for tipo_mercado in ['binary', 'turbo']:
         if tipo_mercado in all_assets:
             for ativo, info in all_assets[tipo_mercado].items():
@@ -381,9 +424,12 @@ def obter_melhor_par(api, payout_minimo):
                     try:
                         payout = all_profits.get(ativo, {}).get(tipo_mercado, 0) * 100
                         if payout >= payout_minimo:
-                            if ativo not in ativos or payout > ativos[ativo]['payout']: ativos[ativo] = {'payout': payout, 'tipo': 'digital' if tipo_mercado == 'digital' else 'turbo'}
-                    except Exception: continue
-    if not ativos: return None, None, None
+                            if ativo not in ativos or payout > ativos[ativo]['payout']:
+                                ativos[ativo] = {'payout': payout, 'tipo': 'digital' if tipo_mercado == 'digital' else 'turbo'}
+                    except Exception:
+                        continue
+    if not ativos:
+        return None, None, None
     best_asset = max(ativos, key=lambda k: ativos[k]['payout'])
     return best_asset, ativos[best_asset]['tipo'], ativos[best_asset]['payout']
 
@@ -391,17 +437,29 @@ def main_bot_logic(state):
     exibir_banner()
     email = os.getenv('EXNOVA_EMAIL', 'test@example.com')
     senha = os.getenv('EXNOVA_PASSWORD', 'password')
-    if not email or not senha: log_error("Environment variables EXNOVA_EMAIL and EXNOVA_PASSWORD not set."); sys.exit(1)
-    config = get_config_from_env(); API = Exnova(email, senha); log_info("Attempting to connect to Exnova..."); check, reason = API.connect()
-    if not check: log_error(f"Connection failed: {reason}"); sys.exit(1)
-    log_success("Connection established successfully!"); API.change_balance(config['conta']); cifrao = "$"
+    if not email or not senha:
+        log_error("Environment variables EXNOVA_EMAIL and EXNOVA_PASSWORD not set.")
+        sys.exit(1)
+
+    config = get_config_from_env()
+    API = Exnova(email, senha)
+    log_info("Attempting to connect to Exnova...")
+    check, reason = API.connect()
+    if not check:
+        log_error(f"Connection failed: {reason}")
+        sys.exit(1)
+
+    log_success("Connection established successfully!")
+    API.change_balance(config['conta'])
+    cifrao = "$"
     try:
-        perfil = API.get_profile_ansyc(); cifrao = perfil.get('currency_char', '$')
+        perfil = API.get_profile_ansyc()
+        cifrao = perfil.get('currency_char', '$')
         log_info(f"Hello, {perfil.get('name', 'User')}! Bot starting in server mode.")
     except Exception as e:
-        log_warning(f"Could not get user profile. Error: {e}"); log_info(f"Hello! Bot starting in server mode.")
+        log_warning(f"Could not get user profile. Error: {e}")
+        log_info(f"Hello! Bot starting in server mode.")
     
-    # ### PARÂMETROS AJUSTADOS PARA SEREM MENOS RESTRITIVOS ###
     PARAMS = { 
         'MAPeriod': 5, 'MaxLevels': 10, 'Proximity': 10.0, 'Point': 1e-6, 
         'FlowBodyMinRatio': 0.35, 'FlowOppositeWickMaxRatio': 0.5, 
@@ -414,54 +472,78 @@ def main_bot_logic(state):
         catalogar_estrategias(API, state, PARAMS)
         last_catalog_time = time.time()
 
-    minuto_anterior, analise_feita = -1, False; log_info("Bot started. Entering analysis loop...")
+    minuto_anterior, analise_feita = -1, False
+    log_info("Bot started. Entering analysis loop...")
+
     while not state.stop:
         try:
             if config['modo_operacao'] == '1' and (time.time() - last_catalog_time) > (4 * 3600):
-                with state.lock: is_trading_check = state.is_trading
+                with state.lock:
+                    is_trading_check = state.is_trading
                 if not is_trading_check:
                     log_info("="*50); log_info("PERIODIC RE-CATALOGING (4H) INITIATED"); log_info("="*50)
                     signal_queue.put({"type": "analysis_status", "status": "Recatalogando estratégias (4h)..."})
                     catalogar_estrategias(API, state, PARAMS)
-                    last_catalog_time = time.time(); log_info("="*50); log_info("PERIODIC RE-CATALOGING FINISHED"); log_info("="*50)
+                    last_catalog_time = time.time()
+                    log_info("="*50); log_info("PERIODIC RE-CATALOGING FINISHED"); log_info("="*50)
                 else:
                     log_warning("Re-cataloging postponed: trade in progress.")
 
-            timestamp = time.time(); dt_objeto = datetime.fromtimestamp(timestamp)
+            timestamp = time.time()
+            dt_objeto = datetime.fromtimestamp(timestamp)
             minuto_atual, segundo_atual = dt_objeto.minute, dt_objeto.second
+
             if minuto_atual != minuto_anterior:
                 minuto_anterior, analise_feita = minuto_atual, False
-                with state.lock: is_trading = state.is_trading
+                with state.lock:
+                    is_trading = state.is_trading
                 if not is_trading:
                     horario_proxima_vela = (dt_objeto.replace(second=0, microsecond=0) + timedelta(minutes=1)).strftime('%H:%M')
                     signal_queue.put({"type": "analysis_status", "status": f"Aguardando vela das {horario_proxima_vela}...", "next_entry_time": horario_proxima_vela})
-            with state.lock: is_trading = state.is_trading
+            
+            with state.lock:
+                is_trading = state.is_trading
+
             if segundo_atual >= 55 and not analise_feita and not is_trading:
-                analise_feita = True; sinal_encontrado_neste_ciclo = False
-                if config['modo_operacao'] == '1':
+                analise_feita = True
+                sinal_encontrado_neste_ciclo = False
+                
+                # Variáveis para guardar a informação do sinal
+                ativo, tipo_op, direcao_final, nome_estrategia_usada, velas = None, None, None, None, None
+
+                if config['modo_operacao'] == '1': # MODO CONSERVADOR (CATALOGADO)
                     open_assets = API.get_all_open_time()
-                    for tipo_mercado in ['binary', 'turbo']:
-                        if tipo_mercado in open_assets:
-                            for ativo, info in open_assets[tipo_mercado].items():
-                                if info.get('open', False) and ativo in state.strategy_performance:
-                                    status_log = [f"Analisando par: {ativo}"]; signal_queue.put({"type": "analysis_update", "asset": ativo, "status_list": status_log})
-                                    velas = validar_e_limpar_velas(API.get_candles(ativo, 60, 150, time.time()))
-                                    if not velas or len(velas) < 20 or is_market_indecisive(velas, PARAMS): continue
-                                    for nome_estrategia, assertividade in state.strategy_performance[ativo].items():
+                    for tipo_mercado_loop in ['binary', 'turbo']:
+                        if tipo_mercado_loop in open_assets:
+                            for ativo_loop, info in open_assets[tipo_mercado_loop].items():
+                                if info.get('open', False) and ativo_loop in state.strategy_performance:
+                                    status_log = [f"Analisando par: {ativo_loop}"]
+                                    signal_queue.put({"type": "analysis_update", "asset": ativo_loop, "status_list": status_log})
+                                    
+                                    current_velas = validar_e_limpar_velas(API.get_candles(ativo_loop, 60, 150, time.time()))
+                                    if not current_velas or len(current_velas) < 20 or is_market_indecisive(current_velas, PARAMS):
+                                        continue
+
+                                    for nome_est, assertividade in state.strategy_performance[ativo_loop].items():
                                         if assertividade >= 50:
                                             cod_map = {'Pullback MQL': 'mql_pullback', 'Fluxo': 'flow', 'Padrões': 'patterns', 'Rejeição': 'rejection_candle'}
-                                            cod_estrategia = next((cod for cod, nome in cod_map.items() if nome == nome_estrategia), None)
-                                            if not cod_estrategia: continue
-                                            status_log.append(f"Testando {nome_estrategia} ({assertividade:.1f}%)..."); signal_queue.put({"type": "analysis_update", "asset": ativo, "status_list": status_log})
-                                            sinal = globals().get(f'strategy_{cod_estrategia}')(velas, PARAMS)
+                                            cod_est = next((cod for cod, nome in cod_map.items() if nome == nome_est), None)
+                                            if not cod_est: continue
+                                            
+                                            status_log.append(f"Testando {nome_est} ({assertividade:.1f}%)...")
+                                            signal_queue.put({"type": "analysis_update", "asset": ativo_loop, "status_list": status_log})
+                                            
+                                            sinal = globals().get(f'strategy_{cod_est}')(current_velas, PARAMS)
                                             if sinal:
-                                                direcao_final = {'BUY': 'call', 'SELL': 'put'}.get(sinal); nome_estrategia_usada = nome_estrategia; tipo_op = tipo_mercado
+                                                ativo, tipo_op, direcao_final, nome_estrategia_usada, velas = ativo_loop, tipo_mercado_loop, {'BUY': 'call', 'SELL': 'put'}.get(sinal), nome_est, current_velas
                                                 sinal_encontrado_neste_ciclo = True
-                                                status_log.append(f"SINAL ENCONTRADO com {nome_estrategia}!"); signal_queue.put({"type": "analysis_update", "asset": ativo, "status_list": status_log}); break
-                                            else: status_log[-1] = f"{nome_estrategia}: Sem sinal."
+                                                status_log.append(f"SINAL ENCONTRADO com {nome_est}!"); signal_queue.put({"type": "analysis_update", "asset": ativo, "status_list": status_log}); break
+                                            else:
+                                                status_log[-1] = f"{nome_est}: Sem sinal."
                                     if sinal_encontrado_neste_ciclo: break
                             if sinal_encontrado_neste_ciclo: break
-                else:
+                
+                else: # MODO AGRESSIVO (PADRÃO)
                     ativo, tipo_op, payout = obter_melhor_par(API, config['pay_minimo'])
                     if ativo:
                         signal_queue.put({"type": "analysis_update", "asset": ativo, "status_list": ["Analisando par..."]})
@@ -473,12 +555,13 @@ def main_bot_logic(state):
                                 status_log.append(f"Testando: {nome}..."); signal_queue.put({"type": "analysis_update", "asset": ativo, "status_list": status_log})
                                 sinal = globals().get(f'strategy_{cod}')(velas, PARAMS)
                                 if sinal:
-                                    direcao_final = {'BUY': 'call', 'SELL': 'put'}.get(sinal); nome_estrategia_usada = nome
+                                    direcao_final, nome_estrategia_usada = {'BUY': 'call', 'SELL': 'put'}.get(sinal), nome
                                     sinal_encontrado_neste_ciclo = True
                                     status_log.append(f"SINAL ENCONTRADO com {nome}!"); signal_queue.put({"type": "analysis_update", "asset": ativo, "status_list": status_log}); break
                                 else: status_log[-1] = f"{nome}: Sem sinal."
                             if not sinal_encontrado_neste_ciclo:
                                 status_log.append("Nenhuma estratégia encontrou sinal."); signal_queue.put({"type": "analysis_update", "asset": ativo, "status_list": status_log})
+
                 if sinal_encontrado_neste_ciclo:
                     with state.lock: state.is_trading = True
                     horario_analise_dt = dt_objeto.replace(second=0, microsecond=0); horario_analise_str = horario_analise_dt.strftime('%H:%M')
@@ -502,21 +585,11 @@ def main_bot_logic(state):
 
 def main():
     bot_state = BotState()
-    websocket_thread = Thread(target=start_websocket_server_sync, args=(bot_state,), daemon=True)
-    websocket_thread.start()
-    
-    try:
-        main_bot_logic(bot_state)
-    except KeyboardInterrupt:
-        log_warning("\nBot interrupted by user.")
-    except Exception as e:
-        log_error(f"Fatal error starting the bot: {e}")
-        traceback.print_exc()
-    finally:
-        bot_state.stop = True
-        log(b, "Shutting down the bot...")
-        time.sleep(2)
-        sys.exit()
+    websocket_thread = Thread(target=start_websocket_server_sync, args=(bot_state,), daemon=True); websocket_thread.start()
+    try: main_bot_logic(bot_state)
+    except KeyboardInterrupt: log_warning("\nBot interrupted by user.")
+    except Exception as e: log_error(f"Fatal error starting the bot: {e}"); traceback.print_exc()
+    finally: bot_state.stop = True; log(b, "Shutting down the bot..."); time.sleep(2); sys.exit()
 
 if __name__ == "__main__":
     main()
