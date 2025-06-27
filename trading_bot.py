@@ -108,7 +108,7 @@ def exibir_banner():
       ██║   ██╔══██╗██║██╔══██║██║         ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║   ██║   ██║
       ██║   ██║  ██║██║██║  ██║███████╗     ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝   ██║
       ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝      ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝    ╚═╝ '''+y+'''
-              azkzero@gmail.com - v12 (Tolerância Máxima de Indecisão)
+              azkzero@gmail.com - v13 (Padrões Avançados)
     ''')
     print(y + "*"*88)
     print(c + "="*88)
@@ -216,7 +216,7 @@ def catalogar_estrategias(api, state, params):
     for ativo_original in ativos_abertos:
         try:
             log_info(f"\n--- Analyzing pair: {w}{ativo_original}{c} ---")
-            velas_historicas_raw = api.get_candles(ativo_original, 60, 500, time.time()) #numero de velas catalogadas
+            velas_historicas_raw = api.get_candles(ativo_original, 60, 240, time.time())
             todas_as_velas = validar_e_limpar_velas(velas_historicas_raw)
             if not todas_as_velas or len(todas_as_velas) < 100: log_warning(f"Could not get enough historical data for {ativo_original}."); continue
             resultados = {nome: {'win': 0, 'loss': 0} for nome in TODAS_AS_ESTRATEGIAS.values()}
@@ -314,13 +314,65 @@ def strategy_flow(velas, p):
         return 'SELL'
     return None
 
+# ##################################################################
+# NOVA LÓGICA DE PADRÕES AVANÇADOS
+# ##################################################################
 def strategy_patterns(velas, p):
-    if len(velas) < p['MAPeriod'] + 2: return None
-    nano_up = sma_slope([v['close'] for v in velas], p['MAPeriod'])
-    if nano_up is None: return None
-    penultimate, last = velas[-2], velas[-1]
-    if nano_up and (penultimate['close'] < penultimate['open'] and last['close'] > last['open'] and last['open'] < penultimate['close'] and last['close'] > penultimate['open']): return 'BUY'
-    if not nano_up and (penultimate['close'] > penultimate['open'] and last['close'] < last['open'] and last['open'] > penultimate['close'] and last['close'] < penultimate['open']): return 'SELL'
+    if len(velas) < p['MAPeriod'] + 5:  # Need at least 3 candles for some patterns + SMA buffer
+        return None
+
+    # Get last 3 candles
+    v1, v2, v3 = velas[-3], velas[-2], velas[-1]
+
+    # --- Candle Properties Helper ---
+    def get_props(vela):
+        props = {}
+        props['range'] = vela['high'] - vela['low']
+        if props['range'] == 0: return None # Avoid division by zero
+        props['corpo'] = abs(vela['open'] - vela['close'])
+        props['body_ratio'] = props['corpo'] / props['range']
+        props['is_alta'] = vela['close'] > vela['open']
+        props['is_baixa'] = vela['close'] < vela['open']
+        return props
+
+    p1, p2, p3 = get_props(v1), get_props(v2), get_props(v3)
+    if not all([p1, p2, p3]): return None # If any candle is invalid
+
+    # 1. Engolfo (Engulfing) - Reversão
+    if p2['is_baixa'] and p3['is_alta'] and p3['corpo'] > p2['corpo'] and v3['close'] > v2['open'] and v3['open'] < v2['close']:
+        return 'BUY'
+    if p2['is_alta'] and p3['is_baixa'] and p3['corpo'] > p2['corpo'] and v3['close'] < v2['open'] and v3['open'] > v2['close']:
+        return 'SELL'
+
+    # 2. Estrela da Manhã / Estrela da Noite - Reversão de 3 velas
+    # Estrela da Manhã (reversão para alta)
+    if p1['is_baixa'] and p1['body_ratio'] > 0.6 and \
+       p2['body_ratio'] < 0.3 and \
+       p3['is_alta'] and p3['body_ratio'] > 0.6 and v3['close'] > (v1['open'] + v1['close']) / 2:
+        return 'BUY'
+    # Estrela da Noite (reversão para baixa)
+    if p1['is_alta'] and p1['body_ratio'] > 0.6 and \
+       p2['body_ratio'] < 0.3 and \
+       p3['is_baixa'] and p3['body_ratio'] > 0.6 and v3['close'] < (v1['open'] + v1['close']) / 2:
+        return 'SELL'
+
+    # 3. Candle de Decisão / Rompimento - Continuação
+    tendencia_alta = sma_slope([v['close'] for v in velas], p['MAPeriod'])
+    if tendencia_alta is not None:
+        if tendencia_alta and p3['is_alta'] and p3['body_ratio'] > 0.7:
+            return 'BUY'
+        if not tendencia_alta and p3['is_baixa'] and p3['body_ratio'] > 0.7:
+            return 'SELL'
+
+    # 4. Vela de Descanso - Continuação
+    if tendencia_alta is not None:
+        # Pausa na tendência de alta
+        if tendencia_alta and p2['body_ratio'] < 0.3 and p3['is_alta'] and p3['body_ratio'] > 0.5:
+            return 'BUY'
+        # Pausa na tendência de baixa
+        if not tendencia_alta and p2['body_ratio'] < 0.3 and p3['is_baixa'] and p3['body_ratio'] > 0.5:
+            return 'SELL'
+            
     return None
 
 def is_market_indecisive(velas, p):
@@ -446,14 +498,13 @@ def main_bot_logic(state):
         log_warning(f"Não foi possível obter o perfil do usuário. Erro: {e}")
         log_info(f"Olá! Iniciando bot em modo servidor.")
     
-    # PARÂMETROS DE INDECISÃO AJUSTADOS AQUI PARA TOLERÂNCIA MÁXIMA
     PARAMS = { 
         'MAPeriod': 5, 'MaxLevels': 10, 'Proximity': 10.0, 'Point': 1e-6, 
         'FlowBodyMinRatio': 0.4, 'FlowOppositeWickMaxRatio': 0.45, 
         'RejectionWickMinRatio': 0.58, 'RejectionBodyMaxRatio': 0.3, 'RejectionOppositeWickMaxRatio': 0.2, 
         'IndecisionCandles': 3,
-        'IndecisionBodyMaxRatio': 0.05,  # Exige um corpo quase inexistente (doji)
-        'IndecisionMinCount': 3          # Exige que TODAS as 3 velas sejam dojis
+        'IndecisionBodyMaxRatio': 0.05,
+        'IndecisionMinCount': 3
     }
     
     last_catalog_time = 0
@@ -525,7 +576,7 @@ def main_bot_logic(state):
                                         continue
 
                                     for nome_estrategia, assertividade in state.strategy_performance[normalized_name].items():
-                                        if assertividade >= 25: 
+                                        if assertividade >= 45: 
                                             cod_map = {'Pullback MQL': 'mql_pullback', 'Fluxo': 'flow', 'Padrões': 'patterns', 'Rejeição': 'rejection_candle'}
                                             cod_est = next((cod for cod, nome in cod_map.items() if nome == nome_estrategia), None)
                                             if not cod_est: continue
