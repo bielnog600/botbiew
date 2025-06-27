@@ -108,7 +108,7 @@ def exibir_banner():
       ██║   ██╔══██╗██║██╔══██║██║         ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║   ██║   ██║
       ██║   ██║  ██║██║██║  ██║███████╗     ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝   ██║
       ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝      ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝    ╚═╝ '''+y+'''
-              azkzero@gmail.com - v14 (Logs Completos de Análise)
+              azkzero@gmail.com - v15 (Ajuste de Sincronização de Entrada)
     ''')
     print(y + "*"*88)
     print(c + "="*88)
@@ -388,11 +388,16 @@ def get_config_from_env():
         'mg_fator': float(os.getenv('EXNOVA_MG_FATOR', 2.0)), 'modo_operacao': os.getenv('EXNOVA_MODO_OPERACAO', '2')
     }
 
+# LÓGICA DE SINCRONIZAÇÃO ATUALIZADA AQUI
 def compra_thread(api, ativo, valor, direcao, expiracao, tipo_op, state, config, cifrao, signal_id, target_entry_timestamp):
     try:
-        wait_time = target_entry_timestamp - time.time()
-        if wait_time > 0: time.sleep(max(0, wait_time - 0.2))
-        while time.time() < target_entry_timestamp: pass
+        # Enviar a ordem 800ms ANTES da vela começar para compensar a latência
+        wait_time = target_entry_timestamp - time.time() - 0.8
+        
+        if wait_time > 0:
+            log_info(f"Aguardando {wait_time:.2f}s para entrada precisa em {ativo}...")
+            time.sleep(wait_time)
+
         entrada_atual = valor; direcao_atual, niveis_mg = direcao, config['mg_niveis'] if config['usar_mg'] else 0
         resultado_final = None
         for i in range(niveis_mg + 1):
@@ -550,7 +555,6 @@ def main_bot_logic(state):
                         if tipo_mercado in open_assets:
                             for ativo_original, info in open_assets[tipo_mercado].items():
                                 normalized_name = normalize_asset(ativo_original)
-                                # Apenas continua se o par foi catalogado com sucesso
                                 if info.get('open', False) and normalized_name in state.strategy_performance:
                                     log_info(f"--- Analisando {ativo_original} ---")
                                     velas = validar_e_limpar_velas(API.get_candles(ativo_original, 60, 150, time.time()))
@@ -563,15 +567,14 @@ def main_bot_logic(state):
                                         log_payload = {"type": "log", "data": {"level": "warning", "message": msg, "pair": ativo_original}}
                                         signal_queue.put(log_payload)
                                         continue
-                                    
-                                    # NOVA LÓGICA DE LOG COMPLETO
+
                                     all_strategies_to_check = {'Pullback MQL': 'mql_pullback', 'Fluxo': 'flow', 'Padrões': 'patterns', 'Rejeição': 'rejection_candle'}
                                     for nome_estrategia, cod_est in all_strategies_to_check.items():
                                         is_approved = False
                                         assertividade = 0
                                         if normalized_name in state.strategy_performance and nome_estrategia in state.strategy_performance[normalized_name]:
                                             assertividade = state.strategy_performance[normalized_name][nome_estrategia]
-                                            if assertividade >= 45:
+                                            if assertividade >= 60:
                                                 is_approved = True
 
                                         sinal = globals().get(f'strategy_{cod_est}')(velas, PARAMS)
