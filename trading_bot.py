@@ -107,7 +107,7 @@ def exibir_banner():
       ██║   ██╔══██╗██║██╔══██║██║         ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║   ██║   ██║
       ██║   ██║  ██║██║██║  ██║███████╗     ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝   ██║
       ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝      ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝    ╚═╝ '''+y+'''
-              azkzero@gmail.com - v6 com Ajuste de Indecisão
+              azkzero@gmail.com - v9 com Ajuste de Amostra Mínima
     ''')
     print(y + "*"*88)
     print(c + "="*88)
@@ -229,7 +229,9 @@ def catalogar_estrategias(api, state, params):
             performance_do_par = {}
             for nome, res in resultados.items():
                 total = res['win'] + res['loss']
-                if total > 3: 
+                # ALTERAÇÃO: Revertido para um ponto de equilíbrio mais seguro.
+                # Exige pelo menos 2 sinais no histórico (total > 1) para considerar a estratégia.
+                if total > 1: 
                     assertividade = (res['win'] / total) * 100
                     performance_do_par[nome] = assertividade
                     log_info(f"  -> Strategy '{nome}' for {ativo}: {assertividade:.2f}% accuracy ({res['win']}W / {res['loss']}L)")
@@ -326,9 +328,9 @@ def is_market_indecisive(velas, p):
         range_total = vela['high'] - vela['low']
         if range_total == 0: indecisive_candles += 1; continue
         corpo = abs(vela['open'] - vela['close'])
-        if (corpo / range_total) <= p.get('IndecisionBodyMaxRatio', 0.15): # Ajustado aqui
+        if (corpo / range_total) <= p.get('IndecisionBodyMaxRatio', 0.15):
              indecisive_candles += 1
-    return indecisive_candles >= p.get('IndecisionMinCount', 2) # Ajustado aqui
+    return indecisive_candles >= p.get('IndecisionMinCount', 2)
 
 class BotState:
     def __init__(self):
@@ -441,16 +443,13 @@ def main_bot_logic(state):
         log_warning(f"Não foi possível obter o perfil do usuário. Erro: {e}")
         log_info(f"Olá! Iniciando bot em modo servidor.")
     
-    # PARÂMETROS DE INDECISÃO AJUSTADOS AQUI
     PARAMS = { 
         'MAPeriod': 5, 'MaxLevels': 10, 'Proximity': 10.0, 'Point': 1e-6, 
         'FlowBodyMinRatio': 0.4, 'FlowOppositeWickMaxRatio': 0.45, 
         'RejectionWickMinRatio': 0.58, 'RejectionBodyMaxRatio': 0.3, 'RejectionOppositeWickMaxRatio': 0.2, 
-        
-        # Filtro de indecisão menos rigoroso
-        'IndecisionCandles': 3,          # Analisa as últimas 3 velas
-        'IndecisionBodyMaxRatio': 0.05,  # Corpo tem que ser MUITO pequeno (15%) para ser indecisão
-        'IndecisionMinCount': 3          # Precisa de 2 (em vez de 3) velas de indecisão para parar
+        'IndecisionCandles': 3,
+        'IndecisionBodyMaxRatio': 0.15,
+        'IndecisionMinCount': 2
     }
     
     last_catalog_time = 0
@@ -481,7 +480,7 @@ def main_bot_logic(state):
             dt_objeto = datetime.fromtimestamp(timestamp)
             minuto_atual, segundo_atual = dt_objeto.minute, dt_objeto.second
 
-            if minuto_atual != minuto_anterior:
+            if minuto_anterior != minuto_atual:
                 minuto_anterior, analise_feita = minuto_atual, False
                 with state.lock:
                     active_trades_count = state.active_trades
@@ -549,7 +548,7 @@ def main_bot_logic(state):
                                 break
                             velas = validar_e_limpar_velas(API.get_candles(ativo, 60, 150, time.time()))
                             if velas and len(velas) >= 20 and not is_market_indecisive(velas, PARAMS):
-                                strategies_to_try = [('Pullback MQL', 'mql_pullback'), ('Fluxo', 'flow'), ('Padrões', 'patterns'), ('Rejeição', 'rejection_candle')]
+                                strategies_to_try = [('Pullback MQL', 'mql_pullback'), ('Fluxo', 'flow'), ('Padrões': 'patterns'), ('Rejeição', 'rejection_candle')]
                                 for nome, cod in strategies_to_try:
                                     sinal = globals().get(f'strategy_{cod}')(velas, PARAMS)
                                     if sinal:
