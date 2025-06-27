@@ -501,7 +501,7 @@ def main_bot_logic(state):
             with state.lock:
                 is_trading = state.is_trading
 
-            if segundo_atual >= 55 and not analise_feita and not is_trading:
+            if segundo_atual >= 50 and not analise_feita and not is_trading:
                 analise_feita = True
                 sinal_final = None
 
@@ -522,7 +522,7 @@ def main_bot_logic(state):
                                         continue
 
                                     for nome_estrategia, assertividade in state.strategy_performance[ativo].items():
-                                        if assertividade >= 70:
+                                        if assertividade >= 60:
                                             cod_map = {'Pullback MQL': 'mql_pullback', 'Fluxo': 'flow', 'Padrões': 'patterns', 'Rejeição': 'rejection_candle'}
                                             cod_estrategia = next((cod for cod, nome in cod_map.items() if nome == nome_estrategia), None)
                                             if not cod_estrategia: continue
