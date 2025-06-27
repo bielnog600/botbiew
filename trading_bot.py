@@ -216,7 +216,7 @@ def catalogar_estrategias(api, state, params):
             performance_do_par = {}
             for nome, res in resultados.items():
                 total = res['win'] + res['loss']
-                if total > 5:
+                if total > 2:
                     assertividade = (res['win'] / total) * 100
                     performance_do_par[nome] = assertividade
                     log_info(f"  -> Strategy '{nome}' for {ativo}: {assertividade:.2f}% accuracy ({res['win']}W / {res['loss']}L)")
@@ -477,7 +477,7 @@ def main_bot_logic(state):
                                         continue
 
                                     for nome_estrategia, assertividade in state.strategy_performance[ativo].items():
-                                        if assertividade >= 50:
+                                        if assertividade >= 40:
                                             cod_map = {'Pullback MQL': 'mql_pullback', 'Fluxo': 'flow', 'Padrões': 'patterns', 'Rejeição': 'rejection_candle'}
                                             cod_est = next((cod for cod, nome in cod_map.items() if nome == nome_estrategia), None)
                                             if not cod_est: continue
