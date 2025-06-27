@@ -542,7 +542,7 @@ def main_bot_logic(state):
                 active_trades_count = state.active_trades
             
             # ALTERAÇÃO CRÍTICA AQUI: Análise antecipada
-            if segundo_atual >= 30 and not analise_feita and active_trades_count < MAX_SIMULTANEOUS_TRADES:
+            if segundo_atual >= 55 and not analise_feita and active_trades_count < MAX_SIMULTANEOUS_TRADES:
                 analise_feita = True
                 sinais_para_executar = []
 
