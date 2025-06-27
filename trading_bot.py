@@ -216,7 +216,7 @@ def catalogar_estrategias(api, state, params):
     for ativo_original in ativos_abertos:
         try:
             log_info(f"\n--- Analyzing pair: {w}{ativo_original}{c} ---")
-            velas_historicas_raw = api.get_candles(ativo_original, 60, 60, time.time()) #numero de velas catalogadas
+            velas_historicas_raw = api.get_candles(ativo_original, 60, 500, time.time()) #numero de velas catalogadas
             todas_as_velas = validar_e_limpar_velas(velas_historicas_raw)
             if not todas_as_velas or len(todas_as_velas) < 100: log_warning(f"Could not get enough historical data for {ativo_original}."); continue
             resultados = {nome: {'win': 0, 'loss': 0} for nome in TODAS_AS_ESTRATEGIAS.values()}
