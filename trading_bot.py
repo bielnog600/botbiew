@@ -113,16 +113,12 @@ def exibir_banner():
     print(c + "="*88)
 
 # ### ATUALIZADO com Lock ###
-    async def handler(self, websocket, *args):
-            # 1) Registra o cliente
-        with clients_lock:
-            connected_clients.add(websocket)
-
-    # 2) Extrai o path, se houver
-        path = args[0] if args else None
-        log_success(f"New WebSocket client connected: {websocket.remote_address}" +
+async def ws_handler(websocket, path, bot_state):
+    with clients_lock:
+        connected_clients.add(websocket)
+    log_success(f"New WebSocket client connected: {websocket.remote_address}" +
                     (f" on path {path}" if path else ""))
-        try:
+    try:
         initial_state = {
             "type": "init",
             "data": { "signals": list(bot_state.signal_history.values()), "placar": { "wins": bot_state.win_count, "losses": bot_state.loss_count, "gale_wins": sum(bot_state.gale_wins.values()) } }
