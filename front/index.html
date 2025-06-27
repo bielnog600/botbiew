@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>Plataforma - MAROMBIEW BOT</title>
     
     <!-- Tailwind CSS & Font Awesome -->
@@ -18,13 +18,40 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     
     <style>
-        body { font-family: 'Poppins', sans-serif; background-color: #0a0a0a; color: #e5e7eb; background-image: radial-gradient(#1e293b 1px, transparent 1px); background-size: 20px 20px; }
+        /* Estilos para uma experiência de App */
+        body { 
+            font-family: 'Poppins', sans-serif; 
+            background-color: #0a0a0a; 
+            color: #e5e7eb; 
+            background-image: radial-gradient(#1e293b 1px, transparent 1px); 
+            background-size: 20px 20px;
+            -webkit-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+            touch-action: manipulation;
+            /* ### NOVO: Ajuda o browser a renderizar controlos de formulário para temas escuros ### */
+            color-scheme: dark;
+        }
+
         .font-mono { font-family: 'Roboto Mono', monospace; }
         .glass-card { background: rgba(17, 24, 39, 0.6); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.05); }
         @keyframes card-enter { from { opacity: 0; transform: scale(0.95) translateY(10px); } to { opacity: 1; transform: scale(1) translateY(0); } }
         .card-enter-animation { animation: card-enter 0.4s ease-out forwards; }
         @keyframes score-pop { 0% { transform: scale(1); } 50% { transform: scale(1.25); color: #ffffff; } 100% { transform: scale(1); } }
         .score-updated { animation: score-pop 0.3s ease-in-out; }
+        
+        /* ### ALTERAÇÃO AQUI: Garante que os inputs de número sejam sempre legíveis ### */
+        .form-input {
+             color: white;
+        }
+        input[type="number"] {
+            -moz-appearance: textfield; /* Firefox */
+        }
+        input::-webkit-outer-spin-button,
+        input::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
     </style>
 </head>
 <body class="p-4 sm:p-6 lg:p-8">
@@ -82,18 +109,7 @@
         // --- Componentes da UI ---
         const Header = () => (<header className="flex flex-col sm:flex-row justify-between items-center mb-8 gap-6"><h1 className="text-3xl font-bold text-white"><i className="fa-solid fa-robot text-teal-400"></i> MAROMBIEW <span className="text-teal-400">BOT</span></h1></header>);
         const TabButton = ({ icon, label, isActive, onClick }) => (<button onClick={onClick} className={`flex flex-col items-center gap-1 w-24 py-2 rounded-lg transition-all duration-200 ${isActive ? 'text-teal-400 bg-teal-500/10' : 'text-gray-400 hover:bg-gray-700/50'}`}><i className={`${icon} text-xl`}></i><span className="text-xs font-semibold">{label}</span></button>);
-        
-        // ### CORREÇÃO AQUI ###
-        // Adicionada a classe z-50 para garantir que o menu fica sempre à frente.
-        const TabBar = ({ activeTab, setActiveTab }) => (
-            <nav className="fixed bottom-0 left-0 right-0 z-50 lg:relative lg:bottom-auto lg:left-auto lg:right-auto bg-gray-900/80 backdrop-blur-sm lg:bg-transparent lg:backdrop-filter-none border-t border-gray-700 lg:border-none p-2 lg:p-0 lg:mb-8">
-                <div className="flex justify-around lg:justify-center lg:gap-6 max-w-md mx-auto lg:max-w-none">
-                    <TabButton icon="fa-solid fa-house" label="Home" isActive={activeTab === 'home'} onClick={() => setActiveTab('home')} />
-                    <TabButton icon="fa-solid fa-chart-pie" label="Relatórios" isActive={activeTab === 'reports'} onClick={() => setActiveTab('reports')} />
-                    <TabButton icon="fa-solid fa-shield-halved" label="Gerenciamento" isActive={activeTab === 'risk'} onClick={() => setActiveTab('risk')} />
-                </div>
-            </nav>
-        );
+        const TabBar = ({ activeTab, setActiveTab }) => (<nav className="fixed bottom-0 left-0 right-0 z-50 lg:relative lg:bottom-auto lg:left-auto lg:right-auto bg-gray-900/80 backdrop-blur-sm lg:bg-transparent lg:backdrop-filter-none border-t border-gray-700 lg:border-none p-2 lg:p-0 lg:mb-8"><div className="flex justify-around lg:justify-center lg:gap-6 max-w-md mx-auto lg:max-w-none"><TabButton icon="fa-solid fa-house" label="Home" isActive={activeTab === 'home'} onClick={() => setActiveTab('home')} /><TabButton icon="fa-solid fa-chart-pie" label="Relatórios" isActive={activeTab === 'reports'} onClick={() => setActiveTab('reports')} /><TabButton icon="fa-solid fa-shield-halved" label="Gerenciamento" isActive={activeTab === 'risk'} onClick={() => setActiveTab('risk')} /></div></nav>);
 
         const Scoreboard = ({ scoreboard }) => {
             const animateScore = (ref, value) => {
