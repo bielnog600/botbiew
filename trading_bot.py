@@ -391,7 +391,7 @@ def get_config_from_env():
 def compra_thread(api, ativo, valor, direcao, expiracao, tipo_op, state, config, cifrao, signal_id, target_entry_timestamp):
     try:
         # ATUALIZAÇÃO: Enviar a ordem 5 segundos ANTES da vela começar
-        wait_time = target_entry_timestamp - time.time() - 5.0
+        wait_time = target_entry_timestamp - time.time() - 15.0
         
         if wait_time > 0:
             log_info(f"Aguardando {wait_time:.2f}s para entrada precisa em {ativo} (envio 5s antes)...")
@@ -508,7 +508,7 @@ def main_bot_logic(state):
 
     while not state.stop:
         try:
-            MAX_SIMULTANEOUS_TRADES = 2
+            MAX_SIMULTANEOUS_TRADES = 1
 
             if config['modo_operacao'] == '1' and (time.time() - last_catalog_time) > (4 * 3600):
                 with state.lock:
