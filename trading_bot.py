@@ -107,7 +107,7 @@ def exibir_banner():
       ██║   ██╔══██╗██║██╔══██║██║         ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║   ██║   ██║
       ██║   ██║  ██║██║██║  ██║███████╗     ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝   ██║
       ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝      ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝    ╚═╝ '''+y+'''
-              azkzero@gmail.com - v5 com Fuso Horário Local (Backend)
+              azkzero@gmail.com - v6 com Ajuste de Indecisão
     ''')
     print(y + "*"*88)
     print(c + "="*88)
@@ -326,8 +326,9 @@ def is_market_indecisive(velas, p):
         range_total = vela['high'] - vela['low']
         if range_total == 0: indecisive_candles += 1; continue
         corpo = abs(vela['open'] - vela['close'])
-        if (corpo / range_total) <= p.get('IndecisionBodyMaxRatio', 0.4): indecisive_candles += 1
-    return indecisive_candles >= p.get('IndecisionMinCount', 2)
+        if (corpo / range_total) <= p.get('IndecisionBodyMaxRatio', 0.15): # Ajustado aqui
+             indecisive_candles += 1
+    return indecisive_candles >= p.get('IndecisionMinCount', 2) # Ajustado aqui
 
 class BotState:
     def __init__(self):
@@ -440,11 +441,16 @@ def main_bot_logic(state):
         log_warning(f"Não foi possível obter o perfil do usuário. Erro: {e}")
         log_info(f"Olá! Iniciando bot em modo servidor.")
     
+    # PARÂMETROS DE INDECISÃO AJUSTADOS AQUI
     PARAMS = { 
         'MAPeriod': 5, 'MaxLevels': 10, 'Proximity': 10.0, 'Point': 1e-6, 
         'FlowBodyMinRatio': 0.4, 'FlowOppositeWickMaxRatio': 0.45, 
         'RejectionWickMinRatio': 0.58, 'RejectionBodyMaxRatio': 0.3, 'RejectionOppositeWickMaxRatio': 0.2, 
-        'IndecisionCandles': 3, 'IndecisionBodyMaxRatio': 0.2, 'IndecisionMinCount': 3 
+        
+        # Filtro de indecisão menos rigoroso
+        'IndecisionCandles': 3,          # Analisa as últimas 3 velas
+        'IndecisionBodyMaxRatio': 0.15,  # Corpo tem que ser MUITO pequeno (15%) para ser indecisão
+        'IndecisionMinCount': 2          # Precisa de 2 (em vez de 3) velas de indecisão para parar
     }
     
     last_catalog_time = 0
@@ -481,11 +487,9 @@ def main_bot_logic(state):
                     active_trades_count = state.active_trades
                 if active_trades_count == 0:
                     horario_proxima_vela = (dt_objeto.replace(second=0, microsecond=0) + timedelta(minutes=1)).strftime('%H:%M')
-                    # ALTERAÇÃO APLICADA AQUI
-                    # Enviando um modelo de string e a hora em separado
                     status_payload = {
                         "type": "analysis_status", 
-                        "status": "Aguardando vela das %s...", # %s é um placeholder
+                        "status": "Aguardando vela das %s...",
                         "next_entry_time": horario_proxima_vela
                     }
                     signal_queue.put(status_payload)
@@ -517,7 +521,7 @@ def main_bot_logic(state):
                                         continue
 
                                     for nome_estrategia, assertividade in state.strategy_performance[ativo].items():
-                                        if assertividade >= 45: # ASSERTIVIDADE AJUSTADA
+                                        if assertividade >= 45: 
                                             cod_map = {'Pullback MQL': 'mql_pullback', 'Fluxo': 'flow', 'Padrões': 'patterns', 'Rejeição': 'rejection_candle'}
                                             cod_est = next((cod for cod, nome in cod_map.items() if nome == nome_estrategia), None)
                                             if not cod_est: continue
