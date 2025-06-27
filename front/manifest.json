@@ -1,0 +1,21 @@
+{
+  "name": "Marombiew Signals",
+  "short_name": "Marombiew",
+  "description": "Painel de sinais para o Marombiew BOT",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#0a0a0a",
+  "theme_color": "#0d9488",
+  "icons": [
+    {
+      "src": "https://placehold.co/192x192/0a0a0a/14b8a6?text=M",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "https://placehold.co/512x512/0a0a0a/14b8a6?text=M",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ]
+}
