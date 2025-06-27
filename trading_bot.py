@@ -573,7 +573,7 @@ def main_bot_logic(state):
                                         assertividade = 0
                                         if normalized_name in state.strategy_performance and nome_estrategia in state.strategy_performance[normalized_name]:
                                             assertividade = state.strategy_performance[normalized_name][nome_estrategia]
-                                            if assertividade >= 45:
+                                            if assertividade >= 65:
                                                 is_approved = True
 
                                         sinal = globals().get(f'strategy_{cod_est}')(velas, PARAMS)
