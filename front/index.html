@@ -95,7 +95,7 @@
             const winsRef = useRef(); useEffect(() => animateScore(winsRef, scoreboard.wins), [scoreboard.wins]);
             const lossesRef = useRef(); useEffect(() => animateScore(lossesRef, scoreboard.losses), [scoreboard.losses]);
             const galesRef = useRef(); useEffect(() => animateScore(galesRef, scoreboard.gale_wins), [scoreboard.gale_wins]);
-            return (<div className="grid grid-cols-3 gap-4 w-full glass-card p-3 rounded-xl mb-6"><div className="text-center px-2"><p className="text-sm font-semibold text-green-400">WINS</p><p ref={winsRef} className="text-2xl font-bold font-mono">{scoreboard.wins}</p></div><div className="text-center px-2"><p className="text-sm font-semibold text-red-400">LOSSES</p><p ref={lossesRef} className="text-2xl font-bold font-mono">{scoreboard.losses}</p></div><div className="text-center px-2"><p className="text-sm font-semibold text-amber-400">GALE WINS</p><p ref={galesRef} className="text-2xl font-bold font-mono">{scoreboard.gale_wins}</p></div></div>);
+            return (<div className="grid grid-cols-3 gap-4 w-full glass-card p-3 rounded-xl mb-6"><div className="text-center px-2"><p className="text-sm font-semibold text-green-400">WINS</p><p ref={winsRef} className="text-2xl font-bold font-mono">{scoreboard.wins}</p></div><div className="text-center px-2"><p className="text-sm font-semibold text-red-400">LOSS</p><p ref={lossesRef} className="text-2xl font-bold font-mono">{scoreboard.losses}</p></div><div className="text-center px-2"><p className="text-sm font-semibold text-amber-400">GALE WINS</p><p ref={galesRef} className="text-2xl font-bold font-mono">{scoreboard.gale_wins}</p></div></div>);
         };
         
         // COMPONENTE ATUALIZADO
