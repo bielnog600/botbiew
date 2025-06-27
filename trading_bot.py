@@ -108,7 +108,7 @@ def exibir_banner():
       ██║   ██╔══██╗██║██╔══██║██║         ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║   ██║   ██║
       ██║   ██║  ██║██║██║  ██║███████╗     ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝   ██║
       ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝      ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝    ╚═╝ '''+y+'''
-              azkzero@gmail.com - v13 (Padrões Avançados)
+              azkzero@gmail.com - v14 (Logs Completos de Análise)
     ''')
     print(y + "*"*88)
     print(c + "="*88)
@@ -314,21 +314,16 @@ def strategy_flow(velas, p):
         return 'SELL'
     return None
 
-# ##################################################################
-# NOVA LÓGICA DE PADRÕES AVANÇADOS
-# ##################################################################
 def strategy_patterns(velas, p):
-    if len(velas) < p['MAPeriod'] + 5:  # Need at least 3 candles for some patterns + SMA buffer
+    if len(velas) < p['MAPeriod'] + 5:
         return None
 
-    # Get last 3 candles
     v1, v2, v3 = velas[-3], velas[-2], velas[-1]
 
-    # --- Candle Properties Helper ---
     def get_props(vela):
         props = {}
         props['range'] = vela['high'] - vela['low']
-        if props['range'] == 0: return None # Avoid division by zero
+        if props['range'] == 0: return None
         props['corpo'] = abs(vela['open'] - vela['close'])
         props['body_ratio'] = props['corpo'] / props['range']
         props['is_alta'] = vela['close'] > vela['open']
@@ -336,27 +331,22 @@ def strategy_patterns(velas, p):
         return props
 
     p1, p2, p3 = get_props(v1), get_props(v2), get_props(v3)
-    if not all([p1, p2, p3]): return None # If any candle is invalid
+    if not all([p1, p2, p3]): return None
 
-    # 1. Engolfo (Engulfing) - Reversão
     if p2['is_baixa'] and p3['is_alta'] and p3['corpo'] > p2['corpo'] and v3['close'] > v2['open'] and v3['open'] < v2['close']:
         return 'BUY'
     if p2['is_alta'] and p3['is_baixa'] and p3['corpo'] > p2['corpo'] and v3['close'] < v2['open'] and v3['open'] > v2['close']:
         return 'SELL'
 
-    # 2. Estrela da Manhã / Estrela da Noite - Reversão de 3 velas
-    # Estrela da Manhã (reversão para alta)
     if p1['is_baixa'] and p1['body_ratio'] > 0.6 and \
        p2['body_ratio'] < 0.3 and \
        p3['is_alta'] and p3['body_ratio'] > 0.6 and v3['close'] > (v1['open'] + v1['close']) / 2:
         return 'BUY'
-    # Estrela da Noite (reversão para baixa)
     if p1['is_alta'] and p1['body_ratio'] > 0.6 and \
        p2['body_ratio'] < 0.3 and \
        p3['is_baixa'] and p3['body_ratio'] > 0.6 and v3['close'] < (v1['open'] + v1['close']) / 2:
         return 'SELL'
 
-    # 3. Candle de Decisão / Rompimento - Continuação
     tendencia_alta = sma_slope([v['close'] for v in velas], p['MAPeriod'])
     if tendencia_alta is not None:
         if tendencia_alta and p3['is_alta'] and p3['body_ratio'] > 0.7:
@@ -364,12 +354,9 @@ def strategy_patterns(velas, p):
         if not tendencia_alta and p3['is_baixa'] and p3['body_ratio'] > 0.7:
             return 'SELL'
 
-    # 4. Vela de Descanso - Continuação
     if tendencia_alta is not None:
-        # Pausa na tendência de alta
         if tendencia_alta and p2['body_ratio'] < 0.3 and p3['is_alta'] and p3['body_ratio'] > 0.5:
             return 'BUY'
-        # Pausa na tendência de baixa
         if not tendencia_alta and p2['body_ratio'] < 0.3 and p3['is_baixa'] and p3['body_ratio'] > 0.5:
             return 'SELL'
             
@@ -563,7 +550,9 @@ def main_bot_logic(state):
                         if tipo_mercado in open_assets:
                             for ativo_original, info in open_assets[tipo_mercado].items():
                                 normalized_name = normalize_asset(ativo_original)
+                                # Apenas continua se o par foi catalogado com sucesso
                                 if info.get('open', False) and normalized_name in state.strategy_performance:
+                                    log_info(f"--- Analisando {ativo_original} ---")
                                     velas = validar_e_limpar_velas(API.get_candles(ativo_original, 60, 150, time.time()))
                                     
                                     if not velas or len(velas) < 20: continue
@@ -574,22 +563,39 @@ def main_bot_logic(state):
                                         log_payload = {"type": "log", "data": {"level": "warning", "message": msg, "pair": ativo_original}}
                                         signal_queue.put(log_payload)
                                         continue
+                                    
+                                    # NOVA LÓGICA DE LOG COMPLETO
+                                    all_strategies_to_check = {'Pullback MQL': 'mql_pullback', 'Fluxo': 'flow', 'Padrões': 'patterns', 'Rejeição': 'rejection_candle'}
+                                    for nome_estrategia, cod_est in all_strategies_to_check.items():
+                                        is_approved = False
+                                        assertividade = 0
+                                        if normalized_name in state.strategy_performance and nome_estrategia in state.strategy_performance[normalized_name]:
+                                            assertividade = state.strategy_performance[normalized_name][nome_estrategia]
+                                            if assertividade >= 45:
+                                                is_approved = True
 
-                                    for nome_estrategia, assertividade in state.strategy_performance[normalized_name].items():
-                                        if assertividade >= 45: 
-                                            cod_map = {'Pullback MQL': 'mql_pullback', 'Fluxo': 'flow', 'Padrões': 'patterns', 'Rejeição': 'rejection_candle'}
-                                            cod_est = next((cod for cod, nome in cod_map.items() if nome == nome_estrategia), None)
-                                            if not cod_est: continue
+                                        sinal = globals().get(f'strategy_{cod_est}')(velas, PARAMS)
+                                        
+                                        if sinal and is_approved:
+                                            msg = f"SINAL VÁLIDO ENCONTRADO com '{nome_estrategia}' ({assertividade:.2f}%)"
+                                            log_success(f"-> {ativo_original}: {msg}")
+                                            log_payload = {"type": "log", "data": {"level": "success", "message": msg, "pair": ativo_original}}
+                                            signal_queue.put(log_payload)
                                             
-                                            sinal = globals().get(f'strategy_{cod_est}')(velas, PARAMS)
-                                            if sinal:
-                                                payout = all_profits.get(ativo_original, {}).get(tipo_mercado, 0) * 100
-                                                potential_trades.append({'ativo': ativo_original, 'tipo_op': tipo_mercado, 'velas': velas, 'payout': payout, 'direcao': {'BUY': 'call', 'SELL': 'put'}.get(sinal), 'nome_estrategia': nome_estrategia, 'assertividade': assertividade})
-                                            else:
-                                                msg = f"Estratégia '{nome_estrategia}' ({assertividade:.2f}%) checada, mas sem sinal."
-                                                log_info(f"-> {ativo_original}: {msg}")
-                                                log_payload = {"type": "log", "data": {"level": "info", "message": msg, "pair": ativo_original}}
-                                                signal_queue.put(log_payload)
+                                            payout = all_profits.get(ativo_original, {}).get(tipo_mercado, 0) * 100
+                                            potential_trades.append({'ativo': ativo_original, 'tipo_op': tipo_mercado, 'velas': velas, 'payout': payout, 'direcao': {'BUY': 'call', 'SELL': 'put'}.get(sinal), 'nome_estrategia': nome_estrategia, 'assertividade': assertividade})
+                                        
+                                        elif sinal and not is_approved:
+                                            msg = f"Sinal encontrado com '{nome_estrategia}', mas a estratégia não foi aprovada (Assertividade: {assertividade:.2f}%)."
+                                            log_warning(f"-> {ativo_original}: {msg}")
+                                            log_payload = {"type": "log", "data": {"level": "warning", "message": msg, "pair": ativo_original}}
+                                            signal_queue.put(log_payload)
+                                            
+                                        elif not sinal:
+                                            msg = f"Estratégia '{nome_estrategia}' checada, mas sem sinal no momento."
+                                            log_info(f"-> {ativo_original}: {msg}")
+                                            log_payload = {"type": "log", "data": {"level": "info", "message": msg, "pair": ativo_original}}
+                                            signal_queue.put(log_payload)
                     
                     if potential_trades:
                         log_success(f"ENCONTRADOS {len(potential_trades)} SINAIS VÁLIDOS. Priorizando os melhores...")
