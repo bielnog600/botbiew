@@ -392,7 +392,9 @@ def obter_melhor_par(api, payout_minimo):
         return None
     
     sorted_assets = sorted(ativos.items(), key=lambda item: item[1]['payout'], reverse=True)
-    log_info(f"Ativos com bom payout encontrados: {[f'{ativo}({details['payout']:.0f}%)' for ativo, details in sorted_assets]}")
+    # CORREÇÃO DE ERRO DE SINTAXE (f-string)
+    payout_list_str = ", ".join([f"{ativo}({details['payout']:.0f}%)" for ativo, details in sorted_assets])
+    log_info(f"Ativos com bom payout encontrados: {payout_list_str}")
     return sorted_assets
 
 def main_bot_logic(state):
