@@ -107,7 +107,7 @@ def exibir_banner():
       ██║   ██╔══██╗██║██╔══██║██║         ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║   ██║   ██║
       ██║   ██║  ██║██║██║  ██║███████╗     ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝   ██║
       ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝      ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝    ╚═╝ '''+y+'''
-              azkzero@gmail.com - v4 com Logs no Frontend (Corrigido)
+              azkzero@gmail.com - v5 com Fuso Horário Local (Backend)
     ''')
     print(y + "*"*88)
     print(c + "="*88)
@@ -136,7 +136,6 @@ class WebSocketServer:
                 connected_clients.discard(websocket)
             log_warning(f"WebSocket client disconnected: {websocket.remote_address}")
 
-# CORREÇÃO APLICADA AQUI
 async def broadcast_signals():
     while True:
         try:
@@ -148,17 +147,14 @@ async def broadcast_signals():
                     continue
                 clients_to_send = list(connected_clients)
 
-            # Log de confirmação de envio
             if signal_data.get("type") == "log":
                 log_info(f"Broadcasting LOG to {len(clients_to_send)} client(s)...")
             else:
                 log_info(f"Broadcasting message to {len(clients_to_send)} client(s): {message_to_send[:150]}...")
 
-            # Envia a mensagem para todos os clientes conectados
             tasks = [client.send(message_to_send) for client in clients_to_send]
             results = await asyncio.gather(*tasks, return_exceptions=True)
             
-            # Opcional: verifica se houve erros durante o envio para algum cliente específico
             for i, result in enumerate(results):
                 if isinstance(result, Exception):
                     log_error(f"Failed to send to client {clients_to_send[i].remote_address}: {result}")
@@ -485,7 +481,14 @@ def main_bot_logic(state):
                     active_trades_count = state.active_trades
                 if active_trades_count == 0:
                     horario_proxima_vela = (dt_objeto.replace(second=0, microsecond=0) + timedelta(minutes=1)).strftime('%H:%M')
-                    signal_queue.put({"type": "analysis_status", "status": f"Aguardando vela das {horario_proxima_vela}...", "next_entry_time": horario_proxima_vela})
+                    # ALTERAÇÃO APLICADA AQUI
+                    # Enviando um modelo de string e a hora em separado
+                    status_payload = {
+                        "type": "analysis_status", 
+                        "status": "Aguardando vela das %s...", # %s é um placeholder
+                        "next_entry_time": horario_proxima_vela
+                    }
+                    signal_queue.put(status_payload)
             
             with state.lock:
                 active_trades_count = state.active_trades
