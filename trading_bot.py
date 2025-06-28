@@ -108,7 +108,7 @@ def exibir_banner():
       ██║   ██╔══██╗██║██╔══██║██║         ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║   ██║   ██║
       ██║   ██║  ██║██║██║  ██║███████╗     ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝   ██║
       ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝      ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝    ╚═╝ '''+y+'''
-              azkzero@gmail.com - v23 (Filtro Avançado de Rejeição)
+              azkzero@gmail.com - v25 (Rompimento S/R)
     ''')
     print(y + "*"*88)
     print(c + "="*88)
@@ -204,7 +204,7 @@ def validar_e_limpar_velas(velas_raw):
 
 def catalogar_estrategias(api, params):
     log_info("="*40); log_info("STARTING STRATEGY CATALOGING MODE..."); log_info("="*40)
-    TODAS_AS_ESTRATEGIAS = {'mql_pullback': 'Pullback MQL', 'flow': 'Fluxo', 'patterns': 'Padrões', 'rejection_candle': 'Rejeição'}
+    TODAS_AS_ESTRATEGIAS = {'mql_pullback': 'Pullback MQL', 'sr_breakout': 'Rompimento S/R', 'patterns': 'Padrões', 'rejection_candle': 'Rejeição'}
     ativos_abertos = []
     all_assets = api.get_all_open_time()
     for tipo_mercado in ['binary', 'turbo']:
@@ -309,32 +309,34 @@ def strategy_mql_pullback(velas, p):
         if last['high'] >= res_levels[0] - p['Proximity'] * p['Point'] and last['close'] <= res_levels[0]: return 'SELL'
     return None
 
-def strategy_flow(velas, p):
-    if len(velas) < p['MAPeriod'] + 2: return None
-    nano_up = sma_slope([v['close'] for v in velas], p['MAPeriod'])
-    if nano_up is None: return None
-    flow_candles = velas[-2:]; min_body_ratio = p.get('FlowBodyMinRatio', 0.4)
-    def is_strong_candle(vela):
-        range_total = vela['high'] - vela['low']
-        if range_total == 0: return False
-        corpo = abs(vela['open'] - vela['close'])
-        return (corpo / range_total) >= min_body_ratio
-    if not all(is_strong_candle(v) for v in flow_candles): return None
-    last_flow_candle = flow_candles[-1]; range_total_last = last_flow_candle['high'] - last_flow_candle['low']
-    if range_total_last > 0:
-        pavio_superior = last_flow_candle['high'] - max(last_flow_candle['open'], last_flow_candle['close'])
-        pavio_inferior = min(last_flow_candle['open'], last_flow_candle['close']) - last_flow_candle['low']
-        max_opposite_wick_ratio = p.get('FlowOppositeWickMaxRatio', 0.45)
-    else: return None
-    res_levels, sup_levels = detect_fractals(velas, p['MaxLevels']); proximity_zone = p['Proximity'] * p['Point']
-    if nano_up and all(v['close'] > v['open'] for v in flow_candles):
-        if (pavio_superior / range_total_last) > max_opposite_wick_ratio: return None
-        if res_levels and abs(last_flow_candle['high'] - res_levels[0]) < proximity_zone: return None
-        return 'BUY'
-    if not nano_up and all(v['close'] < v['open'] for v in flow_candles):
-        if (pavio_inferior / range_total_last) > max_opposite_wick_ratio: return None
-        if sup_levels and abs(last_flow_candle['low'] - sup_levels[0]) < proximity_zone: return None
-        return 'SELL'
+# NOVA ESTRATÉGIA DE ROMPIMENTO S/R
+def strategy_sr_breakout(velas, p):
+    if len(velas) < 5: return None
+    
+    # Identifica os níveis de suporte e resistência mais recentes
+    res_levels, sup_levels = detect_fractals(velas, 5) 
+    
+    vela_sinal = velas[-1]
+    
+    # Verifica se a vela tem pavios em ambos os lados
+    tem_pavio_superior = vela_sinal['high'] > max(vela_sinal['open'], vela_sinal['close'])
+    tem_pavio_inferior = vela_sinal['low'] < min(vela_sinal['open'], vela_sinal['close'])
+
+    if not (tem_pavio_superior and tem_pavio_inferior):
+        return None
+
+    # Rompimento de Resistência (Sinal de Compra)
+    if res_levels:
+        resistencia = res_levels[0]
+        if vela_sinal['open'] < resistencia and vela_sinal['close'] > resistencia:
+            return 'BUY'
+
+    # Rompimento de Suporte (Sinal de Venda)
+    if sup_levels:
+        suporte = sup_levels[0]
+        if vela_sinal['open'] > suporte and vela_sinal['close'] < suporte:
+            return 'SELL'
+            
     return None
 
 def strategy_patterns(velas, p):
@@ -397,7 +399,6 @@ def is_market_too_volatile(velas, p):
             volatile_count += 1
     return volatile_count >= p.get('MinVolatileCandles', 2)
 
-# FUNÇÃO DE CONFIRMAÇÃO REESCRITA
 def is_trade_confirmed_by_previous_candle(sinal, vela_anterior, p):
     if not vela_anterior: return False
     
@@ -408,12 +409,10 @@ def is_trade_confirmed_by_previous_candle(sinal, vela_anterior, p):
     pavio_inferior = min(vela_anterior['open'], vela_anterior['close']) - vela_anterior['low']
     
     if sinal == 'BUY':
-        # Rejeita se a vela anterior tiver um grande pavio superior
         if (pavio_superior / range_total) > p.get('ConfirmationMaxOppositeWickRatio', 0.45):
             return False
     
     if sinal == 'SELL':
-        # Rejeita se a vela anterior tiver um grande pavio inferior
         if (pavio_inferior / range_total) > p.get('ConfirmationMaxOppositeWickRatio', 0.45):
             return False
         
@@ -533,8 +532,7 @@ def main_bot_logic(state):
         log_info(f"Olá! Iniciando bot em modo servidor.")
     
     PARAMS = { 
-        'MAPeriod': 5, 'MaxLevels': 10, 'Proximity': 10.0, 'Point': 1e-6, 
-        'FlowBodyMinRatio': 0.4, 'FlowOppositeWickMaxRatio': 0.45, 
+        'MAPeriod': 14, 'MaxLevels': 10, 'Proximity': 10.0, 'Point': 1e-6, 
         'RejectionWickMinRatio': 0.58, 'RejectionBodyMaxRatio': 0.3, 'RejectionOppositeWickMaxRatio': 0.2, 
         'VolatilityCandles': 3, 'MaxWickRatio': 0.65, 'MinVolatileCandles': 2,
         'ConfirmationMaxOppositeWickRatio': 0.45
@@ -557,7 +555,7 @@ def main_bot_logic(state):
 
     while not state.stop:
         try:
-            MAX_SIMULTANEOUS_TRADES = 5
+            MAX_SIMULTANEOUS_TRADES = 2
             
             if config['modo_operacao'] == '1':
                 if state.global_losses_since_catalog >= 5 or time.time() - ultimo_sinal_timestamp > TEMPO_LIMITE_SEM_SINAIS:
@@ -636,7 +634,7 @@ def main_bot_logic(state):
                             signal_queue.put(log_payload)
                             continue
 
-                        all_strategies_to_check = {'Pullback MQL': 'mql_pullback', 'Fluxo': 'flow', 'Padrões': 'patterns', 'Rejeição': 'rejection_candle'}
+                        all_strategies_to_check = {'Pullback MQL': 'mql_pullback', 'Rompimento S/R': 'sr_breakout', 'Padrões': 'patterns', 'Rejeição': 'rejection_candle'}
                         for nome_estrategia, cod_est in all_strategies_to_check.items():
                             sinal = globals().get(f'strategy_{cod_est}')(velas, PARAMS)
                             if sinal:
@@ -664,7 +662,7 @@ def main_bot_logic(state):
                             if len(sinais_para_executar) + active_trades_count >= MAX_SIMULTANEOUS_TRADES: break
                             velas = validar_e_limpar_velas(API.get_candles(ativo, 60, 150, time.time()))
                             if velas and len(velas) >= 20 and not is_market_too_volatile(velas, PARAMS):
-                                strategies_to_try = [('Pullback MQL', 'mql_pullback'), ('Fluxo', 'flow'), ('Padrões', 'patterns'), ('Rejeição', 'rejection_candle')]
+                                strategies_to_try = [('Pullback MQL', 'mql_pullback'), ('Rompimento S/R', 'sr_breakout'), ('Padrões', 'patterns'), ('Rejeição', 'rejection_candle')]
                                 for nome, cod in strategies_to_try:
                                     sinal = globals().get(f'strategy_{cod}')(velas, PARAMS)
                                     if sinal and is_trade_confirmed_by_previous_candle(sinal, velas[-2], PARAMS):
