@@ -108,7 +108,7 @@ def exibir_banner():
       ██║   ██╔══██╗██║██╔══██║██║         ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║   ██║   ██║
       ██║   ██║  ██║██║██║  ██║███████╗     ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝   ██║
       ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝      ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝    ╚═╝ '''+y+'''
-              azkzero@gmail.com - v26 (Análise de Proximidade S/R)
+              azkzero@gmail.com - v27 (Filtro de Tendência em Padrões)
     ''')
     print(y + "*"*88)
     print(c + "="*88)
@@ -309,11 +309,10 @@ def strategy_mql_pullback(velas, p):
         if last['high'] >= res_levels[0] - p['Proximity'] * p['Point'] and last['close'] <= res_levels[0]: return 'SELL'
     return None
 
-# ESTRATÉGIA ATUALIZADA
 def strategy_sr_breakout(velas, p):
     if len(velas) < 5: return None
     
-    res_levels, sup_levels = detect_fractals(velas, 10) # Aumenta o número de níveis detectados
+    res_levels, sup_levels = detect_fractals(velas, 10)
     
     vela_sinal = velas[-1]
     
@@ -339,9 +338,12 @@ def strategy_sr_breakout(velas, p):
             
     return None
 
+# ESTRATÉGIA ATUALIZADA COM FILTRO DE TENDÊNCIA
 def strategy_patterns(velas, p):
-    if len(velas) < p['MAPeriod'] + 5:
-        return None
+    if len(velas) < p['MAPeriod'] + 5: return None
+    
+    tendencia_alta = sma_slope([v['close'] for v in velas], p['MAPeriod'])
+    if tendencia_alta is None: return None
 
     v1, v2, v3 = velas[-3], velas[-2], velas[-1]
 
@@ -357,33 +359,24 @@ def strategy_patterns(velas, p):
 
     p1, p2, p3 = get_props(v1), get_props(v2), get_props(v3)
     if not all([p1, p2, p3]): return None
-
-    if p2['is_baixa'] and p3['is_alta'] and p3['corpo'] > p2['corpo'] and v3['close'] > v2['open'] and v3['open'] < v2['close']:
+    
+    # Engolfo, apenas a favor da nano tendência
+    if tendencia_alta and p2['is_baixa'] and p3['is_alta'] and p3['corpo'] > p2['corpo'] and v3['close'] > v2['open'] and v3['open'] < v2['close']:
         return 'BUY'
-    if p2['is_alta'] and p3['is_baixa'] and p3['corpo'] > p2['corpo'] and v3['close'] < v2['open'] and v3['open'] > v2['close']:
+    if not tendencia_alta and p2['is_alta'] and p3['is_baixa'] and p3['corpo'] > p2['corpo'] and v3['close'] < v2['open'] and v3['open'] > v2['close']:
         return 'SELL'
 
-    if p1['is_baixa'] and p1['body_ratio'] > 0.6 and \
-       p2['body_ratio'] < 0.3 and \
-       p3['is_alta'] and p3['body_ratio'] > 0.6 and v3['close'] > (v1['open'] + v1['close']) / 2:
+    # Estrela da Manhã/Noite, apenas a favor da nano tendência
+    if tendencia_alta and p1['is_baixa'] and p1['body_ratio'] > 0.6 and p2['body_ratio'] < 0.3 and p3['is_alta'] and p3['body_ratio'] > 0.6 and v3['close'] > (v1['open'] + v1['close']) / 2:
         return 'BUY'
-    if p1['is_alta'] and p1['body_ratio'] > 0.6 and \
-       p2['body_ratio'] < 0.3 and \
-       p3['is_baixa'] and p3['body_ratio'] > 0.6 and v3['close'] < (v1['open'] + v1['close']) / 2:
+    if not tendencia_alta and p1['is_alta'] and p1['body_ratio'] > 0.6 and p2['body_ratio'] < 0.3 and p3['is_baixa'] and p3['body_ratio'] > 0.6 and v3['close'] < (v1['open'] + v1['close']) / 2:
         return 'SELL'
 
-    tendencia_alta = sma_slope([v['close'] for v in velas], p['MAPeriod'])
-    if tendencia_alta is not None:
-        if tendencia_alta and p3['is_alta'] and p3['body_ratio'] > 0.7:
-            return 'BUY'
-        if not tendencia_alta and p3['is_baixa'] and p3['body_ratio'] > 0.7:
-            return 'SELL'
-
-    if tendencia_alta is not None:
-        if tendencia_alta and p2['body_ratio'] < 0.3 and p3['is_alta'] and p3['body_ratio'] > 0.5:
-            return 'BUY'
-        if not tendencia_alta and p2['body_ratio'] < 0.3 and p3['is_baixa'] and p3['body_ratio'] > 0.5:
-            return 'SELL'
+    # Padrões de continuação (já seguiam a tendência)
+    if tendencia_alta and p3['is_alta'] and p3['body_ratio'] > 0.7: return 'BUY'
+    if not tendencia_alta and p3['is_baixa'] and p3['body_ratio'] > 0.7: return 'SELL'
+    if tendencia_alta and p2['body_ratio'] < 0.3 and p3['is_alta'] and p3['body_ratio'] > 0.5: return 'BUY'
+    if not tendencia_alta and p2['body_ratio'] < 0.3 and p3['is_baixa'] and p3['body_ratio'] > 0.5: return 'SELL'
             
     return None
 
@@ -555,7 +548,7 @@ def main_bot_logic(state):
 
     while not state.stop:
         try:
-            MAX_SIMULTANEOUS_TRADES = 1
+            MAX_SIMULTANEOUS_TRADES = 2
             
             if config['modo_operacao'] == '1':
                 if state.global_losses_since_catalog >= 5 or time.time() - ultimo_sinal_timestamp > TEMPO_LIMITE_SEM_SINAIS:
