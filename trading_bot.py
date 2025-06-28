@@ -451,9 +451,9 @@ def is_market_too_volatile(velas, p):
         if range_total == 0: continue
         corpo = abs(vela['open'] - vela['close'])
         pavio_total = range_total - corpo
-        if (pavio_total / range_total) > p.get('MaxWickRatio', 0.65):
+        if (pavio_total / range_total) > p.get('MaxWickRatio', 0.75):
             volatile_count += 1
-    return volatile_count >= p.get('MinVolatileCandles', 2)
+    return volatile_count >= p.get('MinVolatileCandles', 3)
 
 def is_trade_confirmed_by_previous_candle(sinal, vela_anterior, p):
     if not vela_anterior: return False
@@ -702,7 +702,7 @@ def main_bot_logic(state):
                                 assertividade = 0
                                 if normalized_name in state.full_performance_data and nome_estrategia in state.full_performance_data[normalized_name]:
                                     assertividade = state.full_performance_data[normalized_name][nome_estrategia]
-                                    if assertividade >= 60:
+                                    if assertividade >= 40:
                                         is_approved = True
 
                                 if is_approved:
