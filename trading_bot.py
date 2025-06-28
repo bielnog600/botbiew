@@ -227,7 +227,7 @@ def catalogar_estrategias(api, params):
     for ativo_original in ativos_abertos:
         try:
             log_info(f"\n--- Analyzing pair: {w}{ativo_original}{c} ---")
-            velas_historicas_raw = api.get_candles(ativo_original, 60, 60, time.time())
+            velas_historicas_raw = api.get_candles(ativo_original, 60, 120, time.time())
             todas_as_velas = validar_e_limpar_velas(velas_historicas_raw)
             if not todas_as_velas or len(todas_as_velas) < 100: log_warning(f"Could not get enough historical data for {ativo_original}."); continue
             
