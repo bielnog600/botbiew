@@ -108,7 +108,7 @@ def exibir_banner():
       ██║   ██╔══██╗██║██╔══██║██║         ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║   ██║   ██║
       ██║   ██║  ██║██║██║  ██║███████╗     ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝   ██║
       ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝      ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝    ╚═╝ '''+y+'''
-              azkzero@gmail.com - v19 (Deadline de Entrada)
+              azkzero@gmail.com - v20 (Análise Prioritária)
     ''')
     print(y + "*"*88)
     print(c + "="*88)
@@ -522,7 +522,7 @@ def main_bot_logic(state):
         'FlowBodyMinRatio': 0.4, 'FlowOppositeWickMaxRatio': 0.45, 
         'RejectionWickMinRatio': 0.58, 'RejectionBodyMaxRatio': 0.3, 'RejectionOppositeWickMaxRatio': 0.2, 
         'VolatilityCandles': 3, 'MaxWickRatio': 0.65, 'MinVolatileCandles': 2,
-        'ConfirmationMaxOppositeWickRatio': 0.2
+        'ConfirmationMaxOppositeWickRatio': 0.5
     }
     
     last_catalog_time = 0
@@ -575,58 +575,58 @@ def main_bot_logic(state):
 
                 if config['modo_operacao'] == '1': # MODO CONSERVADOR
                     potential_trades = []
-                    open_assets = API.get_all_open_time()
-                    all_profits = API.get_all_profit()
-                    for tipo_mercado in ['binary', 'turbo']:
-                        if tipo_mercado in open_assets:
-                            for ativo_original, info in open_assets[tipo_mercado].items():
-                                normalized_name = normalize_asset(ativo_original)
-                                if info.get('open', False) and normalized_name in state.strategy_performance:
-                                    log_info(f"--- Analisando {ativo_original} ---")
-                                    velas = validar_e_limpar_velas(API.get_candles(ativo_original, 60, 150, time.time()))
-                                    
-                                    if not velas or len(velas) < 20: continue
-                                    
-                                    if is_market_too_volatile(velas, PARAMS):
-                                        msg = "MERCADO MUITO VOLÁTIL (grandes pavios). Análise descartada."
-                                        log_warning(f"-> {ativo_original}: {msg}")
-                                        log_payload = {"type": "log", "data": {"level": "warning", "message": msg, "pair": ativo_original}}
-                                        signal_queue.put(log_payload)
-                                        continue
+                    # LÓGICA DE PRIORIDADE APLICADA AQUI
+                    priority_assets = obter_melhor_par(API, config['pay_minimo'])
+                    if priority_assets:
+                        # Analisa apenas os top 15 pares
+                        for ativo_original, details in priority_assets[:15]:
+                            normalized_name = normalize_asset(ativo_original)
+                            if normalized_name in state.strategy_performance:
+                                log_info(f"--- Analisando {ativo_original} ---")
+                                velas = validar_e_limpar_velas(API.get_candles(ativo_original, 60, 150, time.time()))
+                                
+                                if not velas or len(velas) < 20: continue
+                                
+                                if is_market_too_volatile(velas, PARAMS):
+                                    msg = "MERCADO MUITO VOLÁTIL (grandes pavios). Análise descartada."
+                                    log_warning(f"-> {ativo_original}: {msg}")
+                                    log_payload = {"type": "log", "data": {"level": "warning", "message": msg, "pair": ativo_original}}
+                                    signal_queue.put(log_payload)
+                                    continue
 
-                                    all_strategies_to_check = {'Pullback MQL': 'mql_pullback', 'Fluxo': 'flow', 'Padrões': 'patterns', 'Rejeição': 'rejection_candle'}
-                                    for nome_estrategia, cod_est in all_strategies_to_check.items():
-                                        is_approved = False
-                                        assertividade = 0
-                                        if normalized_name in state.strategy_performance and nome_estrategia in state.strategy_performance[normalized_name]:
-                                            assertividade = state.strategy_performance[normalized_name][nome_estrategia]
-                                            if assertividade >= 45:
-                                                is_approved = True
+                                all_strategies_to_check = {'Pullback MQL': 'mql_pullback', 'Fluxo': 'flow', 'Padrões': 'patterns', 'Rejeição': 'rejection_candle'}
+                                for nome_estrategia, cod_est in all_strategies_to_check.items():
+                                    is_approved = False
+                                    assertividade = 0
+                                    if normalized_name in state.strategy_performance and nome_estrategia in state.strategy_performance[normalized_name]:
+                                        assertividade = state.strategy_performance[normalized_name][nome_estrategia]
+                                        if assertividade >= 45:
+                                            is_approved = True
 
-                                        sinal = globals().get(f'strategy_{cod_est}')(velas, PARAMS)
-                                        
-                                        if sinal:
-                                            if is_trade_confirmed_by_previous_candle(sinal, velas[-2], PARAMS):
-                                                if is_approved:
-                                                    msg = f"SINAL VÁLIDO ENCONTRADO com '{nome_estrategia}' ({assertividade:.2f}%)"
-                                                    log_success(f"-> {ativo_original}: {msg}")
-                                                    log_payload = {"type": "log", "data": {"level": "success", "message": msg, "pair": ativo_original}}
-                                                    signal_queue.put(log_payload)
-                                                    
-                                                    payout = all_profits.get(ativo_original, {}).get(tipo_mercado, 0) * 100
-                                                    potential_trades.append({'ativo': ativo_original, 'tipo_op': tipo_mercado, 'velas': velas, 'payout': payout, 'direcao': {'BUY': 'call', 'SELL': 'put'}.get(sinal), 'nome_estrategia': nome_estrategia, 'assertividade': assertividade})
-                                                else:
-                                                    msg = f"Sinal encontrado com '{nome_estrategia}', mas a estratégia não foi aprovada (Assertividade: {assertividade:.2f}%)."
-                                                    log_warning(f"-> {ativo_original}: {msg}")
-                                                    log_payload = {"type": "log", "data": {"level": "warning", "message": msg, "pair": ativo_original}}
-                                                    signal_queue.put(log_payload)
+                                    sinal = globals().get(f'strategy_{cod_est}')(velas, PARAMS)
+                                    
+                                    if sinal:
+                                        if is_trade_confirmed_by_previous_candle(sinal, velas[-2], PARAMS):
+                                            if is_approved:
+                                                msg = f"SINAL VÁLIDO ENCONTRADO com '{nome_estrategia}' ({assertividade:.2f}%)"
+                                                log_success(f"-> {ativo_original}: {msg}")
+                                                log_payload = {"type": "log", "data": {"level": "success", "message": msg, "pair": ativo_original}}
+                                                signal_queue.put(log_payload)
+                                                
+                                                payout = all_profits.get(ativo_original, {}).get(details['tipo'], 0) * 100
+                                                potential_trades.append({'ativo': ativo_original, 'tipo_op': details['tipo'], 'velas': velas, 'payout': payout, 'direcao': {'BUY': 'call', 'SELL': 'put'}.get(sinal), 'nome_estrategia': nome_estrategia, 'assertividade': assertividade})
                                             else:
-                                                msg = f"Sinal de '{nome_estrategia}' REJEITADO por contradição na vela anterior."
+                                                msg = f"Sinal encontrado com '{nome_estrategia}', mas a estratégia não foi aprovada (Assertividade: {assertividade:.2f}%)."
                                                 log_warning(f"-> {ativo_original}: {msg}")
                                                 log_payload = {"type": "log", "data": {"level": "warning", "message": msg, "pair": ativo_original}}
                                                 signal_queue.put(log_payload)
-                                        elif not sinal:
-                                            pass
+                                        else:
+                                            msg = f"Sinal de '{nome_estrategia}' REJEITADO por contradição na vela anterior."
+                                            log_warning(f"-> {ativo_original}: {msg}")
+                                            log_payload = {"type": "log", "data": {"level": "warning", "message": msg, "pair": ativo_original}}
+                                            signal_queue.put(log_payload)
+                                    elif not sinal:
+                                        pass
                     
                     if potential_trades:
                         log_success(f"ENCONTRADOS {len(potential_trades)} SINAIS VÁLIDOS. Priorizando os melhores...")
