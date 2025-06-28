@@ -108,7 +108,7 @@ def exibir_banner():
       ██║   ██╔══██╗██║██╔══██║██║         ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║   ██║   ██║
       ██║   ██║  ██║██║██║  ██║███████╗     ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝   ██║
       ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝      ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝    ╚═╝ '''+y+'''
-              azkzero@gmail.com - v22.1 (Correção de Argumento)
+              azkzero@gmail.com - v23 (Filtro Avançado de Rejeição)
     ''')
     print(y + "*"*88)
     print(c + "="*88)
@@ -397,10 +397,10 @@ def is_market_too_volatile(velas, p):
             volatile_count += 1
     return volatile_count >= p.get('MinVolatileCandles', 2)
 
+# FUNÇÃO DE CONFIRMAÇÃO REESCRITA
 def is_trade_confirmed_by_previous_candle(sinal, vela_anterior, p):
     if not vela_anterior: return False
     
-    corpo = abs(vela_anterior['open'] - vela_anterior['close'])
     range_total = vela_anterior['high'] - vela_anterior['low']
     if range_total == 0: return True 
     
@@ -408,12 +408,14 @@ def is_trade_confirmed_by_previous_candle(sinal, vela_anterior, p):
     pavio_inferior = min(vela_anterior['open'], vela_anterior['close']) - vela_anterior['low']
     
     if sinal == 'BUY':
-        if vela_anterior['close'] < vela_anterior['open']: return False
-        if pavio_superior > corpo * p.get('ConfirmationMaxOppositeWickRatio', 1.5): return False
+        # Rejeita se a vela anterior tiver um grande pavio superior
+        if (pavio_superior / range_total) > p.get('ConfirmationMaxOppositeWickRatio', 0.45):
+            return False
     
     if sinal == 'SELL':
-        if vela_anterior['close'] > vela_anterior['open']: return False
-        if pavio_inferior > corpo * p.get('ConfirmationMaxOppositeWickRatio', 1.5): return False
+        # Rejeita se a vela anterior tiver um grande pavio inferior
+        if (pavio_inferior / range_total) > p.get('ConfirmationMaxOppositeWickRatio', 0.45):
+            return False
         
     return True
 
@@ -535,7 +537,7 @@ def main_bot_logic(state):
         'FlowBodyMinRatio': 0.4, 'FlowOppositeWickMaxRatio': 0.45, 
         'RejectionWickMinRatio': 0.58, 'RejectionBodyMaxRatio': 0.3, 'RejectionOppositeWickMaxRatio': 0.2, 
         'VolatilityCandles': 3, 'MaxWickRatio': 0.65, 'MinVolatileCandles': 2,
-        'ConfirmationMaxOppositeWickRatio': 0.5
+        'ConfirmationMaxOppositeWickRatio': 0.45
     }
     
     pares_prioritarios = []
@@ -555,7 +557,7 @@ def main_bot_logic(state):
 
     while not state.stop:
         try:
-            MAX_SIMULTANEOUS_TRADES = 1
+            MAX_SIMULTANEOUS_TRADES = 5
             
             if config['modo_operacao'] == '1':
                 if state.global_losses_since_catalog >= 5 or time.time() - ultimo_sinal_timestamp > TEMPO_LIMITE_SEM_SINAIS:
@@ -645,7 +647,7 @@ def main_bot_logic(state):
                                     signal_queue.put(log_payload)
                                     potential_trades.append({'ativo': ativo_original, 'tipo_op': tipo_mercado, 'velas': velas, 'payout': payout, 'direcao': {'BUY': 'call', 'SELL': 'put'}.get(sinal), 'nome_estrategia': nome_estrategia})
                                 else:
-                                    msg = f"Sinal de '{nome_estrategia}' REJEITADO por contradição."
+                                    msg = f"Sinal de '{nome_estrategia}' REJEITADO por contradição na vela anterior."
                                     log_warning(f"-> {ativo_original}: {msg}")
                                     log_payload = {"type": "log", "data": {"level": "warning", "message": msg, "pair": ativo_original}}
                                     signal_queue.put(log_payload)
