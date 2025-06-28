@@ -673,7 +673,7 @@ def main_bot_logic(state):
 
     minuto_anterior, analise_feita = -1, False
     ultimo_sinal_timestamp = time.time()
-    TEMPO_LIMITE_SEM_SINAIS = 1800
+    TEMPO_LIMITE_SEM_SINAIS = 900
 
     log_info("Bot iniciado. Entrando no loop de análise...")
 
