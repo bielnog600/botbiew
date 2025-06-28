@@ -229,7 +229,7 @@ def catalogar_estrategias(api, params):
     for ativo_original in ativos_abertos:
         try:
             log_info(f"\n--- Analyzing pair: {w}{ativo_original}{c} ---")
-            velas_historicas_raw = api.get_candles(ativo_original, 60, 480, time.time())
+            velas_historicas_raw = api.get_candles(ativo_original, 60, 240, time.time())
             todas_as_velas = validar_e_limpar_velas(velas_historicas_raw)
             if not todas_as_velas or len(todas_as_velas) < 100: log_warning(f"Could not get enough historical data for {ativo_original}."); continue
             
@@ -517,9 +517,9 @@ def is_market_too_volatile(velas, p):
         if range_total == 0: continue
         corpo = abs(vela['open'] - vela['close'])
         pavio_total = range_total - corpo
-        if (pavio_total / range_total) > p.get('MaxWickRatio', 0.65):
+        if (pavio_total / range_total) > p.get('MaxWickRatio', 0.75):
             volatile_count += 1
-    return volatile_count >= p.get('MinVolatileCandles', 2)
+    return volatile_count >= p.get('MinVolatileCandles', 3)
 
 def is_trade_confirmed_by_previous_candle(sinal, vela_anterior, p):
     if not vela_anterior: return False
@@ -679,7 +679,7 @@ def main_bot_logic(state):
 
     while not state.stop:
         try:
-            MAX_SIMULTANEOUS_TRADES = 5
+            MAX_SIMULTANEOUS_TRADES = 3
             
             if config['modo_operacao'] == '1':
                 if state.global_losses_since_catalog >= 5 or time.time() - ultimo_sinal_timestamp > TEMPO_LIMITE_SEM_SINAIS:
