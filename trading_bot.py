@@ -108,7 +108,7 @@ def exibir_banner():
       ██║   ██╔══██╗██║██╔══██║██║         ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║   ██║   ██║
       ██║   ██║  ██║██║██║  ██║███████╗     ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝   ██║
       ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝      ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝    ╚═╝ '''+y+'''
-              azkzero@gmail.com - v25 (Rompimento S/R)
+              azkzero@gmail.com - v26 (Análise de Proximidade S/R)
     ''')
     print(y + "*"*88)
     print(c + "="*88)
@@ -309,33 +309,33 @@ def strategy_mql_pullback(velas, p):
         if last['high'] >= res_levels[0] - p['Proximity'] * p['Point'] and last['close'] <= res_levels[0]: return 'SELL'
     return None
 
-# NOVA ESTRATÉGIA DE ROMPIMENTO S/R
+# ESTRATÉGIA ATUALIZADA
 def strategy_sr_breakout(velas, p):
     if len(velas) < 5: return None
     
-    # Identifica os níveis de suporte e resistência mais recentes
-    res_levels, sup_levels = detect_fractals(velas, 5) 
+    res_levels, sup_levels = detect_fractals(velas, 10) # Aumenta o número de níveis detectados
     
     vela_sinal = velas[-1]
     
-    # Verifica se a vela tem pavios em ambos os lados
     tem_pavio_superior = vela_sinal['high'] > max(vela_sinal['open'], vela_sinal['close'])
     tem_pavio_inferior = vela_sinal['low'] < min(vela_sinal['open'], vela_sinal['close'])
 
     if not (tem_pavio_superior and tem_pavio_inferior):
         return None
 
-    # Rompimento de Resistência (Sinal de Compra)
     if res_levels:
-        resistencia = res_levels[0]
-        if vela_sinal['open'] < resistencia and vela_sinal['close'] > resistencia:
-            return 'BUY'
+        resistencias_proximas = [r for r in res_levels if r < vela_sinal['close']]
+        if resistencias_proximas:
+            resistencia_rompida = max(resistencias_proximas)
+            if vela_sinal['open'] < resistencia_rompida:
+                return 'BUY'
 
-    # Rompimento de Suporte (Sinal de Venda)
     if sup_levels:
-        suporte = sup_levels[0]
-        if vela_sinal['open'] > suporte and vela_sinal['close'] < suporte:
-            return 'SELL'
+        suportes_proximos = [s for s in sup_levels if s > vela_sinal['close']]
+        if suportes_proximos:
+            suporte_rompido = min(suportes_proximos)
+            if vela_sinal['open'] > suporte_rompido:
+                return 'SELL'
             
     return None
 
@@ -555,7 +555,7 @@ def main_bot_logic(state):
 
     while not state.stop:
         try:
-            MAX_SIMULTANEOUS_TRADES = 2
+            MAX_SIMULTANEOUS_TRADES = 1
             
             if config['modo_operacao'] == '1':
                 if state.global_losses_since_catalog >= 5 or time.time() - ultimo_sinal_timestamp > TEMPO_LIMITE_SEM_SINAIS:
