@@ -108,7 +108,7 @@ def exibir_banner():
       ██║   ██╔══██╗██║██╔══██║██║         ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║   ██║   ██║
       ██║   ██║  ██║██║██║  ██║███████╗     ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝   ██║
       ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝      ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝    ╚═╝ '''+y+'''
-              azkzero@gmail.com - v27 (Filtro de Tendência em Padrões)
+              azkzero@gmail.com - v28 (Estratégias de Padrões Individuais)
     ''')
     print(y + "*"*88)
     print(c + "="*88)
@@ -204,7 +204,15 @@ def validar_e_limpar_velas(velas_raw):
 
 def catalogar_estrategias(api, params):
     log_info("="*40); log_info("STARTING STRATEGY CATALOGING MODE..."); log_info("="*40)
-    TODAS_AS_ESTRATEGIAS = {'mql_pullback': 'Pullback MQL', 'sr_breakout': 'Rompimento S/R', 'patterns': 'Padrões', 'rejection_candle': 'Rejeição'}
+    TODAS_AS_ESTRATEGIAS = {
+        'mql_pullback': 'Pullback MQL', 
+        'sr_breakout': 'Rompimento S/R', 
+        'rejection_candle': 'Rejeição',
+        'engulfing': 'Engolfo',
+        'morning_star': 'Estrela da Manhã/Noite',
+        'decision_candle': 'Candle de Decisão',
+        'rest_candle': 'Vela de Descanso'
+    }
     ativos_abertos = []
     all_assets = api.get_all_open_time()
     for tipo_mercado in ['binary', 'turbo']:
@@ -338,47 +346,69 @@ def strategy_sr_breakout(velas, p):
             
     return None
 
-# ESTRATÉGIA ATUALIZADA COM FILTRO DE TENDÊNCIA
-def strategy_patterns(velas, p):
-    if len(velas) < p['MAPeriod'] + 5: return None
-    
+# --- NOVAS ESTRATÉGIAS DE PADRÕES ---
+def get_candle_props(vela):
+    props = {}
+    props['range'] = vela['high'] - vela['low']
+    if props['range'] == 0: return None
+    props['corpo'] = abs(vela['open'] - vela['close'])
+    props['body_ratio'] = props['corpo'] / props['range']
+    props['is_alta'] = vela['close'] > vela['open']
+    props['is_baixa'] = vela['close'] < vela['open']
+    return props
+
+def strategy_engulfing(velas, p):
+    if len(velas) < 3: return None
     tendencia_alta = sma_slope([v['close'] for v in velas], p['MAPeriod'])
     if tendencia_alta is None: return None
+    
+    p2, p3 = get_candle_props(velas[-2]), get_candle_props(velas[-1])
+    if not all([p2, p3]): return None
+    
+    if tendencia_alta and p2['is_baixa'] and p3['is_alta'] and p3['corpo'] > p2['corpo'] and velas[-1]['close'] > velas[-2]['open'] and velas[-1]['open'] < velas[-2]['close']:
+        return 'BUY'
+    if not tendencia_alta and p2['is_alta'] and p3['is_baixa'] and p3['corpo'] > p2['corpo'] and velas[-1]['close'] < velas[-2]['open'] and velas[-1]['open'] > velas[-2]['close']:
+        return 'SELL'
+    return None
 
-    v1, v2, v3 = velas[-3], velas[-2], velas[-1]
-
-    def get_props(vela):
-        props = {}
-        props['range'] = vela['high'] - vela['low']
-        if props['range'] == 0: return None
-        props['corpo'] = abs(vela['open'] - vela['close'])
-        props['body_ratio'] = props['corpo'] / props['range']
-        props['is_alta'] = vela['close'] > vela['open']
-        props['is_baixa'] = vela['close'] < vela['open']
-        return props
-
-    p1, p2, p3 = get_props(v1), get_props(v2), get_props(v3)
+def strategy_morning_star(velas, p):
+    if len(velas) < 4: return None
+    tendencia_alta = sma_slope([v['close'] for v in velas], p['MAPeriod'])
+    if tendencia_alta is None: return None
+    
+    p1, p2, p3 = get_candle_props(velas[-3]), get_candle_props(velas[-2]), get_candle_props(velas[-1])
     if not all([p1, p2, p3]): return None
     
-    # Engolfo, apenas a favor da nano tendência
-    if tendencia_alta and p2['is_baixa'] and p3['is_alta'] and p3['corpo'] > p2['corpo'] and v3['close'] > v2['open'] and v3['open'] < v2['close']:
+    if tendencia_alta and p1['is_baixa'] and p1['body_ratio'] > 0.6 and p2['body_ratio'] < 0.3 and p3['is_alta'] and p3['body_ratio'] > 0.6 and velas[-1]['close'] > (velas[-3]['open'] + velas[-3]['close']) / 2:
         return 'BUY'
-    if not tendencia_alta and p2['is_alta'] and p3['is_baixa'] and p3['corpo'] > p2['corpo'] and v3['close'] < v2['open'] and v3['open'] > v2['close']:
+    if not tendencia_alta and p1['is_alta'] and p1['body_ratio'] > 0.6 and p2['body_ratio'] < 0.3 and p3['is_baixa'] and p3['body_ratio'] > 0.6 and velas[-1]['close'] < (velas[-3]['open'] + velas[-3]['close']) / 2:
         return 'SELL'
+    return None
 
-    # Estrela da Manhã/Noite, apenas a favor da nano tendência
-    if tendencia_alta and p1['is_baixa'] and p1['body_ratio'] > 0.6 and p2['body_ratio'] < 0.3 and p3['is_alta'] and p3['body_ratio'] > 0.6 and v3['close'] > (v1['open'] + v1['close']) / 2:
-        return 'BUY'
-    if not tendencia_alta and p1['is_alta'] and p1['body_ratio'] > 0.6 and p2['body_ratio'] < 0.3 and p3['is_baixa'] and p3['body_ratio'] > 0.6 and v3['close'] < (v1['open'] + v1['close']) / 2:
-        return 'SELL'
-
-    # Padrões de continuação (já seguiam a tendência)
+def strategy_decision_candle(velas, p):
+    if len(velas) < 2: return None
+    tendencia_alta = sma_slope([v['close'] for v in velas], p['MAPeriod'])
+    if tendencia_alta is None: return None
+    
+    p3 = get_candle_props(velas[-1])
+    if not p3: return None
+    
     if tendencia_alta and p3['is_alta'] and p3['body_ratio'] > 0.7: return 'BUY'
     if not tendencia_alta and p3['is_baixa'] and p3['body_ratio'] > 0.7: return 'SELL'
+    return None
+
+def strategy_rest_candle(velas, p):
+    if len(velas) < 3: return None
+    tendencia_alta = sma_slope([v['close'] for v in velas], p['MAPeriod'])
+    if tendencia_alta is None: return None
+    
+    p2, p3 = get_candle_props(velas[-2]), get_candle_props(velas[-1])
+    if not all([p2, p3]): return None
+    
     if tendencia_alta and p2['body_ratio'] < 0.3 and p3['is_alta'] and p3['body_ratio'] > 0.5: return 'BUY'
     if not tendencia_alta and p2['body_ratio'] < 0.3 and p3['is_baixa'] and p3['body_ratio'] > 0.5: return 'SELL'
-            
     return None
+# ------------------------------------
 
 def is_market_too_volatile(velas, p):
     last_candles = velas[-p.get('VolatilityCandles', 3):]
@@ -548,7 +578,7 @@ def main_bot_logic(state):
 
     while not state.stop:
         try:
-            MAX_SIMULTANEOUS_TRADES = 2
+            MAX_SIMULTANEOUS_TRADES = 5
             
             if config['modo_operacao'] == '1':
                 if state.global_losses_since_catalog >= 5 or time.time() - ultimo_sinal_timestamp > TEMPO_LIMITE_SEM_SINAIS:
@@ -627,7 +657,7 @@ def main_bot_logic(state):
                             signal_queue.put(log_payload)
                             continue
 
-                        all_strategies_to_check = {'Pullback MQL': 'mql_pullback', 'Rompimento S/R': 'sr_breakout', 'Padrões': 'patterns', 'Rejeição': 'rejection_candle'}
+                        all_strategies_to_check = {'Pullback MQL': 'mql_pullback', 'Rompimento S/R': 'sr_breakout', 'Engolfo': 'engulfing', 'Estrela da Manhã/Noite': 'morning_star', 'Candle de Decisão': 'decision_candle', 'Vela de Descanso': 'rest_candle', 'Rejeição': 'rejection_candle'}
                         for nome_estrategia, cod_est in all_strategies_to_check.items():
                             sinal = globals().get(f'strategy_{cod_est}')(velas, PARAMS)
                             if sinal:
@@ -655,7 +685,7 @@ def main_bot_logic(state):
                             if len(sinais_para_executar) + active_trades_count >= MAX_SIMULTANEOUS_TRADES: break
                             velas = validar_e_limpar_velas(API.get_candles(ativo, 60, 150, time.time()))
                             if velas and len(velas) >= 20 and not is_market_too_volatile(velas, PARAMS):
-                                strategies_to_try = [('Pullback MQL', 'mql_pullback'), ('Rompimento S/R', 'sr_breakout'), ('Padrões', 'patterns'), ('Rejeição', 'rejection_candle')]
+                                strategies_to_try = [('Pullback MQL', 'mql_pullback'), ('Rompimento S/R', 'sr_breakout'), ('Engolfo', 'engulfing'), ('Estrela da Manhã/Noite', 'morning_star'), ('Candle de Decisão', 'decision_candle'), ('Vela de Descanso', 'rest_candle'), ('Rejeição', 'rejection_candle')]
                                 for nome, cod in strategies_to_try:
                                     sinal = globals().get(f'strategy_{cod}')(velas, PARAMS)
                                     if sinal and is_trade_confirmed_by_previous_candle(sinal, velas[-2], PARAMS):
