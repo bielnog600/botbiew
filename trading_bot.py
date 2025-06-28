@@ -555,7 +555,7 @@ def main_bot_logic(state):
 
     while not state.stop:
         try:
-            MAX_SIMULTANEOUS_TRADES = 1
+            MAX_SIMULTANEOUS_TRADES = 2
             
             # LÓGICA DE GESTÃO DE PORTFÓLIO
             if config['modo_operacao'] == '1':
