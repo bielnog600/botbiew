@@ -108,7 +108,7 @@ def exibir_banner():
       ██║   ██╔══██╗██║██╔══██║██║         ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║   ██║   ██║
       ██║   ██║  ██║██║██║  ██║███████╗     ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝   ██║
       ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝      ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝    ╚═╝ '''+y+'''
-              azkzero@gmail.com - v22 (Auto-Adapting Portfolio)
+              azkzero@gmail.com - v22.1 (Correção de Argumento)
     ''')
     print(y + "*"*88)
     print(c + "="*88)
@@ -422,7 +422,6 @@ class BotState:
         self.stop = False; self.win_count = 0; self.loss_count = 0
         self.gale_wins = {f"g{i}": 0 for i in range(1, 11)}
         self.active_trades = 0; self.signal_history = {}
-        # NOVO: Estado para a gestão de portfólio
         self.full_performance_data = {}
         self.pair_losses = {}
         self.banned_pairs = set()
@@ -476,7 +475,7 @@ def compra_thread(api, ativo, valor, direcao, expiracao, tipo_op, state, config,
                 with state.lock:
                     state.win_count += 1
                     if i > 0: state.gale_wins[f'g{i}'] += 1
-                    state.pair_losses[ativo] = 0 # Reseta as perdas do par em caso de win
+                    state.pair_losses[ativo] = 0
                 resultado_final = 'WIN'; break
             elif resultado < 0:
                 log_error(f"RESULTADO: LOSS {gale_info} | Perda: {cifrao}{abs(resultado):.2f}")
@@ -544,8 +543,9 @@ def main_bot_logic(state):
     if config['modo_operacao'] == '1':
         state.full_performance_data = catalogar_estrategias(API, PARAMS)
         pares_prioritarios, full_performance_sorted = selecionar_melhores_pares(state.full_performance_data, 30)
-        state.pair_losses = {par: 0 for par in pares_prioritarios}
-        state.global_losses_since_catalog = 0
+        with state.lock:
+            state.pair_losses = {par: 0 for par in pares_prioritarios}
+            state.global_losses_since_catalog = 0
 
     minuto_anterior, analise_feita = -1, False
     ultimo_sinal_timestamp = time.time()
@@ -555,26 +555,15 @@ def main_bot_logic(state):
 
     while not state.stop:
         try:
-            MAX_SIMULTANEOUS_TRADES = 2
+            MAX_SIMULTANEOUS_TRADES = 1
             
-            # LÓGICA DE GESTÃO DE PORTFÓLIO
             if config['modo_operacao'] == '1':
-                if state.global_losses_since_catalog >= 5:
-                    msg = f"GATILHO DE SEGURANÇA ATIVADO ({state.global_losses_since_catalog} derrotas). Recatalogando todo o mercado..."
-                    log_error(msg)
-                    log_payload = {"type": "log", "data": {"level": "error", "message": msg, "pair": "SISTEMA"}}
-                    signal_queue.put(log_payload)
+                if state.global_losses_since_catalog >= 5 or time.time() - ultimo_sinal_timestamp > TEMPO_LIMITE_SEM_SINAIS:
+                    if state.global_losses_since_catalog >= 5:
+                        msg = f"GATILHO DE SEGURANÇA ATIVADO ({state.global_losses_since_catalog} derrotas). Recatalogando todo o mercado..."
+                    else:
+                        msg = f"Inatividade por mais de {TEMPO_LIMITE_SEM_SINAIS / 60:.0f} minutos. Buscando novos pares promissores..."
                     
-                    state.full_performance_data = catalogar_estrategias(API, PARAMS)
-                    pares_prioritarios, full_performance_sorted = selecionar_melhores_pares(state.full_performance_data, 30)
-                    with state.lock:
-                        state.pair_losses = {par: 0 for par in pares_prioritarios}
-                        state.global_losses_since_catalog = 0
-                        state.banned_pairs.clear()
-                    ultimo_sinal_timestamp = time.time()
-                
-                if time.time() - ultimo_sinal_timestamp > TEMPO_LIMITE_SEM_SINAIS:
-                    msg = f"Inatividade por mais de {TEMPO_LIMITE_SEM_SINAIS / 60:.0f} minutos. Buscando novos pares promissores..."
                     log_warning(msg)
                     log_payload = {"type": "log", "data": {"level": "warning", "message": msg, "pair": "SISTEMA"}}
                     signal_queue.put(log_payload)
@@ -586,23 +575,21 @@ def main_bot_logic(state):
                         state.global_losses_since_catalog = 0
                         state.banned_pairs.clear()
                     ultimo_sinal_timestamp = time.time()
-            
-            pares_a_remover = [par for par in pares_prioritarios if par in state.banned_pairs]
-            if pares_a_remover:
-                for par in pares_a_remover:
-                    pares_prioritarios.remove(par)
-                    # Encontra substituto
-                    for item in full_performance_sorted:
-                        novo_par = item['par']
-                        if novo_par not in pares_prioritarios and novo_par not in state.banned_pairs:
-                            pares_prioritarios.append(novo_par)
-                            with state.lock:
-                                state.pair_losses[novo_par] = 0
-                            msg = f"Substituindo {par} por {novo_par} (Score: {item['score']:.2f}%)"
-                            log_info(msg)
-                            log_payload = {"type": "log", "data": {"level": "info", "message": msg, "pair": "SISTEMA"}}
-                            signal_queue.put(log_payload)
-                            break
+                
+                pares_a_remover = [par for par in pares_prioritarios if par in state.banned_pairs]
+                if pares_a_remover:
+                    for par in pares_a_remover:
+                        pares_prioritarios.remove(par)
+                        for item in full_performance_sorted:
+                            novo_par = item['par']
+                            if novo_par not in pares_prioritarios and novo_par not in state.banned_pairs:
+                                pares_prioritarios.append(novo_par)
+                                with state.lock: state.pair_losses[novo_par] = 0
+                                msg = f"Substituindo {par} por {novo_par} (Score: {item['score']:.2f}%)"
+                                log_info(msg)
+                                log_payload = {"type": "log", "data": {"level": "info", "message": msg, "pair": "SISTEMA"}}
+                                signal_queue.put(log_payload)
+                                break
             
             timestamp = time.time()
             dt_objeto = datetime.fromtimestamp(timestamp)
@@ -658,7 +645,7 @@ def main_bot_logic(state):
                                     signal_queue.put(log_payload)
                                     potential_trades.append({'ativo': ativo_original, 'tipo_op': tipo_mercado, 'velas': velas, 'payout': payout, 'direcao': {'BUY': 'call', 'SELL': 'put'}.get(sinal), 'nome_estrategia': nome_estrategia})
                                 else:
-                                    msg = f"Sinal de '{nome_estrategia}' REJEITADO por contradição na vela anterior."
+                                    msg = f"Sinal de '{nome_estrategia}' REJEITADO por contradição."
                                     log_warning(f"-> {ativo_original}: {msg}")
                                     log_payload = {"type": "log", "data": {"level": "warning", "message": msg, "pair": ativo_original}}
                                     signal_queue.put(log_payload)
@@ -709,7 +696,7 @@ def main_bot_logic(state):
                     }
                     state.signal_history[signal_id] = signal_payload
                     signal_queue.put(signal_payload)
-                    Thread(target=compra_thread, args=(API, sinal_info['ativo'], config['valor_entrada'], sinal_info['direcao'], sinal_info['tipo_op'], state, config, cifrao, signal_id, target_entry_timestamp), daemon=True).start()
+                    Thread(target=compra_thread, args=(API, sinal_info['ativo'], config['valor_entrada'], sinal_info['direcao'], config['expiracao'], sinal_info['tipo_op'], state, config, cifrao, signal_id, target_entry_timestamp), daemon=True).start()
             
             time.sleep(0.2)
         
