@@ -108,7 +108,7 @@ def exibir_banner():
       ██║   ██╔══██╗██║██╔══██║██║         ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║   ██║   ██║
       ██║   ██║  ██║██║██║  ██║███████╗     ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝   ██║
       ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝      ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝    ╚═╝ '''+y+'''
-              azkzero@gmail.com - v30 (Assertividade 70%)
+              azkzero@gmail.com - v31 (Estratégias Refinadas)
     ''')
     print(y + "*"*88)
     print(c + "="*88)
@@ -292,17 +292,17 @@ def detect_fractals(velas, max_levels):
         if lows[i-1] < min(lows[i-3:i-1] + lows[i:i+2]): sup.append(lows[i-1])
     return list(res), list(sup)
 
-def strategy_rejection_candle(velas, p):
-    if len(velas) < p['MAPeriod'] + 2: return None
-    nano_up = sma_slope([v['close'] for v in velas], p['MAPeriod'])
-    if nano_up is None: return None
-    o, h, l, c = velas[-2]['open'], velas[-2]['high'], velas[-2]['low'], velas[-2]['close']
-    range_total = h - l
-    if range_total == 0: return None
-    corpo = abs(o - c); pavio_superior = h - max(o, c); pavio_inferior = min(o, c) - l
-    if nano_up and ((pavio_inferior / range_total) >= p.get('RejectionWickMinRatio')) and ((corpo / range_total) <= p.get('RejectionBodyMaxRatio')) and ((pavio_superior / range_total) <= p.get('RejectionOppositeWickMaxRatio')): return 'BUY'
-    if not nano_up and ((pavio_superior / range_total) >= p.get('RejectionWickMinRatio')) and ((corpo / range_total) <= p.get('RejectionBodyMaxRatio')) and ((pavio_inferior / range_total) <= p.get('RejectionOppositeWickMaxRatio')): return 'SELL'
-    return None
+def get_candle_props(vela):
+    props = {}
+    props['range'] = vela['high'] - vela['low']
+    if props['range'] == 0: return None
+    props['corpo'] = abs(vela['open'] - vela['close'])
+    props['body_ratio'] = props['corpo'] / props['range']
+    props['is_alta'] = vela['close'] > vela['open']
+    props['is_baixa'] = vela['close'] < vela['open']
+    return props
+
+# --- STRATEGIES ---
 
 def strategy_mql_pullback(velas, p):
     if len(velas) < p['MAPeriod'] + 2: return None
@@ -345,17 +345,6 @@ def strategy_sr_breakout(velas, p):
             
     return None
 
-# --- NOVAS ESTRATÉGIAS DE PADRÕES ---
-def get_candle_props(vela):
-    props = {}
-    props['range'] = vela['high'] - vela['low']
-    if props['range'] == 0: return None
-    props['corpo'] = abs(vela['open'] - vela['close'])
-    props['body_ratio'] = props['corpo'] / props['range']
-    props['is_alta'] = vela['close'] > vela['open']
-    props['is_baixa'] = vela['close'] < vela['open']
-    return props
-
 def strategy_engulfing(velas, p):
     if len(velas) < 3: return None
     tendencia_alta = sma_slope([v['close'] for v in velas], p['MAPeriod'])
@@ -363,6 +352,9 @@ def strategy_engulfing(velas, p):
     
     p2, p3 = get_candle_props(velas[-2]), get_candle_props(velas[-1])
     if not all([p2, p3]): return None
+    
+    # Condição extra: vela anterior (p2) deve ser de indecisão
+    if p2['body_ratio'] > 0.4: return None
     
     if tendencia_alta and p2['is_baixa'] and p3['is_alta'] and p3['corpo'] > p2['corpo'] and velas[-1]['close'] > velas[-2]['open'] and velas[-1]['open'] < velas[-2]['close']:
         return 'BUY'
@@ -385,17 +377,44 @@ def strategy_morning_star(velas, p):
     return None
 
 def strategy_rest_candle(velas, p):
-    if len(velas) < 3: return None
+    if len(velas) < 4: return None
     tendencia_alta = sma_slope([v['close'] for v in velas], p['MAPeriod'])
     if tendencia_alta is None: return None
     
-    p2, p3 = get_candle_props(velas[-2]), get_candle_props(velas[-1])
-    if not all([p2, p3]): return None
+    v1, v2, v3 = velas[-3], velas[-2], velas[-1]
+    p1, p2, p3 = get_candle_props(v1), get_candle_props(v2), get_candle_props(v3)
+    if not all([p1, p2, p3]): return None
     
-    if tendencia_alta and p2['body_ratio'] < 0.3 and p3['is_alta'] and p3['body_ratio'] > 0.5: return 'BUY'
-    if not tendencia_alta and p2['body_ratio'] < 0.3 and p3['is_baixa'] and p3['body_ratio'] > 0.5: return 'SELL'
+    # Verifica se a v2 (vela de descanso) está contida na v1 (vela forte)
+    is_inside_bar = v2['high'] < v1['high'] and v2['low'] > v1['low']
+    if not is_inside_bar or p2['body_ratio'] > 0.3: return None
+
+    if tendencia_alta and v3['close'] > v2['high']: return 'BUY'
+    if not tendencia_alta and v3['close'] < v2['low']: return 'SELL'
     return None
-# ------------------------------------
+
+def strategy_rejection_candle(velas, p):
+    if len(velas) < p['MAPeriod'] + 3: return None
+    
+    vela_rejeicao = velas[-2]
+    vela_confirmacao = velas[-1]
+
+    o, h, l, c = vela_rejeicao['open'], vela_rejeicao['high'], vela_rejeicao['low'], vela_rejeicao['close']
+    range_total = h - l
+    if range_total == 0: return None
+    
+    pavio_superior = h - max(o, c)
+    pavio_inferior = min(o, c) - l
+
+    # Rejeição de baixa (pavio inferior grande)
+    if (pavio_inferior / range_total) >= p.get('RejectionWickMinRatio', 0.6) and vela_confirmacao['close'] > vela_confirmacao['open']:
+        return 'BUY'
+    
+    # Rejeição de alta (pavio superior grande)
+    if (pavio_superior / range_total) >= p.get('RejectionWickMinRatio', 0.6) and vela_confirmacao['close'] < vela_confirmacao['open']:
+        return 'SELL'
+        
+    return None
 
 def is_market_too_volatile(velas, p):
     last_candles = velas[-p.get('VolatilityCandles', 3):]
@@ -543,7 +562,7 @@ def main_bot_logic(state):
     
     PARAMS = { 
         'MAPeriod': 14, 'MaxLevels': 10, 'Proximity': 10.0, 'Point': 1e-6, 
-        'RejectionWickMinRatio': 0.58, 'RejectionBodyMaxRatio': 0.3, 'RejectionOppositeWickMaxRatio': 0.2, 
+        'RejectionWickMinRatio': 0.6,
         'VolatilityCandles': 3, 'MaxWickRatio': 0.65, 'MinVolatileCandles': 2,
         'ConfirmationMaxOppositeWickRatio': 0.45
     }
