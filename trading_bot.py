@@ -108,7 +108,7 @@ def exibir_banner():
       ██║   ██╔══██╗██║██╔══██║██║         ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║   ██║   ██║
       ██║   ██║  ██║██║██║  ██║███████╗     ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝   ██║
       ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝      ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝    ╚═╝ '''+y+'''
-              azkzero@gmail.com - v31 (Estratégias Refinadas)
+              azkzero@gmail.com - v28 (Estratégias de Padrões Individuais)
     ''')
     print(y + "*"*88)
     print(c + "="*88)
@@ -210,6 +210,7 @@ def catalogar_estrategias(api, params):
         'rejection_candle': 'Rejeição',
         'engulfing': 'Engolfo',
         'morning_star': 'Estrela da Manhã/Noite',
+        'decision_candle': 'Candle de Decisão',
         'rest_candle': 'Vela de Descanso'
     }
     ativos_abertos = []
@@ -226,7 +227,7 @@ def catalogar_estrategias(api, params):
     for ativo_original in ativos_abertos:
         try:
             log_info(f"\n--- Analyzing pair: {w}{ativo_original}{c} ---")
-            velas_historicas_raw = api.get_candles(ativo_original, 60, 240, time.time())
+            velas_historicas_raw = api.get_candles(ativo_original, 60, 120, time.time())
             todas_as_velas = validar_e_limpar_velas(velas_historicas_raw)
             if not todas_as_velas or len(todas_as_velas) < 100: log_warning(f"Could not get enough historical data for {ativo_original}."); continue
             
@@ -292,17 +293,17 @@ def detect_fractals(velas, max_levels):
         if lows[i-1] < min(lows[i-3:i-1] + lows[i:i+2]): sup.append(lows[i-1])
     return list(res), list(sup)
 
-def get_candle_props(vela):
-    props = {}
-    props['range'] = vela['high'] - vela['low']
-    if props['range'] == 0: return None
-    props['corpo'] = abs(vela['open'] - vela['close'])
-    props['body_ratio'] = props['corpo'] / props['range']
-    props['is_alta'] = vela['close'] > vela['open']
-    props['is_baixa'] = vela['close'] < vela['open']
-    return props
-
-# --- STRATEGIES ---
+def strategy_rejection_candle(velas, p):
+    if len(velas) < p['MAPeriod'] + 2: return None
+    nano_up = sma_slope([v['close'] for v in velas], p['MAPeriod'])
+    if nano_up is None: return None
+    o, h, l, c = velas[-2]['open'], velas[-2]['high'], velas[-2]['low'], velas[-2]['close']
+    range_total = h - l
+    if range_total == 0: return None
+    corpo = abs(o - c); pavio_superior = h - max(o, c); pavio_inferior = min(o, c) - l
+    if nano_up and ((pavio_inferior / range_total) >= p.get('RejectionWickMinRatio')) and ((corpo / range_total) <= p.get('RejectionBodyMaxRatio')) and ((pavio_superior / range_total) <= p.get('RejectionOppositeWickMaxRatio')): return 'BUY'
+    if not nano_up and ((pavio_superior / range_total) >= p.get('RejectionWickMinRatio')) and ((corpo / range_total) <= p.get('RejectionBodyMaxRatio')) and ((pavio_inferior / range_total) <= p.get('RejectionOppositeWickMaxRatio')): return 'SELL'
+    return None
 
 def strategy_mql_pullback(velas, p):
     if len(velas) < p['MAPeriod'] + 2: return None
@@ -345,6 +346,17 @@ def strategy_sr_breakout(velas, p):
             
     return None
 
+# --- NOVAS ESTRATÉGIAS DE PADRÕES ---
+def get_candle_props(vela):
+    props = {}
+    props['range'] = vela['high'] - vela['low']
+    if props['range'] == 0: return None
+    props['corpo'] = abs(vela['open'] - vela['close'])
+    props['body_ratio'] = props['corpo'] / props['range']
+    props['is_alta'] = vela['close'] > vela['open']
+    props['is_baixa'] = vela['close'] < vela['open']
+    return props
+
 def strategy_engulfing(velas, p):
     if len(velas) < 3: return None
     tendencia_alta = sma_slope([v['close'] for v in velas], p['MAPeriod'])
@@ -352,9 +364,6 @@ def strategy_engulfing(velas, p):
     
     p2, p3 = get_candle_props(velas[-2]), get_candle_props(velas[-1])
     if not all([p2, p3]): return None
-    
-    # Condição extra: vela anterior (p2) deve ser de indecisão
-    if p2['body_ratio'] > 0.4: return None
     
     if tendencia_alta and p2['is_baixa'] and p3['is_alta'] and p3['corpo'] > p2['corpo'] and velas[-1]['close'] > velas[-2]['open'] and velas[-1]['open'] < velas[-2]['close']:
         return 'BUY'
@@ -376,45 +385,30 @@ def strategy_morning_star(velas, p):
         return 'SELL'
     return None
 
-def strategy_rest_candle(velas, p):
-    if len(velas) < 4: return None
+def strategy_decision_candle(velas, p):
+    if len(velas) < 2: return None
     tendencia_alta = sma_slope([v['close'] for v in velas], p['MAPeriod'])
     if tendencia_alta is None: return None
     
-    v1, v2, v3 = velas[-3], velas[-2], velas[-1]
-    p1, p2, p3 = get_candle_props(v1), get_candle_props(v2), get_candle_props(v3)
-    if not all([p1, p2, p3]): return None
+    p3 = get_candle_props(velas[-1])
+    if not p3: return None
     
-    # Verifica se a v2 (vela de descanso) está contida na v1 (vela forte)
-    is_inside_bar = v2['high'] < v1['high'] and v2['low'] > v1['low']
-    if not is_inside_bar or p2['body_ratio'] > 0.3: return None
-
-    if tendencia_alta and v3['close'] > v2['high']: return 'BUY'
-    if not tendencia_alta and v3['close'] < v2['low']: return 'SELL'
+    if tendencia_alta and p3['is_alta'] and p3['body_ratio'] > 0.7: return 'BUY'
+    if not tendencia_alta and p3['is_baixa'] and p3['body_ratio'] > 0.7: return 'SELL'
     return None
 
-def strategy_rejection_candle(velas, p):
-    if len(velas) < p['MAPeriod'] + 3: return None
+def strategy_rest_candle(velas, p):
+    if len(velas) < 3: return None
+    tendencia_alta = sma_slope([v['close'] for v in velas], p['MAPeriod'])
+    if tendencia_alta is None: return None
     
-    vela_rejeicao = velas[-2]
-    vela_confirmacao = velas[-1]
-
-    o, h, l, c = vela_rejeicao['open'], vela_rejeicao['high'], vela_rejeicao['low'], vela_rejeicao['close']
-    range_total = h - l
-    if range_total == 0: return None
+    p2, p3 = get_candle_props(velas[-2]), get_candle_props(velas[-1])
+    if not all([p2, p3]): return None
     
-    pavio_superior = h - max(o, c)
-    pavio_inferior = min(o, c) - l
-
-    # Rejeição de baixa (pavio inferior grande)
-    if (pavio_inferior / range_total) >= p.get('RejectionWickMinRatio', 0.6) and vela_confirmacao['close'] > vela_confirmacao['open']:
-        return 'BUY'
-    
-    # Rejeição de alta (pavio superior grande)
-    if (pavio_superior / range_total) >= p.get('RejectionWickMinRatio', 0.6) and vela_confirmacao['close'] < vela_confirmacao['open']:
-        return 'SELL'
-        
+    if tendencia_alta and p2['body_ratio'] < 0.3 and p3['is_alta'] and p3['body_ratio'] > 0.5: return 'BUY'
+    if not tendencia_alta and p2['body_ratio'] < 0.3 and p3['is_baixa'] and p3['body_ratio'] > 0.5: return 'SELL'
     return None
+# ------------------------------------
 
 def is_market_too_volatile(velas, p):
     last_candles = velas[-p.get('VolatilityCandles', 3):]
@@ -562,7 +556,7 @@ def main_bot_logic(state):
     
     PARAMS = { 
         'MAPeriod': 14, 'MaxLevels': 10, 'Proximity': 10.0, 'Point': 1e-6, 
-        'RejectionWickMinRatio': 0.6,
+        'RejectionWickMinRatio': 0.58, 'RejectionBodyMaxRatio': 0.3, 'RejectionOppositeWickMaxRatio': 0.2, 
         'VolatilityCandles': 3, 'MaxWickRatio': 0.65, 'MinVolatileCandles': 2,
         'ConfirmationMaxOppositeWickRatio': 0.45
     }
@@ -663,7 +657,7 @@ def main_bot_logic(state):
                             signal_queue.put(log_payload)
                             continue
 
-                        all_strategies_to_check = {'Pullback MQL': 'mql_pullback', 'Rompimento S/R': 'sr_breakout', 'Engolfo': 'engulfing', 'Estrela da Manhã/Noite': 'morning_star', 'Vela de Descanso': 'rest_candle', 'Rejeição': 'rejection_candle'}
+                        all_strategies_to_check = {'Pullback MQL': 'mql_pullback', 'Rompimento S/R': 'sr_breakout', 'Engolfo': 'engulfing', 'Estrela da Manhã/Noite': 'morning_star', 'Candle de Decisão': 'decision_candle', 'Vela de Descanso': 'rest_candle', 'Rejeição': 'rejection_candle'}
                         for nome_estrategia, cod_est in all_strategies_to_check.items():
                             sinal = globals().get(f'strategy_{cod_est}')(velas, PARAMS)
                             if sinal:
@@ -691,7 +685,7 @@ def main_bot_logic(state):
                             if len(sinais_para_executar) + active_trades_count >= MAX_SIMULTANEOUS_TRADES: break
                             velas = validar_e_limpar_velas(API.get_candles(ativo, 60, 150, time.time()))
                             if velas and len(velas) >= 20 and not is_market_too_volatile(velas, PARAMS):
-                                strategies_to_try = [('Pullback MQL', 'mql_pullback'), ('Rompimento S/R', 'sr_breakout'), ('Engolfo', 'engulfing'), ('Estrela da Manhã/Noite', 'morning_star'), ('Vela de Descanso', 'rest_candle'), ('Rejeição', 'rejection_candle')]
+                                strategies_to_try = [('Pullback MQL', 'mql_pullback'), ('Rompimento S/R', 'sr_breakout'), ('Engolfo', 'engulfing'), ('Estrela da Manhã/Noite', 'morning_star'), ('Candle de Decisão', 'decision_candle'), ('Vela de Descanso', 'rest_candle'), ('Rejeição', 'rejection_candle')]
                                 for nome, cod in strategies_to_try:
                                     sinal = globals().get(f'strategy_{cod}')(velas, PARAMS)
                                     if sinal and is_trade_confirmed_by_previous_candle(sinal, velas[-2], PARAMS):
