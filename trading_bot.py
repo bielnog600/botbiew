@@ -108,7 +108,7 @@ def exibir_banner():
       ██║   ██╔══██╗██║██╔══██║██║         ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║   ██║   ██║
       ██║   ██║  ██║██║██║  ██║███████╗     ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝   ██║
       ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝      ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝    ╚═╝ '''+y+'''
-              azkzero@gmail.com - v21 (Gestor de Portfólio)
+              azkzero@gmail.com - v22 (Auto-Adapting Portfolio)
     ''')
     print(y + "*"*88)
     print(c + "="*88)
@@ -202,7 +202,6 @@ def validar_e_limpar_velas(velas_raw):
         if all(vela_padronizada.values()): velas_limpas.append(vela_padronizada)
     return velas_limpas
 
-# FUNÇÃO MODIFICADA PARA RETORNAR OS DADOS
 def catalogar_estrategias(api, params):
     log_info("="*40); log_info("STARTING STRATEGY CATALOGING MODE..."); log_info("="*40)
     TODAS_AS_ESTRATEGIAS = {'mql_pullback': 'Pullback MQL', 'flow': 'Fluxo', 'patterns': 'Padrões', 'rejection_candle': 'Rejeição'}
@@ -244,7 +243,10 @@ def catalogar_estrategias(api, params):
                     performance_do_par[nome] = assertividade
                     log_info(f"  -> Strategy '{nome}' for {ativo_original}: {assertividade:.2f}% accuracy ({res['win']}W / {res['loss']}L)")
                 else:
-                    log_warning(f"  -> Amostra muito pequena para '{nome}' ({total} sinais). Ignorando.")
+                    msg = f"Amostra muito pequena para '{nome}' ({total} sinais). Ignorando."
+                    log_warning(f"  -> {msg}")
+                    log_payload = {"type": "log", "data": {"level": "warning", "message": msg, "pair": ativo_original}}
+                    signal_queue.put(log_payload)
             
             if performance_do_par:
                 full_performance_data[ativo_original] = performance_do_par
@@ -254,7 +256,6 @@ def catalogar_estrategias(api, params):
     log_info("="*40); log_info("CATALOGING FINISHED!"); log_info("="*40)
     return full_performance_data
 
-# NOVA FUNÇÃO PARA SELECIONAR OS MELHORES PARES
 def selecionar_melhores_pares(performance_data, top_n=30):
     pares_com_score = []
     for par, estrategias in performance_data.items():
@@ -268,7 +269,7 @@ def selecionar_melhores_pares(performance_data, top_n=30):
     
     top_pares = [item['par'] for item in pares_ordenados[:top_n]]
     log_success(f"Top {len(top_pares)} pares selecionados para análise focada: {', '.join(top_pares)}")
-    return top_pares
+    return top_pares, pares_ordenados
 
 def sma_slope(closes, period):
     if len(closes) < period + 1: return None
@@ -420,7 +421,13 @@ class BotState:
     def __init__(self):
         self.stop = False; self.win_count = 0; self.loss_count = 0
         self.gale_wins = {f"g{i}": 0 for i in range(1, 11)}
-        self.active_trades = 0; self.signal_history = {}; self.strategy_performance = {}; self.lock = Lock()
+        self.active_trades = 0; self.signal_history = {}
+        # NOVO: Estado para a gestão de portfólio
+        self.full_performance_data = {}
+        self.pair_losses = {}
+        self.banned_pairs = set()
+        self.global_losses_since_catalog = 0
+        self.lock = Lock()
 
 def get_config_from_env():
     return {
@@ -443,8 +450,7 @@ def compra_thread(api, ativo, valor, direcao, expiracao, tipo_op, state, config,
             log_error(f"-> {ativo}: {msg}")
             log_payload = {"type": "log", "data": {"level": "error", "message": msg, "pair": ativo}}
             signal_queue.put(log_payload)
-            with state.lock:
-                state.active_trades -= 1
+            with state.lock: state.active_trades -= 1
             return
 
         entrada_atual = valor; direcao_atual, niveis_mg = direcao, config['mg_niveis'] if config['usar_mg'] else 0
@@ -470,13 +476,22 @@ def compra_thread(api, ativo, valor, direcao, expiracao, tipo_op, state, config,
                 with state.lock:
                     state.win_count += 1
                     if i > 0: state.gale_wins[f'g{i}'] += 1
+                    state.pair_losses[ativo] = 0 # Reseta as perdas do par em caso de win
                 resultado_final = 'WIN'; break
             elif resultado < 0:
                 log_error(f"RESULTADO: LOSS {gale_info} | Perda: {cifrao}{abs(resultado):.2f}")
+                with state.lock:
+                    state.loss_count += 1
+                    state.global_losses_since_catalog += 1
+                    state.pair_losses[ativo] = state.pair_losses.get(ativo, 0) + 1
+                    if state.pair_losses[ativo] >= 2:
+                        state.banned_pairs.add(ativo)
+                        msg = f"Par {ativo} removido do portfólio por mau desempenho (2 derrotas)."
+                        log_error(msg)
+                        log_payload = {"type": "log", "data": {"level": "error", "message": msg, "pair": ativo}}
+                        signal_queue.put(log_payload)
                 if i < niveis_mg: entrada_atual *= config['mg_fator']
-                else:
-                    with state.lock: state.loss_count += 1
-                    resultado_final = 'LOSS'
+                else: resultado_final = 'LOSS'
             else:
                 log_warning(f"RESULTADO: EMPATE {gale_info}.")
                 if i < niveis_mg: log_info("Re-entrando após empate...")
@@ -525,56 +540,94 @@ def main_bot_logic(state):
     }
     
     pares_prioritarios = []
+    full_performance_sorted = []
     if config['modo_operacao'] == '1':
-        full_performance = catalogar_estrategias(API, PARAMS)
-        pares_prioritarios = selecionar_melhores_pares(full_performance, 30)
+        state.full_performance_data = catalogar_estrategias(API, PARAMS)
+        pares_prioritarios, full_performance_sorted = selecionar_melhores_pares(state.full_performance_data, 30)
+        state.pair_losses = {par: 0 for par in pares_prioritarios}
+        state.global_losses_since_catalog = 0
 
     minuto_anterior, analise_feita = -1, False
     ultimo_sinal_timestamp = time.time()
-    TEMPO_LIMITE_SEM_SINAIS = 1800 # 30 minutos
+    TEMPO_LIMITE_SEM_SINAIS = 1800
 
     log_info("Bot iniciado. Entrando no loop de análise...")
 
     while not state.stop:
         try:
-            MAX_SIMULTANEOUS_TRADES = 2
+            MAX_SIMULTANEOUS_TRADES = 1
             
-            # LÓGICA DE RECATALOGAÇÃO POR INATIVIDADE
-            if config['modo_operacao'] == '1' and (time.time() - ultimo_sinal_timestamp > TEMPO_LIMITE_SEM_SINAIS):
-                log_warning(f"Inatividade por mais de {TEMPO_LIMITE_SEM_SINAIS / 60} minutos. Buscando novos pares promissores...")
-                log_payload = {"type": "log", "data": {"level": "warning", "message": "Inatividade detectada. Recatalogando...", "pair": "Sistema"}}
-                signal_queue.put(log_payload)
-                full_performance = catalogar_estrategias(API, PARAMS)
-                pares_prioritarios = selecionar_melhores_pares(full_performance, 30)
-                ultimo_sinal_timestamp = time.time()
+            # LÓGICA DE GESTÃO DE PORTFÓLIO
+            if config['modo_operacao'] == '1':
+                if state.global_losses_since_catalog >= 5:
+                    msg = f"GATILHO DE SEGURANÇA ATIVADO ({state.global_losses_since_catalog} derrotas). Recatalogando todo o mercado..."
+                    log_error(msg)
+                    log_payload = {"type": "log", "data": {"level": "error", "message": msg, "pair": "SISTEMA"}}
+                    signal_queue.put(log_payload)
+                    
+                    state.full_performance_data = catalogar_estrategias(API, PARAMS)
+                    pares_prioritarios, full_performance_sorted = selecionar_melhores_pares(state.full_performance_data, 30)
+                    with state.lock:
+                        state.pair_losses = {par: 0 for par in pares_prioritarios}
+                        state.global_losses_since_catalog = 0
+                        state.banned_pairs.clear()
+                    ultimo_sinal_timestamp = time.time()
+                
+                if time.time() - ultimo_sinal_timestamp > TEMPO_LIMITE_SEM_SINAIS:
+                    msg = f"Inatividade por mais de {TEMPO_LIMITE_SEM_SINAIS / 60:.0f} minutos. Buscando novos pares promissores..."
+                    log_warning(msg)
+                    log_payload = {"type": "log", "data": {"level": "warning", "message": msg, "pair": "SISTEMA"}}
+                    signal_queue.put(log_payload)
 
+                    state.full_performance_data = catalogar_estrategias(API, PARAMS)
+                    pares_prioritarios, full_performance_sorted = selecionar_melhores_pares(state.full_performance_data, 30)
+                    with state.lock:
+                        state.pair_losses = {par: 0 for par in pares_prioritarios}
+                        state.global_losses_since_catalog = 0
+                        state.banned_pairs.clear()
+                    ultimo_sinal_timestamp = time.time()
+            
+            pares_a_remover = [par for par in pares_prioritarios if par in state.banned_pairs]
+            if pares_a_remover:
+                for par in pares_a_remover:
+                    pares_prioritarios.remove(par)
+                    # Encontra substituto
+                    for item in full_performance_sorted:
+                        novo_par = item['par']
+                        if novo_par not in pares_prioritarios and novo_par not in state.banned_pairs:
+                            pares_prioritarios.append(novo_par)
+                            with state.lock:
+                                state.pair_losses[novo_par] = 0
+                            msg = f"Substituindo {par} por {novo_par} (Score: {item['score']:.2f}%)"
+                            log_info(msg)
+                            log_payload = {"type": "log", "data": {"level": "info", "message": msg, "pair": "SISTEMA"}}
+                            signal_queue.put(log_payload)
+                            break
+            
             timestamp = time.time()
             dt_objeto = datetime.fromtimestamp(timestamp)
             minuto_atual, segundo_atual = dt_objeto.minute, dt_objeto.second
 
             if minuto_anterior != minuto_atual:
                 minuto_anterior, analise_feita = minuto_atual, False
-                with state.lock:
-                    active_trades_count = state.active_trades
+                with state.lock: active_trades_count = state.active_trades
                 if active_trades_count == 0:
                     horario_proxima_vela = (dt_objeto.replace(second=0, microsecond=0) + timedelta(minutes=1)).strftime('%H:%M')
                     status_payload = { "type": "analysis_status", "status": "Aguardando vela das %s...", "next_entry_time": horario_proxima_vela }
                     signal_queue.put(status_payload)
             
-            with state.lock:
-                active_trades_count = state.active_trades
+            with state.lock: active_trades_count = state.active_trades
             
             if segundo_atual >= 30 and not analise_feita and active_trades_count < MAX_SIMULTANEOUS_TRADES:
                 analise_feita = True
                 sinais_para_executar = []
 
-                if config['modo_operacao'] == '1': # MODO CONSERVADOR
+                if config['modo_operacao'] == '1':
                     potential_trades = []
-                    all_profits = API.get_all_profit() # Pega os payouts uma vez
+                    all_profits = API.get_all_profit()
                     
                     for ativo_original in pares_prioritarios:
                         tipo_mercado, payout = None, 0
-                        # Descobre o tipo de mercado e payout do par prioritário
                         for market_type in ['binary', 'turbo']:
                             if ativo_original in all_profits and market_type in all_profits[ativo_original]:
                                 tipo_mercado = market_type
@@ -588,7 +641,7 @@ def main_bot_logic(state):
                         if not velas or len(velas) < 20: continue
                         
                         if is_market_too_volatile(velas, PARAMS):
-                            msg = "MERCADO MUITO VOLÁTIL (grandes pavios). Análise descartada."
+                            msg = "MERCADO MUITO VOLÁTIL. Análise descartada."
                             log_warning(f"-> {ativo_original}: {msg}")
                             log_payload = {"type": "log", "data": {"level": "warning", "message": msg, "pair": ativo_original}}
                             signal_queue.put(log_payload)
@@ -619,8 +672,7 @@ def main_bot_logic(state):
                     sorted_assets = obter_melhor_par(API, config['pay_minimo'])
                     if sorted_assets:
                         for ativo, details in sorted_assets:
-                            if len(sinais_para_executar) + active_trades_count >= MAX_SIMULTANEOUS_TRADES:
-                                break
+                            if len(sinais_para_executar) + active_trades_count >= MAX_SIMULTANEOUS_TRADES: break
                             velas = validar_e_limpar_velas(API.get_candles(ativo, 60, 150, time.time()))
                             if velas and len(velas) >= 20 and not is_market_too_volatile(velas, PARAMS):
                                 strategies_to_try = [('Pullback MQL', 'mql_pullback'), ('Fluxo', 'flow'), ('Padrões', 'patterns'), ('Rejeição', 'rejection_candle')]
@@ -636,10 +688,9 @@ def main_bot_logic(state):
                 
                 vagas_disponiveis = MAX_SIMULTANEOUS_TRADES - active_trades_count
                 for sinal_info in sinais_para_executar[:vagas_disponiveis]:
-                    with state.lock:
-                        state.active_trades += 1
+                    with state.lock: state.active_trades += 1
                     
-                    ultimo_sinal_timestamp = time.time() # Reseta o timer de inatividade
+                    ultimo_sinal_timestamp = time.time()
                     
                     horario_analise_dt = dt_objeto.replace(second=0, microsecond=0)
                     horario_analise_str = horario_analise_dt.strftime('%H:%M')
@@ -658,7 +709,7 @@ def main_bot_logic(state):
                     }
                     state.signal_history[signal_id] = signal_payload
                     signal_queue.put(signal_payload)
-                    Thread(target=compra_thread, args=(API, sinal_info['ativo'], config['valor_entrada'], sinal_info['direcao'], config['expiracao'], sinal_info['tipo_op'], state, config, cifrao, signal_id, target_entry_timestamp), daemon=True).start()
+                    Thread(target=compra_thread, args=(API, sinal_info['ativo'], config['valor_entrada'], sinal_info['direcao'], sinal_info['tipo_op'], state, config, cifrao, signal_id, target_entry_timestamp), daemon=True).start()
             
             time.sleep(0.2)
         
