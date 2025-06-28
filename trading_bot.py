@@ -773,7 +773,7 @@ def main_bot_logic(state):
                                 assertividade = 0
                                 if normalized_name in state.full_performance_data and nome_estrategia in state.full_performance_data[normalized_name]:
                                     assertividade = state.full_performance_data[normalized_name][nome_estrategia]
-                                    if assertividade >= 40:
+                                    if assertividade >= 0:
                                         is_approved = True
 
                                 if is_approved:
