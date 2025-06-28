@@ -108,7 +108,7 @@ def exibir_banner():
       ██║   ██╔══██╗██║██╔══██║██║         ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║   ██║   ██║
       ██║   ██║  ██║██║██║  ██║███████╗     ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝   ██║
       ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝      ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝    ╚═╝ '''+y+'''
-              azkzero@gmail.com - v18 (Filtros Avançados de Confirmação)
+              azkzero@gmail.com - v19 (Deadline de Entrada)
     ''')
     print(y + "*"*88)
     print(c + "="*88)
@@ -362,7 +362,6 @@ def strategy_patterns(velas, p):
             
     return None
 
-# NOVO FILTRO GLOBAL
 def is_market_too_volatile(velas, p):
     last_candles = velas[-p.get('VolatilityCandles', 3):]
     volatile_count = 0
@@ -375,24 +374,21 @@ def is_market_too_volatile(velas, p):
             volatile_count += 1
     return volatile_count >= p.get('MinVolatileCandles', 2)
 
-# NOVO FILTRO DE CONFIRMAÇÃO
 def is_trade_confirmed_by_previous_candle(sinal, vela_anterior, p):
     if not vela_anterior: return False
     
     corpo = abs(vela_anterior['open'] - vela_anterior['close'])
     range_total = vela_anterior['high'] - vela_anterior['low']
-    if range_total == 0: return True # Se for um doji, não contradiz
+    if range_total == 0: return True 
     
     pavio_superior = vela_anterior['high'] - max(vela_anterior['open'], vela_anterior['close'])
     pavio_inferior = min(vela_anterior['open'], vela_anterior['close']) - vela_anterior['low']
     
     if sinal == 'BUY':
-        # Rejeita se a vela anterior for de baixa ou tiver um grande pavio superior
         if vela_anterior['close'] < vela_anterior['open']: return False
-        if pavio_superior > corpo * p.get('ConfirmationMaxOppositeWickRatio', 0.2): return False
+        if pavio_superior > corpo * p.get('ConfirmationMaxOppositeWickRatio', 1.5): return False
     
     if sinal == 'SELL':
-        # Rejeita se a vela anterior for de alta ou tiver um grande pavio inferior
         if vela_anterior['close'] > vela_anterior['open']: return False
         if pavio_inferior > corpo * p.get('ConfirmationMaxOppositeWickRatio', 1.5): return False
         
@@ -414,11 +410,20 @@ def get_config_from_env():
 
 def compra_thread(api, ativo, valor, direcao, expiracao, tipo_op, state, config, cifrao, signal_id, target_entry_timestamp):
     try:
-        wait_time = target_entry_timestamp - time.time() - 20.0
+        wait_time = target_entry_timestamp - time.time() - 5.0
         
         if wait_time > 0:
-            log_info(f"Aguardando {wait_time:.2f}s para entrada precisa em {ativo} (envio 5s antes)...")
+            log_info(f"Aguardando {wait_time:.2f}s para entrada precisa (envio 5s antes)...")
             time.sleep(wait_time)
+
+        if time.time() > target_entry_timestamp + 10:
+            msg = "ENTRADA ABORTADA: Oportunidade identificada tarde demais (após 10s)."
+            log_error(f"-> {ativo}: {msg}")
+            log_payload = {"type": "log", "data": {"level": "error", "message": msg, "pair": ativo}}
+            signal_queue.put(log_payload)
+            with state.lock:
+                state.active_trades -= 1
+            return
 
         entrada_atual = valor; direcao_atual, niveis_mg = direcao, config['mg_niveis'] if config['usar_mg'] else 0
         resultado_final = None
@@ -512,13 +517,12 @@ def main_bot_logic(state):
         log_warning(f"Não foi possível obter o perfil do usuário. Erro: {e}")
         log_info(f"Olá! Iniciando bot em modo servidor.")
     
-    # PARÂMETROS COM OS NOVOS FILTROS
     PARAMS = { 
         'MAPeriod': 5, 'MaxLevels': 10, 'Proximity': 10.0, 'Point': 1e-6, 
         'FlowBodyMinRatio': 0.4, 'FlowOppositeWickMaxRatio': 0.45, 
         'RejectionWickMinRatio': 0.58, 'RejectionBodyMaxRatio': 0.3, 'RejectionOppositeWickMaxRatio': 0.2, 
         'VolatilityCandles': 3, 'MaxWickRatio': 0.65, 'MinVolatileCandles': 2,
-        'ConfirmationMaxOppositeWickRatio': 1.5
+        'ConfirmationMaxOppositeWickRatio': 0.2
     }
     
     last_catalog_time = 0
@@ -531,7 +535,7 @@ def main_bot_logic(state):
 
     while not state.stop:
         try:
-            MAX_SIMULTANEOUS_TRADES = 2
+            MAX_SIMULTANEOUS_TRADES = 5
 
             if config['modo_operacao'] == '1' and (time.time() - last_catalog_time) > (4 * 3600):
                 with state.lock:
@@ -596,13 +600,12 @@ def main_bot_logic(state):
                                         assertividade = 0
                                         if normalized_name in state.strategy_performance and nome_estrategia in state.strategy_performance[normalized_name]:
                                             assertividade = state.strategy_performance[normalized_name][nome_estrategia]
-                                            if assertividade >= 70:
+                                            if assertividade >= 45:
                                                 is_approved = True
 
                                         sinal = globals().get(f'strategy_{cod_est}')(velas, PARAMS)
                                         
                                         if sinal:
-                                            # FILTRO DE CONFIRMAÇÃO DA VELA ANTERIOR
                                             if is_trade_confirmed_by_previous_candle(sinal, velas[-2], PARAMS):
                                                 if is_approved:
                                                     msg = f"SINAL VÁLIDO ENCONTRADO com '{nome_estrategia}' ({assertividade:.2f}%)"
@@ -623,9 +626,6 @@ def main_bot_logic(state):
                                                 log_payload = {"type": "log", "data": {"level": "warning", "message": msg, "pair": ativo_original}}
                                                 signal_queue.put(log_payload)
                                         elif not sinal:
-                                            # Este log pode ser removido para uma UI mais limpa, mas é bom para depuração
-                                            # msg = f"Estratégia '{nome_estrategia}' checada, mas sem sinal no momento."
-                                            # log_info(f"-> {ativo_original}: {msg}")
                                             pass
                     
                     if potential_trades:
