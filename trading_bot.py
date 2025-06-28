@@ -108,7 +108,7 @@ def exibir_banner():
       ██║   ██╔══██╗██║██╔══██║██║         ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║   ██║   ██║
       ██║   ██║  ██║██║██║  ██║███████╗     ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝   ██║
       ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝      ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝    ╚═╝ '''+y+'''
-              azkzero@gmail.com - v32 (Estratégias Profissionais)
+              azkzero@gmail.com - v33 (Pullback Profissional)
     ''')
     print(y + "*"*88)
     print(c + "="*88)
@@ -305,16 +305,65 @@ def get_candle_props(vela):
 
 # --- STRATEGIES ---
 
+# NOVA ESTRATÉGIA DE PULLBACK PROFISSIONAL
 def strategy_mql_pullback(velas, p):
-    if len(velas) < p['MAPeriod'] + 2: return None
-    nano_up = sma_slope([v['close'] for v in velas], p['MAPeriod'])
-    if nano_up is None: return None
-    res_levels, sup_levels = detect_fractals(velas, p['MaxLevels'])
-    last = velas[-1]
-    if nano_up and sup_levels and last['close'] > last['open']:
-        if last['low'] <= sup_levels[0] + p['Proximity'] * p['Point'] and last['close'] >= sup_levels[0]: return 'BUY'
-    if not nano_up and res_levels and last['close'] < last['open']:
-        if last['high'] >= res_levels[0] - p['Proximity'] * p['Point'] and last['close'] <= res_levels[0]: return 'SELL'
+    if len(velas) < 20: return None
+
+    tendencia_alta = sma_slope([v['close'] for v in velas], p.get('PullbackTrendPeriod', 20))
+    if tendencia_alta is None: return None
+
+    res_levels, sup_levels = detect_fractals(velas[:-1], 10)
+
+    # Lógica para PULLBACK DE ALTA
+    if tendencia_alta and res_levels:
+        for i in range(len(velas) - 2, 5, -1):
+            vela_breakout = velas[i]
+            props_breakout = get_candle_props(vela_breakout)
+            if not props_breakout or not props_breakout['is_alta'] or props_breakout['body_ratio'] < 0.6: continue
+
+            resistencia_rompida = next((r for r in res_levels if vela_breakout['open'] < r < vela_breakout['close']), None)
+            if not resistencia_rompida: continue
+
+            velas_pullback = velas[i+1:-1]
+            if not velas_pullback or any(get_candle_props(v)['body_ratio'] > 0.6 for v in velas_pullback): continue
+
+            pullback_tocou_nivel = any(v_pb['low'] <= resistencia_rompida for v_pb in velas_pullback)
+            if not pullback_tocou_nivel: continue
+
+            vela_confirmacao = velas[-1]
+            props_confirmacao = get_candle_props(vela_confirmacao)
+            if not props_confirmacao: continue
+            
+            pavio_inf_confirmacao = vela_confirmacao['low'] < min(vela_confirmacao['open'], vela_confirmacao['close'])
+            if pavio_inf_confirmacao and (min(vela_confirmacao['open'], vela_confirmacao['close']) - vela_confirmacao['low']) > props_confirmacao['corpo']: return 'BUY'
+            if props_confirmacao['is_alta'] and props_confirmacao['body_ratio'] > 0.6: return 'BUY'
+            break
+
+    # Lógica para PULLBACK DE BAIXA
+    if not tendencia_alta and sup_levels:
+        for i in range(len(velas) - 2, 5, -1):
+            vela_breakout = velas[i]
+            props_breakout = get_candle_props(vela_breakout)
+            if not props_breakout or not props_breakout['is_baixa'] or props_breakout['body_ratio'] < 0.6: continue
+
+            suporte_rompido = next((s for s in sup_levels if vela_breakout['close'] < s < vela_breakout['open']), None)
+            if not suporte_rompido: continue
+
+            velas_pullback = velas[i+1:-1]
+            if not velas_pullback or any(get_candle_props(v)['body_ratio'] > 0.6 for v in velas_pullback): continue
+            
+            pullback_tocou_nivel = any(v_pb['high'] >= suporte_rompido for v_pb in velas_pullback)
+            if not pullback_tocou_nivel: continue
+            
+            vela_confirmacao = velas[-1]
+            props_confirmacao = get_candle_props(vela_confirmacao)
+            if not props_confirmacao: continue
+
+            pavio_sup_confirmacao = vela_confirmacao['high'] > max(vela_confirmacao['open'], vela_confirmacao['close'])
+            if pavio_sup_confirmacao and (vela_confirmacao['high'] - max(vela_confirmacao['open'], vela_confirmacao['close'])) > props_confirmacao['corpo']: return 'SELL'
+            if props_confirmacao['is_baixa'] and props_confirmacao['body_ratio'] > 0.6: return 'SELL'
+            break
+            
     return None
 
 def strategy_sr_breakout(velas, p):
@@ -346,33 +395,28 @@ def strategy_sr_breakout(velas, p):
             
     return None
     
-# NOVA LÓGICA DE ENGOLFO
+# LÓGICA DE ENGOLFO REFINADA
 def strategy_engulfing(velas, p):
     if len(velas) < 3: return None
-    
     tendencia_alta = sma_slope([v['close'] for v in velas], p['MAPeriod'])
     if tendencia_alta is None: return None
     
     p2, p3 = get_candle_props(velas[-2]), get_candle_props(velas[-1])
     if not all([p2, p3]): return None
     
-    # Condição: vela anterior (p2) deve ser de indecisão
     if p2['body_ratio'] > 0.4: return None
-    # Condição: vela de engolfo não deve ter pavio de rejeição excessivo
     if (p3['is_alta'] and (velas[-1]['high'] - velas[-1]['close']) > p3['corpo']) or \
        (p3['is_baixa'] and (velas[-1]['close'] - velas[-1]['low']) > p3['corpo']):
         return None
 
     res_levels, sup_levels = detect_fractals(velas, 5)
     
-    # Engolfo de alta, a favor da tendência e perto de um suporte
     if tendencia_alta and p2['is_baixa'] and p3['is_alta'] and p3['corpo'] > p2['corpo']:
-        if sup_levels and abs(velas[-1]['low'] - sup_levels[0]) / sup_levels[0] < 0.001:
+        if sup_levels and any(abs(velas[-1]['low'] - s) / s < 0.001 for s in sup_levels):
             return 'BUY'
     
-    # Engolfo de baixa, a favor da tendência e perto de uma resistência
     if not tendencia_alta and p2['is_alta'] and p3['is_baixa'] and p3['corpo'] > p2['corpo']:
-        if res_levels and abs(velas[-1]['high'] - res_levels[0]) / res_levels[0] < 0.001:
+        if res_levels and any(abs(velas[-1]['high'] - r) / r < 0.001 for r in res_levels):
             return 'SELL'
             
     return None
@@ -391,33 +435,29 @@ def strategy_morning_star(velas, p):
         return 'SELL'
     return None
 
-# NOVA LÓGICA DE VELA DE DESCANSO
+# LÓGICA DE VELA DE DESCANSO REFINADA
 def strategy_rest_candle(velas, p):
     if len(velas) < 4: return None
     tendencia_alta = sma_slope([v['close'] for v in velas], p['MAPeriod'])
     if tendencia_alta is None: return None
     
-    v1, v2, v3 = velas[-3], velas[-2], velas[-1] # v1 = forte, v2 = descanso, v3 = confirmação
-    p1, p2, p3 = get_candle_props(v1), get_candle_props(v2), get_candle_props(v3)
-    if not all([p1, p2, p3]): return None
+    v1, v2, v3 = velas[-3], velas[-2], velas[-1]
+    p1, p2 = get_candle_props(v1), get_candle_props(v2)
+    if not all([p1, p2]): return None
     
     is_inside_bar = v2['high'] < v1['high'] and v2['low'] > v1['low']
-    
     if p1['body_ratio'] < 0.6 or not is_inside_bar or p2['body_ratio'] > 0.3:
         return None
 
-    if tendencia_alta and p1['is_alta'] and v3['close'] > v2['high']:
-        return 'BUY'
-    if not tendencia_alta and p1['is_baixa'] and v3['close'] < v2['low']:
-        return 'SELL'
+    if tendencia_alta and p1['is_alta'] and v3['close'] > v1['high']: return 'BUY'
+    if not tendencia_alta and p1['is_baixa'] and v3['close'] < v1['low']: return 'SELL'
     return None
 
-# NOVA LÓGICA DE REJEIÇÃO
+# LÓGICA DE REJEIÇÃO REFINADA
 def strategy_rejection_candle(velas, p):
     if len(velas) < 3: return None
     
-    vela_rejeicao = velas[-2]
-    vela_confirmacao = velas[-1]
+    vela_rejeicao, vela_confirmacao = velas[-2], velas[-1]
     
     p_rej = get_candle_props(vela_rejeicao)
     if not p_rej: return None
@@ -581,7 +621,8 @@ def main_bot_logic(state):
         'MAPeriod': 14, 'MaxLevels': 10, 'Proximity': 10.0, 'Point': 1e-6, 
         'RejectionWickMinRatio': 0.6,
         'VolatilityCandles': 3, 'MaxWickRatio': 0.65, 'MinVolatileCandles': 2,
-        'ConfirmationMaxOppositeWickRatio': 0.45
+        'ConfirmationMaxOppositeWickRatio': 0.45,
+        'PullbackTrendPeriod': 20
     }
     
     pares_prioritarios = []
