@@ -88,7 +88,7 @@ ALL_STRATEGIES = {
     'morning_star': 'Estrela da Manhã/Noite',
     'rest_candle': 'Vela de Descanso',
     'shooting_star': 'Estrela Cadente',
-    'three_black_crows': 'Três Corvos Negros'
+    'three_white_soldiers': 'Três Soldados Brancos'
 }
 
 # --- Logging Functions ---
@@ -117,7 +117,7 @@ def exibir_banner():
       ██║   ██╔══██╗██║██╔══██║██║         ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║   ██║   ██║
       ██║   ██║  ██║██║██║  ██║███████╗     ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝   ██║
       ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝      ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝    ╚═╝ '''+y+'''
-              azkzero@gmail.com - v47 (Sem Três Soldados)
+              azkzero@gmail.com - v48 (Correção de Erro)
     ''')
     print(y + "*"*88)
     print(c + "="*88)
@@ -211,7 +211,14 @@ def validar_e_limpar_velas(velas_raw):
         if all(vela_padronizada.values()): velas_limpas.append(vela_padronizada)
     return velas_limpas
 
-def catalogar_e_selecionar(api, params, assertividade_minima=80):
+# FUNÇÃO REINTRODUZIDA
+def sma_slope(closes, period):
+    if len(closes) < period + 1: return None
+    sma1 = sum(closes[-(period+1):-1]) / period; sma2 = sum(closes[-period:]) / period
+    if sma1 == sma2: return None
+    return sma2 > sma1
+    
+def catalogar_e_selecionar(api, params, assertividade_minima=75):
     log_info("="*40); log_info("MODO DE CATALOGAÇÃO E SELEÇÃO INICIADO..."); log_info("="*40)
     
     ativos_abertos = []
@@ -266,13 +273,6 @@ def catalogar_e_selecionar(api, params, assertividade_minima=80):
         
     log_info("="*40); log_info("CATALOGAÇÃO FINALIZADA!"); log_info("="*40)
     return champion_strategies
-
-
-def sma_slope(closes, period):
-    if len(closes) < period + 1: return None
-    sma1 = sum(closes[-(period+1):-1]) / period; sma2 = sum(closes[-period:]) / period
-    if sma1 == sma2: return None
-    return sma2 > sma1
 
 def get_candle_props(vela):
     props = {}
@@ -331,7 +331,7 @@ def strategy_engulfing(velas, p):
     if (p3['is_alta'] and (v3['high'] - v3['close']) > p3['corpo']) or \
        (p3['is_baixa'] and (v3['close'] - v3['low']) > p3['corpo']):
         return None
-    
+
     if tendencia_alta and p2['is_baixa'] and p3['is_alta'] and p3['corpo'] > p2['corpo']:
         return 'BUY'
     
@@ -383,6 +383,21 @@ def strategy_shooting_star(velas, p):
        props['pavio_inferior'] < props['corpo'] * 0.5 and \
        vela_confirmacao['close'] < vela_confirmacao['open']:
         return 'SELL'
+    return None
+
+def strategy_three_white_soldiers(velas, p):
+    if len(velas) < 3: return None
+    tendencia_alta = sma_slope([v['close'] for v in velas], p['MAPeriod'])
+    if tendencia_alta is None or not tendencia_alta: return None
+    
+    v1, v2 = velas[-2], velas[-1]
+    p1, p2 = get_candle_props(v1), get_candle_props(v2)
+    if not all([p1, p2]): return None
+    
+    if p1['is_alta'] and p2['is_alta'] and \
+       p1['body_ratio'] > 0.5 and p2['body_ratio'] > 0.5 and \
+       v2['close'] > v1['close'] and v2['open'] < v1['close'] and v2['open'] > v1['open']:
+        return 'BUY'
     return None
 
 def is_market_too_volatile(velas, p):
