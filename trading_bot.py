@@ -84,7 +84,6 @@ clients_lock = Lock()
 
 # CORREÇÃO: Estratégias definidas como uma constante global
 ALL_STRATEGIES = {
-    'mql_pullback': 'Pullback MQL', 
     'sr_breakout': 'Rompimento S/R', 
     'engulfing': 'Engolfo',
     'morning_star': 'Estrela da Manhã/Noite',
@@ -121,7 +120,7 @@ def exibir_banner():
       ██║   ██╔══██╗██║██╔══██║██║         ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║   ██║   ██║
       ██║   ██║  ██║██║██║  ██║███████╗     ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝   ██║
       ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝      ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝    ╚═╝ '''+y+'''
-              azkzero@gmail.com - v39 (Correção de Escopo)
+              azkzero@gmail.com - v40 (Sem Estratégia de Pullback)
     ''')
     print(y + "*"*88)
     print(c + "="*88)
@@ -300,58 +299,6 @@ def get_candle_props(vela):
     return props
 
 # --- STRATEGIES ---
-
-def strategy_mql_pullback(velas, p):
-    if len(velas) < 20: return None
-
-    tendencia_alta = sma_slope([v['close'] for v in velas], p.get('PullbackTrendPeriod', 20))
-    if tendencia_alta is None: return None
-
-    res_levels, sup_levels = detect_fractals(velas[:-1], 10)
-
-    if tendencia_alta and res_levels:
-        for i in range(len(velas) - 2, 5, -1):
-            vela_breakout, props_breakout = velas[i], get_candle_props(velas[i])
-            if not props_breakout or not props_breakout['is_alta'] or props_breakout['body_ratio'] < 0.6: continue
-
-            resistencia_rompida = next((r for r in res_levels if vela_breakout['open'] < r < vela_breakout['close']), None)
-            if not resistencia_rompida: continue
-
-            velas_pullback = velas[i+1:-1]
-            if not velas_pullback or any(get_candle_props(v)['body_ratio'] > 0.6 for v in velas_pullback): continue
-
-            pullback_tocou_nivel = any(v_pb['low'] <= resistencia_rompida for v_pb in velas_pullback)
-            if not pullback_tocou_nivel: continue
-
-            vela_confirmacao, props_confirmacao = velas[-1], get_candle_props(velas[-1])
-            if not props_confirmacao: continue
-            
-            if props_confirmacao['pavio_inferior'] > props_confirmacao['corpo']: return 'BUY'
-            if props_confirmacao['is_alta'] and props_confirmacao['body_ratio'] > 0.6: return 'BUY'
-            break
-
-    if not tendencia_alta and sup_levels:
-        for i in range(len(velas) - 2, 5, -1):
-            vela_breakout, props_breakout = velas[i], get_candle_props(velas[i])
-            if not props_breakout or not props_breakout['is_baixa'] or props_breakout['body_ratio'] < 0.6: continue
-
-            suporte_rompido = next((s for s in sup_levels if vela_breakout['close'] < s < vela_breakout['open']), None)
-            if not suporte_rompido: continue
-            
-            velas_pullback = velas[i+1:-1]
-            if not velas_pullback or any(get_candle_props(v)['body_ratio'] > 0.6 for v in velas_pullback): continue
-            
-            pullback_tocou_nivel = any(v_pb['high'] >= suporte_rompido for v_pb in velas_pullback)
-            if not pullback_tocou_nivel: continue
-            
-            vela_confirmacao, props_confirmacao = velas[-1], get_candle_props(velas[-1])
-            if not props_confirmacao: continue
-
-            if props_confirmacao['pavio_superior'] > props_confirmacao['corpo']: return 'SELL'
-            if props_confirmacao['is_baixa'] and props_confirmacao['body_ratio'] > 0.6: return 'SELL'
-            break
-            
-    return None
 
 def strategy_sr_breakout(velas, p):
     if len(velas) < 5: return None
@@ -663,7 +610,7 @@ def main_bot_logic(state):
 
     while not state.stop:
         try:
-            MAX_SIMULTANEOUS_TRADES = 2
+            MAX_SIMULTANEOUS_TRADES = 1
             
             if config['modo_operacao'] == '1':
                 if time.time() - ultimo_ciclo_catalogacao > TEMPO_CICLO_CATALOGACAO or state.global_losses_since_catalog >= 5:
