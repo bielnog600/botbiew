@@ -108,7 +108,7 @@ def exibir_banner():
       ██║   ██╔══██╗██║██╔══██║██║         ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║   ██║   ██║
       ██║   ██║  ██║██║██║  ██║███████╗     ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝   ██║
       ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝      ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝    ╚═╝ '''+y+'''
-              azkzero@gmail.com - v35 (Padrões Clássicos)
+              azkzero@gmail.com - v36 (Lógica de Seleção Otimizada)
     ''')
     print(y + "*"*88)
     print(c + "="*88)
@@ -248,7 +248,7 @@ def catalogar_estrategias(api, params):
             performance_do_par = {}
             for nome, res in resultados.items():
                 total = res['win'] + res['loss']
-                if total > 0: 
+                if total > 1: 
                     assertividade = (res['win'] / total) * 100
                     performance_do_par[nome] = assertividade
                     log_info(f"  -> Strategy '{nome}' for {ativo_original}: {assertividade:.2f}% accuracy ({res['win']}W / {res['loss']}L)")
@@ -266,13 +266,19 @@ def catalogar_estrategias(api, params):
     log_info("="*40); log_info("CATALOGING FINISHED!"); log_info("="*40)
     return full_performance_data
 
-def selecionar_melhores_pares(performance_data, top_n=30):
+# LÓGICA OTIMIZADA
+def selecionar_melhores_pares(performance_data, assertividade_minima, top_n=30):
     pares_com_score = []
     for par, estrategias in performance_data.items():
-        if not estrategias:
-            continue
+        if not estrategias: continue
         
-        score = sum(estrategias.values()) / len(estrategias)
+        # Filtra apenas as estratégias que cumprem o requisito mínimo
+        estrategias_aprovadas = {k: v for k, v in estrategias.items() if v >= assertividade_minima}
+        
+        if not estrategias_aprovadas: continue
+
+        # O score é a média apenas das estratégias BOAS
+        score = sum(estrategias_aprovadas.values()) / len(estrategias_aprovadas)
         pares_com_score.append({'par': par, 'score': score})
     
     pares_ordenados = sorted(pares_com_score, key=lambda x: x['score'], reverse=True)
@@ -517,9 +523,9 @@ def is_market_too_volatile(velas, p):
         if range_total == 0: continue
         corpo = abs(vela['open'] - vela['close'])
         pavio_total = range_total - corpo
-        if (pavio_total / range_total) > p.get('MaxWickRatio', 0.75):
+        if (pavio_total / range_total) > p.get('MaxWickRatio', 0.65):
             volatile_count += 1
-    return volatile_count >= p.get('MinVolatileCandles', 3)
+    return volatile_count >= p.get('MinVolatileCandles', 2)
 
 def is_trade_confirmed_by_previous_candle(sinal, vela_anterior, p):
     if not vela_anterior: return False
@@ -673,13 +679,13 @@ def main_bot_logic(state):
 
     minuto_anterior, analise_feita = -1, False
     ultimo_sinal_timestamp = time.time()
-    TEMPO_LIMITE_SEM_SINAIS = 900
+    TEMPO_LIMITE_SEM_SINAIS = 1800
 
     log_info("Bot iniciado. Entrando no loop de análise...")
 
     while not state.stop:
         try:
-            MAX_SIMULTANEOUS_TRADES = 3
+            MAX_SIMULTANEOUS_TRADES = 5
             
             if config['modo_operacao'] == '1':
                 if state.global_losses_since_catalog >= 5 or time.time() - ultimo_sinal_timestamp > TEMPO_LIMITE_SEM_SINAIS:
@@ -758,13 +764,7 @@ def main_bot_logic(state):
                             signal_queue.put(log_payload)
                             continue
 
-                        all_strategies_to_check = {
-                            'Pullback MQL': 'mql_pullback', 'Rompimento S/R': 'sr_breakout', 
-                            'Engolfo': 'engulfing', 'Estrela da Manhã/Noite': 'morning_star', 
-                            'Vela de Descanso': 'rest_candle', 'Martelo': 'hammer', 
-                            'Estrela Cadente': 'shooting_star', 'Três Soldados Brancos': 'three_white_soldiers', 
-                            'Três Corvos Negros': 'three_black_crows'
-                        }
+                        all_strategies_to_check = {'Pullback MQL': 'mql_pullback', 'Rompimento S/R': 'sr_breakout', 'Engolfo': 'engulfing', 'Estrela da Manhã/Noite': 'morning_star', 'Vela de Descanso': 'rest_candle', 'Martelo': 'hammer', 'Estrela Cadente': 'shooting_star', 'Três Soldados Brancos': 'three_white_soldiers', 'Três Corvos Negros': 'three_black_crows'}
                         for nome_estrategia, cod_est in all_strategies_to_check.items():
                             sinal = globals().get(f'strategy_{cod_est}')(velas, PARAMS)
                             if sinal:
@@ -773,12 +773,12 @@ def main_bot_logic(state):
                                 assertividade = 0
                                 if normalized_name in state.full_performance_data and nome_estrategia in state.full_performance_data[normalized_name]:
                                     assertividade = state.full_performance_data[normalized_name][nome_estrategia]
-                                    if assertividade >= 0:
+                                    if assertividade >= 70:
                                         is_approved = True
 
                                 if is_approved:
                                     if is_trade_confirmed_by_previous_candle(sinal, velas[-2], PARAMS):
-                                        msg = f"SINAL VÁLIDO ENCONTRADO com '{nome_estrategia}'"
+                                        msg = f"SINAL VÁLIDO ENCONTRADO com '{nome_estrategia}' ({assertividade:.2f}%)"
                                         log_success(f"-> {ativo_original}: {msg}")
                                         log_payload = {"type": "log", "data": {"level": "success", "message": msg, "pair": ativo_original}}
                                         signal_queue.put(log_payload)
