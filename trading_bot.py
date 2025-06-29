@@ -114,7 +114,7 @@ def exibir_banner():
       ██║   ██╔══██╗██║██╔══██║██║         ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║   ██║   ██║
       ██║   ██║  ██║██║██║  ██║███████╗     ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝   ██║
       ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝      ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝    ╚═╝ '''+y+'''
-              azkzero@gmail.com - v50 (Estratégias Focadas)
+              azkzero@gmail.com - v51 (Rompimento S/R Atualizado)
     ''')
     print(y + "*"*88)
     print(c + "="*88)
@@ -208,7 +208,7 @@ def validar_e_limpar_velas(velas_raw):
         if all(vela_padronizada.values()): velas_limpas.append(vela_padronizada)
     return velas_limpas
 
-def catalogar_e_selecionar(api, params, assertividade_minima=75):
+def catalogar_e_selecionar(api, params, assertividade_minima=60):
     log_info("="*40); log_info("MODO DE CATALOGAÇÃO E SELEÇÃO INICIADO..."); log_info("="*40)
     
     ativos_abertos = []
@@ -284,35 +284,42 @@ def get_candle_props(vela):
     props['pavio_inferior'] = min(vela['open'], vela['close']) - vela['low']
     return props
 
+def detect_fractals(velas, max_levels):
+    highs, lows = [v['high'] for v in velas], [v['low'] for v in velas]
+    res, sup = deque(maxlen=max_levels), deque(maxlen=max_levels)
+    for i in range(len(velas) - 3, 2, -1):
+        if highs[i-1] > max(highs[i-3:i-1] + highs[i:i+2]): res.append(highs[i-1])
+        if lows[i-1] < min(lows[i-3:i-1] + lows[i:i+2]): sup.append(lows[i-1])
+    return list(res), list(sup)
+    
 # --- STRATEGIES ---
 def strategy_sr_breakout(velas, p):
-    lookback = p.get('SR_Lookback', 5)
-    if len(velas) < lookback + 2: return None
+    if len(velas) < 5: return None
     
-    closes_lote = [v['close'] for v in velas[-(lookback+1):-1]]
-    if sma_slope(closes_lote, lookback) is not None:
-        return None
-
-    lote = velas[-(lookback+1):-1]
-    highest_high = max(v['high'] for v in lote)
-    lowest_low = min(v['low'] for v in lote)
+    res_levels, sup_levels = detect_fractals(velas, 10)
     
     vela_sinal = velas[-1]
-    props_sinal = get_candle_props(vela_sinal)
-    if not props_sinal: return None
     
-    corpo_medio = 0.40 <= props_sinal['body_ratio'] <= 0.75 
-    pavios_pequenos = props_sinal['pavio_superior'] < props_sinal['corpo'] * 0.5 and \
-                      props_sinal['pavio_inferior'] < props_sinal['corpo'] * 0.5
-                      
-    if not (corpo_medio and pavios_pequenos):
+    tem_pavio_superior = vela_sinal['high'] > max(vela_sinal['open'], vela_sinal['close'])
+    tem_pavio_inferior = vela_sinal['low'] < min(vela_sinal['open'], vela_sinal['close'])
+
+    if not (tem_pavio_superior and tem_pavio_inferior):
         return None
 
-    if props_sinal['is_alta'] and vela_sinal['close'] > highest_high:
-        return 'BUY'
-    if props_sinal['is_baixa'] and vela_sinal['close'] < lowest_low:
-        return 'SELL'
-    
+    if res_levels:
+        resistencias_proximas = [r for r in res_levels if r < vela_sinal['close']]
+        if resistencias_proximas:
+            resistencia_rompida = max(resistencias_proximas)
+            if vela_sinal['open'] < resistencia_rompida:
+                return 'BUY'
+
+    if sup_levels:
+        suportes_proximos = [s for s in sup_levels if s > vela_sinal['close']]
+        if suportes_proximos:
+            suporte_rompido = min(suportes_proximos)
+            if vela_sinal['open'] > suporte_rompido:
+                return 'SELL'
+            
     return None
     
 def strategy_engulfing(velas, p):
@@ -381,7 +388,7 @@ def strategy_shooting_star(velas, p):
        vela_confirmacao['close'] < vela_confirmacao['open']:
         return 'SELL'
     return None
-    
+
 def is_market_too_volatile(velas, p):
     last_candles = velas[-p.get('VolatilityCandles', 3):]
     volatile_count = 0
@@ -538,7 +545,6 @@ def main_bot_logic(state):
         'MAPeriod': 14, 'MaxLevels': 10, 'Proximity': 10.0, 'Point': 1e-6, 
         'VolatilityCandles': 3, 'MaxWickRatio': 0.75, 'MinVolatileCandles': 3,
         'ConfirmationMaxOppositeWickRatio': 0.45,
-        'PullbackTrendPeriod': 20,
         'SRBreakoutBodyMinRatio': 0.6,
         'GapMaxPercentage': 0.3,
         'SR_Lookback': 5,
