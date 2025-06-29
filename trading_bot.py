@@ -87,9 +87,9 @@ ALL_STRATEGIES = {
     'engulfing': 'Engolfo',
     'morning_star': 'Estrela da Manhã/Noite',
     'rest_candle': 'Vela de Descanso',
+    'hammer': 'Martelo',
     'shooting_star': 'Estrela Cadente',
-    'three_white_soldiers': 'Três Soldados Brancos',
-    'three_black_crows': 'Três Corvos Negros'
+    'three_white_soldiers': 'Três Soldados Brancos'
 }
 
 # --- Logging Functions ---
@@ -118,7 +118,7 @@ def exibir_banner():
       ██║   ██╔══██╗██║██╔══██║██║         ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║   ██║   ██║
       ██║   ██║  ██║██║██║  ██║███████╗     ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝   ██║
       ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝      ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝    ╚═╝ '''+y+'''
-              azkzero@gmail.com - v44 (Rompimento de Lote)
+              azkzero@gmail.com - v44 (Sem Três Corvos)
     ''')
     print(y + "*"*88)
     print(c + "="*88)
@@ -268,11 +268,20 @@ def catalogar_e_selecionar(api, params, assertividade_minima=60):
     log_info("="*40); log_info("CATALOGAÇÃO FINALIZADA!"); log_info("="*40)
     return champion_strategies
 
+
 def sma_slope(closes, period):
     if len(closes) < period + 1: return None
     sma1 = sum(closes[-(period+1):-1]) / period; sma2 = sum(closes[-period:]) / period
     if sma1 == sma2: return None
     return sma2 > sma1
+
+def detect_fractals(velas, max_levels):
+    highs, lows = [v['high'] for v in velas], [v['low'] for v in velas]
+    res, sup = deque(maxlen=max_levels), deque(maxlen=max_levels)
+    for i in range(len(velas) - 3, 2, -1):
+        if highs[i-1] > max(highs[i-3:i-1] + highs[i:i+2]): res.append(highs[i-1])
+        if lows[i-1] < min(lows[i-3:i-1] + lows[i:i+2]): sup.append(lows[i-1])
+    return list(res), list(sup)
 
 def get_candle_props(vela):
     props = {}
@@ -290,29 +299,28 @@ def get_candle_props(vela):
 # --- STRATEGIES ---
 
 def strategy_sr_breakout(velas, p):
-    lookback = p.get('SR_Lookback', 5)
-    if len(velas) < lookback + 1: return None
-    
-    lote = velas[-(lookback+1):-1]
-    highest_high = max(v['high'] for v in lote)
-    lowest_low = min(v['low'] for v in lote)
+    if len(velas) < 5: return None
     
     vela_sinal = velas[-1]
     props_sinal = get_candle_props(vela_sinal)
-    if not props_sinal: return None
+    if not props_sinal or props_sinal['body_ratio'] < p.get('SRBreakoutBodyMinRatio', 0.6):
+        return None
     
-    corpo_medio = 0.4 <= props_sinal['body_ratio'] <= 0.75
-    pavios_pequenos = props_sinal['pavio_superior'] < props_sinal['corpo'] * 0.5 and \
-                      props_sinal['pavio_inferior'] < props_sinal['corpo'] * 0.5
-                      
-    if not (corpo_medio and pavios_pequenos):
+    res_levels, sup_levels = detect_fractals(velas[:-1], 10)
+    
+    if not (props_sinal['pavio_superior'] > 0 and props_sinal['pavio_inferior'] > 0):
         return None
 
-    if props_sinal['is_alta'] and vela_sinal['close'] > highest_high:
-        return 'BUY'
-    if props_sinal['is_baixa'] and vela_sinal['close'] < lowest_low:
-        return 'SELL'
-    
+    if props_sinal['is_alta'] and res_levels:
+        resistencia_rompida = min([r for r in res_levels if r > vela_sinal['open']], default=None)
+        if resistencia_rompida and vela_sinal['close'] > resistencia_rompida:
+            return 'BUY'
+
+    if props_sinal['is_baixa'] and sup_levels:
+        suporte_rompido = max([s for s in sup_levels if s < vela_sinal['open']], default=None)
+        if suporte_rompido and vela_sinal['close'] < suporte_rompido:
+            return 'SELL'
+            
     return None
     
 def strategy_engulfing(velas, p):
@@ -329,11 +337,15 @@ def strategy_engulfing(velas, p):
        (p3['is_baixa'] and (v3['close'] - v3['low']) > p3['corpo']):
         return None
 
+    res_levels, sup_levels = detect_fractals(velas, 5)
+    
     if tendencia_alta and p2['is_baixa'] and p3['is_alta'] and p3['corpo'] > p2['corpo']:
-        return 'BUY'
+        if sup_levels and any(abs(v3['low'] - s) / s < 0.001 for s in sup_levels):
+            return 'BUY'
     
     if not tendencia_alta and p2['is_alta'] and p3['is_baixa'] and p3['corpo'] > p2['corpo']:
-        return 'SELL'
+        if res_levels and any(abs(v3['high'] - r) / r < 0.001 for r in res_levels):
+            return 'SELL'
             
     return None
 
@@ -368,6 +380,20 @@ def strategy_rest_candle(velas, p):
     if not tendencia_alta and p1['is_baixa'] and v3['close'] < v1['low']: return 'SELL'
     return None
 
+def strategy_hammer(velas, p):
+    if len(velas) < 3: return None
+    
+    vela_martelo, vela_confirmacao = velas[-2], velas[-1]
+    props = get_candle_props(vela_martelo)
+    if not props: return None
+    
+    if props['body_ratio'] < 0.15 and \
+       props['pavio_inferior'] > props['corpo'] * 2 and \
+       props['pavio_superior'] < props['corpo'] * 0.5 and \
+       vela_confirmacao['close'] > vela_confirmacao['open']:
+        return 'BUY'
+    return None
+
 def strategy_shooting_star(velas, p):
     if len(velas) < 3: return None
 
@@ -397,21 +423,6 @@ def strategy_three_white_soldiers(velas, p):
         return 'BUY'
     return None
     
-def strategy_three_black_crows(velas, p):
-    if len(velas) < 3: return None
-    tendencia_alta = sma_slope([v['close'] for v in velas], p['MAPeriod'])
-    if tendencia_alta is None or tendencia_alta: return None
-    
-    v1, v2 = velas[-2], velas[-1]
-    p1, p2 = get_candle_props(v1), get_candle_props(v2)
-    if not all([p1, p2]): return None
-    
-    if p1['is_baixa'] and p2['is_baixa'] and \
-       p1['body_ratio'] > 0.5 and p2['body_ratio'] > 0.5 and \
-       v2['close'] < v1['close'] and v2['open'] > v1['close'] and v2['open'] < v1['open']:
-        return 'SELL'
-    return None
-
 def is_market_too_volatile(velas, p):
     last_candles = velas[-p.get('VolatilityCandles', 3):]
     volatile_count = 0
@@ -472,7 +483,7 @@ def get_config_from_env():
 
 def compra_thread(api, ativo, valor, direcao, expiracao, tipo_op, state, config, cifrao, signal_id, target_entry_timestamp):
     try:
-        wait_time = target_entry_timestamp - time.time() - 5 #TEMPO PARA ENTRADA!
+        wait_time = target_entry_timestamp - time.time() - 5.0
         
         if wait_time > 0:
             log_info(f"Aguardando {wait_time:.2f}s para entrada precisa (envio 5s antes)...")
@@ -571,8 +582,7 @@ def main_bot_logic(state):
         'ConfirmationMaxOppositeWickRatio': 0.45,
         'PullbackTrendPeriod': 20,
         'SRBreakoutBodyMinRatio': 0.6,
-        'GapMaxPercentage': 0.3,
-        'SR_Lookback': 5,
+        'GapMaxPercentage': 0.3
     }
     
     if config['modo_operacao'] == '1':
