@@ -114,7 +114,7 @@ def exibir_banner():
       ██║   ██╔══██╗██║██╔══██║██║         ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║   ██║   ██║
       ██║   ██║  ██║██║██║  ██║███████╗     ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝   ██║
       ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝      ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝    ╚═╝ '''+y+'''
-              azkzero@gmail.com - v51 (Rompimento S/R Atualizado)
+              azkzero@gmail.com - v51 (Estratégia de Engolfo Profissional)
     ''')
     print(y + "*"*88)
     print(c + "="*88)
@@ -294,68 +294,71 @@ def detect_fractals(velas, max_levels):
     
 # --- STRATEGIES ---
 def strategy_sr_breakout(velas, p):
-    if len(velas) < 5: return None
+    lookback = p.get('SR_Lookback', 5)
+    if len(velas) < lookback + 2: return None
     
-    res_levels, sup_levels = detect_fractals(velas, 10)
-    
-    vela_sinal = velas[-1]
-    
-    tem_pavio_superior = vela_sinal['high'] > max(vela_sinal['open'], vela_sinal['close'])
-    tem_pavio_inferior = vela_sinal['low'] < min(vela_sinal['open'], vela_sinal['close'])
-
-    if not (tem_pavio_superior and tem_pavio_inferior):
+    closes_lote = [v['close'] for v in velas[-(lookback+1):-1]]
+    if sma_slope(closes_lote, lookback) is not None:
         return None
 
-    if res_levels:
-        resistencias_proximas = [r for r in res_levels if r < vela_sinal['close']]
-        if resistencias_proximas:
-            resistencia_rompida = max(resistencias_proximas)
-            if vela_sinal['open'] < resistencia_rompida:
-                return 'BUY'
+    lote = velas[-(lookback+1):-1]
+    highest_high = max(v['high'] for v in lote)
+    lowest_low = min(v['low'] for v in lote)
+    
+    vela_sinal = velas[-1]
+    props_sinal = get_candle_props(vela_sinal)
+    if not props_sinal: return None
+    
+    corpo_medio = 0.40 <= props_sinal['body_ratio'] <= 0.75 
+    pavios_pequenos = props_sinal['pavio_superior'] < props_sinal['corpo'] * 0.5 and \
+                      props_sinal['pavio_inferior'] < props_sinal['corpo'] * 0.5
+                      
+    if not (corpo_medio and pavios_pequenos):
+        return None
 
-    if sup_levels:
-        suportes_proximos = [s for s in sup_levels if s > vela_sinal['close']]
-        if suportes_proximos:
-            suporte_rompido = min(suportes_proximos)
-            if vela_sinal['open'] > suporte_rompido:
-                return 'SELL'
-            
+    if props_sinal['is_alta'] and vela_sinal['close'] > highest_high:
+        return 'BUY'
+    if props_sinal['is_baixa'] and vela_sinal['close'] < lowest_low:
+        return 'SELL'
+    
     return None
     
+# ESTRATÉGIA DE ENGOLFO REFINADA
 def strategy_engulfing(velas, p):
-    if len(velas) < 3: return None
-    tendencia_alta = sma_slope([v['close'] for v in velas], p['MAPeriod'])
-    if tendencia_alta is None: return None
+    if len(velas) < 10: return None
+    
+    # Contexto: Deve ser um padrão de reversão, então evita mercados laterais
+    tendencia_recente = sma_slope(velas[-10:-1], 9)
+    if tendencia_recente is None: return None
     
     v2, v3 = velas[-2], velas[-1]
     p2, p3 = get_candle_props(v2), get_candle_props(v3)
     if not all([p2, p3]): return None
     
+    # Qualidade da Vela
+    if p3['body_ratio'] < p.get('EngulfingBodyMinRatio', 0.7): return None
     if p2['body_ratio'] > 0.4: return None
-    if (p3['is_alta'] and (v3['high'] - v3['close']) > p3['corpo']) or \
-       (p3['is_baixa'] and (v3['close'] - v3['low']) > p3['corpo']):
+    if (p3['is_alta'] and p3['pavio_superior'] > p3['corpo']) or \
+       (p3['is_baixa'] and p3['pavio_inferior'] > p3['corpo']):
         return None
-
-    if tendencia_alta and p2['is_baixa'] and p3['is_alta'] and p3['corpo'] > p2['corpo']:
-        return 'BUY'
+        
+    is_bullish_engulfing = p2['is_baixa'] and p3['is_alta'] and p3['corpo'] > p2['corpo']
+    is_bearish_engulfing = p2['is_alta'] and p3['is_baixa'] and p3['corpo'] > p2['corpo']
     
-    if not tendencia_alta and p2['is_alta'] and p3['is_baixa'] and p3['corpo'] > p2['corpo']:
-        return 'SELL'
+    if not (is_bullish_engulfing or is_bearish_engulfing): return None
+        
+    res_levels, sup_levels = detect_fractals(velas, 10)
+    
+    # Lógica de COMPRA
+    if is_bullish_engulfing and not tendencia_recente: # Confirma fim da tendência de baixa
+        if sup_levels and any(abs(v3['low'] - s) / s < p.get('Proximity', 0.0005) for s in sup_levels):
+            return 'BUY'
             
-    return None
-
-def strategy_morning_star(velas, p):
-    if len(velas) < 4: return None
-    tendencia_alta = sma_slope([v['close'] for v in velas], p['MAPeriod'])
-    if tendencia_alta is None: return None
-    
-    p1, p2, p3 = get_candle_props(velas[-3]), get_candle_props(velas[-2]), get_candle_props(velas[-1])
-    if not all([p1, p2, p3]): return None
-    
-    if tendencia_alta and p1['is_baixa'] and p1['body_ratio'] > 0.6 and p2['body_ratio'] < 0.3 and p3['is_alta'] and p3['body_ratio'] > 0.6 and velas[-1]['close'] > (velas[-3]['open'] + velas[-3]['close']) / 2:
-        return 'BUY'
-    if not tendencia_alta and p1['is_alta'] and p1['body_ratio'] > 0.6 and p2['body_ratio'] < 0.3 and p3['is_baixa'] and p3['body_ratio'] > 0.6 and velas[-1]['close'] < (velas[-3]['open'] + velas[-3]['close']) / 2:
-        return 'SELL'
+    # Lógica de VENDA
+    if is_bearish_engulfing and tendencia_recente: # Confirma fim da tendência de alta
+        if res_levels and any(abs(v3['high'] - r) / r < p.get('Proximity', 0.0005) for r in res_levels):
+            return 'SELL'
+            
     return None
 
 def strategy_rest_candle(velas, p):
@@ -374,21 +377,7 @@ def strategy_rest_candle(velas, p):
     if tendencia_alta and p1['is_alta'] and v3['close'] > v1['high']: return 'BUY'
     if not tendencia_alta and p1['is_baixa'] and v3['close'] < v1['low']: return 'SELL'
     return None
-
-def strategy_shooting_star(velas, p):
-    if len(velas) < 3: return None
-
-    vela_estrela, vela_confirmacao = velas[-2], velas[-1]
-    props = get_candle_props(vela_estrela)
-    if not props: return None
     
-    if props['body_ratio'] < 0.15 and \
-       props['pavio_superior'] > props['corpo'] * 2 and \
-       props['pavio_inferior'] < props['corpo'] * 0.5 and \
-       vela_confirmacao['close'] < vela_confirmacao['open']:
-        return 'SELL'
-    return None
-
 def is_market_too_volatile(velas, p):
     last_candles = velas[-p.get('VolatilityCandles', 3):]
     volatile_count = 0
@@ -542,12 +531,13 @@ def main_bot_logic(state):
         log_info(f"Olá! Iniciando bot em modo servidor.")
     
     PARAMS = { 
-        'MAPeriod': 14, 'MaxLevels': 10, 'Proximity': 10.0, 'Point': 1e-6, 
+        'MAPeriod': 14, 'MaxLevels': 10, 'Proximity': 0.0005, 
         'VolatilityCandles': 3, 'MaxWickRatio': 0.75, 'MinVolatileCandles': 3,
         'ConfirmationMaxOppositeWickRatio': 0.45,
         'SRBreakoutBodyMinRatio': 0.6,
         'GapMaxPercentage': 0.3,
         'SR_Lookback': 5,
+        'EngulfingBodyMinRatio': 0.7
     }
     
     if config['modo_operacao'] == '1':
