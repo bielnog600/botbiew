@@ -120,7 +120,7 @@ def exibir_banner():
       ██║   ██╔══██╗██║██╔══██║██║         ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║   ██║   ██║
       ██║   ██║  ██║██║██║  ██║███████╗     ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝   ██║
       ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝      ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝    ╚═╝ '''+y+'''
-              azkzero@gmail.com - v41 (Filtros de Gap e Pavio)
+              azkzero@gmail.com - v42 (Timing Corrigido em 3 Corvos/Soldados)
     ''')
     print(y + "*"*88)
     print(c + "="*88)
@@ -269,21 +269,6 @@ def catalogar_e_selecionar(api, params, assertividade_minima=60):
         
     log_info("="*40); log_info("CATALOGAÇÃO FINALIZADA!"); log_info("="*40)
     return champion_strategies
-
-
-def sma_slope(closes, period):
-    if len(closes) < period + 1: return None
-    sma1 = sum(closes[-(period+1):-1]) / period; sma2 = sum(closes[-period:]) / period
-    if sma1 == sma2: return None
-    return sma2 > sma1
-
-def detect_fractals(velas, max_levels):
-    highs, lows = [v['high'] for v in velas], [v['low'] for v in velas]
-    res, sup = deque(maxlen=max_levels), deque(maxlen=max_levels)
-    for i in range(len(velas) - 3, 2, -1):
-        if highs[i-1] > max(highs[i-3:i-1] + highs[i:i+2]): res.append(highs[i-1])
-        if lows[i-1] < min(lows[i-3:i-1] + lows[i:i+2]): sup.append(lows[i-1])
-    return list(res), list(sup)
 
 def get_candle_props(vela):
     props = {}
@@ -462,6 +447,7 @@ def strategy_shooting_star(velas, p):
         return 'SELL'
     return None
 
+# LÓGICA CORRIGIDA
 def strategy_three_white_soldiers(velas, p):
     if len(velas) < 3: return None
     tendencia_alta = sma_slope([v['close'] for v in velas], p['MAPeriod'])
@@ -473,7 +459,7 @@ def strategy_three_white_soldiers(velas, p):
     
     if p1['is_alta'] and p2['is_alta'] and \
        p1['body_ratio'] > 0.5 and p2['body_ratio'] > 0.5 and \
-       v2['close'] > v1['close'] and v2['open'] < v1['close'] and v2['open'] > v1['open']:
+       v2['close'] > v1['close'] and v2['open'] > v1['open']:
         return 'BUY'
     return None
     
@@ -488,7 +474,7 @@ def strategy_three_black_crows(velas, p):
     
     if p1['is_baixa'] and p2['is_baixa'] and \
        p1['body_ratio'] > 0.5 and p2['body_ratio'] > 0.5 and \
-       v2['close'] < v1['close'] and v2['open'] > v1['close'] and v2['open'] < v1['open']:
+       v2['close'] < v1['close'] and v2['open'] < v1['open']:
         return 'SELL'
     return None
 
@@ -646,7 +632,6 @@ def main_bot_logic(state):
     
     PARAMS = { 
         'MAPeriod': 14, 'MaxLevels': 10, 'Proximity': 10.0, 'Point': 1e-6, 
-        'RejectionWickMinRatio': 0.6,
         'VolatilityCandles': 3, 'MaxWickRatio': 0.75, 'MinVolatileCandles': 3,
         'ConfirmationMaxOppositeWickRatio': 0.45,
         'PullbackTrendPeriod': 20,
