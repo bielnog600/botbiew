@@ -108,7 +108,7 @@ def exibir_banner():
       ██║   ██╔══██╗██║██╔══██║██║         ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║   ██║   ██║
       ██║   ██║  ██║██║██║  ██║███████╗     ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝   ██║
       ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝      ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝    ╚═╝ '''+y+'''
-              azkzero@gmail.com - v36 (Lógica de Seleção Otimizada)
+              azkzero@gmail.com - v37 (Modos Adaptativos)
     ''')
     print(y + "*"*88)
     print(c + "="*88)
@@ -266,18 +266,14 @@ def catalogar_estrategias(api, params):
     log_info("="*40); log_info("CATALOGING FINISHED!"); log_info("="*40)
     return full_performance_data
 
-# LÓGICA OTIMIZADA
 def selecionar_melhores_pares(performance_data, assertividade_minima, top_n=30):
     pares_com_score = []
     for par, estrategias in performance_data.items():
         if not estrategias: continue
         
-        # Filtra apenas as estratégias que cumprem o requisito mínimo
         estrategias_aprovadas = {k: v for k, v in estrategias.items() if v >= assertividade_minima}
-        
         if not estrategias_aprovadas: continue
 
-        # O score é a média apenas das estratégias BOAS
         score = sum(estrategias_aprovadas.values()) / len(estrategias_aprovadas)
         pares_com_score.append({'par': par, 'score': score})
     
@@ -341,8 +337,7 @@ def strategy_mql_pullback(velas, p):
             vela_confirmacao, props_confirmacao = velas[-1], get_candle_props(velas[-1])
             if not props_confirmacao: continue
             
-            pavio_inf_confirmacao = vela_confirmacao['low'] < min(vela_confirmacao['open'], vela_confirmacao['close'])
-            if pavio_inf_confirmacao and (min(vela_confirmacao['open'], vela_confirmacao['close']) - vela_confirmacao['low']) > props_confirmacao['corpo']: return 'BUY'
+            if props_confirmacao['pavio_inferior'] > props_confirmacao['corpo']: return 'BUY'
             if props_confirmacao['is_alta'] and props_confirmacao['body_ratio'] > 0.6: return 'BUY'
             break
 
@@ -363,8 +358,7 @@ def strategy_mql_pullback(velas, p):
             vela_confirmacao, props_confirmacao = velas[-1], get_candle_props(velas[-1])
             if not props_confirmacao: continue
 
-            pavio_sup_confirmacao = vela_confirmacao['high'] > max(vela_confirmacao['open'], vela_confirmacao['close'])
-            if pavio_sup_confirmacao and (vela_confirmacao['high'] - max(vela_confirmacao['open'], vela_confirmacao['close'])) > props_confirmacao['corpo']: return 'SELL'
+            if props_confirmacao['pavio_superior'] > props_confirmacao['corpo']: return 'SELL'
             if props_confirmacao['is_baixa'] and props_confirmacao['body_ratio'] > 0.6: return 'SELL'
             break
             
@@ -380,10 +374,7 @@ def strategy_sr_breakout(velas, p):
     
     res_levels, sup_levels = detect_fractals(velas[:-1], 10)
     
-    tem_pavio_superior = vela_sinal['high'] > max(vela_sinal['open'], vela_sinal['close'])
-    tem_pavio_inferior = vela_sinal['low'] < min(vela_sinal['open'], vela_sinal['close'])
-
-    if not (tem_pavio_superior and tem_pavio_inferior):
+    if not (props_sinal['pavio_superior'] > 0 and props_sinal['pavio_inferior'] > 0):
         return None
 
     if props_sinal['is_alta'] and res_levels:
@@ -408,8 +399,8 @@ def strategy_engulfing(velas, p):
     if not all([p2, p3]): return None
     
     if p2['body_ratio'] > 0.4: return None
-    if (p3['is_alta'] and (v3['high'] - v3['close']) > p3['corpo']) or \
-       (p3['is_baixa'] and (v3['close'] - v3['low']) > p3['corpo']):
+    if (p3['is_alta'] and p3['pavio_superior'] > p3['corpo']) or \
+       (p3['is_baixa'] and p3['pavio_inferior'] > p3['corpo']):
         return None
 
     res_levels, sup_levels = detect_fractals(velas, 5)
@@ -672,7 +663,7 @@ def main_bot_logic(state):
     full_performance_sorted = []
     if config['modo_operacao'] == '1':
         state.full_performance_data = catalogar_estrategias(API, PARAMS)
-        pares_prioritarios, full_performance_sorted = selecionar_melhores_pares(state.full_performance_data, 30)
+        pares_prioritarios, full_performance_sorted = selecionar_melhores_pares(state.full_performance_data, 70, 30)
         with state.lock:
             state.pair_losses = {par: 0 for par in pares_prioritarios}
             state.global_losses_since_catalog = 0
@@ -680,32 +671,37 @@ def main_bot_logic(state):
     minuto_anterior, analise_feita = -1, False
     ultimo_sinal_timestamp = time.time()
     TEMPO_LIMITE_SEM_SINAIS = 1800
+    current_mode = 'conservative'
 
     log_info("Bot iniciado. Entrando no loop de análise...")
 
     while not state.stop:
         try:
-            MAX_SIMULTANEOUS_TRADES = 5
+            MAX_SIMULTANEOUS_TRADES = 2
             
             if config['modo_operacao'] == '1':
-                if state.global_losses_since_catalog >= 5 or time.time() - ultimo_sinal_timestamp > TEMPO_LIMITE_SEM_SINAIS:
-                    if state.global_losses_since_catalog >= 5:
-                        msg = f"GATILHO DE SEGURANÇA ATIVADO ({state.global_losses_since_catalog} derrotas). Recatalogando todo o mercado..."
-                    else:
-                        msg = f"Inatividade por mais de {TEMPO_LIMITE_SEM_SINAIS / 60:.0f} minutos. Buscando novos pares promissores..."
-                    
+                if state.global_losses_since_catalog >= 5 or time.time() - ultimo_sinal_timestamp > 7200:
+                    msg = "Ciclo de 2 horas ou 5 derrotas atingido. Recatalogando todo o mercado para se adaptar..."
                     log_warning(msg)
                     log_payload = {"type": "log", "data": {"level": "warning", "message": msg, "pair": "SISTEMA"}}
                     signal_queue.put(log_payload)
 
                     state.full_performance_data = catalogar_estrategias(API, PARAMS)
-                    pares_prioritarios, full_performance_sorted = selecionar_melhores_pares(state.full_performance_data, 30)
+                    pares_prioritarios, full_performance_sorted = selecionar_melhores_pares(state.full_performance_data, 70, 30)
                     with state.lock:
                         state.pair_losses = {par: 0 for par in pares_prioritarios}
                         state.global_losses_since_catalog = 0
                         state.banned_pairs.clear()
                     ultimo_sinal_timestamp = time.time()
+                    current_mode = 'conservative'
                 
+                elif current_mode == 'conservative' and time.time() - ultimo_sinal_timestamp > 300:
+                    current_mode = 'exploratory'
+                    msg = "Modo conservador sem sinais por 5 min. Ativando Modo Exploratório para coletar dados."
+                    log_warning(msg)
+                    log_payload = {"type": "log", "data": {"level": "warning", "message": msg, "pair": "SISTEMA"}}
+                    signal_queue.put(log_payload)
+
                 pares_a_remover = [par for par in pares_prioritarios if par in state.banned_pairs]
                 if pares_a_remover:
                     for par in pares_a_remover:
@@ -771,25 +767,29 @@ def main_bot_logic(state):
                                 normalized_name = normalize_asset(ativo_original)
                                 is_approved = False
                                 assertividade = 0
-                                if normalized_name in state.full_performance_data and nome_estrategia in state.full_performance_data[normalized_name]:
+                                
+                                # APROVAÇÃO DA ESTRATÉGIA COM LÓGICA CORRIGIDA
+                                if current_mode == 'exploratory':
+                                    is_approved = True # Em modo exploratório, qualquer sinal técnico é válido
+                                elif normalized_name in state.full_performance_data and nome_estrategia in state.full_performance_data[normalized_name]:
                                     assertividade = state.full_performance_data[normalized_name][nome_estrategia]
-                                    if assertividade >= 70:
+                                    if assertividade >= 50:
                                         is_approved = True
 
                                 if is_approved:
                                     if is_trade_confirmed_by_previous_candle(sinal, velas[-2], PARAMS):
-                                        msg = f"SINAL VÁLIDO ENCONTRADO com '{nome_estrategia}' ({assertividade:.2f}%)"
+                                        msg = f"SINAL VÁLIDO ({current_mode.upper()}) com '{nome_estrategia}'"
                                         log_success(f"-> {ativo_original}: {msg}")
                                         log_payload = {"type": "log", "data": {"level": "success", "message": msg, "pair": ativo_original}}
                                         signal_queue.put(log_payload)
                                         potential_trades.append({'ativo': ativo_original, 'tipo_op': tipo_mercado, 'velas': velas, 'payout': payout, 'direcao': {'BUY': 'call', 'SELL': 'put'}.get(sinal), 'nome_estrategia': nome_estrategia})
                                     else:
-                                        msg = f"Sinal de '{nome_estrategia}' REJEITADO por contradição na vela anterior."
+                                        msg = f"Sinal de '{nome_estrategia}' REJEITADO por contradição."
                                         log_warning(f"-> {ativo_original}: {msg}")
                                         log_payload = {"type": "log", "data": {"level": "warning", "message": msg, "pair": ativo_original}}
                                         signal_queue.put(log_payload)
-                                else:
-                                    msg = f"Sinal encontrado com '{nome_estrategia}', mas a estratégia não foi aprovada (Assertividade: {assertividade:.2f}%)."
+                                elif sinal: # Se encontrou sinal mas não foi aprovado
+                                    msg = f"Sinal de '{nome_estrategia}' encontrado mas não aprovado (Assertividade: {assertividade:.2f}%)"
                                     log_warning(f"-> {ativo_original}: {msg}")
                                     log_payload = {"type": "log", "data": {"level": "warning", "message": msg, "pair": ativo_original}}
                                     signal_queue.put(log_payload)
@@ -822,6 +822,9 @@ def main_bot_logic(state):
                     with state.lock: state.active_trades += 1
                     
                     ultimo_sinal_timestamp = time.time()
+                    if current_mode == 'exploratory':
+                        current_mode = 'conservative' # Volta ao modo conservador após uma entrada
+                        log_info("Retornando ao Modo Conservador após entrada.")
                     
                     horario_analise_dt = dt_objeto.replace(second=0, microsecond=0)
                     horario_analise_str = horario_analise_dt.strftime('%H:%M')
