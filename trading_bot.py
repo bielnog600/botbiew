@@ -108,7 +108,7 @@ def exibir_banner():
       ██║   ██╔══██╗██║██╔══██║██║         ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║   ██║   ██║
       ██║   ██║  ██║██║██║  ██║███████╗     ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝   ██║
       ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝      ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝    ╚═╝ '''+y+'''
-              azkzero@gmail.com - v37 (Modos Adaptativos)
+              azkzero@gmail.com - v38 (Gestor de Portfólio Adaptativo)
     ''')
     print(y + "*"*88)
     print(c + "="*88)
@@ -202,18 +202,12 @@ def validar_e_limpar_velas(velas_raw):
         if all(vela_padronizada.values()): velas_limpas.append(vela_padronizada)
     return velas_limpas
 
-def catalogar_estrategias(api, params):
-    log_info("="*40); log_info("STARTING STRATEGY CATALOGING MODE..."); log_info("="*40)
+def catalogar_e_selecionar(api, params, assertividade_minima=60):
+    log_info("="*40); log_info("MODO DE CATALOGAÇÃO E SELEÇÃO INICIADO..."); log_info("="*40)
     TODAS_AS_ESTRATEGIAS = {
-        'mql_pullback': 'Pullback MQL', 
-        'sr_breakout': 'Rompimento S/R', 
-        'engulfing': 'Engolfo',
-        'morning_star': 'Estrela da Manhã/Noite',
-        'rest_candle': 'Vela de Descanso',
-        'hammer': 'Martelo',
-        'shooting_star': 'Estrela Cadente',
-        'three_white_soldiers': 'Três Soldados Brancos',
-        'three_black_crows': 'Três Corvos Negros'
+        'mql_pullback': 'Pullback MQL', 'sr_breakout': 'Rompimento S/R', 'engulfing': 'Engolfo',
+        'morning_star': 'Estrela da Manhã/Noite', 'rest_candle': 'Vela de Descanso', 'hammer': 'Martelo',
+        'shooting_star': 'Estrela Cadente', 'three_white_soldiers': 'Três Soldados Brancos', 'three_black_crows': 'Três Corvos Negros'
     }
     ativos_abertos = []
     all_assets = api.get_all_open_time()
@@ -221,67 +215,53 @@ def catalogar_estrategias(api, params):
         if tipo_mercado in all_assets:
             for ativo, info in all_assets[tipo_mercado].items():
                 if info.get('open', False) and ativo not in ativos_abertos: ativos_abertos.append(ativo)
-    if not ativos_abertos: log_error("No open currency pairs found to catalog."); return {}
     
-    log_info(f"Found {len(ativos_abertos)} open pairs for analysis.")
-    full_performance_data = {}
-    
+    if not ativos_abertos: log_error("Nenhum par aberto encontrado para catalogar."); return {}, []
+
+    log_info(f"Encontrados {len(ativos_abertos)} pares abertos para análise.")
+    champion_strategies = {}
+
     for ativo_original in ativos_abertos:
         try:
-            log_info(f"\n--- Analyzing pair: {w}{ativo_original}{c} ---")
+            log_info(f"\n--- Analisando o par: {w}{ativo_original}{c} ---")
             velas_historicas_raw = api.get_candles(ativo_original, 60, 240, time.time())
             todas_as_velas = validar_e_limpar_velas(velas_historicas_raw)
-            if not todas_as_velas or len(todas_as_velas) < 100: log_warning(f"Could not get enough historical data for {ativo_original}."); continue
-            
-            resultados = {nome: {'win': 0, 'loss': 0} for nome in TODAS_AS_ESTRATEGIAS.values()}
-            for i in range(50, len(todas_as_velas) - 1):
-                velas_atuais = todas_as_velas[:i]; vela_resultado = todas_as_velas[i]
-                for cod, nome in TODAS_AS_ESTRATEGIAS.items():
+            if not todas_as_velas or len(todas_as_velas) < 100: log_warning(f"Não foi possível obter dados históricos suficientes para {ativo_original}."); continue
+
+            best_strategy = None
+            highest_assertiveness = 0
+
+            for cod, nome in TODAS_AS_ESTRATEGIAS.items():
+                wins, losses, total = 0, 0, 0
+                for i in range(50, len(todas_as_velas) - 1):
+                    velas_atuais, vela_resultado = todas_as_velas[:i], todas_as_velas[i]
                     sinal = globals().get(f'strategy_{cod}')(velas_atuais, params)
                     if sinal:
+                        total += 1
                         if (sinal == 'BUY' and vela_resultado['close'] > velas_atuais[-1]['close']) or \
                            (sinal == 'SELL' and vela_resultado['close'] < velas_atuais[-1]['close']):
-                            resultados[nome]['win'] += 1
+                            wins += 1
                         else:
-                            resultados[nome]['loss'] += 1
-            
-            performance_do_par = {}
-            for nome, res in resultados.items():
-                total = res['win'] + res['loss']
-                if total > 1: 
-                    assertividade = (res['win'] / total) * 100
-                    performance_do_par[nome] = assertividade
-                    log_info(f"  -> Strategy '{nome}' for {ativo_original}: {assertividade:.2f}% accuracy ({res['win']}W / {res['loss']}L)")
-                else:
-                    msg = f"Amostra muito pequena para '{nome}' ({total} sinais). Ignorando."
-                    log_warning(f"  -> {msg}")
-                    log_payload = {"type": "log", "data": {"level": "warning", "message": msg, "pair": ativo_original}}
-                    signal_queue.put(log_payload)
-            
-            if performance_do_par:
-                full_performance_data[ativo_original] = performance_do_par
+                            losses += 1
                 
-        except Exception as e: log_error(f"An error occurred while analyzing the pair {ativo_original}: {e}"); traceback.print_exc()
-        
-    log_info("="*40); log_info("CATALOGING FINISHED!"); log_info("="*40)
-    return full_performance_data
+                if total > 2: # Exige pelo menos 3 ocorrências para ser estatisticamente relevante
+                    assertividade = (wins / total) * 100
+                    log_info(f"  -> Estratégia '{nome}': {assertividade:.2f}% ({wins}W / {losses}L)")
+                    if assertividade > highest_assertiveness:
+                        highest_assertiveness = assertividade
+                        best_strategy = nome
+            
+            if best_strategy and highest_assertiveness >= assertividade_minima:
+                champion_strategies[ativo_original] = best_strategy
+                log_success(f"  -> CAMPEÃ PARA {ativo_original}: {best_strategy} com {highest_assertiveness:.2f}% de acerto.")
+            else:
+                log_warning(f"  -> Nenhuma estratégia para {ativo_original} atingiu a assertividade mínima de {assertividade_minima}%.")
 
-def selecionar_melhores_pares(performance_data, assertividade_minima, top_n=30):
-    pares_com_score = []
-    for par, estrategias in performance_data.items():
-        if not estrategias: continue
+        except Exception as e: log_error(f"Ocorreu um erro ao analisar o par {ativo_original}: {e}"); traceback.print_exc()
         
-        estrategias_aprovadas = {k: v for k, v in estrategias.items() if v >= assertividade_minima}
-        if not estrategias_aprovadas: continue
+    log_info("="*40); log_info("CATALOGAÇÃO FINALIZADA!"); log_info("="*40)
+    return champion_strategies
 
-        score = sum(estrategias_aprovadas.values()) / len(estrategias_aprovadas)
-        pares_com_score.append({'par': par, 'score': score})
-    
-    pares_ordenados = sorted(pares_com_score, key=lambda x: x['score'], reverse=True)
-    
-    top_pares = [item['par'] for item in pares_ordenados[:top_n]]
-    log_success(f"Top {len(top_pares)} pares selecionados para análise focada: {', '.join(top_pares)}")
-    return top_pares, pares_ordenados
 
 def sma_slope(closes, period):
     if len(closes) < period + 1: return None
@@ -399,8 +379,8 @@ def strategy_engulfing(velas, p):
     if not all([p2, p3]): return None
     
     if p2['body_ratio'] > 0.4: return None
-    if (p3['is_alta'] and p3['pavio_superior'] > p3['corpo']) or \
-       (p3['is_baixa'] and p3['pavio_inferior'] > p3['corpo']):
+    if (p3['is_alta'] and (v3['high'] - v3['close']) > p3['corpo']) or \
+       (p3['is_baixa'] and (v3['close'] - v3['low']) > p3['corpo']):
         return None
 
     res_levels, sup_levels = detect_fractals(velas, 5)
@@ -542,9 +522,9 @@ class BotState:
         self.stop = False; self.win_count = 0; self.loss_count = 0
         self.gale_wins = {f"g{i}": 0 for i in range(1, 11)}
         self.active_trades = 0; self.signal_history = {}
-        self.full_performance_data = {}
-        self.pair_losses = {}
-        self.banned_pairs = set()
+        self.champion_strategies = {}
+        self.consecutive_losses = {}
+        self.suspended_pairs = {}
         self.global_losses_since_catalog = 0
         self.lock = Lock()
 
@@ -595,17 +575,17 @@ def compra_thread(api, ativo, valor, direcao, expiracao, tipo_op, state, config,
                 with state.lock:
                     state.win_count += 1
                     if i > 0: state.gale_wins[f'g{i}'] += 1
-                    state.pair_losses[ativo] = 0
+                    state.consecutive_losses[ativo] = 0
                 resultado_final = 'WIN'; break
             elif resultado < 0:
                 log_error(f"RESULTADO: LOSS {gale_info} | Perda: {cifrao}{abs(resultado):.2f}")
                 with state.lock:
                     state.loss_count += 1
                     state.global_losses_since_catalog += 1
-                    state.pair_losses[ativo] = state.pair_losses.get(ativo, 0) + 1
-                    if state.pair_losses[ativo] >= 2:
-                        state.banned_pairs.add(ativo)
-                        msg = f"Par {ativo} removido do portfólio por mau desempenho (2 derrotas)."
+                    state.consecutive_losses[ativo] = state.consecutive_losses.get(ativo, 0) + 1
+                    if state.consecutive_losses[ativo] >= 2:
+                        state.suspended_pairs[ativo] = time.time() + 1800 # Suspende por 30 minutos
+                        msg = f"Par {ativo} suspenso por 30 min. devido a 2 derrotas seguidas."
                         log_error(msg)
                         log_payload = {"type": "log", "data": {"level": "error", "message": msg, "pair": ativo}}
                         signal_queue.put(log_payload)
@@ -659,64 +639,38 @@ def main_bot_logic(state):
         'SRBreakoutBodyMinRatio': 0.6
     }
     
-    pares_prioritarios = []
-    full_performance_sorted = []
     if config['modo_operacao'] == '1':
-        state.full_performance_data = catalogar_estrategias(API, PARAMS)
-        pares_prioritarios, full_performance_sorted = selecionar_melhores_pares(state.full_performance_data, 70, 30)
+        state.champion_strategies = catalogar_e_selecionar(API, PARAMS, 60)
         with state.lock:
-            state.pair_losses = {par: 0 for par in pares_prioritarios}
-            state.global_losses_since_catalog = 0
+            state.consecutive_losses = {par: 0 for par in state.champion_strategies.keys()}
 
     minuto_anterior, analise_feita = -1, False
     ultimo_sinal_timestamp = time.time()
-    TEMPO_LIMITE_SEM_SINAIS = 1800
-    current_mode = 'conservative'
+    ultimo_ciclo_catalogacao = time.time()
+    TEMPO_LIMITE_INATIVIDADE = 300 # 5 minutos
+    TEMPO_CICLO_CATALOGACAO = 7200 # 2 horas
 
     log_info("Bot iniciado. Entrando no loop de análise...")
 
     while not state.stop:
         try:
-            MAX_SIMULTANEOUS_TRADES = 2
+            MAX_SIMULTANEOUS_TRADES = 5
             
             if config['modo_operacao'] == '1':
-                if state.global_losses_since_catalog >= 5 or time.time() - ultimo_sinal_timestamp > 7200:
-                    msg = "Ciclo de 2 horas ou 5 derrotas atingido. Recatalogando todo o mercado para se adaptar..."
+                if time.time() - ultimo_ciclo_catalogacao > TEMPO_CICLO_CATALOGACAO or state.global_losses_since_catalog >= 5:
+                    msg = "Ciclo de 2 horas ou 5 derrotas atingido. Recatalogando todo o mercado..."
                     log_warning(msg)
                     log_payload = {"type": "log", "data": {"level": "warning", "message": msg, "pair": "SISTEMA"}}
                     signal_queue.put(log_payload)
-
-                    state.full_performance_data = catalogar_estrategias(API, PARAMS)
-                    pares_prioritarios, full_performance_sorted = selecionar_melhores_pares(state.full_performance_data, 70, 30)
+                    
+                    state.champion_strategies = catalogar_e_selecionar(API, PARAMS, 60)
                     with state.lock:
-                        state.pair_losses = {par: 0 for par in pares_prioritarios}
+                        state.consecutive_losses = {par: 0 for par in state.champion_strategies.keys()}
+                        state.suspended_pairs.clear()
                         state.global_losses_since_catalog = 0
-                        state.banned_pairs.clear()
+                    ultimo_ciclo_catalogacao = time.time()
                     ultimo_sinal_timestamp = time.time()
-                    current_mode = 'conservative'
                 
-                elif current_mode == 'conservative' and time.time() - ultimo_sinal_timestamp > 300:
-                    current_mode = 'exploratory'
-                    msg = "Modo conservador sem sinais por 5 min. Ativando Modo Exploratório para coletar dados."
-                    log_warning(msg)
-                    log_payload = {"type": "log", "data": {"level": "warning", "message": msg, "pair": "SISTEMA"}}
-                    signal_queue.put(log_payload)
-
-                pares_a_remover = [par for par in pares_prioritarios if par in state.banned_pairs]
-                if pares_a_remover:
-                    for par in pares_a_remover:
-                        pares_prioritarios.remove(par)
-                        for item in full_performance_sorted:
-                            novo_par = item['par']
-                            if novo_par not in pares_prioritarios and novo_par not in state.banned_pairs:
-                                pares_prioritarios.append(novo_par)
-                                with state.lock: state.pair_losses[novo_par] = 0
-                                msg = f"Substituindo {par} por {novo_par} (Score: {item['score']:.2f}%)"
-                                log_info(msg)
-                                log_payload = {"type": "log", "data": {"level": "info", "message": msg, "pair": "SISTEMA"}}
-                                signal_queue.put(log_payload)
-                                break
-            
             timestamp = time.time()
             dt_objeto = datetime.fromtimestamp(timestamp)
             minuto_atual, segundo_atual = dt_objeto.minute, dt_objeto.second
@@ -739,92 +693,47 @@ def main_bot_logic(state):
                     potential_trades = []
                     all_profits = API.get_all_profit()
                     
-                    for ativo_original in pares_prioritarios:
+                    pares_para_analisar = [p for p, t in state.suspended_pairs.items() if time.time() > t]
+                    for p in pares_para_analisar:
+                        del state.suspended_pairs[p]
+
+                    for ativo_original, estrategia_campea in state.champion_strategies.items():
+                        if ativo_original in state.suspended_pairs: continue
+
                         tipo_mercado, payout = None, 0
                         for market_type in ['binary', 'turbo']:
                             if ativo_original in all_profits and market_type in all_profits[ativo_original]:
-                                tipo_mercado = market_type
-                                payout = all_profits[ativo_original][market_type] * 100
+                                tipo_mercado, payout = market_type, all_profits[ativo_original][market_type] * 100
                                 break
                         
                         if not tipo_mercado or payout < config['pay_minimo']: continue
 
-                        log_info(f"--- Analisando {ativo_original} ---")
+                        log_info(f"--- Analisando {ativo_original} com a estratégia campeã: {estrategia_campea} ---")
                         velas = validar_e_limpar_velas(API.get_candles(ativo_original, 60, 150, time.time()))
                         if not velas or len(velas) < 20: continue
                         
-                        if is_market_too_volatile(velas, PARAMS):
-                            msg = "MERCADO MUITO VOLÁTIL. Análise descartada."
-                            log_warning(f"-> {ativo_original}: {msg}")
-                            log_payload = {"type": "log", "data": {"level": "warning", "message": msg, "pair": ativo_original}}
+                        if is_market_too_volatile(velas, PARAMS): continue
+
+                        cod_est = next((cod for cod, nome in TODAS_AS_ESTRATEGIAS.items() if nome == estrategia_campea), None)
+                        if not cod_est: continue
+                        
+                        sinal = globals().get(f'strategy_{cod_est}')(velas, PARAMS)
+                        if sinal and is_trade_confirmed_by_previous_candle(sinal, velas[-2], PARAMS):
+                            msg = f"SINAL VÁLIDO ENCONTRADO com '{estrategia_campea}'"
+                            log_success(f"-> {ativo_original}: {msg}")
+                            log_payload = {"type": "log", "data": {"level": "success", "message": msg, "pair": ativo_original}}
                             signal_queue.put(log_payload)
-                            continue
-
-                        all_strategies_to_check = {'Pullback MQL': 'mql_pullback', 'Rompimento S/R': 'sr_breakout', 'Engolfo': 'engulfing', 'Estrela da Manhã/Noite': 'morning_star', 'Vela de Descanso': 'rest_candle', 'Martelo': 'hammer', 'Estrela Cadente': 'shooting_star', 'Três Soldados Brancos': 'three_white_soldiers', 'Três Corvos Negros': 'three_black_crows'}
-                        for nome_estrategia, cod_est in all_strategies_to_check.items():
-                            sinal = globals().get(f'strategy_{cod_est}')(velas, PARAMS)
-                            if sinal:
-                                normalized_name = normalize_asset(ativo_original)
-                                is_approved = False
-                                assertividade = 0
-                                
-                                # APROVAÇÃO DA ESTRATÉGIA COM LÓGICA CORRIGIDA
-                                if current_mode == 'exploratory':
-                                    is_approved = True # Em modo exploratório, qualquer sinal técnico é válido
-                                elif normalized_name in state.full_performance_data and nome_estrategia in state.full_performance_data[normalized_name]:
-                                    assertividade = state.full_performance_data[normalized_name][nome_estrategia]
-                                    if assertividade >= 50:
-                                        is_approved = True
-
-                                if is_approved:
-                                    if is_trade_confirmed_by_previous_candle(sinal, velas[-2], PARAMS):
-                                        msg = f"SINAL VÁLIDO ({current_mode.upper()}) com '{nome_estrategia}'"
-                                        log_success(f"-> {ativo_original}: {msg}")
-                                        log_payload = {"type": "log", "data": {"level": "success", "message": msg, "pair": ativo_original}}
-                                        signal_queue.put(log_payload)
-                                        potential_trades.append({'ativo': ativo_original, 'tipo_op': tipo_mercado, 'velas': velas, 'payout': payout, 'direcao': {'BUY': 'call', 'SELL': 'put'}.get(sinal), 'nome_estrategia': nome_estrategia})
-                                    else:
-                                        msg = f"Sinal de '{nome_estrategia}' REJEITADO por contradição."
-                                        log_warning(f"-> {ativo_original}: {msg}")
-                                        log_payload = {"type": "log", "data": {"level": "warning", "message": msg, "pair": ativo_original}}
-                                        signal_queue.put(log_payload)
-                                elif sinal: # Se encontrou sinal mas não foi aprovado
-                                    msg = f"Sinal de '{nome_estrategia}' encontrado mas não aprovado (Assertividade: {assertividade:.2f}%)"
-                                    log_warning(f"-> {ativo_original}: {msg}")
-                                    log_payload = {"type": "log", "data": {"level": "warning", "message": msg, "pair": ativo_original}}
-                                    signal_queue.put(log_payload)
+                            potential_trades.append({'ativo': ativo_original, 'tipo_op': tipo_mercado, 'velas': velas, 'payout': payout, 'direcao': {'BUY': 'call', 'SELL': 'put'}.get(sinal), 'nome_estrategia': estrategia_campea})
                     
                     if potential_trades:
-                        log_success(f"ENCONTRADOS {len(potential_trades)} SINAIS VÁLIDOS. Priorizando os melhores...")
                         sorted_trades = sorted(potential_trades, key=lambda x: x['payout'], reverse=True)
                         sinais_para_executar = sorted_trades
-                
-                else: # MODO AGRESSIVO
-                    sorted_assets = obter_melhor_par(API, config['pay_minimo'])
-                    if sorted_assets:
-                        for ativo, details in sorted_assets:
-                            if len(sinais_para_executar) + active_trades_count >= MAX_SIMULTANEOUS_TRADES: break
-                            velas = validar_e_limpar_velas(API.get_candles(ativo, 60, 150, time.time()))
-                            if velas and len(velas) >= 20 and not is_market_too_volatile(velas, PARAMS):
-                                strategies_to_try = [('Pullback MQL', 'mql_pullback'), ('Rompimento S/R', 'sr_breakout'), ('Engolfo', 'engulfing'), ('Estrela da Manhã/Noite', 'morning_star'), ('Vela de Descanso', 'rest_candle'), ('Martelo', 'hammer'), ('Estrela Cadente', 'shooting_star'), ('Três Soldados Brancos', 'three_white_soldiers'), ('Três Corvos Negros', 'three_black_crows')]
-                                for nome, cod in strategies_to_try:
-                                    sinal = globals().get(f'strategy_{cod}')(velas, PARAMS)
-                                    if sinal and is_trade_confirmed_by_previous_candle(sinal, velas[-2], PARAMS):
-                                        sinais_para_executar.append({
-                                            'ativo': ativo, 'tipo_op': details['tipo'], 'velas': velas,
-                                            'direcao': {'BUY': 'call', 'SELL': 'put'}.get(sinal),
-                                            'nome_estrategia': nome
-                                        })
-                                        break
                 
                 vagas_disponiveis = MAX_SIMULTANEOUS_TRADES - active_trades_count
                 for sinal_info in sinais_para_executar[:vagas_disponiveis]:
                     with state.lock: state.active_trades += 1
                     
                     ultimo_sinal_timestamp = time.time()
-                    if current_mode == 'exploratory':
-                        current_mode = 'conservative' # Volta ao modo conservador após uma entrada
-                        log_info("Retornando ao Modo Conservador após entrada.")
                     
                     horario_analise_dt = dt_objeto.replace(second=0, microsecond=0)
                     horario_analise_str = horario_analise_dt.strftime('%H:%M')
