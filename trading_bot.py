@@ -85,7 +85,7 @@ clients_lock = Lock()
 ALL_STRATEGIES = {
     'sr_breakout': 'Rompimento S/R', 
     'engulfing': 'Engolfo',
-    'rest_candle': 'Vela de Descanso'
+    'rest_candle': 'Vela de Descanso',
 }
 
 # --- Logging Functions ---
@@ -114,7 +114,7 @@ def exibir_banner():
       ██║   ██╔══██╗██║██╔══██║██║         ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║   ██║   ██║
       ██║   ██║  ██║██║██║  ██║███████╗     ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝   ██║
       ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝      ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝    ╚═╝ '''+y+'''
-              azkzero@gmail.com - v51 (Estratégia de Engolfo Profissional)
+              azkzero@gmail.com - v52 (Rompimento de Lote)
     ''')
     print(y + "*"*88)
     print(c + "="*88)
@@ -284,31 +284,27 @@ def get_candle_props(vela):
     props['pavio_inferior'] = min(vela['open'], vela['close']) - vela['low']
     return props
 
-def detect_fractals(velas, max_levels):
-    highs, lows = [v['high'] for v in velas], [v['low'] for v in velas]
-    res, sup = deque(maxlen=max_levels), deque(maxlen=max_levels)
-    for i in range(len(velas) - 3, 2, -1):
-        if highs[i-1] > max(highs[i-3:i-1] + highs[i:i+2]): res.append(highs[i-1])
-        if lows[i-1] < min(lows[i-3:i-1] + lows[i:i+2]): sup.append(lows[i-1])
-    return list(res), list(sup)
-    
 # --- STRATEGIES ---
 def strategy_sr_breakout(velas, p):
     lookback = p.get('SR_Lookback', 5)
     if len(velas) < lookback + 2: return None
     
-    closes_lote = [v['close'] for v in velas[-(lookback+1):-1]]
+    # 1. Verifica se o mercado está lateral no "lote"
+    closes_lote = [v['close'] for v in velas[-(lookback+2):-1]]
     if sma_slope(closes_lote, lookback) is not None:
-        return None
+        return None # Ignora se houver tendência definida no lote
 
+    # 2. Define o range do lote
     lote = velas[-(lookback+1):-1]
     highest_high = max(v['high'] for v in lote)
     lowest_low = min(v['low'] for v in lote)
     
+    # 3. Analisa a vela de rompimento
     vela_sinal = velas[-1]
     props_sinal = get_candle_props(vela_sinal)
     if not props_sinal: return None
     
+    # 4. Aplica os filtros de qualidade da vela
     corpo_medio = 0.40 <= props_sinal['body_ratio'] <= 0.75 
     pavios_pequenos = props_sinal['pavio_superior'] < props_sinal['corpo'] * 0.5 and \
                       props_sinal['pavio_inferior'] < props_sinal['corpo'] * 0.5
@@ -316,6 +312,7 @@ def strategy_sr_breakout(velas, p):
     if not (corpo_medio and pavios_pequenos):
         return None
 
+    # 5. Verifica o rompimento e dá o sinal
     if props_sinal['is_alta'] and vela_sinal['close'] > highest_high:
         return 'BUY'
     if props_sinal['is_baixa'] and vela_sinal['close'] < lowest_low:
@@ -323,11 +320,9 @@ def strategy_sr_breakout(velas, p):
     
     return None
     
-# ESTRATÉGIA DE ENGOLFO REFINADA
 def strategy_engulfing(velas, p):
     if len(velas) < 10: return None
     
-    # Contexto: Deve ser um padrão de reversão, então evita mercados laterais
     tendencia_recente = sma_slope(velas[-10:-1], 9)
     if tendencia_recente is None: return None
     
@@ -335,11 +330,10 @@ def strategy_engulfing(velas, p):
     p2, p3 = get_candle_props(v2), get_candle_props(v3)
     if not all([p2, p3]): return None
     
-    # Qualidade da Vela
     if p3['body_ratio'] < p.get('EngulfingBodyMinRatio', 0.7): return None
     if p2['body_ratio'] > 0.4: return None
-    if (p3['is_alta'] and p3['pavio_superior'] > p3['corpo']) or \
-       (p3['is_baixa'] and p3['pavio_inferior'] > p3['corpo']):
+    if (p3['is_alta'] and (v3['high'] - v3['close']) > p3['corpo']) or \
+       (p3['is_baixa'] and (v3['close'] - v3['low']) > p3['corpo']):
         return None
         
     is_bullish_engulfing = p2['is_baixa'] and p3['is_alta'] and p3['corpo'] > p2['corpo']
@@ -347,17 +341,8 @@ def strategy_engulfing(velas, p):
     
     if not (is_bullish_engulfing or is_bearish_engulfing): return None
         
-    res_levels, sup_levels = detect_fractals(velas, 10)
-    
-    # Lógica de COMPRA
-    if is_bullish_engulfing and not tendencia_recente: # Confirma fim da tendência de baixa
-        if sup_levels and any(abs(v3['low'] - s) / s < p.get('Proximity', 0.0005) for s in sup_levels):
-            return 'BUY'
-            
-    # Lógica de VENDA
-    if is_bearish_engulfing and tendencia_recente: # Confirma fim da tendência de alta
-        if res_levels and any(abs(v3['high'] - r) / r < p.get('Proximity', 0.0005) for r in res_levels):
-            return 'SELL'
+    if is_bullish_engulfing and not tendencia_recente: return 'BUY'
+    if is_bearish_engulfing and tendencia_recente: return 'SELL'
             
     return None
 
