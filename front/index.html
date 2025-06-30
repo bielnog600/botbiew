@@ -23,14 +23,28 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect, useCallback } = React;
+        const { useState, useEffect, useCallback, Component } = React; // <<< CORREÇÃO: Adicionado 'Component'
         const { createClient } = supabase;
 
         // --- INFORMAÇÕES DE CONEXÃO COM O SUPABASE ---
-        // Substitua pelos seus dados, que encontra em "Project Settings" -> "API" no seu painel do Supabase.
-        const SUPABASE_URL = 'SEU_URL_DO_SUPABASE';
-        const SUPABASE_ANON_KEY = 'SUA_CHAVE_ANON_DO_SUPABASE';
-        const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        // ⬇️⬇️⬇️ SUBSTITUA PELOS SEUS DADOS AQUI ⬇️⬇️⬇️
+        const SUPABASE_URL = 'https://ioduahwknfsktujthfyc.supabase.co';
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlvZHVhaHdrbmZza3R1anRoZnljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEzMDc0NDcsImV4cCI6MjA2Njg4MzQ0N30.96f8wZO6SvABKFMWjIiw1pSugAB4Isldj7yxLcLJRSE';
+        // ⬆️⬆️⬆️ SUBSTITUA PELOS SEUS DADOS AQUI ⬆️⬆️⬆️
+
+        let supabaseClient;
+        let supabaseInitializationError = null;
+
+        if (SUPABASE_URL.includes('SEU_URL') || SUPABASE_ANON_KEY.includes('SUA_CHAVE')) {
+            supabaseInitializationError = "As credenciais do Supabase não foram definidas no ficheiro HTML. Edite o ficheiro e substitua 'SEU_URL_DO_SUPABASE' e 'SUA_CHAVE_ANON_DO_SUPABASE' pelas suas chaves reais.";
+        } else {
+            try {
+                supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+            } catch (e) {
+                supabaseInitializationError = `Erro ao inicializar o Supabase: ${e.message}`;
+            }
+        }
+
 
         function LoginPage({ onLogin }) {
             const [email, setEmail] = useState('');
@@ -237,10 +251,16 @@
 
         function App() {
             const [session, setSession] = useState(null);
+            const [loading, setLoading] = useState(true);
 
             useEffect(() => {
+                if(supabaseInitializationError) {
+                    setLoading(false);
+                    return;
+                }
                 supabaseClient.auth.getSession().then(({ data: { session } }) => {
                     setSession(session);
+                    setLoading(false);
                 });
 
                 const { data: { subscription } } = supabaseClient.auth.onAuthStateChange((_event, session) => {
@@ -250,10 +270,41 @@
                 return () => subscription.unsubscribe();
             }, []);
 
+            if (supabaseInitializationError) {
+                return <div className="min-h-screen flex items-center justify-center text-red-400 p-4"><div className="glass-card p-8 rounded-xl max-w-lg text-center"><h1 className="text-2xl font-bold mb-4">Erro de Configuração</h1><p>{supabaseInitializationError}</p></div></div>;
+            }
+
+            if (loading) {
+                return <div className="min-h-screen flex items-center justify-center"><p>A carregar...</p></div>
+            }
+
             if (!session) {
                 return <LoginPage onLogin={(user) => setSession({ user })} />;
             } else {
                 return <Dashboard />;
+            }
+        }
+
+        class ErrorBoundary extends Component {
+            constructor(props) {
+                super(props);
+                this.state = { hasError: false, error: null };
+            }
+            static getDerivedStateFromError(error) { return { hasError: true, error }; }
+            componentDidCatch(error, errorInfo) { console.error("React Tree Error:", error, errorInfo); }
+            render() {
+                if (this.state.hasError) {
+                    return (
+                        <div className="text-center text-red-400 p-8 glass-card rounded-xl max-w-lg mx-auto">
+                            <h1 className="text-2xl font-bold mb-2"><i className="fa-solid fa-triangle-exclamation mr-2"></i>Oops! Algo correu mal.</h1>
+                            <p>A aplicação encontrou um erro. Por favor, tente atualizar a página.</p>
+                            <pre className="mt-4 text-xs text-left bg-gray-900 p-2 rounded overflow-auto">
+                                {this.state.error && this.state.error.toString()}
+                            </pre>
+                        </div>
+                    );
+                }
+                return this.props.children;
             }
         }
 
