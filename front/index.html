@@ -27,75 +27,206 @@
         const { useState, useEffect, useCallback, Component } = React;
         const { createClient } = supabase;
 
+        // --- INFORMAÇÕES DE CONEXÃO COM O SUPABASE ---
         const SUPABASE_URL = 'https://ioduahwknfsktujthfyc.supabase.co';
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlvZHVhaHdrbmZza3R1anRoZnljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEzMDc0NDcsImV4cCI6MjA2Njg4MzQ0N30.96f8wZO6SvABKFMWjIiw1pSugAB4Isldj7yxLcLJRSE';
         const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-        function LoginPage({ onLoginSuccess }) {
-            // ... (Componente de Login - sem alterações)
+        function LoginPage({ onLogin }) {
+            const [email, setEmail] = useState('');
+            const [password, setPassword] = useState('');
+            const [error, setError] = useState('');
+            const [loading, setLoading] = useState(false);
+
+            const handleLogin = async (e) => {
+                e.preventDefault();
+                setLoading(true);
+                setError('');
+                const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+                if (error) setError(error.message);
+                else if (data.user) onLogin(data.user);
+                setLoading(false);
+            };
+
+            return (
+                <div className="min-h-screen flex items-center justify-center bg-gray-900">
+                    <div className="w-full max-w-md p-8 space-y-8 glass-card rounded-xl">
+                        <div><h2 className="mt-6 text-center text-3xl font-extrabold text-white">Admin Login</h2></div>
+                        <form className="mt-8 space-y-6" onSubmit={handleLogin}>
+                            <div className="rounded-md shadow-sm -space-y-px">
+                                <div><input type="email" required className="form-input appearance-none rounded-none relative block w-full px-3 py-2 border placeholder-gray-500 text-gray-300 rounded-t-md focus:outline-none focus:ring-teal-500 focus:border-teal-500" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} /></div>
+                                <div><input type="password" required className="form-input appearance-none rounded-none relative block w-full px-3 py-2 border placeholder-gray-500 text-gray-300 rounded-b-md focus:outline-none focus:ring-teal-500 focus:border-teal-500" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} /></div>
+                            </div>
+                            {error && <p className="text-red-500 text-sm text-center">{error}</p>}
+                            <div><button type="submit" className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white btn-primary focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500" disabled={loading}>{loading ? 'A entrar...' : 'Entrar'}</button></div>
+                        </form>
+                    </div>
+                </div>
+            );
         }
         
         function AdminDashboard() {
-            // ... (Componente do Painel Admin - sem alterações)
+            const [view, setView] = useState('bot_control');
+            const handleLogout = async () => { await supabaseClient.auth.signOut(); };
+
+            return (
+                <div className="flex h-screen bg-gray-900">
+                    <aside className="w-64 bg-gray-800 text-white flex flex-col">
+                        <div className="h-16 flex items-center justify-center text-2xl font-bold border-b border-gray-700">Admin</div>
+                        <nav className="flex-1 px-2 py-4 space-y-2">
+                            <a href="#" onClick={() => setView('bot_control')} className={`block px-4 py-2 rounded-md ${view === 'bot_control' ? 'nav-link-active' : ''}`}>Controlo do Bot</a>
+                            <a href="#" onClick={() => setView('user_management')} className={`block px-4 py-2 rounded-md ${view === 'user_management' ? 'nav-link-active' : ''}`}>Gestão de Alunos</a>
+                        </nav>
+                        <div className="p-4 border-t border-gray-700"><button onClick={handleLogout} className="w-full text-left px-4 py-2 rounded-md hover:bg-red-500">Sair</button></div>
+                    </aside>
+                    <main className="flex-1 p-10 overflow-y-auto">
+                        {view === 'bot_control' && <BotControl />}
+                        {view === 'user_management' && <UserManagement />}
+                    </main>
+                </div>
+            );
         }
         
+        function BotControl() {
+            const [botStatus, setBotStatus] = useState('PAUSED');
+            const [params, setParams] = useState('');
+            const [loading, setLoading] = useState(false);
+
+            const fetchConfig = useCallback(async () => {
+                const { data } = await supabaseClient.table('bot_config').select('*').eq('id', 1).single();
+                if (data) {
+                    setBotStatus(data.status);
+                    setParams(JSON.stringify(data.params, null, 2));
+                }
+            }, []);
+
+            useEffect(() => { fetchConfig(); }, [fetchConfig]);
+
+            const handleStatusChange = async (newStatus) => {
+                setLoading(true);
+                await supabaseClient.table('bot_config').update({ status: newStatus }).eq('id', 1);
+                fetchConfig();
+                setLoading(false);
+            };
+
+            const handleParamsSave = async () => {
+                try {
+                    const parsedParams = JSON.parse(params);
+                    setLoading(true);
+                    await supabaseClient.table('bot_config').update({ params: parsedParams }).eq('id', 1);
+                    alert('Parâmetros guardados com sucesso!');
+                    setLoading(false);
+                } catch (e) { alert('Erro: JSON inválido!'); }
+            };
+
+            return (
+                <div>
+                    <h1 className="text-3xl font-bold text-white mb-6">Controlo do Bot</h1>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="glass-card p-6 rounded-xl">
+                            <h2 className="text-xl font-bold mb-4">Estado do Bot</h2>
+                            <p className="mb-4">Estado atual: <span className={`font-bold ${botStatus === 'RUNNING' ? 'text-green-400' : 'text-amber-400'}`}>{botStatus}</span></p>
+                            <div className="flex gap-4">
+                                <button onClick={() => handleStatusChange('RUNNING')} className="btn-primary px-4 py-2 rounded-md disabled:opacity-50" disabled={loading || botStatus === 'RUNNING'}>Iniciar Bot</button>
+                                <button onClick={() => handleStatusChange('PAUSED')} className="bg-amber-500 hover:bg-amber-600 px-4 py-2 rounded-md disabled:opacity-50" disabled={loading || botStatus === 'PAUSED'}>Pausar Bot</button>
+                            </div>
+                        </div>
+                         <div className="glass-card p-6 rounded-xl">
+                            <h2 className="text-xl font-bold mb-4">Parâmetros das Estratégias</h2>
+                            <textarea value={params} onChange={(e) => setParams(e.target.value)} className="form-input w-full h-64 font-mono text-sm p-2 rounded-md"></textarea>
+                            <button onClick={handleParamsSave} className="mt-4 btn-primary w-full py-2 rounded-md disabled:opacity-50" disabled={loading}>Guardar Parâmetros</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        function UserManagement() {
+            const [users, setUsers] = useState([]);
+            const fetchUsers = useCallback(async () => {
+                const { data: { users: authUsers } } = await supabaseClient.auth.admin.listUsers();
+                const { data: subscriptions } = await supabaseClient.from('subscriptions').select('*');
+                
+                const combined = authUsers.map(user => {
+                    const sub = subscriptions.find(s => s.user_id === user.id) || {};
+                    return { ...user, subscription: sub };
+                });
+                setUsers(combined);
+            }, []);
+
+            useEffect(() => { fetchUsers(); }, [fetchUsers]);
+            
+            const handleSubscriptionChange = async (userId, newStatus, newExpiry) => {
+                 const { data } = await supabaseClient.from('subscriptions').select('user_id').eq('user_id', userId).single();
+                if (data) await supabaseClient.from('subscriptions').update({ status: newStatus, expires_at: newExpiry }).eq('user_id', userId);
+                else await supabaseClient.from('subscriptions').insert({ user_id: userId, status: newStatus, expires_at: newExpiry });
+                fetchUsers();
+            };
+
+            return (
+                <div>
+                    <h1 className="text-3xl font-bold text-white mb-6">Gestão de Alunos</h1>
+                    <div className="glass-card rounded-xl overflow-hidden">
+                        <table className="min-w-full">
+                            <thead className="bg-gray-800">
+                                <tr>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Email</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Estado</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Expira em</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Ações</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-700">
+                                {users.map(user => {
+                                    const expiryDate = user.subscription.expires_at ? new Date(user.subscription.expires_at).toISOString().split('T')[0] : '';
+                                    return (
+                                        <tr key={user.id}>
+                                            <td className="px-6 py-4 whitespace-nowrap">{user.email}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap">{user.subscription.status || 'inactive'}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap">{expiryDate}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
+                                                <button onClick={() => {
+                                                    const newDate = prompt("Nova data de expiração (YYYY-MM-DD):", expiryDate);
+                                                    if(newDate) handleSubscriptionChange(user.id, 'active', newDate);
+                                                }} className="text-teal-400 hover:text-teal-300">Editar</button>
+                                                <button onClick={() => handleSubscriptionChange(user.id, 'inactive', user.subscription.expires_at)} className="text-red-400 hover:text-red-300">Desativar</button>
+                                            </td>
+                                        </tr>
+                                    )
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            );
+        }
+
         function App() {
             const [session, setSession] = useState(null);
-            const [userProfile, setUserProfile] = useState(null);
             const [loading, setLoading] = useState(true);
 
             useEffect(() => {
-                const getSessionAndProfile = async (session) => {
-                    if (session && session.user) {
-                        const { data: profile } = await supabaseClient.from('profiles').select('*').eq('id', session.user.id).single();
-                        setUserProfile(profile);
-                    } else {
-                        setUserProfile(null);
-                    }
-                    setLoading(false);
-                };
-
                 supabaseClient.auth.getSession().then(({ data: { session } }) => {
                     setSession(session);
-                    getSessionAndProfile(session);
+                    setLoading(false);
                 });
 
                 const { data: { subscription } } = supabaseClient.auth.onAuthStateChange((_event, session) => {
                     setSession(session);
-                    if(!session) setLoading(false); // Garante que o estado de loading é atualizado no logout
                 });
 
                 return () => subscription.unsubscribe();
             }, []);
-
-             useEffect(() => {
-                if(session && !userProfile) {
-                     const fetchProfile = async () => {
-                        const { data: profile } = await supabaseClient.from('profiles').select('*').eq('id', session.user.id).single();
-                        setUserProfile(profile);
-                        setLoading(false);
-                     }
-                     fetchProfile();
-                }
-             }, [session, userProfile]);
 
             if (loading) {
                 return <div className="min-h-screen flex items-center justify-center"><p>A carregar...</p></div>;
             }
 
             if (!session) {
-                return <LoginPage onLoginSuccess={() => setLoading(true)} />;
-            }
-            
-            if (userProfile && userProfile.role === 'admin') {
+                return <LoginPage onLogin={() => setLoading(true)} />;
+            } else {
                 return <AdminDashboard />;
             }
-            
-            if(userProfile && userProfile.role !== 'admin'){
-                 return <div className="min-h-screen flex items-center justify-center text-amber-400"><p>Acesso negado. Esta área é apenas para administradores.</p></div>;
-            }
-
-            return <div className="min-h-screen flex items-center justify-center"><p>A verificar permissões...</p></div>;
         }
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
