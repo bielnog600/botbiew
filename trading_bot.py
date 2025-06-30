@@ -99,13 +99,10 @@ def _log_and_broadcast(level, message, pair="Sistema"):
     color_map = {'info': c, 'success': g, 'warning': y, 'error': r}
     console_color = color_map.get(level, w)
     
-    # Clean color codes from the message for both console and frontend
     clean_message = ''.join(filter(lambda char: char not in [g, y, r, w, c, b], message))
     
-    # 1. Print to console
     log(console_color, f"{pair}: {clean_message}" if pair != "Sistema" else clean_message)
 
-    # 2. Put in queue for frontend
     log_payload = { "type": "log", "data": { "level": level, "message": clean_message, "pair": pair } }
     signal_queue.put(log_payload)
 
@@ -117,7 +114,6 @@ def log_error(msg, pair="Sistema"): _log_and_broadcast('error', msg, pair)
 
 # --- Banner and WebSocket Functions ---
 def exibir_banner():
-    # Banner display remains the same, but logging calls will be handled by the new system.
     print(c + "\n" + "="*88)
     print(y + "*"*88)
     print(g + '''
@@ -133,7 +129,7 @@ def exibir_banner():
       ██║   ██╔══██╗██║██╔══██║██║       ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║    ██║    ██║
       ██║   ██║  ██║██║██║  ██║███████╗    ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝    ██║
       ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝     ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝     ╚═╝ '''+y+'''
-              azkzero@gmail.com - v62 (Correção de Entradas Simultâneas)
+              azkzero@gmail.com - v62.1 (Ajustes de Interface)
     ''')
     print(y + "*"*88)
     print(c + "="*88)
@@ -275,19 +271,28 @@ def catalogar_e_selecionar(api, params, state):
     return champion_strategies
 
 def get_candle_props(vela):
-    if not all(k in vela for k in ['high', 'low', 'open', 'close']): return None
-    props = {}
-    props['range'] = vela['high'] - vela['low']
-    if props['range'] == 0: return None
-    props['corpo'] = abs(vela['open'] - vela['close'])
-    props['body_ratio'] = props['corpo'] / props['range'] if props['range'] > 0 else 0
-    props['is_alta'] = vela['close'] > vela['open']
-    props['is_baixa'] = vela['close'] < vela['open']
-    props['pavio_superior'] = vela['high'] - max(vela['open'], vela['close'])
-    props['pavio_inferior'] = min(vela['open'], vela['close']) - vela['low']
+    if not vela or not all(k in vela and vela[k] is not None for k in ['high', 'low', 'open', 'close']):
+        return None
+        
+    props = {
+        'open': vela['open'], 'close': vela['close'],
+        'high': vela['high'], 'low': vela['low']
+    }
+    props['range'] = props['high'] - props['low']
+    
+    if props['range'] > 0:
+        props['corpo'] = abs(props['open'] - props['close'])
+        props['body_ratio'] = props['corpo'] / props['range']
+    else:
+        props['corpo'] = 0
+        props['body_ratio'] = 0
+
+    props['is_alta'] = props['close'] > props['open']
+    props['is_baixa'] = props['close'] < props['open']
+    props['pavio_superior'] = props['high'] - max(props['open'], props['close'])
+    props['pavio_inferior'] = min(props['open'], props['close']) - props['low']
     return props
 
-# --- HELPER FUNCTIONS FOR ADVANCED STRATEGIES ---
 def calculate_ema(closes, period):
     if len(closes) < period: return None
     ema = [sum(closes[:period]) / period]
@@ -322,7 +327,6 @@ def check_trend_with_emas(closes, p):
     if ema_short < ema_long and last_close < ema_short: return 'SELL'
     return 'NEUTRAL'
 
-# --- NEW GLOBAL FILTERS ---
 def is_market_consolidating(velas, p):
     lookback = p.get('Consolidation_Lookback', 10)
     threshold = p.get('Consolidation_Threshold', 0.0005)
@@ -340,7 +344,6 @@ def is_exhaustion_pattern(velas, p):
         return True
     return False
 
-# --- REFACTORED STRATEGIES WITH CONFIDENCE SCORE ---
 def strategy_sr_breakout(velas, p, state, ativo=None):
     score, direcao = 0, None
     lookback = p.get('SR_Lookback', 15)
@@ -355,7 +358,7 @@ def strategy_sr_breakout(velas, p, state, ativo=None):
     if not props_breakout or props_breakout['body_ratio'] < p.get('SR_BodyRatio', 0.70):
         return score, direcao
 
-    avg_body_size = sum(get_candle_props(v)['corpo'] for v in zona_analise if get_candle_props(v)) / len(zona_analise)
+    avg_body_size = sum(p.get('corpo', 0) for p in (get_candle_props(v) for v in zona_analise) if p) / len(zona_analise)
     if props_breakout['corpo'] <= avg_body_size: return score, direcao
 
     max_wick = p.get('SR_MaxOppositeWickRatio', 0.30)
@@ -383,8 +386,9 @@ def strategy_engulfing(velas, p, state, ativo=None):
     min_candles = max(p.get('EMA_Short_Period', 9), p.get('EMA_Long_Period', 21), p.get('Engulfing_RSIPeriod', 14)) + 4
     if len(velas) < min_candles: return score, direcao
 
-    p_eng, p_ed, p_t1, p_t2 = (get_candle_props(velas[i]) for i in [-1, -2, -3, -4])
-    if not all([p_eng, p_ed, p_t1, p_t2]): return score, direcao
+    props = [get_candle_props(velas[i]) for i in [-1, -2, -3, -4]]
+    if not all(props): return score, direcao
+    p_eng, p_ed, p_t1, p_t2 = props
 
     strong_body, max_wick = p.get('Engulfing_BodyRatio', 0.70), p.get('Engulfing_MaxOppositeWickRatio', 0.3)
     
@@ -445,7 +449,6 @@ def strategy_candle_flow(velas, p, state, ativo=None):
 
     return score, direcao
 
-# --- Bot State and Main Logic ---
 class BotState:
     def __init__(self, p):
         self.stop = False; self.win_count = 0; self.loss_count = 0
@@ -465,7 +468,7 @@ def get_config_from_env():
         'conta': os.getenv('EXNOVA_CONTA', 'PRACTICE').upper(), 'pay_minimo': float(os.getenv('EXNOVA_PAY_MINIMO', 80)),
         'valor_entrada': float(os.getenv('EXNOVA_VALOR_ENTRADA', 1)), 'expiracao': int(os.getenv('EXNOVA_EXPIRACAO', 1)),
         'usar_mg': os.getenv('EXNOVA_USAR_MG', 'SIM').upper() == 'SIM', 'mg_niveis': int(os.getenv('EXNOVA_MG_NIVEIS', 2)),
-        'mg_fator': float(os.getenv('EXNOVA_MG_FATOR', 2.0)), 'modo_operacao': os.getenv('EXNOVA_MODO_OPERACAO', '1') # Default to Catalog Mode
+        'mg_fator': float(os.getenv('EXNOVA_MG_FATOR', 2.0)), 'modo_operacao': os.getenv('EXNOVA_MODO_OPERACAO', '1')
     }
 
 def compra_thread(api, ativo, valor, direcao, expiracao, tipo_op, state, config, cifrao, signal_id, target_entry_timestamp):
@@ -615,10 +618,9 @@ def main_bot_logic(state, PARAMS):
                 all_profits = API.get_all_profit()
 
                 for ativo, estrategia in state.champion_strategies.items():
-                    # --- FIXED SIMULTANEOUS TRADES LOGIC ---
                     with state.lock:
                         if state.active_trades >= MAX_TRADES:
-                            break # Para de procurar se o limite já foi atingido
+                            break
 
                     if ativo in state.suspended_pairs: continue
                     
@@ -642,7 +644,15 @@ def main_bot_logic(state, PARAMS):
                         
                         with state.lock: state.active_trades += 1
                         signal_id = str(uuid.uuid4())
-                        signal_payload = { "type": "signal", "signal_id": signal_id, "pair": ativo, "strategy": estrategia, "direction": direcao_sinal, "entry_time": horario_entrada_str, "candle": get_candle_props(velas[-1]), "result": None, "gale_level": 0 }
+                        
+                        signal_payload = { 
+                            "type": "signal", "signal_id": signal_id, "pair": ativo, 
+                            "strategy": estrategia, "direction": direcao_sinal, 
+                            "entry_time": horario_entrada_str, 
+                            "candle": velas[-1],
+                            "previous_candle": velas[-2], # Sending previous candle
+                            "result": None, "gale_level": 0 
+                        }
                         state.signal_history[signal_id] = signal_payload
                         signal_queue.put(signal_payload)
 
@@ -660,7 +670,7 @@ def main_bot_logic(state, PARAMS):
 def main():
     PARAMS = { 
         'Assertividade_Minima': 60, 'Recatalog_Cycle_Hours': 2, 'Recatalog_Loss_Trigger': 5,
-        'MAX_SIMULTANEOUS_TRADES': 1, # <--- CONFIGURAÇÃO CENTRALIZADA
+        'MAX_SIMULTANEOUS_TRADES': 1,
         'Consolidation_Lookback': 10, 'Consolidation_Threshold': 0.0005, 'Exhaustion_DojiLike_Ratio': 0.2,
         'Standby_Loss_Count': 3, 'Standby_Timeframe_Minutes': 5, 'Minimum_Confidence_Score': 3,
         'EMA_Short_Period': 9, 'EMA_Long_Period': 21,
