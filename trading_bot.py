@@ -474,7 +474,9 @@ def compra_thread(api, ativo, valor, direcao, expiracao, tipo_op, state, config,
         if wait_time > 0: time.sleep(wait_time)
 
         if time.time() > target_entry_timestamp + 10:
-            log_error("Oportunidade perdida (atraso >10s).", pair=ativo); return
+            log_error("Oportunidade perdida (atraso >10s).", pair=ativo)
+            with state.lock: state.active_trades -= 1
+            return
 
         entrada_atual, direcao_atual, niveis_mg = valor, direcao, config['mg_niveis'] if config['usar_mg'] else 0
         resultado_final = None
@@ -542,9 +544,19 @@ def main_bot_logic(state, PARAMS):
     if not check: log_error(f"Falha na conexão: {reason}"); sys.exit(1)
     
     log_success("Conexão estabelecida!"); API.change_balance(config['conta'])
-    cifrao = API.get_profile_ansyc().get('currency_char', '$')
-    log_success(f"Logado como {API.profile['name']} | Moeda: {cifrao}")
     
+    # --- FIXED PROFILE HANDLING ---
+    cifrao = "$"
+    try:
+        profile_data = API.get_profile_ansyc()
+        if profile_data:
+            cifrao = profile_data.get('currency_char', '$')
+            log_success(f"Logado como {profile_data.get('name', 'Usuário')} | Moeda: {cifrao}")
+        else:
+            log_warning("Não foi possível obter dados do perfil, usando valores padrão.")
+    except Exception as e:
+        log_error(f"Erro ao obter perfil: {e}. Usando valores padrão.")
+
     if config['modo_operacao'] == '1':
         state.champion_strategies = catalogar_e_selecionar(API, PARAMS, state)
         with state.lock:
@@ -568,7 +580,7 @@ def main_bot_logic(state, PARAMS):
                 if len(state.global_loss_timestamps) >= PARAMS.get('Standby_Loss_Count', 3):
                     time_diff = state.global_loss_timestamps[-1] - state.global_loss_timestamps[0]
                     if time_diff <= PARAMS.get('Standby_Timeframe_Minutes', 5) * 60:
-                        log_error("Gatilho de segurança global ativado! Entrando em modo Stand-by por 3 minutos.")
+                        log_error(f"{PARAMS.get('Standby_Loss_Count', 3)} perdas em menos de {PARAMS.get('Standby_Timeframe_Minutes', 5)} min. Entrando em modo Stand-by.")
                         state.standby_mode = True
                         state.standby_until = time.time() + 180
                         state.global_loss_timestamps.clear()
@@ -611,7 +623,7 @@ def main_bot_logic(state, PARAMS):
                     velas = validar_e_limpar_velas(API.get_candles(ativo, 60, 150, time.time()))
                     if not velas or len(velas) < 30: continue
 
-                    if is_market_consolidating(velas, PARAMS): log_warning("Mercado consolidado. Análise descartada.", pair=ativo); continue
+                    if is_market_consolidating(velas, PARAMS): log_info("Mercado consolidado. Análise descartada.", pair=ativo); continue
                     if is_exhaustion_pattern(velas, PARAMS): log_warning("Padrão de exaustão detectado. Análise descartada.", pair=ativo); continue
 
                     cod_est = next((cod for cod, nome in ALL_STRATEGIES.items() if nome == estrategia), None)
@@ -659,6 +671,9 @@ def main():
         main_bot_logic(bot_state, PARAMS)
     except KeyboardInterrupt:
         log_warning("\nBot interrompido pelo usuário.")
+    except Exception as e:
+        log_error(f"Erro fatal: {e}")
+        traceback.print_exc()
     finally:
         bot_state.stop = True; log_info("Desligando..."); time.sleep(2); sys.exit()
 
