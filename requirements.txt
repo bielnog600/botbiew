@@ -3,3 +3,4 @@ colorama
 configobj
 requests
 websocket-client
+supabase
