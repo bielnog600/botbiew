@@ -31,9 +31,12 @@
         const { createClient } = supabase;
 
         // --- INFORMAÇÕES DE CONEXÃO COM O SUPABASE ---
+        // ⬇️⬇️⬇️ SUBSTITUA PELOS SEUS DADOS AQUI ⬇️⬇️⬇️
         const SUPABASE_URL = 'https://ioduahwknfsktujthfyc.supabase.co';
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlvZHVhaHdrbmZza3R1anRoZnljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEzMDc0NDcsImV4cCI6MjA2Njg4MzQ0N30.96f8wZO6SvABKFMWjIiw1pSugAB4Isldj7yxLcLJRSE';
+        // ⬆️⬆️⬆️ SUBSTITUA PELOS SEUS DADOS AQUI ⬆️⬆️⬆️
         const WEBSOCKET_URL = 'wss://botexnova.marombiew.com';
+
 
         let supabaseClient;
         let supabaseInitializationError = null;
@@ -49,6 +52,18 @@
         }
 
         // --- Componentes ---
+
+        class ErrorBoundary extends Component {
+            constructor(props) { super(props); this.state = { hasError: false, error: null }; }
+            static getDerivedStateFromError(error) { return { hasError: true, error }; }
+            componentDidCatch(error, errorInfo) { console.error("React Tree Error:", error, errorInfo); }
+            render() {
+                if (this.state.hasError) {
+                    return (<div className="text-center text-red-400 p-8 glass-card rounded-xl max-w-lg mx-auto"><h1 className="text-2xl font-bold mb-2"><i className="fa-solid fa-triangle-exclamation mr-2"></i>Oops! Algo correu mal.</h1><p>A aplicação encontrou um erro. Por favor, tente atualizar a página.</p><pre className="mt-4 text-xs text-left bg-gray-900 p-2 rounded overflow-auto">{this.state.error && this.state.error.toString()}</pre></div>);
+                }
+                return this.props.children;
+            }
+        }
 
         function LoginPage({ onLogin }) {
             const [email, setEmail] = useState('');
@@ -213,8 +228,8 @@
                 </div>
             );
         }
-
-        // --- Componentes do Cliente (Recriados e Corrigidos) ---
+        
+        // --- Componentes do Cliente (Reintroduzidos) ---
 
         const ClientDashboard = ({ userProfile }) => {
             const [activeTab, setActiveTab] = useState('home');
@@ -428,11 +443,11 @@
                 return <ClientDashboard userProfile={userProfile} />;
             }
 
-            return <div className="min-h-screen flex items-center justify-center"><p>A carregar perfil...</p></div>;
+            return <div className="min-h-screen flex items-center justify-center"><p>A verificar permissões...</p></div>;
         }
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
+        root.render(<ErrorBoundary><App /></ErrorBoundary>);
     </script>
 </body>
 </html>
