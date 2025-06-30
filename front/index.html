@@ -68,8 +68,7 @@
     <script type="text/babel">
         const { useState, useEffect, useCallback, useMemo, useRef, Component } = React;
         
-        // --- ATENÇÃO: Use este endereço se o bot estiver a correr na mesma máquina.
-        // --- Para acesso externo, substitua pelo endereço IP ou domínio do seu servidor.
+        // --- CORREÇÃO: Forçar o uso de wss:// para evitar erros de segurança ---
         const WEBSOCKET_URL = 'wss://botexnova.marombiew.com';
 
         function convertTimeToUserTimezone(timeString) {
