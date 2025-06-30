@@ -89,17 +89,35 @@ ALL_STRATEGIES = {
     'candle_flow': 'Fluxo de Velas',
 }
 
-# --- Logging Functions ---
+# --- Centralized Logging Functions ---
 def log(cor, mensagem):
+    """Prints a message to the console with a specific color."""
     print(f"{cor}[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] {w}{mensagem}")
 
-def log_info(msg): log(c, msg)
-def log_success(msg): log(g, msg)
-def log_warning(msg): log(y, msg)
-def log_error(msg): log(r, msg)
+def _log_and_broadcast(level, message, pair="Sistema"):
+    """Internal function to handle console logging and WebSocket broadcasting."""
+    color_map = {'info': c, 'success': g, 'warning': y, 'error': r}
+    console_color = color_map.get(level, w)
+    
+    # Clean color codes from the message for both console and frontend
+    clean_message = ''.join(filter(lambda char: char not in [g, y, r, w, c, b], message))
+    
+    # 1. Print to console
+    log(console_color, f"{pair}: {clean_message}" if pair != "Sistema" else clean_message)
+
+    # 2. Put in queue for frontend
+    log_payload = { "type": "log", "data": { "level": level, "message": clean_message, "pair": pair } }
+    signal_queue.put(log_payload)
+
+def log_info(msg, pair="Sistema"): _log_and_broadcast('info', msg, pair)
+def log_success(msg, pair="Sistema"): _log_and_broadcast('success', msg, pair)
+def log_warning(msg, pair="Sistema"): _log_and_broadcast('warning', msg, pair)
+def log_error(msg, pair="Sistema"): _log_and_broadcast('error', msg, pair)
+
 
 # --- Banner and WebSocket Functions ---
 def exibir_banner():
+    # Banner display remains the same, but logging calls will be handled by the new system.
     print(c + "\n" + "="*88)
     print(y + "*"*88)
     print(g + '''
@@ -115,7 +133,7 @@ def exibir_banner():
       ██║   ██╔══██╗██║██╔══██║██║       ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║    ██║    ██║
       ██║   ██║  ██║██║██║  ██║███████╗    ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝    ██║
       ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝     ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝     ╚═╝ '''+y+'''
-              azkzero@gmail.com - v60 (Módulo de Inteligência Avançada)
+              azkzero@gmail.com - v61 (Logging Integrado ao Frontend)
     ''')
     print(y + "*"*88)
     print(c + "="*88)
@@ -127,9 +145,7 @@ class WebSocketServer:
     async def handler(self, websocket, *args):
         with clients_lock:
             connected_clients.add(websocket)
-        path = args[0] if args else None
-        log_success(f"New WebSocket client connected: {websocket.remote_address}" +
-                    (f" on path {path}" if path else ""))
+        log_success(f"Novo cliente WebSocket conectado: {websocket.remote_address}")
         try:
             initial_state = {
                 "type": "init",
@@ -138,11 +154,11 @@ class WebSocketServer:
             await websocket.send(json.dumps(initial_state))
             await websocket.wait_closed()
         except websockets.exceptions.ConnectionClosed as e:
-            log_warning(f"Connection closed with client {websocket.remote_address}: {e}")
+            log_warning(f"Conexão fechada com o cliente {websocket.remote_address}: {e}")
         finally:
             with clients_lock:
                 connected_clients.discard(websocket)
-            log_warning(f"WebSocket client disconnected: {websocket.remote_address}")
+            log_warning(f"Cliente WebSocket desconectado: {websocket.remote_address}")
 
 async def broadcast_signals():
     while True:
@@ -152,6 +168,7 @@ async def broadcast_signals():
             
             with clients_lock:
                 if not connected_clients:
+                    await asyncio.sleep(0.1)
                     continue
                 clients_to_send = list(connected_clients)
 
@@ -161,7 +178,7 @@ async def broadcast_signals():
         except queue.Empty:
             await asyncio.sleep(0.1)
         except Exception:
-            pass
+            pass # Errors are handled by the log system
 
 def start_websocket_server_sync(bot_state):
     loop = asyncio.new_event_loop()
@@ -172,19 +189,18 @@ def start_websocket_server_sync(bot_state):
         try:
             start_server = websockets.serve(server_instance.handler, "0.0.0.0", 8765, **server_options)
         except (AttributeError, TypeError, OSError):
-            log_warning("reuse_port not supported. Starting without it.")
+            log_warning("reuse_port não suportado. Iniciando sem ele.")
             del server_options["reuse_port"]
             start_server = websockets.serve(server_instance.handler, "0.0.0.0", 8765, **server_options)
         server = await start_server
-        log_success(f"WebSocket Server started successfully on {server.sockets[0].getsockname()}")
+        log_success(f"Servidor WebSocket iniciado em {server.sockets[0].getsockname()}")
         await asyncio.gather(broadcast_signals(), server.wait_closed())
     try:
         loop.run_until_complete(main_async_logic())
     except Exception as e:
-        log_error(f"CRITICAL ERROR in WebSocket server thread: {e}"); traceback.print_exc()
+        log_error(f"ERRO CRÍTICO no thread do WebSocket: {e}"); traceback.print_exc()
     finally:
-        log_warning("WebSocket server loop is shutting down."); loop.close()
-
+        log_warning("Loop do servidor WebSocket está sendo encerrado."); loop.close()
 
 # --- Logic and Strategy Functions ---
 def validar_e_limpar_velas(velas_raw):
@@ -196,27 +212,34 @@ def validar_e_limpar_velas(velas_raw):
         if all(vela_padronizada.values()): velas_limpas.append(vela_padronizada)
     return velas_limpas
 
-def catalogar_e_selecionar(api, params, assertividade_minima=60, state=None):
-    log_info("="*40); log_info("MODO DE CATALOGAÇÃO E SELEÇÃO INICIADO..."); log_info("="*40)
+def catalogar_e_selecionar(api, params, state):
+    log_info("MODO DE CATALOGAÇÃO E SELEÇÃO INICIADO...")
     
     ativos_abertos = []
-    all_assets = api.get_all_open_time()
-    for tipo_mercado in ['binary', 'turbo']:
-        if tipo_mercado in all_assets:
-            for ativo, info in all_assets[tipo_mercado].items():
-                if info.get('open', False) and ativo not in ativos_abertos: ativos_abertos.append(ativo)
-    
+    try:
+        all_assets = api.get_all_open_time()
+        for tipo_mercado in ['binary', 'turbo']:
+            if tipo_mercado in all_assets:
+                for ativo, info in all_assets[tipo_mercado].items():
+                    if info.get('open', False) and ativo not in ativos_abertos: ativos_abertos.append(ativo)
+    except Exception as e:
+        log_error(f"Não foi possível obter os ativos abertos: {e}")
+        return {}
+
     if not ativos_abertos: log_error("Nenhum par aberto encontrado para catalogar."); return {}
 
     log_info(f"Encontrados {len(ativos_abertos)} pares abertos para análise.")
     champion_strategies = {}
+    assertividade_minima = params.get('Assertividade_Minima', 60)
 
     for ativo_original in ativos_abertos:
         try:
-            log_info(f"\n--- Analisando o par: {w}{ativo_original}{c} ---")
+            log_info(f"Analisando o par...", pair=ativo_original)
             velas_historicas_raw = api.get_candles(ativo_original, 60, 300, time.time())
             todas_as_velas = validar_e_limpar_velas(velas_historicas_raw)
-            if not todas_as_velas or len(todas_as_velas) < 100: log_warning(f"Dados históricos insuficientes para {ativo_original}."); continue
+            if not todas_as_velas or len(todas_as_velas) < 100: 
+                log_warning(f"Dados históricos insuficientes.", pair=ativo_original)
+                continue
             
             best_strategy, highest_assertiveness = None, 0
 
@@ -224,10 +247,9 @@ def catalogar_e_selecionar(api, params, assertividade_minima=60, state=None):
                 wins, losses, total = 0, 0, 0
                 for i in range(50, len(todas_as_velas) - 1):
                     velas_atuais, vela_resultado = todas_as_velas[:i], todas_as_velas[i]
-                    # Pass state=None para evitar que a catalogação use a memória de trades reais
-                    score, _ = globals().get(f'strategy_{cod}')(velas_atuais, params, None)
+                    score, direcao = globals().get(f'strategy_{cod}')(velas_atuais, params, None)
                     if score >= params.get('Minimum_Confidence_Score', 3):
-                        sinal = 'BUY' if velas_atuais[-1]['close'] > velas_atuais[-2]['close'] else 'SELL' # Simulação simplificada para catalogação
+                        sinal = direcao
                         total += 1
                         if (sinal == 'BUY' and vela_resultado['close'] > velas_atuais[-1]['close']) or \
                            (sinal == 'SELL' and vela_resultado['close'] < velas_atuais[-1]['close']):
@@ -235,21 +257,21 @@ def catalogar_e_selecionar(api, params, assertividade_minima=60, state=None):
                         else:
                             losses += 1
                 
-                if total > 5: # Aumenta o mínimo de trades para considerar uma estratégia
+                if total > 5:
                     assertividade = (wins / total) * 100
-                    log_info(f"  -> Estratégia '{nome}': {assertividade:.2f}% ({wins}W / {losses}L em {total} sinais)")
+                    log_info(f"Estratégia '{nome}': {assertividade:.2f}% ({wins}W/{losses}L)", pair=ativo_original)
                     if assertividade > highest_assertiveness:
                         highest_assertiveness, best_strategy = assertividade, nome
             
             if best_strategy and highest_assertiveness >= assertividade_minima:
                 champion_strategies[ativo_original] = best_strategy
-                log_success(f"  -> CAMPEÃ PARA {ativo_original}: {best_strategy} com {highest_assertiveness:.2f}% de acerto.")
+                log_success(f"Estratégia campeã: {best_strategy} com {highest_assertiveness:.2f}% de acerto.", pair=ativo_original)
             else:
-                log_warning(f"  -> Nenhuma estratégia para {ativo_original} atingiu os critérios mínimos.")
+                log_warning("Nenhuma estratégia atingiu os critérios mínimos.", pair=ativo_original)
 
-        except Exception as e: log_error(f"Erro ao analisar {ativo_original}: {e}"); traceback.print_exc()
+        except Exception as e: log_error(f"Erro ao analisar: {e}", pair=ativo_original); traceback.print_exc()
         
-    log_info("="*40); log_info("CATALOGAÇÃO FINALIZADA!"); log_info("="*40)
+    log_info("CATALOGAÇÃO FINALIZADA!")
     return champion_strategies
 
 def get_candle_props(vela):
@@ -313,7 +335,6 @@ def is_exhaustion_pattern(velas, p):
     c1, c2 = get_candle_props(velas[-2]), get_candle_props(velas[-3])
     if not c1 or not c2: return False
     
-    # Ex: dois candles seguidos com corpo pequeno (dojis, spinning tops)
     doji_like_threshold = p.get('Exhaustion_DojiLike_Ratio', 0.2)
     if c1['body_ratio'] < doji_like_threshold and c2['body_ratio'] < doji_like_threshold:
         return True
@@ -327,8 +348,7 @@ def strategy_sr_breakout(velas, p, state, ativo=None):
     if len(velas) < min_candles: return score, direcao
 
     zona_analise = velas[-(lookback + 1):-1]
-    highest_high = max(v['high'] for v in zona_analise)
-    lowest_low = min(v['low'] for v in zona_analise)
+    highest_high, lowest_low = max(v['high'] for v in zona_analise), min(v['low'] for v in zona_analise)
 
     breakout_candle = velas[-1]
     props_breakout = get_candle_props(breakout_candle)
@@ -338,18 +358,15 @@ def strategy_sr_breakout(velas, p, state, ativo=None):
     avg_body_size = sum(get_candle_props(v)['corpo'] for v in zona_analise if get_candle_props(v)) / len(zona_analise)
     if props_breakout['corpo'] <= avg_body_size: return score, direcao
 
-    is_bullish_breakout, is_bearish_breakout = False, False
-    max_wick_ratio = p.get('SR_MaxOppositeWickRatio', 0.30)
+    max_wick = p.get('SR_MaxOppositeWickRatio', 0.30)
     
-    if breakout_candle['close'] > highest_high and (props_breakout['pavio_superior'] / props_breakout['corpo'] if props_breakout['corpo'] > 0 else 1) < max_wick_ratio:
-        is_bullish_breakout = True
+    if breakout_candle['close'] > highest_high and (props_breakout['pavio_superior'] / props_breakout['corpo'] if props_breakout['corpo'] > 0 else 1) < max_wick:
         direcao = 'BUY'
-    elif breakout_candle['close'] < lowest_low and (props_breakout['pavio_inferior'] / props_breakout['corpo'] if props_breakout['corpo'] > 0 else 1) < max_wick_ratio:
-        is_bearish_breakout = True
+    elif breakout_candle['close'] < lowest_low and (props_breakout['pavio_inferior'] / props_breakout['corpo'] if props_breakout['corpo'] > 0 else 1) < max_wick:
         direcao = 'SELL'
     
     if not direcao: return score, direcao
-    score += 1 # Ponto pelo padrão principal
+    score += 1
 
     closes = [v['close'] for v in velas]
     trend_ema = check_trend_with_emas(closes, p)
@@ -357,7 +374,6 @@ def strategy_sr_breakout(velas, p, state, ativo=None):
 
     if trend_ema == direcao: score += 1
     if (direcao == 'BUY' and rsi_value > 50) or (direcao == 'SELL' and rsi_value < 50): score += 1
-    
     if state and ativo and state.consecutive_losses.get(ativo, 0) == 0: score += 1
     
     return score, direcao
@@ -367,22 +383,18 @@ def strategy_engulfing(velas, p, state, ativo=None):
     min_candles = max(p.get('EMA_Short_Period', 9), p.get('EMA_Long_Period', 21), p.get('Engulfing_RSIPeriod', 14)) + 4
     if len(velas) < min_candles: return score, direcao
 
-    engulfing, engulfed, trend1, trend2 = velas[-1], velas[-2], velas[-3], velas[-4]
-    p_eng, p_ed, p_t1, p_t2 = get_candle_props(engulfing), get_candle_props(engulfed), get_candle_props(trend1), get_candle_props(trend2)
+    p_eng, p_ed, p_t1, p_t2 = (get_candle_props(velas[i]) for i in [-1, -2, -3, -4])
     if not all([p_eng, p_ed, p_t1, p_t2]): return score, direcao
 
-    strong_body_ratio = p.get('Engulfing_BodyRatio', 0.70)
-    max_wick_ratio = p.get('Engulfing_MaxOppositeWickRatio', 0.3)
+    strong_body, max_wick = p.get('Engulfing_BodyRatio', 0.70), p.get('Engulfing_MaxOppositeWickRatio', 0.3)
     
     is_bullish = p_t1['is_baixa'] and p_t2['is_baixa'] and p_ed['is_baixa'] and p_eng['is_alta'] and \
-                 engulfing['close'] > engulfed['open'] and engulfing['open'] < engulfed['close'] and \
-                 p_eng['body_ratio'] >= strong_body_ratio and \
-                 (p_eng['pavio_superior'] / p_eng['corpo'] if p_eng['corpo'] > 0 else 1) < max_wick_ratio
+                 velas[-1]['close'] > velas[-2]['open'] and velas[-1]['open'] < velas[-2]['close'] and \
+                 p_eng['body_ratio'] >= strong_body and (p_eng['pavio_superior'] / p_eng['corpo'] if p_eng['corpo'] > 0 else 1) < max_wick
     
     is_bearish = p_t1['is_alta'] and p_t2['is_alta'] and p_ed['is_alta'] and p_eng['is_baixa'] and \
-                 engulfing['close'] < engulfed['open'] and engulfing['open'] > engulfed['close'] and \
-                 p_eng['body_ratio'] >= strong_body_ratio and \
-                 (p_eng['pavio_inferior'] / p_eng['corpo'] if p_eng['corpo'] > 0 else 1) < max_wick_ratio
+                 velas[-1]['close'] < velas[-2]['open'] and velas[-1]['open'] > velas[-2]['close'] and \
+                 p_eng['body_ratio'] >= strong_body and (p_eng['pavio_inferior'] / p_eng['corpo'] if p_eng['corpo'] > 0 else 1) < max_wick
     
     if is_bullish: direcao = 'BUY'
     elif is_bearish: direcao = 'SELL'
@@ -393,10 +405,8 @@ def strategy_engulfing(velas, p, state, ativo=None):
     trend_ema = check_trend_with_emas(closes, p)
     rsi_value = calculate_rsi(closes, p.get('Engulfing_RSIPeriod', 14))
 
-    # Engolfo é reversão, então a tendência EMA deve ser OPOSTA ao sinal
     if (direcao == 'BUY' and trend_ema == 'SELL') or (direcao == 'SELL' and trend_ema == 'BUY'): score += 1
     if (direcao == 'BUY' and rsi_value < 40) or (direcao == 'SELL' and rsi_value > 60): score += 1
-
     if state and ativo and state.consecutive_losses.get(ativo, 0) == 0: score += 1
         
     return score, direcao
@@ -406,19 +416,16 @@ def strategy_candle_flow(velas, p, state, ativo=None):
     min_candles = max(p.get('EMA_Short_Period', 9), p.get('EMA_Long_Period', 21), p.get('Flow_RSIPeriod', 14)) + 3
     if len(velas) < min_candles: return score, direcao
 
-    f1, f2 = velas[-2], velas[-1]
-    p1, p2 = get_candle_props(f1), get_candle_props(f2)
+    p1, p2 = get_candle_props(velas[-2]), get_candle_props(velas[-1])
     if not all([p1, p2]): return score, direcao
 
     strong_body, max_wick = p.get('Flow_BodyRatio', 0.70), p.get('Flow_MaxWickRatio', 0.40)
     
     is_bullish = p1['is_alta'] and p2['is_alta'] and p1['body_ratio'] >= strong_body and p2['body_ratio'] >= strong_body and \
-                 (p1['pavio_superior'] / p1['corpo'] if p1['corpo'] > 0 else 1) < max_wick and \
-                 (p2['pavio_superior'] / p2['corpo'] if p2['corpo'] > 0 else 1) < max_wick
+                 (p1['pavio_superior'] / p1['corpo'] if p1['corpo'] > 0 else 1) < max_wick and (p2['pavio_superior'] / p2['corpo'] if p2['corpo'] > 0 else 1) < max_wick
     
     is_bearish = p1['is_baixa'] and p2['is_baixa'] and p1['body_ratio'] >= strong_body and p2['body_ratio'] >= strong_body and \
-                 (p1['pavio_inferior'] / p1['corpo'] if p1['corpo'] > 0 else 1) < max_wick and \
-                 (p2['pavio_inferior'] / p2['corpo'] if p2['corpo'] > 0 else 1) < max_wick
+                 (p1['pavio_inferior'] / p1['corpo'] if p1['corpo'] > 0 else 1) < max_wick and (p2['pavio_inferior'] / p2['corpo'] if p2['corpo'] > 0 else 1) < max_wick
 
     if is_bullish: direcao = 'BUY'
     elif is_bearish: direcao = 'SELL'
@@ -433,10 +440,7 @@ def strategy_candle_flow(velas, p, state, ativo=None):
     rsi_curr, rsi_prev = rsi_values[-1], rsi_values[-2]
 
     if trend_ema == direcao: score += 1
-    if (direcao == 'BUY' and rsi_curr > 50 and rsi_curr > rsi_prev) or \
-       (direcao == 'SELL' and rsi_curr < 50 and rsi_curr < rsi_prev):
-        score += 1
-        
+    if (direcao == 'BUY' and rsi_curr > 50 and rsi_curr > rsi_prev) or (direcao == 'SELL' and rsi_curr < 50 and rsi_curr < rsi_prev): score += 1
     if state and ativo and state.consecutive_losses.get(ativo, 0) == 0: score += 1
 
     return score, direcao
@@ -452,7 +456,6 @@ class BotState:
         self.suspended_pairs = {}
         self.global_losses_since_catalog = 0
         self.lock = Lock()
-        # New state for standby mode
         self.standby_mode = False
         self.standby_until = 0
         self.global_loss_timestamps = deque(maxlen=p.get('Standby_Loss_Count', 3))
@@ -462,28 +465,70 @@ def get_config_from_env():
         'conta': os.getenv('EXNOVA_CONTA', 'PRACTICE').upper(), 'pay_minimo': float(os.getenv('EXNOVA_PAY_MINIMO', 80)),
         'valor_entrada': float(os.getenv('EXNOVA_VALOR_ENTRADA', 1)), 'expiracao': int(os.getenv('EXNOVA_EXPIRACAO', 1)),
         'usar_mg': os.getenv('EXNOVA_USAR_MG', 'SIM').upper() == 'SIM', 'mg_niveis': int(os.getenv('EXNOVA_MG_NIVEIS', 2)),
-        'mg_fator': float(os.getenv('EXNOVA_MG_FATOR', 2.0)), 'modo_operacao': os.getenv('EXNOVA_MODO_OPERACAO', '2')
+        'mg_fator': float(os.getenv('EXNOVA_MG_FATOR', 2.0)), 'modo_operacao': os.getenv('EXNOVA_MODO_OPERACAO', '1') # Default to Catalog Mode
     }
 
 def compra_thread(api, ativo, valor, direcao, expiracao, tipo_op, state, config, cifrao, signal_id, target_entry_timestamp):
     try:
-        # ... (código da thread de compra permanece o mesmo, mas agora lida com perdas globais) ...
-        # Lógica de compra omitida para brevidade, mas deve ser a mesma da v59.
-        # A parte importante é como ela interage com 'state' após uma perda.
-        # Exemplo de como a perda é registrada:
-        # if resultado < 0:
-        #    log_error(...)
-        #    with state.lock:
-        #        state.loss_count += 1
-        #        state.global_losses_since_catalog += 1
-        #        state.global_loss_timestamps.append(time.time()) # <--- NOVA LINHA
-        #        state.consecutive_losses[ativo] = state.consecutive_losses.get(ativo, 0) + 1
-        #        ... (resto da lógica de suspensão) ...
-        pass # A lógica de compra real é complexa e não precisa ser reescrita aqui.
-    except Exception as e: log_error(f"ERRO CRÍTICO NA THREAD DE COMPRA: {e}"); traceback.print_exc()
+        wait_time = target_entry_timestamp - time.time() - 5.0
+        if wait_time > 0: time.sleep(wait_time)
+
+        if time.time() > target_entry_timestamp + 10:
+            log_error("Oportunidade perdida (atraso >10s).", pair=ativo); return
+
+        entrada_atual, direcao_atual, niveis_mg = valor, direcao, config['mg_niveis'] if config['usar_mg'] else 0
+        resultado_final = None
+        for i in range(niveis_mg + 1):
+            if state.stop: break
+            if i > 0:
+                signal_queue.put({"type": "gale", "signal_id": signal_id, "gale_level": i})
+                if signal_id in state.signal_history: state.signal_history[signal_id]["gale_level"] = i
+            
+            gale_info = f"(Gale {i})" if i > 0 else "(Entrada Principal)"
+            log_info(f"ORDEM {gale_info}: {cifrao}{entrada_atual:.2f} | {direcao_atual.upper()} | {expiracao}M", pair=ativo)
+            
+            check, id_ordem = api.buy(entrada_atual, ativo, direcao_atual, expiracao)
+            if not check: log_error(f"Falha ao abrir ordem no {gale_info}.", pair=ativo); resultado_final = "ERROR"; break
+            
+            resultado, status_encontrado = 0.0, False; tempo_limite = time.time() + expiracao * 60 + 15
+            while time.time() < tempo_limite:
+                status, lucro = api.check_win_v4(id_ordem)
+                if status: resultado, status_encontrado = lucro, True; break
+                time.sleep(0.5)
+            
+            if not status_encontrado: log_error(f"Timeout na ordem {id_ordem}.", pair=ativo); resultado_final = "ERROR"; break
+            
+            if resultado > 0:
+                log_success(f"RESULTADO: WIN {gale_info} | Lucro: {cifrao}{resultado:.2f}", pair=ativo)
+                with state.lock:
+                    state.win_count += 1
+                    if i > 0: state.gale_wins[f'g{i}'] += 1
+                    state.consecutive_losses[ativo] = 0
+                resultado_final = 'WIN'; break
+            elif resultado < 0:
+                log_error(f"RESULTADO: LOSS {gale_info} | Perda: {cifrao}{abs(resultado):.2f}", pair=ativo)
+                with state.lock:
+                    state.loss_count += 1
+                    state.global_losses_since_catalog += 1
+                    state.global_loss_timestamps.append(time.time())
+                    state.consecutive_losses[ativo] = state.consecutive_losses.get(ativo, 0) + 1
+                    if state.consecutive_losses[ativo] >= 2:
+                        state.suspended_pairs[ativo] = time.time() + 1800
+                        log_error("Par suspenso por 30 min (2 derrotas seguidas).", pair=ativo)
+                if i < niveis_mg: entrada_atual *= config['mg_fator']
+                else: resultado_final = 'LOSS'
+            else:
+                log_warning(f"RESULTADO: EMPATE {gale_info}.", pair=ativo)
+                if i < niveis_mg: log_info("Re-entrando após empate...", pair=ativo)
+                else: resultado_final = 'DRAW'
+        
+        if resultado_final and resultado_final != "ERROR" and signal_id in state.signal_history:
+            state.signal_history[signal_id]["result"] = resultado_final
+            placar = { "wins": state.win_count, "losses": state.loss_count, "gale_wins": sum(state.gale_wins.values()) }
+            signal_queue.put({ "type": "result", "signal_id": signal_id, "result": resultado_final, "placar": placar })
+    except Exception as e: log_error(f"ERRO CRÍTICO NA THREAD: {e}", pair=ativo); traceback.print_exc()
     finally:
         with state.lock: state.active_trades -= 1
-
 
 def main_bot_logic(state, PARAMS):
     exibir_banner()
@@ -498,30 +543,29 @@ def main_bot_logic(state, PARAMS):
     
     log_success("Conexão estabelecida!"); API.change_balance(config['conta'])
     cifrao = API.get_profile_ansyc().get('currency_char', '$')
+    log_success(f"Logado como {API.profile['name']} | Moeda: {cifrao}")
     
     if config['modo_operacao'] == '1':
-        state.champion_strategies = catalogar_e_selecionar(API, PARAMS, 60, state)
+        state.champion_strategies = catalogar_e_selecionar(API, PARAMS, state)
         with state.lock:
             state.consecutive_losses = {par: 0 for par in state.champion_strategies.keys()}
 
     minuto_anterior, analise_feita = -1, False
     ultimo_ciclo_catalogacao = time.time()
-    TEMPO_CICLO_CATALOGACAO = 7200
-
     log_info("Bot iniciado. Entrando no loop de análise inteligente...")
 
     while not state.stop:
         try:
-            # --- VERIFICAÇÃO DO MODO STANDBY ---
             with state.lock:
                 if state.standby_mode and time.time() < state.standby_until:
+                    if int(time.time()) % 10 == 0: log_warning(f"Bot em modo Stand-by. Retomando em {int(state.standby_until - time.time())}s...")
                     time.sleep(5)
                     continue
                 elif state.standby_mode:
                     log_success("Modo Stand-by finalizado. Retomando análises.")
                     state.standby_mode = False
 
-                if len(state.global_loss_timestamps) == PARAMS.get('Standby_Loss_Count', 3):
+                if len(state.global_loss_timestamps) >= PARAMS.get('Standby_Loss_Count', 3):
                     time_diff = state.global_loss_timestamps[-1] - state.global_loss_timestamps[0]
                     if time_diff <= PARAMS.get('Standby_Timeframe_Minutes', 5) * 60:
                         log_error("Gatilho de segurança global ativado! Entrando em modo Stand-by por 3 minutos.")
@@ -529,44 +573,68 @@ def main_bot_logic(state, PARAMS):
                         state.standby_until = time.time() + 180
                         state.global_loss_timestamps.clear()
                         continue
-
-            # ... (lógica de recatalogação, tempo, etc.) ...
             
+            if config['modo_operacao'] == '1' and (time.time() - ultimo_ciclo_catalogacao > PARAMS.get('Recatalog_Cycle_Hours', 2) * 3600 or state.global_losses_since_catalog >= PARAMS.get('Recatalog_Loss_Trigger', 5)):
+                log_warning("Gatilho de segurança ativado. Recatalogando todo o mercado...")
+                state.champion_strategies = catalogar_e_selecionar(API, PARAMS, state)
+                with state.lock:
+                    state.consecutive_losses = {par: 0 for par in state.champion_strategies.keys()}
+                    state.suspended_pairs.clear()
+                    state.global_losses_since_catalog = 0
+                ultimo_ciclo_catalogacao = time.time()
+
+            timestamp = time.time()
+            dt_objeto = datetime.fromtimestamp(timestamp)
+            if dt_objeto.minute != minuto_anterior:
+                minuto_anterior, analise_feita = dt_objeto.minute, False
+
             with state.lock: active_trades_count = state.active_trades
             MAX_SIMULTANEOUS_TRADES = 1
             
-            # --- LOOP DE ANÁLISE PRINCIPAL ---
-            timestamp = time.time()
-            dt_objeto = datetime.fromtimestamp(timestamp)
             if dt_objeto.second >= 30 and not analise_feita and active_trades_count < MAX_SIMULTANEOUS_TRADES:
                 analise_feita = True
                 
-                # ... (obter lucros, limpar pares suspensos) ...
+                with state.lock:
+                    pares_a_remover = [p for p, t in state.suspended_pairs.items() if time.time() > t]
+                    for p in pares_a_remover:
+                        del state.suspended_pairs[p]
+                        log_info("Par reativado após suspensão.", pair=p)
+
+                all_profits = API.get_all_profit()
 
                 for ativo, estrategia in state.champion_strategies.items():
-                    # ... (verificar se o par está suspenso, obter payout) ...
+                    if ativo in state.suspended_pairs: continue
+                    
+                    payout = all_profits.get(ativo, {}).get('turbo', 0) * 100 or all_profits.get(ativo, {}).get('binary', 0) * 100
+                    if payout < config['pay_minimo']: continue
+
                     velas = validar_e_limpar_velas(API.get_candles(ativo, 60, 150, time.time()))
                     if not velas or len(velas) < 30: continue
 
-                    # --- APLICAÇÃO DOS FILTROS GLOBAIS ---
-                    if is_market_consolidating(velas, PARAMS):
-                        log_warning(f"-> {ativo}: Mercado consolidado. Análise descartada."); continue
-                    if is_exhaustion_pattern(velas, PARAMS):
-                        log_warning(f"-> {ativo}: Padrão de exaustão detectado. Análise descartada."); continue
+                    if is_market_consolidating(velas, PARAMS): log_warning("Mercado consolidado. Análise descartada.", pair=ativo); continue
+                    if is_exhaustion_pattern(velas, PARAMS): log_warning("Padrão de exaustão detectado. Análise descartada.", pair=ativo); continue
 
-                    # --- EXECUÇÃO DA ESTRATÉGIA E SCORE ---
                     cod_est = next((cod for cod, nome in ALL_STRATEGIES.items() if nome == estrategia), None)
                     if not cod_est: continue
                     
                     score, direcao_sinal = globals().get(f'strategy_{cod_est}')(velas, PARAMS, state, ativo)
 
                     if score >= PARAMS.get('Minimum_Confidence_Score', 3):
-                        log_success(f"SINAL CONFIRMADO (Score: {score}): {direcao_sinal} em {ativo} via {estrategia}")
-                        # ... (lógica para preparar e iniciar a compra_thread) ...
-                    else:
-                        if score > 0: log_info(f"-> {ativo}: Sinal encontrado para {estrategia} mas com score baixo ({score}). Entrada abortada.")
+                        horario_entrada_str = (dt_objeto.replace(second=0, microsecond=0) + timedelta(minutes=1)).strftime('%H:%M')
+                        log_success(f"SINAL CONFIRMADO (Score: {score}) -> {direcao_sinal} para as {horario_entrada_str}", pair=ativo)
+                        
+                        with state.lock: state.active_trades += 1
+                        signal_id = str(uuid.uuid4())
+                        signal_payload = { "type": "signal", "signal_id": signal_id, "pair": ativo, "strategy": estrategia, "direction": direcao_sinal, "entry_time": horario_entrada_str, "candle": get_candle_props(velas[-1]), "result": None, "gale_level": 0 }
+                        state.signal_history[signal_id] = signal_payload
+                        signal_queue.put(signal_payload)
 
-            if dt_objeto.second < 30: analise_feita = False
+                        target_entry_timestamp = (timestamp // 60 + 1) * 60
+                        tipo_op = 'turbo' if 'turbo' in all_profits.get(ativo, {}) else 'binary'
+                        Thread(target=compra_thread, args=(API, ativo, config['valor_entrada'], {'BUY':'call', 'SELL':'put'}[direcao_sinal], config['expiracao'], tipo_op, state, config, cifrao, signal_id, target_entry_timestamp), daemon=True).start()
+                    elif score > 0:
+                        log_info(f"Sinal para '{estrategia}' encontrado mas com score baixo ({score}). Entrada abortada.", pair=ativo)
+
             time.sleep(0.2)
         
         except Exception as e:
@@ -574,20 +642,12 @@ def main_bot_logic(state, PARAMS):
 
 def main():
     PARAMS = { 
-        # Filtros Globais
-        'Consolidation_Lookback': 10, 'Consolidation_Threshold': 0.0005,
-        'Exhaustion_DojiLike_Ratio': 0.2,
-        # Standby Global
-        'Standby_Loss_Count': 3, 'Standby_Timeframe_Minutes': 5,
-        # Score de Confiança
-        'Minimum_Confidence_Score': 3, # Mínimo 2 para entrar
-        # Indicadores
+        'Assertividade_Minima': 60, 'Recatalog_Cycle_Hours': 2, 'Recatalog_Loss_Trigger': 5,
+        'Consolidation_Lookback': 10, 'Consolidation_Threshold': 0.0005, 'Exhaustion_DojiLike_Ratio': 0.2,
+        'Standby_Loss_Count': 3, 'Standby_Timeframe_Minutes': 5, 'Minimum_Confidence_Score': 3,
         'EMA_Short_Period': 9, 'EMA_Long_Period': 21,
-        # Estratégia Rompimento
         'SR_Lookback': 15, 'SR_BodyRatio': 0.70, 'SR_MaxOppositeWickRatio': 0.30, 'SR_RSIPeriod': 14,
-        # Estratégia Engolfo
         'Engulfing_BodyRatio': 0.70, 'Engulfing_MaxOppositeWickRatio': 0.3, 'Engulfing_RSIPeriod': 14, 'Engulfing_ProximityPercent': 0.01,
-        # Estratégia Fluxo de Velas
         'Flow_BodyRatio': 0.70, 'Flow_MaxWickRatio': 0.40, 'Flow_RSIPeriod': 14,
     }
     bot_state = BotState(PARAMS)
@@ -600,7 +660,7 @@ def main():
     except KeyboardInterrupt:
         log_warning("\nBot interrompido pelo usuário.")
     finally:
-        bot_state.stop = True; log(b, "Desligando..."); time.sleep(2); sys.exit()
+        bot_state.stop = True; log_info("Desligando..."); time.sleep(2); sys.exit()
 
 if __name__ == "__main__":
     main()
