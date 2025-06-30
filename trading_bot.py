@@ -16,8 +16,6 @@ import queue
 
 from colorama import init, Fore
 
-# Removed numpy and pandas imports to ensure compatibility
-
 try:
     from exnovaapi.stable_api import Exnova
 except ImportError:
@@ -648,10 +646,10 @@ def main_bot_logic(state, PARAMS):
                     signal_queue.put(analysis_payload)
 
                     master_trend = get_master_trend(velas, PARAMS)
-                    if master_trend == 'SIDEWAYS': log_info("Mercado lateral (filtro MA 100).", pair=ativo); continue
+                    if master_trend == 'SIDEWAYS': continue # Silently skip sideways markets
                     
-                    if is_market_consolidating(velas, PARAMS): log_info("Mercado consolidado.", pair=ativo); continue
-                    if is_exhaustion_pattern(velas, PARAMS): log_warning("Padrão de exaustão.", pair=ativo); continue
+                    if is_market_consolidating(velas, PARAMS): continue
+                    if is_exhaustion_pattern(velas, PARAMS): continue
 
                     cod_est = next((cod for cod, nome in ALL_STRATEGIES.items() if nome == estrategia), None)
                     if not cod_est: continue
