@@ -124,7 +124,7 @@ def exibir_banner():
       ██║   ██╔══██╗██║██╔══██║██║       ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║    ██║    ██║
       ██║   ██║  ██║██║██║  ██║███████╗    ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝    ██║
       ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝     ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝     ╚═╝ '''+y+'''
-              azkzero@gmail.com - v64.2 (Correção de Função Faltando)
+              azkzero@gmail.com - v64.2 (Correção de Variável Global)
     ''')
     print(y + "*"*88)
     print(c + "="*88)
@@ -411,6 +411,11 @@ def strategy_candle_flow(velas, p, state, ativo=None):
     return score, direcao
 
 # --- New Strategy Dispatcher ---
+ALL_STRATEGIES = {
+    'sr_breakout': 'Rompimento', 
+    'engulfing': 'Engolfo',
+    'candle_flow': 'Fluxo de Velas',
+}
 STRATEGY_FUNCTIONS = {
     'sr_breakout': strategy_sr_breakout,
     'engulfing': strategy_engulfing,
