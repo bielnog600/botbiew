@@ -209,7 +209,7 @@ def validar_e_limpar_velas(velas_raw):
         if all(vela_padronizada.values()): velas_limpas.append(vela_padronizada)
     return velas_limpas
 
-def catalogar_e_selecionar(api, params, assertividade_minima=60):
+def catalogar_e_selecionar(api, params, assertividade_minima=80):
     log_info("="*40); log_info("MODO DE CATALOGAÇÃO E SELEÇÃO INICIADO..."); log_info("="*40)
     
     ativos_abertos = []
