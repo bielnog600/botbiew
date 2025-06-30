@@ -124,7 +124,7 @@ def exibir_banner():
       ██║   ██╔══██╗██║██╔══██║██║       ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║    ██║    ██║
       ██║   ██║  ██║██║██║  ██║███████╗    ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝    ██║
       ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝     ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝     ╚═╝ '''+y+'''
-              azkzero@gmail.com - v64.1 (Dependências Removidas)
+              azkzero@gmail.com - v64.2 (Correção de Função Faltando)
     ''')
     print(y + "*"*88)
     print(c + "="*88)
@@ -416,6 +416,70 @@ STRATEGY_FUNCTIONS = {
     'engulfing': strategy_engulfing,
     'candle_flow': strategy_candle_flow,
 }
+
+# --- RE-ADDED MISSING FUNCTION ---
+def catalogar_e_selecionar(api, params, state):
+    log_info("MODO DE CATALOGAÇÃO E SELEÇÃO INICIADO...")
+    
+    ativos_abertos = []
+    try:
+        all_assets = api.get_all_open_time()
+        for tipo_mercado in ['binary', 'turbo']:
+            if tipo_mercado in all_assets:
+                for ativo, info in all_assets[tipo_mercado].items():
+                    if info.get('open', False) and ativo not in ativos_abertos: ativos_abertos.append(ativo)
+    except Exception as e:
+        log_error(f"Não foi possível obter os ativos abertos: {e}")
+        return {}
+
+    if not ativos_abertos: log_error("Nenhum par aberto encontrado para catalogar."); return {}
+
+    log_info(f"Encontrados {len(ativos_abertos)} pares abertos para análise.")
+    champion_strategies = {}
+    assertividade_minima = params.get('Assertividade_Minima', 60)
+
+    for ativo_original in ativos_abertos:
+        try:
+            log_info(f"Analisando o par...", pair=ativo_original)
+            velas_historicas_raw = api.get_candles(ativo_original, 60, 300, time.time())
+            todas_as_velas = validar_e_limpar_velas(velas_historicas_raw)
+            if not todas_as_velas or len(todas_as_velas) < 150: 
+                log_warning(f"Dados históricos insuficientes.", pair=ativo_original)
+                continue
+            
+            best_strategy, highest_assertiveness = None, 0
+
+            for cod, nome in ALL_STRATEGIES.items():
+                wins, losses, total = 0, 0, 0
+                for i in range(120, len(todas_as_velas) - 1):
+                    velas_atuais, vela_resultado = todas_as_velas[:i], todas_as_velas[i]
+                    strategy_function = STRATEGY_FUNCTIONS[cod]
+                    score, direcao = strategy_function(velas_atuais, params, None, ativo_original)
+                    if score >= params.get('Minimum_Confidence_Score', 3):
+                        sinal = direcao
+                        total += 1
+                        if (sinal == 'BUY' and vela_resultado['close'] > velas_atuais[-1]['close']) or \
+                           (sinal == 'SELL' and vela_resultado['close'] < velas_atuais[-1]['close']):
+                            wins += 1
+                        else:
+                            losses += 1
+                
+                if total > 5:
+                    assertividade = (wins / total) * 100
+                    log_info(f"Estratégia '{nome}': {assertividade:.2f}% ({wins}W/{losses}L)", pair=ativo_original)
+                    if assertividade > highest_assertiveness:
+                        highest_assertiveness, best_strategy = assertividade, nome
+            
+            if best_strategy and highest_assertiveness >= assertividade_minima:
+                champion_strategies[ativo_original] = best_strategy
+                log_success(f"Estratégia campeã: {best_strategy} com {highest_assertiveness:.2f}% de acerto.", pair=ativo_original)
+            else:
+                log_warning("Nenhuma estratégia atingiu os critérios mínimos.", pair=ativo_original)
+
+        except Exception as e: log_error(f"Erro ao analisar: {e}", pair=ativo_original); traceback.print_exc()
+        
+    log_info("CATALOGAÇÃO FINALIZADA!")
+    return champion_strategies
 
 class BotState:
     def __init__(self, p):
