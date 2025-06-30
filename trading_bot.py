@@ -196,7 +196,8 @@ def main_bot_logic(state):
                 response = supabase_client.table('bot_config').select('*').eq('id', 1).single().execute()
                 config_data = response.data
             except APIError as e:
-                if "The result contains 0 rows" in e.message:
+                # --- FIX: Check for the specific error code 'PGRST116' which means no rows were found ---
+                if hasattr(e, 'code') and e.code == 'PGRST116':
                     log_warning("Configuração do bot não encontrada na base de dados. A criar configuração padrão...")
                     default_params = {
                         "Assertividade_Minima": 80, "MAX_SIMULTANEOUS_TRADES": 1, "Standby_Loss_Count": 2,
@@ -209,20 +210,25 @@ def main_bot_logic(state):
                         "status": "PAUSED",
                         "params": default_params
                     }).execute()
+                    
+                    # Check if the insert was successful and get the new data
                     if insert_response.data:
                         log_success("Configuração padrão criada com sucesso. O bot continuará em modo PAUSADO.")
                         config_data = insert_response.data[0]
                     else:
                         log_error("Falha ao criar configuração padrão. A tentar novamente no próximo ciclo.")
                         time.sleep(10)
-                        continue
+                        continue # Restart the loop
                 else:
-                    raise e # Re-lança outros erros da API
+                    # Re-raise any other API errors that are not the 'zero rows' error
+                    log_error(f"Erro de API do Supabase não tratado: {e}")
+                    raise e
 
             bot_status = config_data.get('status', 'PAUSED')
             remote_params = config_data.get('params', {})
 
             if bot_status == 'PAUSED':
+                # Log 'PAUSED' status less frequently to avoid spamming the console
                 if int(time.time()) % 20 == 0:
                     log_info("Bot em modo PAUSADO. A aguardar comando 'RUNNING' do painel.")
                 time.sleep(5)
