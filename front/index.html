@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Admin Dashboard - MAROMBIEW BOT</title>
+    <title>Dashboard - MAROMBIEW BOT</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
@@ -11,19 +11,23 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
-        body { background-color: #0a0a0a; color: #e5e7eb; }
+        body { background-color: #0a0a0a; color: #e5e7eb; font-family: 'Poppins', sans-serif; }
         .glass-card { background: rgba(17, 24, 39, 0.6); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.1); }
         .form-input { background-color: #1f2937; border-color: #374151; }
         .btn-primary { background-color: #0d9488; }
         .btn-primary:hover { background-color: #14b8a6; }
         .nav-link-active { background-color: #14b8a6; color: white; }
+        .font-mono { font-family: 'Roboto Mono', monospace; }
+        @keyframes card-enter { from { opacity: 0; transform: scale(0.95) translateY(10px); } to { opacity: 1; transform: scale(1) translateY(0); } }
+        .card-enter-animation { animation: card-enter 0.4s ease-out forwards; }
+        .timer-border-wrapper { position: absolute; top: -2px; right: -2px; bottom: -2px; left: -2px; border-radius: 1.125rem; z-index: 0; background: var(--gradient); }
     </style>
 </head>
 <body>
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect, useCallback, Component } = React; // <<< CORREÇÃO: Adicionado 'Component'
+        const { useState, useEffect, useCallback, useMemo, Component } = React;
         const { createClient } = supabase;
 
         // --- INFORMAÇÕES DE CONEXÃO COM O SUPABASE ---
@@ -31,6 +35,8 @@
         const SUPABASE_URL = 'https://ioduahwknfsktujthfyc.supabase.co';
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlvZHVhaHdrbmZza3R1anRoZnljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEzMDc0NDcsImV4cCI6MjA2Njg4MzQ0N30.96f8wZO6SvABKFMWjIiw1pSugAB4Isldj7yxLcLJRSE';
         // ⬆️⬆️⬆️ SUBSTITUA PELOS SEUS DADOS AQUI ⬆️⬆️⬆️
+        const WEBSOCKET_URL = 'wss://botexnova.marombiew.com';
+
 
         let supabaseClient;
         let supabaseInitializationError = null;
@@ -45,6 +51,7 @@
             }
         }
 
+        // --- Componentes ---
 
         function LoginPage({ onLogin }) {
             const [email, setEmail] = useState('');
@@ -57,50 +64,31 @@
                 setLoading(true);
                 setError('');
                 const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
-                if (error) {
-                    setError(error.message);
-                } else if (data.user) {
-                    onLogin(data.user);
-                }
+                if (error) setError(error.message);
+                else if (data.user) onLogin(data.user);
                 setLoading(false);
             };
 
             return (
                 <div className="min-h-screen flex items-center justify-center bg-gray-900">
                     <div className="w-full max-w-md p-8 space-y-8 glass-card rounded-xl">
-                        <div>
-                            <h2 className="mt-6 text-center text-3xl font-extrabold text-white">Admin Login</h2>
-                        </div>
+                        <div><h2 className="mt-6 text-center text-3xl font-extrabold text-white">Login</h2></div>
                         <form className="mt-8 space-y-6" onSubmit={handleLogin}>
                             <div className="rounded-md shadow-sm -space-y-px">
                                 <div><input type="email" required className="form-input appearance-none rounded-none relative block w-full px-3 py-2 border placeholder-gray-500 text-gray-300 rounded-t-md focus:outline-none focus:ring-teal-500 focus:border-teal-500" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} /></div>
                                 <div><input type="password" required className="form-input appearance-none rounded-none relative block w-full px-3 py-2 border placeholder-gray-500 text-gray-300 rounded-b-md focus:outline-none focus:ring-teal-500 focus:border-teal-500" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} /></div>
                             </div>
-                            {error && <p className="text-red-500 text-sm">{error}</p>}
+                            {error && <p className="text-red-500 text-sm text-center">{error}</p>}
                             <div><button type="submit" className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white btn-primary focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500" disabled={loading}>{loading ? 'A entrar...' : 'Entrar'}</button></div>
                         </form>
                     </div>
                 </div>
             );
         }
-
-        function Dashboard() {
+        
+        function AdminDashboard() {
             const [view, setView] = useState('bot_control');
-            const [user, setUser] = useState(null);
-
-            useEffect(() => {
-                const getSession = async () => {
-                    const { data: { session } } = await supabaseClient.auth.getSession();
-                    if(session) setUser(session.user);
-                };
-                getSession();
-            }, []);
-
-            const handleLogout = async () => {
-                await supabaseClient.auth.signOut();
-                setUser(null);
-                window.location.reload();
-            };
+            const handleLogout = async () => { await supabaseClient.auth.signOut(); window.location.reload(); };
 
             return (
                 <div className="flex h-screen bg-gray-900">
@@ -110,9 +98,7 @@
                             <a href="#" onClick={() => setView('bot_control')} className={`block px-4 py-2 rounded-md ${view === 'bot_control' ? 'nav-link-active' : ''}`}>Controlo do Bot</a>
                             <a href="#" onClick={() => setView('user_management')} className={`block px-4 py-2 rounded-md ${view === 'user_management' ? 'nav-link-active' : ''}`}>Gestão de Alunos</a>
                         </nav>
-                        <div className="p-4 border-t border-gray-700">
-                            <button onClick={handleLogout} className="w-full text-left px-4 py-2 rounded-md hover:bg-red-500">Sair</button>
-                        </div>
+                        <div className="p-4 border-t border-gray-700"><button onClick={handleLogout} className="w-full text-left px-4 py-2 rounded-md hover:bg-red-500">Sair</button></div>
                     </aside>
                     <main className="flex-1 p-10 overflow-y-auto">
                         {view === 'bot_control' && <BotControl />}
@@ -128,7 +114,7 @@
             const [loading, setLoading] = useState(false);
 
             const fetchConfig = useCallback(async () => {
-                const { data, error } = await supabaseClient.table('bot_config').select('*').eq('id', 1).single();
+                const { data } = await supabaseClient.table('bot_config').select('*').eq('id', 1).single();
                 if (data) {
                     setBotStatus(data.status);
                     setParams(JSON.stringify(data.params, null, 2));
@@ -151,9 +137,7 @@
                     await supabaseClient.table('bot_config').update({ params: parsedParams }).eq('id', 1);
                     alert('Parâmetros guardados com sucesso!');
                     setLoading(false);
-                } catch (e) {
-                    alert('Erro: JSON inválido!');
-                }
+                } catch (e) { alert('Erro: JSON inválido!'); }
             };
 
             return (
@@ -180,33 +164,17 @@
 
         function UserManagement() {
             const [users, setUsers] = useState([]);
-
             const fetchUsers = useCallback(async () => {
-                const { data, error } = await supabaseClient
-                    .from('profiles')
-                    .select(`
-                        id,
-                        email,
-                        role,
-                        subscriptions ( status, expires_at )
-                    `);
+                const { data } = await supabaseClient.from('profiles').select(`id, email, role, subscriptions ( status, expires_at )`);
                 if(data) setUsers(data);
             }, []);
 
             useEffect(() => { fetchUsers(); }, [fetchUsers]);
             
             const handleSubscriptionChange = async (userId, newStatus, newExpiry) => {
-                 const { data, error } = await supabaseClient
-                    .from('subscriptions')
-                    .select('user_id')
-                    .eq('user_id', userId)
-                    .single();
-
-                if (data) { // Update
-                    await supabaseClient.from('subscriptions').update({ status: newStatus, expires_at: newExpiry }).eq('user_id', userId);
-                } else { // Insert
-                    await supabaseClient.from('subscriptions').insert({ user_id: userId, status: newStatus, expires_at: newExpiry });
-                }
+                 const { data } = await supabaseClient.from('subscriptions').select('user_id').eq('user_id', userId).single();
+                if (data) await supabaseClient.from('subscriptions').update({ status: newStatus, expires_at: newExpiry }).eq('user_id', userId);
+                else await supabaseClient.from('subscriptions').insert({ user_id: userId, status: newStatus, expires_at: newExpiry });
                 fetchUsers();
             };
 
@@ -249,8 +217,155 @@
             );
         }
 
+        function ClientDashboard() {
+            const [activeTab, setActiveTab] = useState('home');
+            const [signals, setSignals] = useState([]);
+            const [scoreboard, setScoreboard] = useState({ wins: 0, losses: 0, gale_wins: 0 });
+            const [liveAnalysis, setLiveAnalysis] = useState({});
+            const [isConnected, setIsConnected] = useState(false);
+            const socketRef = useRef(null);
+
+            const handleMessage = useCallback((message) => {
+                if (!message || !message.type) return;
+                switch (message.type) {
+                    case 'init':
+                        const initialData = message.data || {};
+                        setScoreboard(initialData.placar || { wins: 0, losses: 0, gale_wins: 0 });
+                        setSignals((initialData.signals || []).sort((a,b) => (b.entry_time || "").localeCompare(a.entry_time || "")));
+                        break;
+                    case 'live_analysis': setLiveAnalysis(message.data); break;
+                    case 'signal': setSignals(prev => [message, ...prev]); break;
+                    case 'result':
+                        if (message.placar) setScoreboard(message.placar);
+                        setSignals(prev => prev.map(s => s.signal_id === message.signal_id ? { ...s, result: message.result } : s));
+                        break;
+                    case 'gale':
+                         setSignals(prev => prev.map(s => s.signal_id === message.signal_id ? { ...s, gale_level: message.gale_level } : s));
+                        break;
+                }
+            }, []);
+
+            const connect = useCallback(() => {
+                if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) return;
+                socketRef.current = new WebSocket(WEBSOCKET_URL);
+                socketRef.current.onmessage = (event) => { try { handleMessage(JSON.parse(event.data)); } catch (e) { console.error('Failed to parse message:', event.data, e)} };
+                socketRef.current.onopen = () => setIsConnected(true);
+                socketRef.current.onclose = () => { setIsConnected(false); setTimeout(connect, 5000); };
+                socketRef.current.onerror = () => setIsConnected(false);
+            }, [handleMessage]);
+
+            useEffect(() => {
+                connect();
+                return () => { if (socketRef.current) socketRef.current.close(); };
+            }, [connect]);
+
+            const renderView = () => {
+                switch(activeTab) {
+                    case 'reports': return <ReportsView signals={signals} />;
+                    case 'home':
+                    default: 
+                        return <HomeView signals={signals} liveAnalysis={liveAnalysis} />;
+                }
+            };
+            
+            return (
+              <div className="h-screen w-screen flex flex-col p-4 sm:p-6 lg:p-8 gap-6">
+                  <div className="flex-shrink-0">
+                    <Header isConnected={isConnected} />
+                    <Scoreboard scoreboard={scoreboard} />
+                  </div>
+                  <main className="flex-grow overflow-y-auto pb-20 lg:pb-0 no-scrollbar">{renderView()}</main>
+                  <div className="fixed bottom-0 left-0 right-0 lg:static lg:order-first z-50">
+                      <TabBar activeTab={activeTab} setActiveTab={setActiveTab} />
+                  </div>
+              </div>
+            );
+        }
+
+        // --- Componentes do Cliente (Home, Reports, etc.) ---
+        // (Estes componentes são os mesmos da versão anterior do dashboard)
+        const HomeView = ({ signals, liveAnalysis }) => {
+            const latestActiveSignalId = useMemo(() => {
+                const activeSignals = signals.filter(s => !s.result);
+                return activeSignals.length > 0 ? activeSignals[0].signal_id : null;
+            }, [signals]);
+
+            return (<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                        <LiveAnalysisCard analysis={liveAnalysis} showTimer={!latestActiveSignalId} />
+                        {signals.map(signal => <SignalCard key={`${signal.signal_id}-${signal.result}`} signal={signal} isLatestActive={signal.signal_id === latestActiveSignalId} />)}
+                    </div>);
+        }
+        const ReportsView = ({ signals }) => {
+            const completedSignals = useMemo(() => signals.filter(s => s.result && s.result !== 'DRAW'), [signals]);
+            const reports = useMemo(() => {
+                if (completedSignals.length === 0) return { strategyReport: {}, pairReport: {} };
+                const strategyReport = {}; const pairReport = {};
+                completedSignals.forEach(signal => {
+                    if (!signal.strategy) return;
+                    const isWin = signal.result === 'WIN';
+                    if (!strategyReport[signal.strategy]) strategyReport[signal.strategy] = { wins: 0, losses: 0 };
+                    if (isWin) strategyReport[signal.strategy].wins++; else strategyReport[signal.strategy].losses++;
+                    if (!pairReport[signal.pair]) pairReport[signal.pair] = { wins: 0, losses: 0 };
+                    if (isWin) pairReport[signal.pair].wins++; else pairReport[signal.pair].losses++;
+                });
+                return { strategyReport, pairReport };
+            }, [completedSignals]);
+            const ReportCard = ({ title, data }) => (<div className="glass-card rounded-xl p-6"><h3 className="text-xl font-bold mb-4">{title}</h3><div className="space-y-4">{Object.entries(data).length > 0 ? Object.entries(data).map(([key, value]) => {const total = value.wins + value.losses; const winRate = total > 0 ? ((value.wins / total) * 100).toFixed(1) : 0; return (<div key={key}><div className="flex justify-between items-center mb-1 text-sm"><span className="font-semibold">{key}</span><span className="font-mono text-gray-400">{value.wins}W / {value.losses}L</span></div><div className="w-full bg-gray-700 rounded-full h-2.5"><div className="bg-teal-500 h-2.5 rounded-full" style={{ width: `${winRate}%` }}></div></div><p className="text-xs text-right mt-1 text-teal-400">{winRate}% de Acerto</p></div>);}) : <p className="text-gray-500 text-center">Nenhum dado disponível.</p>}</div></div>);
+            if (completedSignals.length === 0) {
+                 return (<div className="glass-card rounded-xl p-8 text-center card-enter-animation"><i className="fa-solid fa-chart-simple text-4xl text-gray-500 mb-4"></i><h3 className="text-xl font-bold">Sem Dados de Relatório</h3><p className="text-gray-400 mt-2">Aguardando a finalização das primeiras operações.</p></div>);
+            }
+            return (<div className="grid grid-cols-1 md:grid-cols-2 gap-8 card-enter-animation"><ReportCard title="Performance por Estratégia" data={reports.strategyReport} /><ReportCard title="Performance por Par" data={reports.pairReport} /></div>);
+        }
+        const SignalCard = ({ signal, isLatestActive }) => {
+            const isCall = signal.direction.toUpperCase() === 'BUY';
+            const directionText = isCall ? 'CALL' : 'PUT';
+            const directionColor = isCall ? 'text-green-400' : 'text-red-400';
+            const directionIcon = isCall ? 'fa-arrow-trend-up' : 'fa-arrow-trend-down';
+            const ResultFooter = () => {
+                if (!signal.result) return <div className="w-full mt-3 h-16"></div>;
+                const isWin = signal.result === 'WIN'; const resultColor = isWin ? 'text-green-400' : 'text-red-400'; const resultIcon = isWin ? 'fa-solid fa-trophy' : 'fa-solid fa-shield-halved'; const resultBg = isWin ? 'bg-green-500/10 border-green-500/30' : 'bg-red-500/10 border-red-500/30';
+                return (<div className={`w-full mt-3 h-16 flex items-center justify-center rounded-lg border ${resultBg}`}><div className="text-center"><p className={`text-xs ${resultColor}`}>RESULTADO</p><p className={`font-mono text-2xl font-bold ${resultColor} flex items-center justify-center gap-2`}><i className={resultIcon}></i><span>{signal.result}</span></p></div></div>);
+            };
+            return (<div className="glass-card rounded-2xl p-4 flex flex-col text-center card-enter-animation relative h-[240px]">
+                {isLatestActive && !signal.result && <Timer />}
+                <div className="relative z-10 flex flex-col h-full">
+                    {signal.gale_level > 0 && <div className="absolute top-0 right-0 bg-amber-500 text-gray-900 text-xs font-bold px-2 py-0.5 rounded-full z-20">GALE {signal.gale_level}</div>}
+                    <div className="flex justify-between items-center w-full mb-3">
+                        <p className="font-bold text-xl text-white">{signal.pair}</p>
+                        <p className="text-xs bg-gray-700 text-gray-300 px-2 py-1 rounded-md">{signal.strategy}</p>
+                    </div>
+                    <div className="flex-grow flex justify-between items-center gap-4">
+                        <div className="flex flex-col justify-center h-full text-left">
+                            <p className="text-xs text-gray-400">HORÁRIO</p>
+                            <p className="font-mono text-3xl font-bold text-white my-1">{convertTimeToUserTimezone(signal.entry_time)}</p>
+                            <div className={`font-semibold text-2xl ${directionColor}`}><i className={`fa-solid ${directionIcon} mr-1`}></i>{directionText}</div>
+                        </div>
+                        <div className="flex items-center justify-center gap-2">
+                            <div className="w-10 h-24" dangerouslySetInnerHTML={{ __html: renderCandle(signal.previous_candle) }}></div>
+                            <i className="fa-solid fa-chevron-right text-gray-500"></i>
+                            <div className="w-10 h-24" dangerouslySetInnerHTML={{ __html: renderCandle(signal.candle) }}></div>
+                        </div>
+                    </div>
+                    <ResultFooter />
+                </div>
+            </div>);
+        };
+        const Timer = () => {
+            const [progress, setProgress] = useState(0);
+            useEffect(() => {
+                const updateTimer = () => setProgress(new Date().getSeconds());
+                updateTimer();
+                const intervalId = setInterval(updateTimer, 1000);
+                return () => clearInterval(intervalId);
+            }, []);
+            const timerStyle = { '--gradient': `conic-gradient(#14b8a6 ${progress * 6}deg, rgba(255,255,255,0.1) 0deg)` };
+            return <div className="timer-border-wrapper" style={timerStyle}></div>;
+        };
+
+
         function App() {
             const [session, setSession] = useState(null);
+            const [userProfile, setUserProfile] = useState(null);
             const [loading, setLoading] = useState(true);
 
             useEffect(() => {
@@ -258,13 +373,25 @@
                     setLoading(false);
                     return;
                 }
-                supabaseClient.auth.getSession().then(({ data: { session } }) => {
+                const getSessionAndProfile = async () => {
+                    const { data: { session } } = await supabaseClient.auth.getSession();
                     setSession(session);
+                    if (session) {
+                        const { data: profile } = await supabaseClient.from('profiles').select('*').eq('id', session.user.id).single();
+                        setUserProfile(profile);
+                    }
                     setLoading(false);
-                });
+                };
+                getSessionAndProfile();
 
-                const { data: { subscription } } = supabaseClient.auth.onAuthStateChange((_event, session) => {
+                const { data: { subscription } } = supabaseClient.auth.onAuthStateChange(async (_event, session) => {
                     setSession(session);
+                    if (session) {
+                         const { data: profile } = await supabaseClient.from('profiles').select('*').eq('id', session.user.id).single();
+                         setUserProfile(profile);
+                    } else {
+                        setUserProfile(null);
+                    }
                 });
 
                 return () => subscription.unsubscribe();
@@ -280,36 +407,17 @@
 
             if (!session) {
                 return <LoginPage onLogin={(user) => setSession({ user })} />;
-            } else {
-                return <Dashboard />;
             }
-        }
-
-        class ErrorBoundary extends Component {
-            constructor(props) {
-                super(props);
-                this.state = { hasError: false, error: null };
+            
+            if (userProfile && userProfile.role === 'admin') {
+                return <AdminDashboard />;
             }
-            static getDerivedStateFromError(error) { return { hasError: true, error }; }
-            componentDidCatch(error, errorInfo) { console.error("React Tree Error:", error, errorInfo); }
-            render() {
-                if (this.state.hasError) {
-                    return (
-                        <div className="text-center text-red-400 p-8 glass-card rounded-xl max-w-lg mx-auto">
-                            <h1 className="text-2xl font-bold mb-2"><i className="fa-solid fa-triangle-exclamation mr-2"></i>Oops! Algo correu mal.</h1>
-                            <p>A aplicação encontrou um erro. Por favor, tente atualizar a página.</p>
-                            <pre className="mt-4 text-xs text-left bg-gray-900 p-2 rounded overflow-auto">
-                                {this.state.error && this.state.error.toString()}
-                            </pre>
-                        </div>
-                    );
-                }
-                return this.props.children;
-            }
+            
+            return <ClientDashboard />;
         }
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<ErrorBoundary><App /></ErrorBoundary>);
+        root.render(<App />);
     </script>
 </body>
 </html>
