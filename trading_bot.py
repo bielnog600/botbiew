@@ -329,7 +329,7 @@ def catalogar_e_selecionar(api, params, state):
 
     log_info(f"Encontrados {len(ativos_abertos)} pares abertos para análise.")
     champion_strategies = {}
-    assertividade_minima = params.get('Assertividade_Minima', 70)
+    assertividade_minima = params.get('Assertividade_Minima', 80)
 
     for ativo_original in ativos_abertos:
         try:
@@ -564,7 +564,7 @@ def main_bot_logic(state, PARAMS):
 
 def main():
     PARAMS = { 
-        'Assertividade_Minima': 70,
+        'Assertividade_Minima': 80,
         'MAX_SIMULTANEOUS_TRADES': 1,
         'Standby_Loss_Count': 2,
         'Standby_Timeframe_Minutes': 5,
