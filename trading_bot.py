@@ -99,10 +99,13 @@ def _log_and_broadcast(level, message, pair="Sistema"):
     color_map = {'info': c, 'success': g, 'warning': y, 'error': r}
     console_color = color_map.get(level, w)
     
+    # Clean color codes from the message for both console and frontend
     clean_message = ''.join(filter(lambda char: char not in [g, y, r, w, c, b], message))
     
+    # 1. Print to console
     log(console_color, f"{pair}: {clean_message}" if pair != "Sistema" else clean_message)
 
+    # 2. Put in queue for frontend
     log_payload = { "type": "log", "data": { "level": level, "message": clean_message, "pair": pair } }
     signal_queue.put(log_payload)
 
@@ -114,6 +117,7 @@ def log_error(msg, pair="Sistema"): _log_and_broadcast('error', msg, pair)
 
 # --- Banner and WebSocket Functions ---
 def exibir_banner():
+    # Banner display remains the same, but logging calls will be handled by the new system.
     print(c + "\n" + "="*88)
     print(y + "*"*88)
     print(g + '''
@@ -270,29 +274,17 @@ def catalogar_e_selecionar(api, params, state):
     log_info("CATALOGAÇÃO FINALIZADA!")
     return champion_strategies
 
-# --- CORRECTED HELPER FUNCTION ---
 def get_candle_props(vela):
+    if not all(k in vela for k in ['high', 'low', 'open', 'close']): return None
     props = {}
-    if not vela or not all(k in vela for k in ['high', 'low', 'open', 'close']):
-        return None # Return None if candle is invalid
-        
-    props['open'] = vela.get('open')
-    props['close'] = vela.get('close')
-    props['high'] = vela.get('high')
-    props['low'] = vela.get('low')
-    props['range'] = props['high'] - props['low']
-    
-    if props['range'] > 0:
-        props['corpo'] = abs(props['open'] - props['close'])
-        props['body_ratio'] = props['corpo'] / props['range']
-    else:
-        props['corpo'] = 0
-        props['body_ratio'] = 0
-
-    props['is_alta'] = props['close'] > props['open']
-    props['is_baixa'] = props['close'] < props['open']
-    props['pavio_superior'] = props['high'] - max(props['open'], props['close'])
-    props['pavio_inferior'] = min(props['open'], props['close']) - props['low']
+    props['range'] = vela['high'] - vela['low']
+    if props['range'] == 0: return None
+    props['corpo'] = abs(vela['open'] - vela['close'])
+    props['body_ratio'] = props['corpo'] / props['range'] if props['range'] > 0 else 0
+    props['is_alta'] = vela['close'] > vela['open']
+    props['is_baixa'] = vela['close'] < vela['open']
+    props['pavio_superior'] = vela['high'] - max(vela['open'], vela['close'])
+    props['pavio_inferior'] = min(vela['open'], vela['close']) - vela['low']
     return props
 
 # --- HELPER FUNCTIONS FOR ADVANCED STRATEGIES ---
@@ -348,7 +340,7 @@ def is_exhaustion_pattern(velas, p):
         return True
     return False
 
-# --- REFACTORED STRATEGIES WITH CONFIDENCE SCORE (Adjusted to handle None from get_candle_props) ---
+# --- REFACTORED STRATEGIES WITH CONFIDENCE SCORE ---
 def strategy_sr_breakout(velas, p, state, ativo=None):
     score, direcao = 0, None
     lookback = p.get('SR_Lookback', 15)
@@ -363,7 +355,7 @@ def strategy_sr_breakout(velas, p, state, ativo=None):
     if not props_breakout or props_breakout['body_ratio'] < p.get('SR_BodyRatio', 0.70):
         return score, direcao
 
-    avg_body_size = sum(p.get('corpo', 0) for p in (get_candle_props(v) for v in zona_analise) if p) / len(zona_analise)
+    avg_body_size = sum(get_candle_props(v)['corpo'] for v in zona_analise if get_candle_props(v)) / len(zona_analise)
     if props_breakout['corpo'] <= avg_body_size: return score, direcao
 
     max_wick = p.get('SR_MaxOppositeWickRatio', 0.30)
@@ -391,9 +383,8 @@ def strategy_engulfing(velas, p, state, ativo=None):
     min_candles = max(p.get('EMA_Short_Period', 9), p.get('EMA_Long_Period', 21), p.get('Engulfing_RSIPeriod', 14)) + 4
     if len(velas) < min_candles: return score, direcao
 
-    props = [get_candle_props(velas[i]) for i in [-1, -2, -3, -4]]
-    if not all(props): return score, direcao
-    p_eng, p_ed, p_t1, p_t2 = props
+    p_eng, p_ed, p_t1, p_t2 = (get_candle_props(velas[i]) for i in [-1, -2, -3, -4])
+    if not all([p_eng, p_ed, p_t1, p_t2]): return score, direcao
 
     strong_body, max_wick = p.get('Engulfing_BodyRatio', 0.70), p.get('Engulfing_MaxOppositeWickRatio', 0.3)
     
@@ -474,7 +465,7 @@ def get_config_from_env():
         'conta': os.getenv('EXNOVA_CONTA', 'PRACTICE').upper(), 'pay_minimo': float(os.getenv('EXNOVA_PAY_MINIMO', 80)),
         'valor_entrada': float(os.getenv('EXNOVA_VALOR_ENTRADA', 1)), 'expiracao': int(os.getenv('EXNOVA_EXPIRACAO', 1)),
         'usar_mg': os.getenv('EXNOVA_USAR_MG', 'SIM').upper() == 'SIM', 'mg_niveis': int(os.getenv('EXNOVA_MG_NIVEIS', 2)),
-        'mg_fator': float(os.getenv('EXNOVA_MG_FATOR', 2.0)), 'modo_operacao': os.getenv('EXNOVA_MODO_OPERACAO', '1')
+        'mg_fator': float(os.getenv('EXNOVA_MG_FATOR', 2.0)), 'modo_operacao': os.getenv('EXNOVA_MODO_OPERACAO', '1') # Default to Catalog Mode
     }
 
 def compra_thread(api, ativo, valor, direcao, expiracao, tipo_op, state, config, cifrao, signal_id, target_entry_timestamp):
@@ -578,6 +569,7 @@ def main_bot_logic(state, PARAMS):
         try:
             with state.lock:
                 if state.standby_mode and time.time() < state.standby_until:
+                    if int(time.time()) % 10 == 0: log_warning(f"Bot em modo Stand-by. Retomando em {int(state.standby_until - time.time())}s...")
                     time.sleep(5)
                     continue
                 elif state.standby_mode:
@@ -623,9 +615,10 @@ def main_bot_logic(state, PARAMS):
                 all_profits = API.get_all_profit()
 
                 for ativo, estrategia in state.champion_strategies.items():
+                    # --- FIXED SIMULTANEOUS TRADES LOGIC ---
                     with state.lock:
                         if state.active_trades >= MAX_TRADES:
-                            break
+                            break # Para de procurar se o limite já foi atingido
 
                     if ativo in state.suspended_pairs: continue
                     
@@ -649,8 +642,7 @@ def main_bot_logic(state, PARAMS):
                         
                         with state.lock: state.active_trades += 1
                         signal_id = str(uuid.uuid4())
-                        # --- FIXED PAYLOAD TO SEND RAW CANDLE ---
-                        signal_payload = { "type": "signal", "signal_id": signal_id, "pair": ativo, "strategy": estrategia, "direction": direcao_sinal, "entry_time": horario_entrada_str, "candle": velas[-1], "result": None, "gale_level": 0 }
+                        signal_payload = { "type": "signal", "signal_id": signal_id, "pair": ativo, "strategy": estrategia, "direction": direcao_sinal, "entry_time": horario_entrada_str, "candle": get_candle_props(velas[-1]), "result": None, "gale_level": 0 }
                         state.signal_history[signal_id] = signal_payload
                         signal_queue.put(signal_payload)
 
@@ -668,7 +660,7 @@ def main_bot_logic(state, PARAMS):
 def main():
     PARAMS = { 
         'Assertividade_Minima': 60, 'Recatalog_Cycle_Hours': 2, 'Recatalog_Loss_Trigger': 5,
-        'MAX_SIMULTANEOUS_TRADES': 1,
+        'MAX_SIMULTANEOUS_TRADES': 1, # <--- CONFIGURAÇÃO CENTRALIZADA
         'Consolidation_Lookback': 10, 'Consolidation_Threshold': 0.0005, 'Exhaustion_DojiLike_Ratio': 0.2,
         'Standby_Loss_Count': 3, 'Standby_Timeframe_Minutes': 5, 'Minimum_Confidence_Score': 3,
         'EMA_Short_Period': 9, 'EMA_Long_Period': 21,
