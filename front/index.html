@@ -52,28 +52,30 @@
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
-        @property --progress-value {
-          syntax: '<integer>';
-          initial-value: 0;
-          inherits: false;
+        /* Timer Animation */
+        @keyframes progress-border {
+            from { --angle: 0deg; }
+            to { --angle: 360deg; }
         }
-        @keyframes progress { to { --progress-value: 60; } }
         .timer-border {
             position: relative;
         }
         .timer-border::before {
             content: '';
             position: absolute;
-            top: 0; right: 0; bottom: 0; left: 0;
+            top: -2px; right: -2px; bottom: -2px; left: -2px;
             z-index: -1;
-            margin: -2px; 
-            border-radius: 1.125rem; 
+            border-radius: 1.125rem; /* 18px */
             background: conic-gradient(
-                from 0deg,
-                #14b8a6 calc(var(--progress-value) * 1s / 60s * 360deg), 
-                rgba(255,255,255,0.1) 0
+                from var(--start-angle), 
+                #14b8a6, 
+                #0f766e,
+                #14b8a6, 
+                rgba(255,255,255,0.1) 1deg,
+                rgba(255,255,255,0.1)
             );
-            animation: progress 60s linear forwards;
+            animation: progress-border 60s linear;
+            animation-delay: var(--animation-delay, 0s);
         }
     </style>
 </head>
@@ -89,7 +91,6 @@
             if (!timeString || !timeString.includes(':')) return timeString;
             try {
                 const todayStr = new Date().toISOString().slice(0, 10);
-                // Assume bot time is UTC
                 const fullDateTimeString = `${todayStr}T${timeString}:00Z`;
                 const dateObj = new Date(fullDateTimeString);
                 if (isNaN(dateObj)) return timeString;
@@ -162,20 +163,23 @@
             );
         });
 
-        const SignalCard = React.memo(({ signal }) => {
-            const [timerKey, setTimerKey] = useState(Date.now());
+        const SignalCard = React.memo(({ signal, isLatestActive }) => {
             const isCall = signal.direction.toUpperCase() === 'CALL' || signal.direction.toUpperCase() === 'BUY';
             const directionColor = isCall ? 'text-green-400' : 'text-red-400';
             const directionIcon = isCall ? 'fa-arrow-trend-up' : 'fa-arrow-trend-down';
+            
+            const [animationStyle, setAnimationStyle] = useState({});
 
             useEffect(() => {
-                const now = new Date();
-                const seconds = now.getSeconds();
-                const element = document.getElementById(signal.signal_id);
-                if (element && !signal.result) {
-                    element.style.setProperty('--progress-value', seconds);
+                if (isLatestActive && !signal.result) {
+                    const seconds = new Date().getSeconds();
+                    setAnimationStyle({
+                        '--animation-delay': `-${seconds}s`,
+                        '--start-angle': `${(seconds / 60) * 360}deg`
+                    });
                 }
-            }, [signal.result]);
+            }, [isLatestActive, signal.result]);
+
 
             const ResultFooter = () => {
                 if (!signal.result) return <div className="w-full mt-3 h-16"></div>;
@@ -183,9 +187,9 @@
                 return (<div className={`w-full mt-3 h-16 flex items-center justify-center rounded-lg border ${resultBg}`}><div className="text-center"><p className={`text-xs ${resultColor}`}>RESULTADO</p><p className={`font-mono text-2xl font-bold ${resultColor} flex items-center justify-center gap-2`}><i className={resultIcon}></i><span>{signal.result}</span></p></div></div>);
             };
 
-            const cardClasses = `glass-card rounded-2xl p-4 flex flex-col text-center card-enter-animation relative h-[340px] ${!signal.result ? 'timer-border' : ''}`;
+            const cardClasses = `glass-card rounded-2xl p-4 flex flex-col text-center card-enter-animation relative h-[340px] ${isLatestActive && !signal.result ? 'timer-border' : ''}`;
             
-            return (<div id={signal.signal_id} key={signal.signal_id} className={cardClasses}>
+            return (<div id={signal.signal_id} className={cardClasses} style={animationStyle}>
                 {signal.gale_level > 0 && <div className="absolute top-2 right-2 bg-amber-500 text-gray-900 text-xs font-bold px-2 py-0.5 rounded-full">GALE {signal.gale_level}</div>}
                 <div className="flex justify-between items-center w-full mb-3">
                     <p className="font-bold text-xl text-white">{signal.pair}</p>
@@ -211,9 +215,14 @@
         });
         
         function HomeView({ signals, liveAnalysis }) {
+            const latestActiveSignalId = useMemo(() => {
+                const activeSignals = signals.filter(s => !s.result);
+                return activeSignals.length > 0 ? activeSignals[0].signal_id : null;
+            }, [signals]);
+
             return (<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                         <LiveAnalysisCard analysis={liveAnalysis} />
-                        {signals.map(signal => <SignalCard key={signal.signal_id} signal={signal} />)}
+                        {signals.map(signal => <SignalCard key={signal.signal_id} signal={signal} isLatestActive={signal.signal_id === latestActiveSignalId} />)}
                     </div>);
         }
 
