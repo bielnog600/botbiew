@@ -669,14 +669,14 @@ def main_bot_logic(state, PARAMS):
 
 def main():
     PARAMS = { 
-        'Assertividade_Minima': 60, 'Recatalog_Cycle_Hours': 2, 'Recatalog_Loss_Trigger': 5,
+        'Assertividade_Minima': 70, 'Recatalog_Cycle_Hours': 2, 'Recatalog_Loss_Trigger': 5,
         'MAX_SIMULTANEOUS_TRADES': 1,
         'Consolidation_Lookback': 10, 'Consolidation_Threshold': 0.0005, 'Exhaustion_DojiLike_Ratio': 0.2,
         'Standby_Loss_Count': 3, 'Standby_Timeframe_Minutes': 5, 'Minimum_Confidence_Score': 3,
-        'EMA_Short_Period': 9, 'EMA_Long_Period': 21,
+        'EMA_Short_Period': 9, 'EMA_Long_Period': 100,
         'SR_Lookback': 15, 'SR_BodyRatio': 0.70, 'SR_MaxOppositeWickRatio': 0.30, 'SR_RSIPeriod': 14,
-        'Engulfing_BodyRatio': 0.70, 'Engulfing_MaxOppositeWickRatio': 0.3, 'Engulfing_RSIPeriod': 14, 'Engulfing_ProximityPercent': 0.01,
-        'Flow_BodyRatio': 0.70, 'Flow_MaxWickRatio': 0.40, 'Flow_RSIPeriod': 14,
+        'Engulfing_BodyRatio': 0.75, 'Engulfing_MaxOppositeWickRatio': 0.3, 'Engulfing_RSIPeriod': 14, 'Engulfing_ProximityPercent': 0.01,
+        'Flow_BodyRatio': 0.75, 'Flow_MaxWickRatio': 0.40, 'Flow_RSIPeriod': 14,
     }
     bot_state = BotState(PARAMS)
     
