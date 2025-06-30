@@ -104,17 +104,17 @@ def exibir_banner():
     print(g + '''
           ██╗     ██████╗  ██████╗  █████╗ ███╗   ██╗     ███████╗███╗   ███╗██╗████████╗██╗  ██╗
           ██║     ██╔═══██╗██╔════╝ ██╔══██╗████╗  ██║     ██╔════╝████╗ ████║██║╚══██╔══╝██║  ██║
-          ██║     ██║   ██║██║  ███╗███████║██╔██╗ ██║     ███████╗██╔████╔██║██║   ██║   ███████║
-          ██║     ██║   ██║██║   ██║██╔══██║██║╚██╗██║     ╚════██║██║╚██╔╝██║██║   ██║   ██╔══██║
-          ███████╗╚██████╔╝╚██████╔╝██║  ██║██║ ╚████║     ███████║██║ ╚═╝ ██║██║   ██║   ██║  ██║
-          ╚══════╝ ╚═════╝  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═══╝     ╚══════╝╚═╝     ╚═╝╚═╝   ╚═╝   ╚═╝  ╚═╝ '''+c+'''
-    ████████╗██████╗ ██╗ █████╗ ██╗         ██╗   ██║██╗  ████████╗██████╗  █████╗ ██████╗  ██████╗ ████████╗
-    ╚══██╔══╝██╔══██╗██║██╔══██╗██║         ██║   ██║██║  ╚══██╔══╝██╔══██╗██╔═══██╗╚══██╔══╝
-      ██║   ██████╔╝██║███████║██║         ██║   ██║██║     ██║   ██████╔╝███████║██████╔╝██║   ██║   ██║
-      ██║   ██╔══██╗██║██╔══██║██║         ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║   ██║   ██║
-      ██║   ██║  ██║██║██║  ██║███████╗     ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝   ██║
-      ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝      ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝    ╚═╝ '''+y+'''
-              azkzero@gmail.com - v55 (Estratégias Profissionais)
+          ██║     ██║   ██║██║  ███╗███████║██╔██╗ ██║     ███████╗██╔████╔██║██║   ██║    ███████║
+          ██║     ██║   ██║██║   ██║██╔══██║██║╚██╗██║     ╚════██║██║╚██╔╝██║██║   ██║    ██╔══██║
+          ███████╗╚██████╔╝╚██████╔╝██║  ██║██║ ╚████║     ███████║██║ ╚═╝ ██║██║   ██║    ██║  ██║
+          ╚══════╝ ╚═════╝  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═══╝     ╚══════╝╚═╝     ╚═╝╚═╝   ╚═╝    ╚═╝  ╚═╝ '''+c+'''
+    ████████╗██████╗ ██╗ █████╗ ██╗       ██╗   ██║██╗  ████████╗██████╗  █████╗ ██████╗  ██████╗ ████████╗
+    ╚══██╔══╝██╔══██╗██║██╔══██╗██║       ██║   ██║██║  ╚══██╔══╝██╔══██╗██╔═══██╗╚══██╔══╝
+      ██║   ██████╔╝██║███████║██║       ██║   ██║██║     ██║   ████████╗███████║██████╔╝██║    ██║    ██║
+      ██║   ██╔══██╗██║██╔══██║██║       ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║    ██║    ██║
+      ██║   ██║  ██║██║██║  ██║███████╗    ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝    ██║
+      ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝     ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝     ╚═╝ '''+y+'''
+              azkzero@gmail.com - v56 (Estratégia Vela de Descanso Aprimorada)
     ''')
     print(y + "*"*88)
     print(c + "="*88)
@@ -270,7 +270,7 @@ def sma_slope(closes, period):
     sma1 = sum(closes[-(period+1):-1]) / period; sma2 = sum(closes[-period:]) / period
     if sma1 == sma2: return None
     return sma2 > sma1
-    
+
 def get_candle_props(vela):
     props = {}
     if not all(k in vela for k in ['high', 'low', 'open', 'close']): return None
@@ -284,6 +284,48 @@ def get_candle_props(vela):
     props['pavio_inferior'] = min(vela['open'], vela['close']) - vela['low']
     return props
 
+# --- NEW HELPER FUNCTIONS FOR ADVANCED STRATEGY ---
+def calculate_ema(closes, period):
+    """Calcula a Média Móvel Exponencial (EMA)."""
+    if len(closes) < period:
+        return None
+    ema = []
+    # Calcula a primeira SMA como valor inicial
+    sma = sum(closes[:period]) / period
+    ema.append(sma)
+    # Fator de suavização
+    multiplier = 2 / (period + 1)
+    for price in closes[period:]:
+        ema_value = (price - ema[-1]) * multiplier + ema[-1]
+        ema.append(ema_value)
+    return ema[-1] # Retorna o valor mais recente da EMA
+
+def calculate_rsi(closes, period=14):
+    """Calcula o Índice de Força Relativa (RSI)."""
+    if len(closes) < period + 1:
+        return None
+    
+    deltas = [closes[i] - closes[i-1] for i in range(1, len(closes))]
+    gains = [delta if delta > 0 else 0 for delta in deltas]
+    losses = [-delta if delta < 0 else 0 for delta in deltas]
+
+    if len(gains) < period:
+        return None
+
+    avg_gain = sum(gains[:period]) / period
+    avg_loss = sum(losses[:period]) / period
+
+    for i in range(period, len(gains)):
+        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+
+    if avg_loss == 0:
+        return 100 # RSI é 100 se não houver perdas
+    
+    rs = avg_gain / avg_loss
+    rsi = 100 - (100 / (1 + rs))
+    return rsi
+    
 # --- STRATEGIES ---
 def strategy_sr_breakout(velas, p):
     lookback = p.get('SR_Lookback', 5)
@@ -318,7 +360,7 @@ def strategy_sr_breakout(velas, p):
 def strategy_engulfing(velas, p):
     if len(velas) < 10: return None
     
-    tendencia_recente = sma_slope(velas[-10:-1], 9)
+    tendencia_recente = sma_slope([v['close'] for v in velas[-10:-1]], 9)
     if tendencia_recente is None: return None
     
     v2, v3 = velas[-2], velas[-1]
@@ -342,27 +384,97 @@ def strategy_engulfing(velas, p):
     return None
 
 def strategy_rest_candle(velas, p):
-    if len(velas) < 3: return None
-    
-    tendencia_alta = sma_slope([v['close'] for v in velas], p['MAPeriod'])
-    if tendencia_alta is None: return None
+    """
+    Estratégia Vela de Descanso aprimorada, baseada em contexto, força e confluências.
+    Regras:
+    1. Contexto: 2 candles fortes na mesma direção.
+    2. Movimento: Candles de força com poucos pavios.
+    3. Descanso: Um candle pequeno de cor oposta aparece.
+    4. Confluência: Confirmação com EMA e/ou RSI.
+    5. Entrada: A favor do movimento inicial.
+    """
+    # Garante que há velas suficientes para a análise completa (2 de força + 1 de descanso + histórico para EMA/RSI)
+    min_candles = max(p.get('RestCandle_EMAPeriod', 20), p.get('RestCandle_RSIPeriod', 14)) + 3
+    if len(velas) < min_candles:
+        return None
 
-    vela_tendencia, vela_descanso = velas[-2], velas[-1]
-    
-    props_tendencia = get_candle_props(vela_tendencia)
+    # --- 1. Identifique o Contexto e a Vela de Descanso ---
+    vela_descanso = velas[-1]
+    candle_1, candle_2 = velas[-3], velas[-2] # Os dois candles que formam o movimento de força
+
     props_descanso = get_candle_props(vela_descanso)
+    props_1 = get_candle_props(candle_1)
+    props_2 = get_candle_props(candle_2)
+
+    if not all([props_descanso, props_1, props_2]):
+        return None # Ignora se houver dados inválidos
+
+    # Define os ratios a partir dos parâmetros
+    strong_body_ratio = p.get('RestCandle_StrongBodyRatio', 0.65)
+    max_wick_ratio = p.get('RestCandle_MaxWickRatio', 0.40)
+    weak_body_ratio = p.get('RestCandle_WeakBodyRatio', 0.35)
+
+    # Verifica se o padrão é de ALTA (CALL)
+    is_bullish_context = (
+        # 1. Os dois candles anteriores são de alta e fortes?
+        props_1['is_alta'] and props_2['is_alta'] and
+        props_1['body_ratio'] >= strong_body_ratio and
+        props_2['body_ratio'] >= strong_body_ratio and
+        # 2. O movimento deles é "limpo" (pouco pavio)?
+        (props_1['pavio_superior'] / props_1['corpo'] < max_wick_ratio) and
+        (props_2['pavio_superior'] / props_2['corpo'] < max_wick_ratio) and
+        # 3. O candle atual é uma vela de descanso de baixa?
+        props_descanso['is_baixa'] and props_descanso['body_ratio'] <= weak_body_ratio
+    )
+
+    # Verifica se o padrão é de BAIXA (PUT)
+    is_bearish_context = (
+        # 1. Os dois candles anteriores são de baixa e fortes?
+        props_1['is_baixa'] and props_2['is_baixa'] and
+        props_1['body_ratio'] >= strong_body_ratio and
+        props_2['body_ratio'] >= strong_body_ratio and
+        # 2. O movimento deles é "limpo" (pouco pavio)?
+        (props_1['pavio_inferior'] / props_1['corpo'] < max_wick_ratio) and
+        (props_2['pavio_inferior'] / props_2['corpo'] < max_wick_ratio) and
+        # 3. O candle atual é uma vela de descanso de alta?
+        props_descanso['is_alta'] and props_descanso['body_ratio'] <= weak_body_ratio
+    )
     
-    if not props_tendencia or not props_descanso: return None
+    if not is_bullish_context and not is_bearish_context:
+        return None # Se não encontrou nenhum dos contextos, para a análise.
 
-    if not tendencia_alta and props_tendencia['is_baixa'] and \
-       props_tendencia['body_ratio'] > 0.6 and props_descanso['is_alta'] and \
-       props_descanso['body_ratio'] < 0.4:
-        return 'SELL'
+    # --- 3. Confirme com Confluências (EMA e RSI) ---
+    closes = [v['close'] for v in velas]
+    ema_value = calculate_ema(closes, p.get('RestCandle_EMAPeriod', 20))
+    rsi_value = calculate_rsi(closes, p.get('RestCandle_RSIPeriod', 14))
 
-    if tendencia_alta and props_tendencia['is_alta'] and \
-       props_tendencia['body_ratio'] > 0.6 and props_descanso['is_baixa'] and \
-       props_descanso['body_ratio'] < 0.4:
+    if ema_value is None or rsi_value is None:
+        return None # Não foi possível calcular os indicadores
+
+    ema_confirm = False
+    rsi_confirm = False
+    
+    if is_bullish_context:
+        # Para CALL, preço deve estar acima da EMA e RSI > 50
+        if vela_descanso['close'] > ema_value: ema_confirm = True
+        if rsi_value > 50: rsi_confirm = True
+    elif is_bearish_context:
+        # Para PUT, preço deve estar abaixo da EMA e RSI < 50
+        if vela_descanso['close'] < ema_value: ema_confirm = True
+        if rsi_value < 50: rsi_confirm = True
+
+    # A regra é usar 1 ou mais confluências. Se nenhuma for confirmada, o sinal é inválido.
+    if not (ema_confirm or rsi_confirm):
+        return None
+
+    # --- 4. Faça a Entrada a Favor do Movimento ---
+    if is_bullish_context:
+        # log_info(f"Sinal VELA DE DESCANSO (CALL): Contexto de alta confirmado com confluências (EMA: {ema_confirm}, RSI: {rsi_confirm}).")
         return 'BUY'
+    
+    if is_bearish_context:
+        # log_info(f"Sinal VELA DE DESCANSO (PUT): Contexto de baixa confirmado com confluências (EMA: {ema_confirm}, RSI: {rsi_confirm}).")
+        return 'SELL'
         
     return None
     
@@ -519,13 +631,20 @@ def main_bot_logic(state):
         log_info(f"Olá! Iniciando bot em modo servidor.")
     
     PARAMS = { 
-        'MAPeriod': 21, 'MaxLevels': 10, 'Proximity': 0.0005, 
-        'VolatilityCandles': 3, 'MaxWickRatio': 0.75, 'MinVolatileCandles': 3,
+        'MaxLevels': 10, 'Proximity': 0.0005, 
+        'VolatilityCandles': 3, 'MinVolatileCandles': 3,
+        'MaxWickRatio': 0.75, 
         'ConfirmationMaxOppositeWickRatio': 0.45,
         'SRBreakoutBodyMinRatio': 0.6,
         'GapMaxPercentage': 0.3,
         'SR_Lookback': 5,
-        'EngulfingBodyMinRatio': 0.7
+        'EngulfingBodyMinRatio': 0.7,
+        # --- Novos Parâmetros para Vela de Descanso ---
+        'RestCandle_EMAPeriod': 20,           # Período da Média Móvel Exponencial
+        'RestCandle_RSIPeriod': 14,           # Período do RSI
+        'RestCandle_StrongBodyRatio': 0.65,   # Ratio mínimo para ser um candle de força
+        'RestCandle_MaxWickRatio': 0.40,      # Ratio máximo do pavio em um candle de força
+        'RestCandle_WeakBodyRatio': 0.35      # Ratio máximo para ser uma vela de descanso
     }
     
     if config['modo_operacao'] == '1':
@@ -543,7 +662,7 @@ def main_bot_logic(state):
 
     while not state.stop:
         try:
-            MAX_SIMULTANEOUS_TRADES = 1
+            MAX_SIMULTANEOUS_TRADES = 5
             
             if config['modo_operacao'] == '1':
                 if time.time() - ultimo_ciclo_catalogacao > TEMPO_CICLO_CATALOGACAO or state.global_losses_since_catalog >= 5:
@@ -559,7 +678,7 @@ def main_bot_logic(state):
                         state.global_losses_since_catalog = 0
                     ultimo_ciclo_catalogacao = time.time()
                     ultimo_sinal_timestamp = time.time()
-                
+            
             timestamp = time.time()
             dt_objeto = datetime.fromtimestamp(timestamp)
             minuto_atual, segundo_atual = dt_objeto.minute, dt_objeto.second
