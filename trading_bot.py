@@ -329,7 +329,7 @@ def catalogar_e_selecionar(api, params, state):
 
     log_info(f"Encontrados {len(ativos_abertos)} pares abertos para análise.")
     champion_strategies = {}
-    assertividade_minima = params.get('Assertividade_Minima', 80)
+    assertividade_minima = params.get('Assertividade_Minima', 70)
 
     for ativo_original in ativos_abertos:
         try:
@@ -381,7 +381,7 @@ class BotState:
         self.global_losses_since_catalog = 0
         self.lock = Lock()
         self.standby_mode, self.standby_until = False, 0
-        self.global_loss_timestamps = deque(maxlen=p.get('Standby_Loss_Count', 3))
+        self.global_loss_timestamps = deque(maxlen=p.get('Standby_Loss_Count', 2))
 
 def get_config_from_env():
     return {
@@ -564,9 +564,9 @@ def main_bot_logic(state, PARAMS):
 
 def main():
     PARAMS = { 
-        'Assertividade_Minima': 80,
+        'Assertividade_Minima': 70,
         'MAX_SIMULTANEOUS_TRADES': 1,
-        'Standby_Loss_Count': 3,
+        'Standby_Loss_Count': 2,
         'Standby_Timeframe_Minutes': 5,
         'Recatalog_Cycle_Hours': 2,
         'Recatalog_Loss_Trigger': 5,
