@@ -114,7 +114,7 @@ def exibir_banner():
       ██║   ██╔══██╗██║██╔══██║██║       ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║    ██║    ██║
       ██║   ██║  ██║██║██║  ██║███████╗    ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝    ██║
       ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝     ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝     ╚═╝ '''+y+'''
-              azkzero@gmail.com - v56 (Estratégia Vela de Descanso Aprimorada)
+              azkzero@gmail.com - v57 (Estratégia de Engolfo Aprimorada)
     ''')
     print(y + "*"*88)
     print(c + "="*88)
@@ -358,124 +358,169 @@ def strategy_sr_breakout(velas, p):
     return None
     
 def strategy_engulfing(velas, p):
-    if len(velas) < 10: return None
-    
-    tendencia_recente = sma_slope([v['close'] for v in velas[-10:-1]], 9)
-    if tendencia_recente is None: return None
-    
-    v2, v3 = velas[-2], velas[-1]
-    p2, p3 = get_candle_props(v2), get_candle_props(v3)
-    if not all([p2, p3]): return None
-    
-    if p3['body_ratio'] < p.get('EngulfingBodyMinRatio', 0.7): return None
-    if p2['body_ratio'] > 0.4: return None
-    if (p3['is_alta'] and (v3['high'] - v3['close']) > p3['corpo']) or \
-       (p3['is_baixa'] and (v3['close'] - v3['low']) > p3['corpo']):
+    """
+    Estratégia de Engolfo Aprimorada, com verificação de tendência, força e confluências.
+    """
+    # Garante velas suficientes para análise (tendência + padrão + indicadores)
+    min_candles = max(p.get('Engulfing_EMAPeriod', 20), p.get('Engulfing_RSIPeriod', 14)) + 4
+    if len(velas) < min_candles:
+        return None
+
+    # --- Definição das velas do padrão ---
+    engulfing_candle = velas[-1]
+    engulfed_candle = velas[-2]
+    trend_candle_1 = velas[-3]
+    trend_candle_2 = velas[-4]
+
+    props_engulfing = get_candle_props(engulfing_candle)
+    props_engulfed = get_candle_props(engulfed_candle)
+    props_trend1 = get_candle_props(trend_candle_1)
+    props_trend2 = get_candle_props(trend_candle_2)
+
+    if not all([props_engulfing, props_engulfed, props_trend1, props_trend2]):
+        return None
+
+    # Parâmetros da estratégia
+    strong_body_ratio = p.get('Engulfing_BodyRatio', 0.7)
+    max_wick_ratio = p.get('Engulfing_MaxOppositeWickRatio', 0.3)
+
+    # --- Verificação de Engolfo de Alta (CALL) ---
+    is_bullish_engulf = (
+        # 1. Tendência anterior de baixa (2 velas vermelhas)
+        props_trend1['is_baixa'] and props_trend2['is_baixa'] and
+        # O padrão de engolfo clássico
+        props_engulfed['is_baixa'] and props_engulfing['is_alta'] and
+        # 2. Candle engolfador é forte
+        engulfing_candle['close'] > engulfed_candle['open'] and 
+        engulfing_candle['open'] < engulfed_candle['close'] and
+        props_engulfing['body_ratio'] >= strong_body_ratio and
+        # Pavio superior curto (pouca rejeição de alta)
+        (props_engulfing['pavio_superior'] / props_engulfing['corpo'] < max_wick_ratio if props_engulfing['corpo'] > 0 else False)
+    )
+
+    # --- Verificação de Engolfo de Baixa (PUT) ---
+    is_bearish_engulf = (
+        # 1. Tendência anterior de alta (2 velas verdes)
+        props_trend1['is_alta'] and props_trend2['is_alta'] and
+        # O padrão de engolfo clássico
+        props_engulfed['is_alta'] and props_engulfing['is_baixa'] and
+        # 2. Candle engolfador é forte
+        engulfing_candle['close'] < engulfed_candle['open'] and 
+        engulfing_candle['open'] > engulfed_candle['close'] and
+        props_engulfing['body_ratio'] >= strong_body_ratio and
+        # Pavio inferior curto (pouca rejeição de baixa)
+        (props_engulfing['pavio_inferior'] / props_engulfing['corpo'] < max_wick_ratio if props_engulfing['corpo'] > 0 else False)
+    )
+
+    if not is_bullish_engulf and not is_bearish_engulf:
+        return None
+
+    # --- 3 & 4. Verificação de Confluências ---
+    closes = [v['close'] for v in velas]
+    ema_value = calculate_ema(closes, p.get('Engulfing_EMAPeriod', 20))
+    rsi_value = calculate_rsi(closes, p.get('Engulfing_RSIPeriod', 14))
+
+    if ema_value is None or rsi_value is None:
         return None
         
-    is_bullish_engulfing = p2['is_baixa'] and p3['is_alta'] and p3['corpo'] > p2['corpo']
-    is_bearish_engulfing = p2['is_alta'] and p3['is_baixa'] and p3['corpo'] > p2['corpo']
+    ema_confirm = False
+    rsi_confirm = False
+
+    if is_bullish_engulf:
+        # Perto da Média Móvel (região de suporte)
+        proximity = ema_value * (p.get('Engulfing_ProximityPercent', 0.01) / 100) # 0.01% do preço
+        if abs(engulfing_candle['low'] - ema_value) <= proximity:
+            ema_confirm = True
+        # RSI em sobre-venda
+        if rsi_value < 30:
+            rsi_confirm = True
+
+    elif is_bearish_engulf:
+        # Perto da Média Móvel (região de resistência)
+        proximity = ema_value * (p.get('Engulfing_ProximityPercent', 0.01) / 100)
+        if abs(engulfing_candle['high'] - ema_value) <= proximity:
+            ema_confirm = True
+        # RSI em sobre-compra
+        if rsi_value > 70:
+            rsi_confirm = True
     
-    if not (is_bullish_engulfing or is_bearish_engulfing): return None
-        
-    if is_bullish_engulfing and not tendencia_recente: return 'BUY'
-    if is_bearish_engulfing and tendencia_recente: return 'SELL'
-            
+    # Precisa de pelo menos uma confluência para validar o sinal
+    if not (ema_confirm or rsi_confirm):
+        return None
+
+    # --- 5. Sinal de Entrada ---
+    if is_bullish_engulf:
+        return 'BUY'
+    if is_bearish_engulf:
+        return 'SELL'
+
     return None
 
 def strategy_rest_candle(velas, p):
     """
     Estratégia Vela de Descanso aprimorada, baseada em contexto, força e confluências.
-    Regras:
-    1. Contexto: 2 candles fortes na mesma direção.
-    2. Movimento: Candles de força com poucos pavios.
-    3. Descanso: Um candle pequeno de cor oposta aparece.
-    4. Confluência: Confirmação com EMA e/ou RSI.
-    5. Entrada: A favor do movimento inicial.
     """
-    # Garante que há velas suficientes para a análise completa (2 de força + 1 de descanso + histórico para EMA/RSI)
     min_candles = max(p.get('RestCandle_EMAPeriod', 20), p.get('RestCandle_RSIPeriod', 14)) + 3
     if len(velas) < min_candles:
         return None
 
-    # --- 1. Identifique o Contexto e a Vela de Descanso ---
     vela_descanso = velas[-1]
-    candle_1, candle_2 = velas[-3], velas[-2] # Os dois candles que formam o movimento de força
+    candle_1, candle_2 = velas[-3], velas[-2] 
 
     props_descanso = get_candle_props(vela_descanso)
     props_1 = get_candle_props(candle_1)
     props_2 = get_candle_props(candle_2)
 
     if not all([props_descanso, props_1, props_2]):
-        return None # Ignora se houver dados inválidos
+        return None
 
-    # Define os ratios a partir dos parâmetros
     strong_body_ratio = p.get('RestCandle_StrongBodyRatio', 0.65)
     max_wick_ratio = p.get('RestCandle_MaxWickRatio', 0.40)
     weak_body_ratio = p.get('RestCandle_WeakBodyRatio', 0.35)
 
-    # Verifica se o padrão é de ALTA (CALL)
     is_bullish_context = (
-        # 1. Os dois candles anteriores são de alta e fortes?
         props_1['is_alta'] and props_2['is_alta'] and
         props_1['body_ratio'] >= strong_body_ratio and
         props_2['body_ratio'] >= strong_body_ratio and
-        # 2. O movimento deles é "limpo" (pouco pavio)?
-        (props_1['pavio_superior'] / props_1['corpo'] < max_wick_ratio) and
-        (props_2['pavio_superior'] / props_2['corpo'] < max_wick_ratio) and
-        # 3. O candle atual é uma vela de descanso de baixa?
+        (props_1['pavio_superior'] / props_1['corpo'] < max_wick_ratio if props_1['corpo'] > 0 else False) and
+        (props_2['pavio_superior'] / props_2['corpo'] < max_wick_ratio if props_2['corpo'] > 0 else False) and
         props_descanso['is_baixa'] and props_descanso['body_ratio'] <= weak_body_ratio
     )
 
-    # Verifica se o padrão é de BAIXA (PUT)
     is_bearish_context = (
-        # 1. Os dois candles anteriores são de baixa e fortes?
         props_1['is_baixa'] and props_2['is_baixa'] and
         props_1['body_ratio'] >= strong_body_ratio and
         props_2['body_ratio'] >= strong_body_ratio and
-        # 2. O movimento deles é "limpo" (pouco pavio)?
-        (props_1['pavio_inferior'] / props_1['corpo'] < max_wick_ratio) and
-        (props_2['pavio_inferior'] / props_2['corpo'] < max_wick_ratio) and
-        # 3. O candle atual é uma vela de descanso de alta?
+        (props_1['pavio_inferior'] / props_1['corpo'] < max_wick_ratio if props_1['corpo'] > 0 else False) and
+        (props_2['pavio_inferior'] / props_2['corpo'] < max_wick_ratio if props_2['corpo'] > 0 else False) and
         props_descanso['is_alta'] and props_descanso['body_ratio'] <= weak_body_ratio
     )
     
     if not is_bullish_context and not is_bearish_context:
-        return None # Se não encontrou nenhum dos contextos, para a análise.
+        return None
 
-    # --- 3. Confirme com Confluências (EMA e RSI) ---
     closes = [v['close'] for v in velas]
     ema_value = calculate_ema(closes, p.get('RestCandle_EMAPeriod', 20))
     rsi_value = calculate_rsi(closes, p.get('RestCandle_RSIPeriod', 14))
 
     if ema_value is None or rsi_value is None:
-        return None # Não foi possível calcular os indicadores
+        return None
 
     ema_confirm = False
     rsi_confirm = False
     
     if is_bullish_context:
-        # Para CALL, preço deve estar acima da EMA e RSI > 50
         if vela_descanso['close'] > ema_value: ema_confirm = True
         if rsi_value > 50: rsi_confirm = True
     elif is_bearish_context:
-        # Para PUT, preço deve estar abaixo da EMA e RSI < 50
         if vela_descanso['close'] < ema_value: ema_confirm = True
         if rsi_value < 50: rsi_confirm = True
 
-    # A regra é usar 1 ou mais confluências. Se nenhuma for confirmada, o sinal é inválido.
     if not (ema_confirm or rsi_confirm):
         return None
 
-    # --- 4. Faça a Entrada a Favor do Movimento ---
-    if is_bullish_context:
-        # log_info(f"Sinal VELA DE DESCANSO (CALL): Contexto de alta confirmado com confluências (EMA: {ema_confirm}, RSI: {rsi_confirm}).")
-        return 'BUY'
-    
-    if is_bearish_context:
-        # log_info(f"Sinal VELA DE DESCANSO (PUT): Contexto de baixa confirmado com confluências (EMA: {ema_confirm}, RSI: {rsi_confirm}).")
-        return 'SELL'
-        
+    if is_bullish_context: return 'BUY'
+    if is_bearish_context: return 'SELL'
     return None
     
 def is_market_too_volatile(velas, p):
@@ -631,20 +676,23 @@ def main_bot_logic(state):
         log_info(f"Olá! Iniciando bot em modo servidor.")
     
     PARAMS = { 
-        'MaxLevels': 10, 'Proximity': 0.0005, 
-        'VolatilityCandles': 3, 'MinVolatileCandles': 3,
-        'MaxWickRatio': 0.75, 
-        'ConfirmationMaxOppositeWickRatio': 0.45,
-        'SRBreakoutBodyMinRatio': 0.6,
-        'GapMaxPercentage': 0.3,
+        'VolatilityCandles': 3, 'MinVolatileCandles': 3, 'MaxWickRatio': 0.75, 
+        'ConfirmationMaxOppositeWickRatio': 0.45, 'GapMaxPercentage': 0.3,
         'SR_Lookback': 5,
-        'EngulfingBodyMinRatio': 0.7,
-        # --- Novos Parâmetros para Vela de Descanso ---
-        'RestCandle_EMAPeriod': 20,           # Período da Média Móvel Exponencial
-        'RestCandle_RSIPeriod': 14,           # Período do RSI
-        'RestCandle_StrongBodyRatio': 0.65,   # Ratio mínimo para ser um candle de força
-        'RestCandle_MaxWickRatio': 0.40,      # Ratio máximo do pavio em um candle de força
-        'RestCandle_WeakBodyRatio': 0.35      # Ratio máximo para ser uma vela de descanso
+        
+        # Parâmetros Estratégia Engolfo Aprimorada
+        'Engulfing_BodyRatio': 0.70,
+        'Engulfing_MaxOppositeWickRatio': 0.3,
+        'Engulfing_EMAPeriod': 20,
+        'Engulfing_RSIPeriod': 14,
+        'Engulfing_ProximityPercent': 0.01, # Proximidade em % do preço para considerar perto da EMA
+
+        # Parâmetros Estratégia Vela de Descanso Aprimorada
+        'RestCandle_EMAPeriod': 20,
+        'RestCandle_RSIPeriod': 14,
+        'RestCandle_StrongBodyRatio': 0.65,
+        'RestCandle_MaxWickRatio': 0.40,
+        'RestCandle_WeakBodyRatio': 0.35
     }
     
     if config['modo_operacao'] == '1':
@@ -662,7 +710,7 @@ def main_bot_logic(state):
 
     while not state.stop:
         try:
-            MAX_SIMULTANEOUS_TRADES = 5
+            MAX_SIMULTANEOUS_TRADES = 2
             
             if config['modo_operacao'] == '1':
                 if time.time() - ultimo_ciclo_catalogacao > TEMPO_CICLO_CATALOGACAO or state.global_losses_since_catalog >= 5:
@@ -703,14 +751,16 @@ def main_bot_logic(state):
                     
                     pares_para_analisar = [p for p, t in state.suspended_pairs.items() if time.time() > t]
                     for p in pares_para_analisar:
-                        del state.suspended_pairs[p]
+                        if p in state.suspended_pairs:
+                           del state.suspended_pairs[p]
+
 
                     for ativo_original, estrategia_campea in state.champion_strategies.items():
                         if ativo_original in state.suspended_pairs: continue
 
                         tipo_mercado, payout = None, 0
                         for market_type in ['binary', 'turbo']:
-                            if ativo_original in all_profits and market_type in all_profits[ativo_original]:
+                            if ativo_original in all_profits and market_type in all_profits.get(ativo_original, {}):
                                 tipo_mercado, payout = market_type, all_profits[ativo_original][market_type] * 100
                                 break
                         
