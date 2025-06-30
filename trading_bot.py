@@ -129,7 +129,7 @@ def exibir_banner():
       ██║   ██╔══██╗██║██╔══██║██║       ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║    ██║    ██║
       ██║   ██║  ██║██║██║  ██║███████╗    ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝    ██║
       ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝     ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝     ╚═╝ '''+y+'''
-              azkzero@gmail.com - v62 (Correção de Entradas Simultâneas)
+              azkzero@gmail.com - v62.1 (Ajustes de Interface)
     ''')
     print(y + "*"*88)
     print(c + "="*88)
@@ -270,16 +270,14 @@ def catalogar_e_selecionar(api, params, state):
     log_info("CATALOGAÇÃO FINALIZADA!")
     return champion_strategies
 
-# --- CORRECTED HELPER FUNCTION ---
 def get_candle_props(vela):
-    props = {}
-    if not vela or not all(k in vela for k in ['high', 'low', 'open', 'close']):
-        return None # Return None if candle is invalid
+    if not vela or not all(k in vela and vela[k] is not None for k in ['high', 'low', 'open', 'close']):
+        return None
         
-    props['open'] = vela.get('open')
-    props['close'] = vela.get('close')
-    props['high'] = vela.get('high')
-    props['low'] = vela.get('low')
+    props = {
+        'open': vela['open'], 'close': vela['close'],
+        'high': vela['high'], 'low': vela['low']
+    }
     props['range'] = props['high'] - props['low']
     
     if props['range'] > 0:
@@ -295,7 +293,6 @@ def get_candle_props(vela):
     props['pavio_inferior'] = min(props['open'], props['close']) - props['low']
     return props
 
-# --- HELPER FUNCTIONS FOR ADVANCED STRATEGIES ---
 def calculate_ema(closes, period):
     if len(closes) < period: return None
     ema = [sum(closes[:period]) / period]
@@ -330,7 +327,6 @@ def check_trend_with_emas(closes, p):
     if ema_short < ema_long and last_close < ema_short: return 'SELL'
     return 'NEUTRAL'
 
-# --- NEW GLOBAL FILTERS ---
 def is_market_consolidating(velas, p):
     lookback = p.get('Consolidation_Lookback', 10)
     threshold = p.get('Consolidation_Threshold', 0.0005)
@@ -348,7 +344,6 @@ def is_exhaustion_pattern(velas, p):
         return True
     return False
 
-# --- REFACTORED STRATEGIES WITH CONFIDENCE SCORE (Adjusted to handle None from get_candle_props) ---
 def strategy_sr_breakout(velas, p, state, ativo=None):
     score, direcao = 0, None
     lookback = p.get('SR_Lookback', 15)
@@ -454,7 +449,6 @@ def strategy_candle_flow(velas, p, state, ativo=None):
 
     return score, direcao
 
-# --- Bot State and Main Logic ---
 class BotState:
     def __init__(self, p):
         self.stop = False; self.win_count = 0; self.loss_count = 0
@@ -578,6 +572,7 @@ def main_bot_logic(state, PARAMS):
         try:
             with state.lock:
                 if state.standby_mode and time.time() < state.standby_until:
+                    if int(time.time()) % 10 == 0: log_warning(f"Bot em modo Stand-by. Retomando em {int(state.standby_until - time.time())}s...")
                     time.sleep(5)
                     continue
                 elif state.standby_mode:
@@ -649,8 +644,15 @@ def main_bot_logic(state, PARAMS):
                         
                         with state.lock: state.active_trades += 1
                         signal_id = str(uuid.uuid4())
-                        # --- FIXED PAYLOAD TO SEND RAW CANDLE ---
-                        signal_payload = { "type": "signal", "signal_id": signal_id, "pair": ativo, "strategy": estrategia, "direction": direcao_sinal, "entry_time": horario_entrada_str, "candle": velas[-1], "result": None, "gale_level": 0 }
+                        
+                        signal_payload = { 
+                            "type": "signal", "signal_id": signal_id, "pair": ativo, 
+                            "strategy": estrategia, "direction": direcao_sinal, 
+                            "entry_time": horario_entrada_str, 
+                            "candle": velas[-1],
+                            "previous_candle": velas[-2], # Sending previous candle
+                            "result": None, "gale_level": 0 
+                        }
                         state.signal_history[signal_id] = signal_payload
                         signal_queue.put(signal_payload)
 
