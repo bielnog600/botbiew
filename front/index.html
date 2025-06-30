@@ -135,7 +135,6 @@
             return (
                 <div className="glass-card rounded-2xl p-4 flex flex-col text-center h-[240px] card-enter-animation">
                     <h3 className="text-xl font-bold text-white mb-3 text-left flex items-center gap-2 flex-shrink-0"><i className="fa-solid fa-terminal"></i>Terminal do Bot</h3>
-                    {/* ALTERAÇÃO: Revertido para o comportamento de scroll automático */}
                     <div className="bg-gray-900/50 rounded-lg p-3 w-full text-left flex-grow font-mono text-sm space-y-2 overflow-hidden flex flex-col-reverse">
                         <div>
                         {logs.map((log) => (
@@ -221,20 +220,11 @@
                         const initialData = message.data || {};
                         setScoreboard(initialData.placar || { wins: 0, losses: 0, gale_wins: 0 });
                         setSignals((initialData.signals || []).sort((a,b) => (b.entry_time || "").localeCompare(a.entry_time || "")));
-                        setLogMessages([{id: Date.now(), level: 'info', pair: 'Sistema', message: 'Conectado com sucesso.'}]);
-                        break;
-                    case 'analysis_status':
-                        let finalStatus = message.status;
-                        if (message.next_entry_time && message.status.includes('%s')) {
-                             const localTime = convertTimeToUserTimezone(message.next_entry_time);
-                             finalStatus = message.status.replace('%s', localTime);
-                        }
-                        const newStatusLog = { id: Date.now(), level: 'info', pair: 'Sistema', message: finalStatus };
-                        setLogMessages(prev => [newStatusLog, ...prev].slice(0, 10));
+                        setLogMessages([{id: Date.now(), level: 'success', pair: 'Sistema', message: 'Conectado com sucesso.'}]);
                         break;
                     case 'log':
                         const newLog = { id: Date.now(), ...message.data };
-                        setLogMessages(prev => [newLog, ...prev].slice(0, 10));
+                        setLogMessages(prev => [newLog, ...prev].slice(0, 50)); // Aumentado para 50 logs
                         break;
                     case 'signal':
                         setSignals(prev => [message, ...prev]);
@@ -259,14 +249,14 @@
                 socketRef.current.onclose = () => {
                      console.log("WebSocket desconectado. Tentando reconectar...");
                      const disconnectLog = {id: Date.now(), level: 'error', pair: 'Sistema', message: 'Desconectado. Tentando reconectar...'};
-                     setLogMessages(prev => [disconnectLog, ...prev].slice(0,10));
+                     setLogMessages(prev => [disconnectLog, ...prev].slice(0,50));
                      setTimeout(connect, 5000);
                 };
                  socketRef.current.onerror = (err) => {
-                    console.error("Erro no WebSocket:", err);
-                    const errorLog = {id: Date.now(), level: 'error', pair: 'Sistema', message: 'Erro de conexão.'};
-                    setLogMessages(prev => [errorLog, ...prev].slice(0,10));
-                };
+                     console.error("Erro no WebSocket:", err);
+                     const errorLog = {id: Date.now(), level: 'error', pair: 'Sistema', message: 'Erro de conexão.'};
+                     setLogMessages(prev => [errorLog, ...prev].slice(0,50));
+                 };
             }, [handleMessage]);
 
             useEffect(() => {
@@ -299,21 +289,21 @@
             
             return (
               <div className="h-screen w-screen flex flex-col p-4 sm:p-6 lg:p-8 gap-6">
-                {/* Parte Fixa (Topo) */}
-                <div className="flex-shrink-0">
-                  <Header />
-                  <Scoreboard scoreboard={scoreboard} />
-                </div>
-                
-                {/* Parte Rolável (Conteúdo Principal) */}
-                <main className="flex-grow overflow-y-auto pb-20 lg:pb-0 no-scrollbar">
-                    {renderView()}
-                </main>
-                
-                {/* TabBar Fixa (em baixo em mobile, no topo em desktop) */}
-                <div className="fixed bottom-0 left-0 right-0 lg:static lg:order-first z-50">
-                    <TabBar activeTab={activeTab} setActiveTab={setActiveTab} />
-                </div>
+                  {/* Parte Fixa (Topo) */}
+                  <div className="flex-shrink-0">
+                    <Header />
+                    <Scoreboard scoreboard={scoreboard} />
+                  </div>
+                  
+                  {/* Parte Rolável (Conteúdo Principal) */}
+                  <main className="flex-grow overflow-y-auto pb-20 lg:pb-0 no-scrollbar">
+                      {renderView()}
+                  </main>
+                  
+                  {/* TabBar Fixa (em baixo em mobile, no topo em desktop) */}
+                  <div className="fixed bottom-0 left-0 right-0 lg:static lg:order-first z-50">
+                      <TabBar activeTab={activeTab} setActiveTab={setActiveTab} />
+                  </div>
               </div>
             );
         }
