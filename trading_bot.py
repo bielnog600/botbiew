@@ -122,7 +122,7 @@ def exibir_banner():
       ██║   ██╔══██╗██║██╔══██║██║       ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║    ██║    ██║
       ██║   ██║  ██║██║██║  ██║███████╗    ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝    ██║
       ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝     ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝     ╚═╝ '''+y+'''
-              azkzero@gmail.com - v65 (Novas Estratégias MQL)
+              azkzero@gmail.com - v65.1 (Comunicação Aprimorada)
     ''')
     print(y + "*"*88)
     print(c + "="*88)
@@ -517,7 +517,7 @@ def main_bot_logic(state, PARAMS):
                     
                     analysis_payload = {"type": "live_analysis", "data": {"pair": ativo, "strategy": estrategia, "candle": velas[-1]}}
                     signal_queue.put(analysis_payload)
-
+                    
                     cod_est = next((cod for cod, nome in ALL_STRATEGIES.items() if nome == estrategia), None)
                     if not cod_est: continue
                     
@@ -553,11 +553,16 @@ def main():
     PARAMS = { 
         'Assertividade_Minima': 60,
         'MAX_SIMULTANEOUS_TRADES': 1,
+        'Standby_Loss_Count': 3,
+        'Standby_Timeframe_Minutes': 5,
+        'Recatalog_Cycle_Hours': 2,
+        'Recatalog_Loss_Trigger': 5,
+        'Minimum_Confidence_Score': 1, # Set to 1 for new MQL strategies
         # New Strategy Params
         'MAPeriod': 14,
         'MaxLevels': 5,
         'Proximity': 2,
-        'Point': 0.00001, # Adjust based on asset precision
+        'Point': 0.00001,
     }
     bot_state = BotState(PARAMS)
     
