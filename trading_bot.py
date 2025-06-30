@@ -113,6 +113,15 @@ def exibir_banner():
     print(c + "="*88)
 
 # --- Logic and Strategy Functions ---
+def validar_e_limpar_velas(velas_raw):
+    if not velas_raw: return []
+    velas_limpas = []
+    for v_raw in velas_raw:
+        if not isinstance(v_raw, dict): continue
+        vela_padronizada = {'open': v_raw.get('open'), 'close': v_raw.get('close'), 'high': v_raw.get('high') or v_raw.get('max'), 'low': v_raw.get('low') or v_raw.get('min')}
+        if all(v is not None for v in vela_padronizada.values()): velas_limpas.append(vela_padronizada)
+    return velas_limpas
+
 def sma_slope(closes, period):
     if len(closes) < period + 1: return None
     sma1 = sum(closes[-(period+1):-1]) / period; sma2 = sum(closes[-period:]) / period
@@ -202,16 +211,24 @@ def get_config_from_env():
 def run_trading_cycle(API, state, params, config, cifrao):
     """Encapsulates the logic for a single analysis and trading cycle."""
     try:
-        # Catalogação (se necessário)
+        # A lógica de catalogação pode ser adicionada aqui se necessário
+        # Por agora, vamos assumir que as estratégias são fixas ou já catalogadas
         if not state.champion_strategies:
-            log_info("Iniciando catalogação de estratégias...")
-            # A função catalogar_e_selecionar precisaria ser definida ou importada
-            # state.champion_strategies = catalogar_e_selecionar(API, params, state)
-            # Mock para teste
-            state.champion_strategies = {"EURUSD-op": "Fluxo"}
-            log_info("Catalogação concluída.")
+            log_info("Definindo estratégias padrão para todos os pares...")
+            # Mock: usa todas as estratégias para todos os pares para teste
+            all_assets = API.get_all_open_time()
+            open_pairs = []
+            for market_type in ['binary', 'turbo']:
+                if market_type in all_assets:
+                    for asset, info in all_assets[market_type].items():
+                        if info.get('open'):
+                            open_pairs.append(asset)
+            
+            # Para simplificar, vamos usar a primeira estratégia para todos
+            default_strategy = list(ALL_STRATEGIES.values())[0]
+            state.champion_strategies = {pair: default_strategy for pair in open_pairs}
+            log_info(f"Estratégia '{default_strategy}' definida como padrão.")
 
-        # Lógica de análise de mercado
         minuto_anterior = -1
         timestamp = time.time()
         dt_objeto = datetime.fromtimestamp(timestamp)
@@ -235,7 +252,7 @@ def run_trading_cycle(API, state, params, config, cifrao):
                         break
                 
                 payout = all_profits.get(ativo, {}).get('turbo', 0) * 100 or all_profits.get(ativo, {}).get('binary', 0) * 100
-                if payout < config['pay_minimo']:
+                if payout < config.get('pay_minimo', 80):
                     continue
 
                 velas = validar_e_limpar_velas(API.get_candles(ativo, 60, 100, time.time()))
@@ -251,12 +268,11 @@ def run_trading_cycle(API, state, params, config, cifrao):
 
                 if score > 0 and direcao_sinal:
                     log_success(f"SINAL ENCONTRADO: {direcao_sinal} em {ativo} via {estrategia}")
-                    # A lógica de compra seria iniciada aqui em uma thread
+                    # A lógica de compra seria iniciada aqui
                     # ...
     except Exception as e:
         log_error(f"Erro no ciclo de trading: {e}")
         traceback.print_exc()
-
 
 def main_bot_logic(state):
     exibir_banner()
