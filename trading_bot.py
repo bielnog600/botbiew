@@ -114,7 +114,7 @@ def exibir_banner():
       ██║   ██╔══██╗██║██╔══██║██║         ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║   ██║   ██║
       ██║   ██║  ██║██║██║  ██║███████╗     ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝   ██║
       ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝      ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝    ╚═╝ '''+y+'''
-              azkzero@gmail.com - v52 (Rompimento de Lote)
+              azkzero@gmail.com - v53 (Estratégias Profissionais)
     ''')
     print(y + "*"*88)
     print(c + "="*88)
@@ -284,27 +284,31 @@ def get_candle_props(vela):
     props['pavio_inferior'] = min(vela['open'], vela['close']) - vela['low']
     return props
 
+def detect_fractals(velas, max_levels):
+    highs, lows = [v['high'] for v in velas], [v['low'] for v in velas]
+    res, sup = deque(maxlen=max_levels), deque(maxlen=max_levels)
+    for i in range(len(velas) - 3, 2, -1):
+        if highs[i-1] > max(highs[i-3:i-1] + highs[i:i+2]): res.append(highs[i-1])
+        if lows[i-1] < min(lows[i-3:i-1] + lows[i:i+2]): sup.append(lows[i-1])
+    return list(res), list(sup)
+    
 # --- STRATEGIES ---
 def strategy_sr_breakout(velas, p):
     lookback = p.get('SR_Lookback', 5)
     if len(velas) < lookback + 2: return None
     
-    # 1. Verifica se o mercado está lateral no "lote"
     closes_lote = [v['close'] for v in velas[-(lookback+2):-1]]
     if sma_slope(closes_lote, lookback) is not None:
-        return None # Ignora se houver tendência definida no lote
+        return None
 
-    # 2. Define o range do lote
     lote = velas[-(lookback+1):-1]
     highest_high = max(v['high'] for v in lote)
     lowest_low = min(v['low'] for v in lote)
     
-    # 3. Analisa a vela de rompimento
     vela_sinal = velas[-1]
     props_sinal = get_candle_props(vela_sinal)
     if not props_sinal: return None
     
-    # 4. Aplica os filtros de qualidade da vela
     corpo_medio = 0.40 <= props_sinal['body_ratio'] <= 0.75 
     pavios_pequenos = props_sinal['pavio_superior'] < props_sinal['corpo'] * 0.5 and \
                       props_sinal['pavio_inferior'] < props_sinal['corpo'] * 0.5
@@ -312,7 +316,6 @@ def strategy_sr_breakout(velas, p):
     if not (corpo_medio and pavios_pequenos):
         return None
 
-    # 5. Verifica o rompimento e dá o sinal
     if props_sinal['is_alta'] and vela_sinal['close'] > highest_high:
         return 'BUY'
     if props_sinal['is_baixa'] and vela_sinal['close'] < lowest_low:
