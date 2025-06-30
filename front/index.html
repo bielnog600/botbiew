@@ -2,7 +2,8 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- This meta tag is crucial for a responsive, app-like experience on mobile -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Admin Dashboard - MAROMBIEW BOT</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
@@ -10,27 +11,94 @@
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
-        body { background-color: #0a0a0a; color: #e5e7eb; font-family: 'Poppins', sans-serif; }
-        .glass-card { background: rgba(17, 24, 39, 0.6); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.1); }
-        .form-input { background-color: #1f2937; border-color: #374151; }
-        .btn-primary { background-color: #0d9488; }
-        .btn-primary:hover { background-color: #14b8a6; }
-        .nav-link-active { background-color: #14b8a6; color: white; }
+        :root {
+            --bg-dark: #0D1117;
+            --bg-medium: #161B22;
+            --border-color: #30363d;
+            --text-primary: #c9d1d9;
+            --text-secondary: #8b949e;
+            --accent-primary: #238636;
+            --accent-primary-hover: #2ea043;
+            --accent-secondary: #db6d28;
+            --accent-red: #da3633;
+        }
+        html, body {
+            overscroll-behavior-y: contain; /* Prevents pull-to-refresh on mobile */
+        }
+        body {
+            background-color: var(--bg-dark);
+            color: var(--text-primary);
+            font-family: 'Poppins', sans-serif;
+        }
+        .glass-card {
+            background: rgba(22, 27, 34, 0.7);
+            backdrop-filter: blur(10px);
+            border: 1px solid var(--border-color);
+        }
+        .form-input {
+            background-color: var(--bg-dark);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+        .form-input:focus {
+            outline: none;
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 0 3px rgba(35, 134, 54, 0.3);
+        }
+        .btn {
+            transition: background-color 0.2s, transform 0.1s;
+            border: none;
+            font-weight: 600;
+        }
+        .btn:active {
+           transform: scale(0.98);
+        }
+        .btn-primary { background-color: var(--accent-primary); }
+        .btn-primary:hover { background-color: var(--accent-primary-hover); }
+        .btn-red { background-color: var(--accent-red); }
+        
+        /* Responsive Navigation */
+        .desktop-nav { display: none; }
+        .mobile-nav { display: flex; }
+        @media (min-width: 768px) {
+            .desktop-nav { display: flex; }
+            .mobile-nav { display: none; }
+        }
+
+        .nav-link-active {
+            background-color: var(--accent-primary);
+            color: white;
+        }
         .font-mono { font-family: 'Roboto Mono', monospace; }
+
+        /* Custom Toggle Switch */
+        .toggle-checkbox:checked {
+            background-color: var(--accent-primary);
+            border-color: var(--accent-primary);
+        }
+        .toggle-checkbox:checked + .toggle-label {
+            background-color: var(--accent-primary);
+        }
     </style>
 </head>
 <body>
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect, useCallback, Component } = React;
+        const { useState, useEffect, useCallback, Component, Fragment } = React;
         const { createClient } = supabase;
 
-        // --- INFORMAÇÕES DE CONEXÃO COM O SUPABASE ---
+        // --- SUPABASE CONNECTION ---
         const SUPABASE_URL = 'https://ioduahwknfsktujthfyc.supabase.co';
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlvZHVhaHdrbmZza3R1anRoZnljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEzMDc0NDcsImV4cCI6MjA2Njg4MzQ0N30.96f8wZO6SvABKFMWjIiw1pSugAB4Isldj7yxLcLJRSE';
         const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+        // --- COMPONENTS ---
 
         function LoginPage({ onLogin }) {
             const [email, setEmail] = useState('');
@@ -49,92 +117,203 @@
             };
 
             return (
-                <div className="min-h-screen flex items-center justify-center bg-gray-900">
-                    <div className="w-full max-w-md p-8 space-y-8 glass-card rounded-xl">
-                        <div><h2 className="mt-6 text-center text-3xl font-extrabold text-white">Admin Login</h2></div>
-                        <form className="mt-8 space-y-6" onSubmit={handleLogin}>
-                            <div className="rounded-md shadow-sm -space-y-px">
-                                <div><input type="email" required className="form-input appearance-none rounded-none relative block w-full px-3 py-2 border placeholder-gray-500 text-gray-300 rounded-t-md focus:outline-none focus:ring-teal-500 focus:border-teal-500" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} /></div>
-                                <div><input type="password" required className="form-input appearance-none rounded-none relative block w-full px-3 py-2 border placeholder-gray-500 text-gray-300 rounded-b-md focus:outline-none focus:ring-teal-500 focus:border-teal-500" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} /></div>
+                <div className="min-h-screen flex items-center justify-center p-4 bg-dots">
+                    <div className="w-full max-w-md p-8 space-y-6 glass-card rounded-2xl shadow-lg">
+                        <div className="text-center">
+                            <i className="fas fa-robot text-4xl text-green-400 mb-2"></i>
+                            <h2 className="text-3xl font-bold text-white">Admin Login</h2>
+                             <p className="text-gray-400">MAROMBIEW BOT</p>
+                        </div>
+                        <form className="space-y-6" onSubmit={handleLogin}>
+                            <div className="space-y-4">
+                                <div><input type="email" required className="form-input w-full px-4 py-3 rounded-lg" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} /></div>
+                                <div><input type="password" required className="form-input w-full px-4 py-3 rounded-lg" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} /></div>
                             </div>
-                            {error && <p className="text-red-500 text-sm text-center">{error}</p>}
-                            <div><button type="submit" className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white btn-primary focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500" disabled={loading}>{loading ? 'A entrar...' : 'Entrar'}</button></div>
+                            {error && <p className="text-red-400 text-sm text-center">{error}</p>}
+                            <div><button type="submit" className="btn btn-primary w-full py-3 rounded-lg text-white font-semibold" disabled={loading}>{loading ? 'Entrando...' : 'Entrar'}</button></div>
                         </form>
                     </div>
                 </div>
             );
         }
-        
-        function AdminDashboard() {
-            const [view, setView] = useState('bot_control');
-            const handleLogout = async () => { await supabaseClient.auth.signOut(); };
+
+        function BotControl() {
+            const [botStatus, setBotStatus] = useState('PAUSED');
+            const [params, setParams] = useState(null);
+            const [loading, setLoading] = useState(true);
+            const [saving, setSaving] = useState(false);
+
+            const fetchConfig = useCallback(async () => {
+                setLoading(true);
+                const { data, error } = await supabaseClient.table('bot_config').select('*').eq('id', 1).single();
+                if (data) {
+                    setBotStatus(data.status);
+                    setParams(data.params);
+                } else {
+                    console.error("Erro ao buscar config:", error);
+                }
+                setLoading(false);
+            }, []);
+
+            useEffect(() => {
+                fetchConfig();
+                const channel = supabaseClient.channel('bot_config_changes')
+                    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'bot_config', filter: 'id=eq.1' }, payload => {
+                        console.log('Config alterada:', payload.new);
+                        setBotStatus(payload.new.status);
+                        setParams(payload.new.params);
+                    })
+                    .subscribe();
+
+                return () => supabaseClient.removeChannel(channel);
+            }, [fetchConfig]);
+
+            const handleStatusToggle = async () => {
+                const newStatus = botStatus === 'RUNNING' ? 'PAUSED' : 'RUNNING';
+                setSaving(true);
+                await supabaseClient.table('bot_config').update({ status: newStatus }).eq('id', 1);
+                setBotStatus(newStatus); // Optimistic update
+                setSaving(false);
+            };
+
+            const handleParamChange = (key, value) => {
+                // Handle numeric conversion
+                const numericFields = ["Assertividade_Minima", "MAX_SIMULTANEOUS_TRADES", "Standby_Loss_Count", "Standby_Timeframe_Minutes", "Recatalog_Cycle_Hours", "Recatalog_Loss_Trigger", "Consolidation_Lookback", "MAPeriod", "MaxLevels", "Proximity"];
+                const floatFields = ["Consolidation_Threshold", "Exhaustion_DojiLike_Ratio", "Point"];
+                
+                let processedValue = value;
+                if(numericFields.includes(key)) processedValue = parseInt(value, 10) || 0;
+                if(floatFields.includes(key)) processedValue = parseFloat(value) || 0;
+
+                setParams(prev => ({ ...prev, [key]: processedValue }));
+            };
+
+            const handleParamsSave = async () => {
+                setSaving(true);
+                const { error } = await supabaseClient.table('bot_config').update({ params: params }).eq('id', 1);
+                if (error) {
+                    alert('Erro ao guardar parâmetros: ' + error.message);
+                } else {
+                    alert('Parâmetros guardados com sucesso!');
+                }
+                setSaving(false);
+            };
+
+            if (loading) return <div className="text-center p-10">Carregando configurações do Bot...</div>;
 
             return (
-                <div className="flex h-screen bg-gray-900">
-                    <aside className="w-64 bg-gray-800 text-white flex flex-col">
-                        <div className="h-16 flex items-center justify-center text-2xl font-bold border-b border-gray-700">Admin</div>
-                        <nav className="flex-1 px-2 py-4 space-y-2">
-                            <a href="#" onClick={() => setView('bot_control')} className={`block px-4 py-2 rounded-md ${view === 'bot_control' ? 'nav-link-active' : ''}`}>Controlo do Bot</a>
-                            <a href="#" onClick={() => setView('user_management')} className={`block px-4 py-2 rounded-md ${view === 'user_management' ? 'nav-link-active' : ''}`}>Gestão de Alunos</a>
-                        </nav>
-                        <div className="p-4 border-t border-gray-700"><button onClick={handleLogout} className="w-full text-left px-4 py-2 rounded-md hover:bg-red-500">Sair</button></div>
-                    </aside>
-                    <main className="flex-1 p-10 overflow-y-auto">
-                        {view === 'bot_control' && <BotControl />}
-                        {view === 'user_management' && <UserManagement />}
-                    </main>
+                <div className="space-y-8">
+                    <div>
+                        <h1 className="text-3xl font-bold text-white mb-2">Controle do Bot</h1>
+                        <p className="text-gray-400">Monitore o status e ajuste as estratégias em tempo real.</p>
+                    </div>
+
+                    <div className="glass-card p-6 rounded-xl">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <h2 className="text-xl font-bold mb-1">Estado do Bot</h2>
+                                <p className={`font-bold text-lg ${botStatus === 'RUNNING' ? 'text-green-400' : 'text-amber-400'}`}>{botStatus}</p>
+                            </div>
+                            <div className="flex items-center">
+                                <span className="text-gray-400 mr-3">{botStatus === 'PAUSED' ? 'Ligar' : 'Desligar'}</span>
+                                <div className="relative inline-block w-14 mr-2 align-middle select-none transition duration-200 ease-in">
+                                    <input 
+                                        type="checkbox" 
+                                        name="toggle" 
+                                        id="toggle" 
+                                        className="toggle-checkbox absolute block w-7 h-7 rounded-full bg-white border-4 appearance-none cursor-pointer"
+                                        checked={botStatus === 'RUNNING'}
+                                        onChange={handleStatusToggle}
+                                        disabled={saving}
+                                    />
+                                    <label htmlFor="toggle" className="toggle-label block overflow-hidden h-7 rounded-full bg-gray-600 cursor-pointer"></label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div className="glass-card p-6 rounded-xl">
+                         <h2 className="text-xl font-bold mb-4">Parâmetros das Estratégias</h2>
+                         {params ? (
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                {Object.entries(params).map(([key, value]) => (
+                                    <div key={key}>
+                                        <label className="block text-sm font-medium text-gray-400 mb-1">{key.replace(/_/g, ' ')}</label>
+                                        <input 
+                                            type={typeof value === 'number' ? 'number' : 'text'}
+                                            step={key === 'Point' || key === 'Consolidation_Threshold' ? '0.00001' : '1'}
+                                            value={value}
+                                            onChange={(e) => handleParamChange(key, e.target.value)}
+                                            className="form-input w-full px-3 py-2 rounded-md text-sm"
+                                        />
+                                    </div>
+                                ))}
+                            </div>
+                         ) : <p>Carregando parâmetros...</p>}
+                         <button onClick={handleParamsSave} className="mt-6 btn btn-primary w-full py-2.5 rounded-md disabled:opacity-50" disabled={saving}>
+                            {saving ? 'Guardando...' : 'Guardar Parâmetros'}
+                        </button>
+                    </div>
                 </div>
             );
         }
         
-        function BotControl() {
-            const [botStatus, setBotStatus] = useState('PAUSED');
-            const [params, setParams] = useState('');
-            const [loading, setLoading] = useState(false);
+        function SignalsView() {
+            const [signals, setSignals] = useState([]);
+            
+            useEffect(() => {
+                // Fetch initial signals
+                const fetchInitialSignals = async () => {
+                    const { data, error } = await supabaseClient
+                        .from('trade_signals')
+                        .select('*')
+                        .order('created_at', { ascending: false })
+                        .limit(50);
+                    if (data) setSignals(data);
+                };
+                fetchInitialSignals();
 
-            const fetchConfig = useCallback(async () => {
-                const { data } = await supabaseClient.table('bot_config').select('*').eq('id', 1).single();
-                if (data) {
-                    setBotStatus(data.status);
-                    setParams(JSON.stringify(data.params, null, 2));
-                }
+                // Listen for new signals
+                const channel = supabaseClient.channel('trade_signals_feed')
+                    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'trade_signals' }, payload => {
+                        setSignals(currentSignals => [payload.new, ...currentSignals]);
+                    })
+                    .subscribe();
+                
+                return () => supabaseClient.removeChannel(channel);
             }, []);
 
-            useEffect(() => { fetchConfig(); }, [fetchConfig]);
-
-            const handleStatusChange = async (newStatus) => {
-                setLoading(true);
-                await supabaseClient.table('bot_config').update({ status: newStatus }).eq('id', 1);
-                fetchConfig();
-                setLoading(false);
-            };
-
-            const handleParamsSave = async () => {
-                try {
-                    const parsedParams = JSON.parse(params);
-                    setLoading(true);
-                    await supabaseClient.table('bot_config').update({ params: parsedParams }).eq('id', 1);
-                    alert('Parâmetros guardados com sucesso!');
-                    setLoading(false);
-                } catch (e) { alert('Erro: JSON inválido!'); }
-            };
-
             return (
-                <div>
-                    <h1 className="text-3xl font-bold text-white mb-6">Controlo do Bot</h1>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div className="glass-card p-6 rounded-xl">
-                            <h2 className="text-xl font-bold mb-4">Estado do Bot</h2>
-                            <p className="mb-4">Estado atual: <span className={`font-bold ${botStatus === 'RUNNING' ? 'text-green-400' : 'text-amber-400'}`}>{botStatus}</span></p>
-                            <div className="flex gap-4">
-                                <button onClick={() => handleStatusChange('RUNNING')} className="btn-primary px-4 py-2 rounded-md disabled:opacity-50" disabled={loading || botStatus === 'RUNNING'}>Iniciar Bot</button>
-                                <button onClick={() => handleStatusChange('PAUSED')} className="bg-amber-500 hover:bg-amber-600 px-4 py-2 rounded-md disabled:opacity-50" disabled={loading || botStatus === 'PAUSED'}>Pausar Bot</button>
-                            </div>
-                        </div>
-                         <div className="glass-card p-6 rounded-xl">
-                            <h2 className="text-xl font-bold mb-4">Parâmetros das Estratégias</h2>
-                            <textarea value={params} onChange={(e) => setParams(e.target.value)} className="form-input w-full h-64 font-mono text-sm p-2 rounded-md"></textarea>
-                            <button onClick={handleParamsSave} className="mt-4 btn-primary w-full py-2 rounded-md disabled:opacity-50" disabled={loading}>Guardar Parâmetros</button>
+                 <div>
+                    <h1 className="text-3xl font-bold text-white mb-6">Sinais em Tempo Real</h1>
+                    <div className="glass-card rounded-xl overflow-hidden">
+                        <div className="overflow-x-auto">
+                            <table className="min-w-full">
+                                <thead className="bg-gray-800/50">
+                                    <tr>
+                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Horário</th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Par</th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Direção</th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Estratégia</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-700">
+                                    {signals.length === 0 && (
+                                        <tr><td colSpan="4" className="text-center py-10 text-gray-400">Aguardando sinais do bot...</td></tr>
+                                    )}
+                                    {signals.map(signal => (
+                                        <tr key={signal.id}>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm font-mono">{new Date(signal.created_at).toLocaleTimeString('pt-BR')}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm font-bold">{signal.pair}</td>
+                                            <td className={`px-6 py-4 whitespace-nowrap text-sm font-bold ${signal.direction === 'BUY' ? 'text-green-400' : 'text-red-400'}`}>
+                                                <i className={`fas fa-arrow-${signal.direction === 'BUY' ? 'up' : 'down'} mr-2`}></i>
+                                                {signal.direction}
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-400">{signal.strategy}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
                         </div>
                     </div>
                 </div>
@@ -142,61 +321,142 @@
         }
 
         function UserManagement() {
+            // This component remains largely the same but styled to fit the new theme
             const [users, setUsers] = useState([]);
+            const [loading, setLoading] = useState(true);
+
             const fetchUsers = useCallback(async () => {
-                const { data: { users: authUsers } } = await supabaseClient.auth.admin.listUsers();
-                const { data: subscriptions } = await supabaseClient.from('subscriptions').select('*');
-                
-                const combined = authUsers.map(user => {
-                    const sub = subscriptions.find(s => s.user_id === user.id) || {};
-                    return { ...user, subscription: sub };
-                });
-                setUsers(combined);
+                setLoading(true);
+                try {
+                    const { data: { users: authUsers }, error: authError } = await supabaseClient.auth.admin.listUsers();
+                    if(authError) throw authError;
+
+                    const { data: subscriptions, error: subError } = await supabaseClient.from('subscriptions').select('*');
+                    if(subError) throw subError;
+                    
+                    const combined = authUsers.map(user => {
+                        const sub = subscriptions.find(s => s.user_id === user.id) || {};
+                        return { ...user, subscription: sub };
+                    });
+                    setUsers(combined);
+                } catch (error) {
+                    alert("Erro ao buscar usuários: " + error.message);
+                } finally {
+                    setLoading(false);
+                }
             }, []);
 
             useEffect(() => { fetchUsers(); }, [fetchUsers]);
             
             const handleSubscriptionChange = async (userId, newStatus, newExpiry) => {
-                 const { data } = await supabaseClient.from('subscriptions').select('user_id').eq('user_id', userId).single();
+                const { data } = await supabaseClient.from('subscriptions').select('user_id').eq('user_id', userId).single();
                 if (data) await supabaseClient.from('subscriptions').update({ status: newStatus, expires_at: newExpiry }).eq('user_id', userId);
                 else await supabaseClient.from('subscriptions').insert({ user_id: userId, status: newStatus, expires_at: newExpiry });
                 fetchUsers();
             };
 
+            if (loading) return <div className="text-center p-10">Carregando usuários...</div>;
+
             return (
                 <div>
                     <h1 className="text-3xl font-bold text-white mb-6">Gestão de Alunos</h1>
                     <div className="glass-card rounded-xl overflow-hidden">
-                        <table className="min-w-full">
-                            <thead className="bg-gray-800">
-                                <tr>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Email</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Estado</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Expira em</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Ações</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-700">
-                                {users.map(user => {
-                                    const expiryDate = user.subscription.expires_at ? new Date(user.subscription.expires_at).toISOString().split('T')[0] : '';
-                                    return (
-                                        <tr key={user.id}>
-                                            <td className="px-6 py-4 whitespace-nowrap">{user.email}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap">{user.subscription.status || 'inactive'}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap">{expiryDate}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
-                                                <button onClick={() => {
-                                                    const newDate = prompt("Nova data de expiração (YYYY-MM-DD):", expiryDate);
-                                                    if(newDate) handleSubscriptionChange(user.id, 'active', newDate);
-                                                }} className="text-teal-400 hover:text-teal-300">Editar</button>
-                                                <button onClick={() => handleSubscriptionChange(user.id, 'inactive', user.subscription.expires_at)} className="text-red-400 hover:text-red-300">Desativar</button>
-                                            </td>
-                                        </tr>
-                                    )
-                                })}
-                            </tbody>
-                        </table>
+                        <div className="overflow-x-auto">
+                            <table className="min-w-full">
+                                <thead className="bg-gray-800/50">
+                                    <tr>
+                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Email</th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Estado</th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Expira em</th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Ações</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-700">
+                                    {users.map(user => {
+                                        const expiryDate = user.subscription.expires_at ? new Date(user.subscription.expires_at).toISOString().split('T')[0] : '';
+                                        return (
+                                            <tr key={user.id}>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm">{user.email}</td>
+                                                <td className="px-6 py-4 whitespace-nowrap"><span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${user.subscription.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>{user.subscription.status || 'inactive'}</span></td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm font-mono">{expiryDate}</td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-4">
+                                                    <button onClick={() => {
+                                                        const newDate = prompt("Nova data de expiração (YYYY-MM-DD):", expiryDate);
+                                                        if(newDate) handleSubscriptionChange(user.id, 'active', newDate);
+                                                    }} className="text-green-400 hover:text-green-300">Editar</button>
+                                                    <button onClick={() => handleSubscriptionChange(user.id, 'inactive', user.subscription.expires_at)} className="text-red-400 hover:text-red-300">Desativar</button>
+                                                </td>
+                                            </tr>
+                                        )
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
+                </div>
+            );
+        }
+
+        function AdminDashboard() {
+            const [view, setView] = useState('bot_control');
+            const handleLogout = async () => { await supabaseClient.auth.signOut(); };
+
+            const NavLink = ({ viewName, icon, text }) => (
+                <a href="#" onClick={() => setView(viewName)} className={`flex items-center justify-center md:justify-start space-x-3 px-4 py-3 rounded-lg text-sm font-semibold transition-colors ${view === viewName ? 'nav-link-active' : 'hover:bg-gray-700'}`}>
+                    <i className={`fa-solid ${icon} text-lg w-6 text-center`}></i>
+                    <span className="hidden md:inline">{text}</span>
+                </a>
+            );
+
+            const renderView = () => {
+                switch (view) {
+                    case 'bot_control': return <BotControl />;
+                    case 'signals': return <SignalsView />;
+                    case 'user_management': return <UserManagement />;
+                    default: return <BotControl />;
+                }
+            };
+
+            return (
+                <div className="flex flex-col md:flex-row h-screen max-h-screen bg-gray-900 overflow-hidden">
+                    {/* Desktop Sidebar */}
+                    <aside className="desktop-nav w-64 bg-gray-800 text-white flex-col p-4 border-r border-gray-700">
+                        <div className="h-16 flex items-center px-2 text-xl font-bold">
+                            <i className="fas fa-robot text-green-400 mr-3"></i> MAROMBIEW
+                        </div>
+                        <nav className="flex-1 space-y-2">
+                            <NavLink viewName="bot_control" icon="fa-gamepad" text="Controle do Bot" />
+                            <NavLink viewName="signals" icon="fa-satellite-dish" text="Sinais ao Vivo" />
+                            <NavLink viewName="user_management" icon="fa-users" text="Gestão de Alunos" />
+                        </nav>
+                        <div className="p-2">
+                            <button onClick={handleLogout} className="w-full flex items-center space-x-3 px-4 py-3 rounded-lg text-sm font-semibold hover:bg-red-500/80">
+                                <i className="fa-solid fa-right-from-bracket text-lg w-6 text-center"></i>
+                                <span>Sair</span>
+                            </button>
+                        </div>
+                    </aside>
+
+                    {/* Main Content */}
+                    <main className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-8">
+                        {renderView()}
+                    </main>
+
+                    {/* Mobile Bottom Nav */}
+                    <nav className="mobile-nav w-full bg-gray-800 border-t border-gray-700 justify-around">
+                         <a href="#" onClick={() => setView('bot_control')} className={`flex-1 flex flex-col items-center py-2 text-xs ${view === 'bot_control' ? 'text-green-400' : 'text-gray-400'}`}>
+                            <i className="fa-solid fa-gamepad text-xl mb-1"></i>Controle
+                        </a>
+                        <a href="#" onClick={() => setView('signals')} className={`flex-1 flex flex-col items-center py-2 text-xs ${view === 'signals' ? 'text-green-400' : 'text-gray-400'}`}>
+                            <i className="fa-solid fa-satellite-dish text-xl mb-1"></i>Sinais
+                        </a>
+                        <a href="#" onClick={() => setView('user_management')} className={`flex-1 flex flex-col items-center py-2 text-xs ${view === 'user_management' ? 'text-green-400' : 'text-gray-400'}`}>
+                            <i className="fa-solid fa-users text-xl mb-1"></i>Alunos
+                        </a>
+                         <a href="#" onClick={handleLogout} className="flex-1 flex flex-col items-center py-2 text-xs text-gray-400">
+                            <i className="fa-solid fa-right-from-bracket text-xl mb-1"></i>Sair
+                        </a>
+                    </nav>
                 </div>
             );
         }
@@ -219,11 +479,13 @@
             }, []);
 
             if (loading) {
-                return <div className="min-h-screen flex items-center justify-center"><p>A carregar...</p></div>;
+                return <div className="min-h-screen flex items-center justify-center"><p>Carregando...</p></div>;
             }
 
             if (!session) {
-                return <LoginPage onLogin={() => setLoading(true)} />;
+                return <LoginPage onLogin={() => {
+                    // No need to set loading, onAuthStateChange will handle the re-render
+                }} />;
             } else {
                 return <AdminDashboard />;
             }
