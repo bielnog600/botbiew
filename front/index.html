@@ -67,7 +67,7 @@
     <script type="text/babel">
         const { useState, useEffect, useCallback, useMemo, useRef, Component } = React;
         
-        const WEBSOCKET_URL = 'wss://botexnova.marombiew.com';
+        const WEBSOCKET_URL = 'wss://botexnova.marombiew.com'; // <<< URL CORRIGIDA E CENTRALIZADA
 
         function convertTimeToUserTimezone(timeString) {
             if (!timeString || !timeString.includes(':')) return timeString;
@@ -160,6 +160,8 @@
                     };
                     updateTimer();
                     intervalId = setInterval(updateTimer, 1000);
+                } else {
+                    setProgress(0);
                 }
                 return () => clearInterval(intervalId);
             }, [isLatestActive, signal.result]);
@@ -288,11 +290,12 @@
             const connect = useCallback(() => {
                 if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) return;
                 
+                console.log("Tentando conectar ao WebSocket em:", WEBSOCKET_URL);
                 socketRef.current = new WebSocket(WEBSOCKET_URL);
                 socketRef.current.onmessage = (event) => { try { handleMessage(JSON.parse(event.data)); } catch (e) { console.error('Failed to parse message:', event.data, e)} };
-                socketRef.current.onopen = () => console.log("WebSocket conectado.");
-                socketRef.current.onclose = () => {
-                     console.log("WebSocket desconectado. Tentando reconectar...");
+                socketRef.current.onopen = () => console.log("Conexão WebSocket estabelecida com sucesso!");
+                socketRef.current.onclose = (event) => {
+                     console.log(`Conexão WebSocket fechada: Código ${event.code}. Tentando reconectar...`);
                      setTimeout(connect, 5000);
                 };
                  socketRef.current.onerror = (err) => console.error("Erro no WebSocket:", err);
