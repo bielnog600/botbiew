@@ -282,8 +282,8 @@ def main_bot_logic(state):
         sys.exit(1)
 
     # --- Supabase Client Setup ---
-    supabase_url = os.getenv('https://ioduahwknfsktujthfyc.supabase.co', 'SEU_URL_DO_SUPABASE')
-    supabase_key = os.getenv('eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlvZHVhaHdrbmZza3R1anRoZnljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEzMDc0NDcsImV4cCI6MjA2Njg4MzQ0N30.96f8wZO6SvABKFMWjIiw1pSugAB4Isldj7yxLcLJRSE', 'SUA_CHAVE_ANON_DO_SUPABASE')
+    supabase_url = os.getenv('SUPABASE_URL', 'SEU_URL_DO_SUPABASE')
+    supabase_key = os.getenv('SUPABASE_KEY', 'SUA_CHAVE_ANON_DO_SUPABASE')
     if 'SEU_URL' in supabase_url or 'SUA_CHAVE' in supabase_key:
         log_error("As credenciais do Supabase não foram definidas nas variáveis de ambiente.")
         sys.exit(1)
