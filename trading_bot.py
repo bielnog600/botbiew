@@ -15,7 +15,14 @@ import websockets
 import queue
 
 from colorama import init, Fore
-from configobj import ConfigObj
+
+try:
+    import numpy as np
+    import pandas as pd
+except ImportError:
+    print("Warning: 'numpy' and 'pandas' not found. Please install them using: pip install numpy pandas")
+    sys.exit(1)
+
 try:
     from exnovaapi.stable_api import Exnova
 except ImportError:
@@ -82,13 +89,6 @@ signal_queue = queue.Queue()
 connected_clients = set()
 clients_lock = Lock() 
 
-# --- UPDATED STRATEGIES ---
-ALL_STRATEGIES = {
-    'sr_breakout': 'Rompimento', 
-    'engulfing': 'Engolfo',
-    'candle_flow': 'Fluxo de Velas',
-}
-
 # --- Centralized Logging Functions ---
 def log(cor, mensagem):
     """Prints a message to the console with a specific color."""
@@ -129,7 +129,7 @@ def exibir_banner():
       ██║   ██╔══██╗██║██╔══██║██║       ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║    ██║    ██║
       ██║   ██║  ██║██║██║  ██║███████╗    ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝    ██║
       ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝     ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝     ╚═╝ '''+y+'''
-              azkzero@gmail.com - v63.1 (Correção de Filtro de Tendência)
+              azkzero@gmail.com - v64 (Otimização e Qualidade de Código)
     ''')
     print(y + "*"*88)
     print(c + "="*88)
@@ -208,68 +208,6 @@ def validar_e_limpar_velas(velas_raw):
         if all(v is not None for v in vela_padronizada.values()): velas_limpas.append(vela_padronizada)
     return velas_limpas
 
-def catalogar_e_selecionar(api, params, state):
-    log_info("MODO DE CATALOGAÇÃO E SELEÇÃO INICIADO...")
-    
-    ativos_abertos = []
-    try:
-        all_assets = api.get_all_open_time()
-        for tipo_mercado in ['binary', 'turbo']:
-            if tipo_mercado in all_assets:
-                for ativo, info in all_assets[tipo_mercado].items():
-                    if info.get('open', False) and ativo not in ativos_abertos: ativos_abertos.append(ativo)
-    except Exception as e:
-        log_error(f"Não foi possível obter os ativos abertos: {e}")
-        return {}
-
-    if not ativos_abertos: log_error("Nenhum par aberto encontrado para catalogar."); return {}
-
-    log_info(f"Encontrados {len(ativos_abertos)} pares abertos para análise.")
-    champion_strategies = {}
-    assertividade_minima = params.get('Assertividade_Minima', 60)
-
-    for ativo_original in ativos_abertos:
-        try:
-            log_info(f"Analisando o par...", pair=ativo_original)
-            velas_historicas_raw = api.get_candles(ativo_original, 60, 300, time.time())
-            todas_as_velas = validar_e_limpar_velas(velas_historicas_raw)
-            if not todas_as_velas or len(todas_as_velas) < 150: 
-                log_warning(f"Dados históricos insuficientes.", pair=ativo_original)
-                continue
-            
-            best_strategy, highest_assertiveness = None, 0
-
-            for cod, nome in ALL_STRATEGIES.items():
-                wins, losses, total = 0, 0, 0
-                for i in range(120, len(todas_as_velas) - 1):
-                    velas_atuais, vela_resultado = todas_as_velas[:i], todas_as_velas[i]
-                    score, direcao = globals().get(f'strategy_{cod}')(velas_atuais, params, None, ativo_original)
-                    if score >= params.get('Minimum_Confidence_Score', 3):
-                        sinal = direcao
-                        total += 1
-                        if (sinal == 'BUY' and vela_resultado['close'] > velas_atuais[-1]['close']) or \
-                           (sinal == 'SELL' and vela_resultado['close'] < velas_atuais[-1]['close']):
-                            wins += 1
-                        else:
-                            losses += 1
-                
-                if total > 5:
-                    assertividade = (wins / total) * 100
-                    log_info(f"Estratégia '{nome}': {assertividade:.2f}% ({wins}W/{losses}L)", pair=ativo_original)
-                    if assertividade > highest_assertiveness:
-                        highest_assertiveness, best_strategy = assertividade, nome
-            
-            if best_strategy and highest_assertiveness >= assertividade_minima:
-                champion_strategies[ativo_original] = best_strategy
-                log_success(f"Estratégia campeã: {best_strategy} com {highest_assertiveness:.2f}% de acerto.", pair=ativo_original)
-            else:
-                log_warning("Nenhuma estratégia atingiu os critérios mínimos.", pair=ativo_original)
-
-        except Exception as e: log_error(f"Erro ao analisar: {e}", pair=ativo_original); traceback.print_exc()
-        
-    log_info("CATALOGAÇÃO FINALIZADA!")
-    return champion_strategies
-
 def get_candle_props(vela):
     if not vela or not all(k in vela and vela[k] is not None for k in ['high', 'low', 'open', 'close']):
         return None
@@ -289,35 +227,30 @@ def get_candle_props(vela):
     props['pavio_inferior'] = min(props['open'], props['close']) - props['low']
     return props
 
+# --- Indicator Calculations with NumPy/Pandas ---
 def calculate_ema(closes, period):
     if len(closes) < period: return None
-    ema = [sum(closes[:period]) / period]
-    multiplier = 2 / (period + 1)
-    for price in closes[period:]:
-        ema_value = (price - ema[-1]) * multiplier + ema[-1]
-        ema.append(ema_value)
-    return ema[-1] 
+    return pd.Series(closes).ewm(span=period, adjust=False).mean().iloc[-1]
 
 def calculate_rsi(closes, period=14):
     if len(closes) < period + 1: return None
-    deltas = [closes[i] - closes[i-1] for i in range(1, len(closes))]
-    gains = [d if d > 0 else 0 for d in deltas]
-    losses = [-d if d < 0 else 0 for d in deltas]
-    if len(gains) < period: return None
-    avg_gain = sum(gains[:period]) / period; avg_loss = sum(losses[:period]) / period
-    for i in range(period, len(gains)):
-        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
-        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
-    if avg_loss == 0: return 100
-    rs = avg_gain / avg_loss
-    return 100 - (100 / (1 + rs))
+    close_series = pd.Series(closes)
+    delta = close_series.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+    rs = gain / loss
+    rsi = 100 - (100 / (1 + rs))
+    return rsi.iloc[-1]
 
 # --- MASTER TREND FILTERS ---
 def calculate_ma_slope(closes, period, lookback=3):
     if len(closes) < period + lookback: return 0
-    ma_values = [sum(closes[-(period+i):-i if i > 0 else len(closes)]) / period for i in range(lookback, -1, -1)]
-    if ma_values[-1] > ma_values[0]: return 1
-    if ma_values[-1] < ma_values[0]: return -1
+    ma_series = pd.Series(closes).rolling(window=period).mean()
+    if len(ma_series.dropna()) < lookback: return 0
+    
+    ma_values = ma_series.dropna().iloc[-lookback:]
+    if ma_values.iloc[-1] > ma_values.iloc[0]: return 1
+    if ma_values.iloc[-1] < ma_values.iloc[0]: return -1
     return 0
 
 def check_trend_with_emas(closes, p):
@@ -364,7 +297,7 @@ def is_exhaustion_pattern(velas, p):
         return True
     return False
 
-# --- STRATEGIES (Unchanged, they respect the master filter now) ---
+# --- STRATEGIES ---
 def strategy_sr_breakout(velas, p, state, ativo=None):
     score, direcao = 0, None
     lookback = p.get('SR_Lookback', 15)
@@ -376,7 +309,7 @@ def strategy_sr_breakout(velas, p, state, ativo=None):
     props_breakout = get_candle_props(velas[-1])
     if not props_breakout or props_breakout['body_ratio'] < p.get('SR_BodyRatio', 0.70): return score, direcao
 
-    avg_body_size = sum(prop.get('corpo', 0) for prop in (get_candle_props(v) for v in zona_analise) if prop) / len(zona_analise)
+    avg_body_size = np.mean([prop.get('corpo', 0) for prop in (get_candle_props(v) for v in zona_analise) if prop])
     if props_breakout['corpo'] <= avg_body_size: return score, direcao
 
     max_wick = p.get('SR_MaxOppositeWickRatio', 0.30)
@@ -454,16 +387,26 @@ def strategy_candle_flow(velas, p, state, ativo=None):
 
     closes = [v['close'] for v in velas]
     trend_ema = check_trend_with_emas(closes, p)
-    rsi_values = [calculate_rsi(closes[:i+1], p.get('Flow_RSIPeriod', 14)) for i in range(len(closes)-2, len(closes))]
-    rsi_values = [v for v in rsi_values if v is not None]
-    if len(rsi_values) < 2: return 0, None
-    rsi_curr, rsi_prev = rsi_values[-1], rsi_values[-2]
+    rsi_value = calculate_rsi(closes, p.get('Flow_RSIPeriod', 14))
+    if rsi_value is None: return 0, None
+
+    # Get previous RSI to check direction
+    closes_prev = [v['close'] for v in velas[:-1]]
+    rsi_prev = calculate_rsi(closes_prev, p.get('Flow_RSIPeriod', 14))
+    if rsi_prev is None: return 0, None
 
     if trend_ema == direcao: score += 1
-    if (direcao == 'BUY' and rsi_curr > 50 and rsi_curr > rsi_prev) or (direcao == 'SELL' and rsi_curr < 50 and rsi_curr < rsi_prev): score += 1
+    if (direcao == 'BUY' and rsi_value > 50 and rsi_value > rsi_prev) or (direcao == 'SELL' and rsi_value < 50 and rsi_value < rsi_prev): score += 1
     if state and ativo and state.consecutive_losses.get(ativo, 0) == 0: score += 1
 
     return score, direcao
+
+# --- New Strategy Dispatcher ---
+STRATEGY_FUNCTIONS = {
+    'sr_breakout': strategy_sr_breakout,
+    'engulfing': strategy_engulfing,
+    'candle_flow': strategy_candle_flow,
+}
 
 class BotState:
     def __init__(self, p):
@@ -631,7 +574,8 @@ def main_bot_logic(state, PARAMS):
                     cod_est = next((cod for cod, nome in ALL_STRATEGIES.items() if nome == estrategia), None)
                     if not cod_est: continue
                     
-                    score, direcao_sinal = globals().get(f'strategy_{cod_est}')(velas, PARAMS, state, ativo)
+                    strategy_function = STRATEGY_FUNCTIONS[cod_est]
+                    score, direcao_sinal = strategy_function(velas, PARAMS, state, ativo)
 
                     if score >= PARAMS.get('Minimum_Confidence_Score', 3):
                         if (master_trend == 'UPTREND' and direcao_sinal != 'BUY') or \
