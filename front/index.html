@@ -6,6 +6,7 @@
     <title>MAROMBIEW BOT</title>
     
     <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="MAROMBIEW BOT">
     <link rel="apple-touch-icon" href="https://placehold.co/180x180/0a0a0a/14b8a6?text=M">
@@ -67,7 +68,7 @@
     <script type="text/babel">
         const { useState, useEffect, useCallback, useMemo, useRef, Component } = React;
         
-        const WEBSOCKET_URL = 'wss://botexnova.marombiew.com'; // <<< URL CORRIGIDA E CENTRALIZADA
+        const WEBSOCKET_URL = 'wss://botexnova.marombiew.com';
 
         function convertTimeToUserTimezone(timeString) {
             if (!timeString || !timeString.includes(':')) return timeString;
