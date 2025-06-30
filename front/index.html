@@ -25,7 +25,7 @@
     <style>
         html, body, #root {
             height: 100%;
-            overflow: hidden; /* Impede o scroll no corpo da página */
+            overflow: hidden;
         }
         body { 
             font-family: 'Poppins', sans-serif; 
@@ -49,26 +49,31 @@
         input[type="number"] { -moz-appearance: textfield; }
         input::-webkit-outer-spin-button, input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
         
-        @keyframes log-slide-in {
-            from {
-                opacity: 0;
-                transform: translateY(15px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-        .log-item-enter {
-            animation: log-slide-in 0.4s ease-out forwards;
-        }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
-        .no-scrollbar::-webkit-scrollbar {
-            display: none;
+        @property --progress-value {
+          syntax: '<integer>';
+          initial-value: 0;
+          inherits: false;
         }
-        .no-scrollbar {
-            -ms-overflow-style: none;
-            scrollbar-width: none;
+        @keyframes progress { to { --progress-value: 60; } }
+        .timer-border {
+            position: relative;
+        }
+        .timer-border::before {
+            content: '';
+            position: absolute;
+            top: 0; right: 0; bottom: 0; left: 0;
+            z-index: -1;
+            margin: -2px; 
+            border-radius: 1.125rem; 
+            background: conic-gradient(
+                from 0deg,
+                #14b8a6 calc(var(--progress-value) * 1s / 60s * 360deg), 
+                rgba(255,255,255,0.1) 0
+            );
+            animation: progress 60s linear infinite;
         }
     </style>
 </head>
@@ -79,7 +84,7 @@
         const { useState, useEffect, useCallback, useMemo, useRef, Component } = React;
         
         const BOT_UTC_OFFSET = "-00:00";
-        const WEBSOCKET_URL = 'wss://botexnova.marombiew.com';
+        const WEBSOCKET_URL = 'ws://127.0.0.1:8765';
 
         function convertTimeToUserTimezone(timeString) {
             if (!timeString || !timeString.includes(':')) return timeString;
@@ -96,10 +101,7 @@
         }
 
         class ErrorBoundary extends Component {
-            constructor(props) {
-                super(props);
-                this.state = { hasError: false, error: null };
-            }
+            constructor(props) { super(props); this.state = { hasError: false, error: null }; }
             static getDerivedStateFromError(error) { return { hasError: true, error: error }; }
             componentDidCatch(error, errorInfo) { console.error("React Tree Error:", error, errorInfo); }
             render() {
@@ -112,7 +114,12 @@
 
         const Header = () => (<header className="flex flex-col sm:flex-row justify-between items-center gap-6"><h1 className="text-3xl font-bold text-white"><i className="fa-solid fa-robot text-teal-400"></i> MAROMBIEW <span className="text-teal-400">BOT</span></h1></header>);
         const TabButton = ({ icon, label, isActive, onClick }) => (<button onClick={onClick} className={`flex flex-col items-center gap-1 w-24 py-2 rounded-lg transition-all duration-200 ${isActive ? 'text-teal-400 bg-teal-500/10' : 'text-gray-400 hover:bg-gray-700/50'}`}><i className={`${icon} text-xl`}></i><span className="text-xs font-semibold">{label}</span></button>);
-        const TabBar = ({ activeTab, setActiveTab }) => (<nav className="w-full lg:mb-4"><div className="flex justify-around lg:justify-center lg:gap-6 max-w-md mx-auto lg:max-w-none glass-card p-2 rounded-xl lg:bg-transparent lg:p-0 lg:glass-card-none"><TabButton icon="fa-solid fa-house" label="Home" isActive={activeTab === 'home'} onClick={() => setActiveTab('home')} /><TabButton icon="fa-solid fa-chart-pie" label="Relatórios" isActive={activeTab === 'reports'} onClick={() => setActiveTab('reports')} /><TabButton icon="fa-solid fa-shield-halved" label="Gerenciamento" isActive={activeTab === 'risk'} onClick={() => setActiveTab('risk')} /></div></nav>);
+        
+        const TabBar = ({ activeTab, setActiveTab }) => (<nav className="w-full lg:mb-4"><div className="flex justify-around lg:justify-center lg:gap-6 max-w-md mx-auto lg:max-w-none glass-card p-2 rounded-xl lg:bg-transparent lg:p-0 lg:glass-card-none">
+            <TabButton icon="fa-solid fa-house" label="Home" isActive={activeTab === 'home'} onClick={() => setActiveTab('home')} />
+            <TabButton icon="fa-solid fa-chart-pie" label="Relatórios" isActive={activeTab === 'reports'} onClick={() => setActiveTab('reports')} />
+            <TabButton icon="fa-solid fa-shield-halved" label="Gerenciamento" isActive={activeTab === 'risk'} onClick={() => setActiveTab('risk')} />
+        </div></nav>);
 
         const Scoreboard = ({ scoreboard }) => {
             const animateScore = (ref, value) => { if (ref.current && ref.current.textContent !== String(value)) { ref.current.classList.add('score-updated'); setTimeout(() => ref.current.classList.remove('score-updated'), 300); }};
@@ -122,61 +129,87 @@
             return (<div className="grid grid-cols-3 gap-4 w-full glass-card p-3 rounded-xl"><div className="text-center px-2"><p className="text-sm font-semibold text-green-400">WINS</p><p ref={winsRef} className="text-2xl font-bold font-mono">{scoreboard.wins}</p></div><div className="text-center px-2"><p className="text-sm font-semibold text-red-400">LOSSES</p><p ref={lossesRef} className="text-2xl font-bold font-mono">{scoreboard.losses}</p></div><div className="text-center px-2"><p className="text-sm font-semibold text-amber-400">GALE WINS</p><p ref={galesRef} className="text-2xl font-bold font-mono">{scoreboard.gale_wins}</p></div></div>);
         };
         
-        const LogFeed = React.memo(({ logs }) => {
-            const getIcon = (level) => {
-                switch(level) {
-                    case 'success': return 'fa-solid fa-check-circle text-teal-400';
-                    case 'warning': return 'fa-solid fa-triangle-exclamation text-amber-400';
-                    case 'error': return 'fa-solid fa-circle-xmark text-red-500';
-                    case 'info':
-                    default: return 'fa-solid fa-circle-info text-sky-400';
-                }
-            };
+        const renderCandle = (candle) => {
+            if (!candle || candle.high === undefined || candle.low === undefined) return '<div class="h-full w-full flex items-center justify-center text-gray-500"><i class="fa-solid fa-hourglass-half"></i></div>';
+            const candleColor = candle.close >= candle.open ? '#22c55e' : '#ef4444';
+            const priceRange = candle.high - candle.low;
+            if (priceRange <= 0) return `<svg viewBox="0 0 30 100" class="w-full h-full"><line x1="5" y1="50" x2="25" y2="50" stroke="${candleColor}" stroke-width="2"/></svg>`;
+            const bodyHeight = (Math.abs(candle.open - candle.close) / priceRange) * 100;
+            const bodyTop = ((candle.high - Math.max(candle.open, candle.close)) / priceRange) * 100;
+            return `<svg viewBox="0 0 30 100" class="w-full h-full"><rect x="14" y="0" width="2" height="100" fill="${candleColor}" /><rect x="5" y="${bodyTop}" width="20" height="${bodyHeight}" fill="${candleColor}" /></svg>`;
+        };
+
+        const LiveAnalysisCard = React.memo(({ analysis }) => {
             return (
-                <div className="glass-card rounded-2xl p-4 flex flex-col text-center h-[240px] card-enter-animation">
-                    <h3 className="text-xl font-bold text-white mb-3 text-left flex items-center gap-2 flex-shrink-0"><i className="fa-solid fa-terminal"></i>Terminal do Bot</h3>
-                    <div className="bg-gray-900/50 rounded-lg p-3 w-full text-left flex-grow font-mono text-sm space-y-2 overflow-hidden flex flex-col-reverse">
-                        <div>
-                        {logs.map((log) => (
-                            <div key={log.id} className="flex items-start gap-2 log-item-enter">
-                                <i className={`${getIcon(log.level)} mt-1`}></i>
-                                <p className="flex-1">
-                                    <span className="font-bold mr-2 text-gray-400">{log.pair}:</span>
-                                    <span className="text-gray-300">{log.message}</span>
-                                </p>
+                <div className="glass-card rounded-2xl p-4 flex flex-col text-center h-[340px] card-enter-animation">
+                     <h3 className="text-xl font-bold text-white mb-3 text-left flex items-center gap-2 flex-shrink-0"><i className="fa-solid fa-magnifying-glass-chart text-teal-400"></i> Análise ao Vivo</h3>
+                     <div className="flex-grow flex flex-col items-center justify-center">
+                        {analysis.pair ? (
+                            <>
+                                <p className="font-bold text-2xl text-white">{analysis.pair}</p>
+                                <p className="text-sm bg-gray-700 text-gray-300 px-2 py-1 rounded-md my-2">{analysis.strategy}</p>
+                                <div className="w-16 h-28 mx-auto mt-4" dangerouslySetInnerHTML={{ __html: renderCandle(analysis.candle) }}></div>
+                                <p className="text-xs text-gray-400 mt-2">Vela anterior</p>
+                            </>
+                        ) : (
+                            <div className="text-center text-gray-500">
+                                <i className="fa-solid fa-satellite-dish text-4xl mb-4"></i>
+                                <p>Aguardando dados de análise...</p>
                             </div>
-                        ))}
-                        </div>
-                    </div>
+                        )}
+                     </div>
                 </div>
             );
         });
 
         const SignalCard = React.memo(({ signal }) => {
-            if (!signal || !signal.direction || !signal.pair) return null;
+            const [timerKey, setTimerKey] = useState(Date.now());
             const isCall = signal.direction.toUpperCase() === 'CALL' || signal.direction.toUpperCase() === 'BUY';
             const directionColor = isCall ? 'text-green-400' : 'text-red-400';
             const directionIcon = isCall ? 'fa-arrow-trend-up' : 'fa-arrow-trend-down';
-            const renderCandle = (candle) => {
-                if (!candle || !candle.high || !candle.low) return '<div class="h-full w-full flex items-center justify-center text-gray-500"><i class="fa-solid fa-image"></i></div>';
-                const candleColor = candle.close >= candle.open ? '#22c55e' : '#ef4444';
-                const priceRange = candle.high - candle.low;
-                if (priceRange <= 0) return `<svg viewBox="0 0 30 100" class="w-full h-full"><line x1="5" y1="50" x2="25" y2="50" stroke="${candleColor}" stroke-width="2"/></svg>`;
-                const bodyHeight = (Math.abs(candle.open - candle.close) / priceRange) * 100;
-                const bodyTop = ((candle.high - Math.max(candle.open, candle.close)) / priceRange) * 100;
-                return `<svg viewBox="0 0 30 100" class="w-full h-full"><rect x="14" y="0" width="2" height="100" fill="${candleColor}" /><rect x="5" y="${bodyTop}" width="20" height="${bodyHeight}" fill="${candleColor}" /></svg>`;
-            };
+
+            useEffect(() => {
+                if (!signal.result) {
+                    setTimerKey(Date.now());
+                }
+            }, [signal.result]);
+
             const ResultFooter = () => {
                 if (!signal.result) return <div className="w-full mt-3 h-16"></div>;
                 const isWin = signal.result === 'WIN'; const resultColor = isWin ? 'text-green-400' : 'text-red-400'; const resultIcon = isWin ? 'fa-solid fa-trophy' : 'fa-solid fa-shield-halved'; const resultBg = isWin ? 'bg-green-500/10 border-green-500/30' : 'bg-red-500/10 border-red-500/30';
                 return (<div className={`w-full mt-3 h-16 flex items-center justify-center rounded-lg border ${resultBg}`}><div className="text-center"><p className={`text-xs ${resultColor}`}>RESULTADO</p><p className={`font-mono text-2xl font-bold ${resultColor} flex items-center justify-center gap-2`}><i className={resultIcon}></i><span>{signal.result}</span></p></div></div>);
             };
-            return (<div id={signal.signal_id} className="glass-card rounded-2xl p-4 flex flex-col text-center card-enter-animation relative h-[340px]">{signal.gale_level > 0 && <div className="absolute top-2 right-2 bg-amber-500 text-gray-900 text-xs font-bold px-2 py-0.5 rounded-full">GALE {signal.gale_level}</div>}<div className="flex justify-between items-center w-full mb-3"><p className="font-bold text-xl text-white">{signal.pair}</p><p className="text-xs bg-gray-700 text-gray-300 px-2 py-1 rounded-md">{signal.strategy}</p></div><div className="flex-grow grid grid-cols-2 gap-4 items-center"><div className="flex flex-col justify-center h-full"><p className="text-xs text-gray-400">HORÁRIO DA ENTRADA</p><p className="font-mono text-3xl font-bold text-white my-1">{convertTimeToUserTimezone(signal.entry_time)}</p><div className={`font-semibold text-2xl ${directionColor}`}><i className={`fa-solid ${directionIcon} mr-1`}></i>{signal.direction.toUpperCase()}</div></div><div className="w-16 h-28 mx-auto" dangerouslySetInnerHTML={{ __html: renderCandle(signal.candle) }}></div></div><ResultFooter /></div>);
+
+            const cardClasses = `glass-card rounded-2xl p-4 flex flex-col text-center card-enter-animation relative h-[340px] ${!signal.result ? 'timer-border' : ''}`;
+            
+            return (<div id={signal.signal_id} key={timerKey} className={cardClasses}>
+                {signal.gale_level > 0 && <div className="absolute top-2 right-2 bg-amber-500 text-gray-900 text-xs font-bold px-2 py-0.5 rounded-full">GALE {signal.gale_level}</div>}
+                <div className="flex justify-between items-center w-full mb-3">
+                    <p className="font-bold text-xl text-white">{signal.pair}</p>
+                    <p className="text-xs bg-gray-700 text-gray-300 px-2 py-1 rounded-md">{signal.strategy}</p>
+                </div>
+                <div className="flex-grow flex justify-between items-center gap-4">
+                    <div className="flex flex-col justify-center h-full text-left">
+                        <p className="text-xs text-gray-400">HORÁRIO DA ENTRADA</p>
+                        <p className="font-mono text-3xl font-bold text-white my-1">{convertTimeToUserTimezone(signal.entry_time)}</p>
+                        <div className={`font-semibold text-2xl ${directionColor}`}>
+                            <i className={`fa-solid ${directionIcon} mr-1`}></i>
+                            {signal.direction.toUpperCase()}
+                        </div>
+                    </div>
+                    <div className="flex items-center justify-center gap-2">
+                        <div className="w-10 h-24" dangerouslySetInnerHTML={{ __html: renderCandle(signal.previous_candle) }}></div>
+                        <i className="fa-solid fa-chevron-right text-gray-500"></i>
+                        <div className="w-10 h-24" dangerouslySetInnerHTML={{ __html: renderCandle(signal.candle) }}></div>
+                    </div>
+                </div>
+                <ResultFooter />
+            </div>);
         });
         
-        function HomeView({ signals, logMessages }) {
+        function HomeView({ signals, liveAnalysis }) {
             return (<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                        <LogFeed logs={logMessages} />
+                        <LiveAnalysisCard analysis={liveAnalysis} />
                         {signals.map(signal => <SignalCard key={signal.signal_id} signal={signal} />)}
                     </div>);
         }
@@ -201,7 +234,7 @@
         function RiskManagementView() {
             const [capital, setCapital] = useState(1000); const [risk, setRisk] = useState(2); const [payout, setPayout] = useState(85); const [stopLoss, setStopLoss] = useState(5); const [stopWin, setStopWin] = useState(10);
             const entryValue = (capital * risk) / 100; const stopLossValue = (capital * stopLoss) / 100; const stopWinValue = (capital * stopWin) / 100; const profitPerTrade = entryValue * (payout / 100);
-            const FormInput = ({label, ...props}) => (<div><label className="text-sm">{label}</label><input {...props} className="form-input mt-1" /></div>);
+            const FormInput = ({label, ...props}) => (<div><label className="text-sm">{label}</label><input {...props} className="form-input mt-1 w-full p-2 rounded-md border border-gray-600 focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none" /></div>);
             return (<div className="grid grid-cols-1 md:grid-cols-2 gap-8 card-enter-animation"><div className="glass-card rounded-xl p-6 space-y-4"><h3 className="text-xl font-bold">Configuração de Risco</h3><FormInput label="Capital Inicial (R$)" type="number" value={capital} onChange={e => setCapital(e.target.value)} /><FormInput label="Risco por Operação (%)" type="number" value={risk} onChange={e => setRisk(e.target.value)} /><FormInput label="Payout da Corretora (%)" type="number" value={payout} onChange={e => setPayout(e.target.value)} /><FormInput label="Stop Loss do Dia (%)" type="number" value={stopLoss} onChange={e => setStopLoss(e.target.value)} /><FormInput label="Stop Win do Dia (%)" type="number" value={stopWin} onChange={e => setStopWin(e.target.value)} /></div><div className="glass-card rounded-xl p-6 flex flex-col justify-center"><h3 className="text-xl font-bold mb-6">Seu Plano Diário</h3><div className="space-y-5"><div className="flex justify-between items-center text-lg"><span className="text-gray-400">Valor da Entrada:</span><span className="font-mono font-bold text-white">R$ {entryValue.toFixed(2)}</span></div><div className="flex justify-between items-center text-lg"><span className="text-gray-400">Lucro por Operação:</span><span className="font-mono font-bold text-green-400">+ R$ {profitPerTrade.toFixed(2)}</span></div><hr className="border-gray-700" /><div className="flex justify-between items-center text-xl"><span className="text-gray-400">Meta de Lucro (Stop Win):</span><span className="font-mono font-bold text-green-400">+ R$ {stopWinValue.toFixed(2)}</span></div><div className="flex justify-between items-center text-xl"><span className="text-gray-400">Limite de Perda (Stop Loss):</span><span className="font-mono font-bold text-red-400">- R$ {stopLossValue.toFixed(2)}</span></div></div></div></div>);
         }
 
@@ -209,7 +242,7 @@
             const [activeTab, setActiveTab] = useState('home');
             const [signals, setSignals] = useState([]);
             const [scoreboard, setScoreboard] = useState({ wins: 0, losses: 0, gale_wins: 0 });
-            const [logMessages, setLogMessages] = useState([]);
+            const [liveAnalysis, setLiveAnalysis] = useState({});
             const socketRef = useRef(null);
 
             const handleMessage = useCallback((message) => {
@@ -220,14 +253,14 @@
                         const initialData = message.data || {};
                         setScoreboard(initialData.placar || { wins: 0, losses: 0, gale_wins: 0 });
                         setSignals((initialData.signals || []).sort((a,b) => (b.entry_time || "").localeCompare(a.entry_time || "")));
-                        setLogMessages([{id: Date.now(), level: 'success', pair: 'Sistema', message: 'Conectado com sucesso.'}]);
+                        setLiveAnalysis({ pair: null, strategy: null, candle: null });
                         break;
-                    case 'log':
-                        const newLog = { id: Date.now(), ...message.data };
-                        setLogMessages(prev => [newLog, ...prev].slice(0, 50)); // Aumentado para 50 logs
+                    case 'live_analysis':
+                        setLiveAnalysis(message.data);
                         break;
                     case 'signal':
                         setSignals(prev => [message, ...prev]);
+                        setLiveAnalysis({ pair: null, strategy: null, candle: null });
                         break;
                     case 'result':
                         if (message.placar) setScoreboard(message.placar);
@@ -240,41 +273,21 @@
             }, []);
 
             const connect = useCallback(() => {
-                console.log("Tentando conectar WebSocket...");
                 if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) return;
                 
                 socketRef.current = new WebSocket(WEBSOCKET_URL);
-                socketRef.current.onmessage = (event) => handleMessage(JSON.parse(event.data));
+                socketRef.current.onmessage = (event) => { try { handleMessage(JSON.parse(event.data)); } catch (e) { console.error('Failed to parse message:', event.data, e)} };
                 socketRef.current.onopen = () => console.log("WebSocket conectado.");
                 socketRef.current.onclose = () => {
                      console.log("WebSocket desconectado. Tentando reconectar...");
-                     const disconnectLog = {id: Date.now(), level: 'error', pair: 'Sistema', message: 'Desconectado. Tentando reconectar...'};
-                     setLogMessages(prev => [disconnectLog, ...prev].slice(0,50));
                      setTimeout(connect, 5000);
                 };
-                 socketRef.current.onerror = (err) => {
-                     console.error("Erro no WebSocket:", err);
-                     const errorLog = {id: Date.now(), level: 'error', pair: 'Sistema', message: 'Erro de conexão.'};
-                     setLogMessages(prev => [errorLog, ...prev].slice(0,50));
-                 };
+                 socketRef.current.onerror = (err) => console.error("Erro no WebSocket:", err);
             }, [handleMessage]);
 
             useEffect(() => {
                 connect();
-                const handleVisibilityChange = () => {
-                    if (document.visibilityState === 'visible' && socketRef.current && socketRef.current.readyState === WebSocket.CLOSED) {
-                        console.log("App visível, reconectando WebSocket...");
-                        connect();
-                    }
-                };
-                document.addEventListener('visibilitychange', handleVisibilityChange);
-                
-                return () => {
-                    document.removeEventListener('visibilitychange', handleVisibilityChange);
-                    if (socketRef.current) {
-                        socketRef.current.close();
-                    }
-                };
+                return () => { if (socketRef.current) socketRef.current.close(); };
             }, [connect]);
 
             const renderView = () => {
@@ -283,24 +296,21 @@
                     case 'risk': return <RiskManagementView />;
                     case 'home':
                     default: 
-                        return <HomeView signals={signals} logMessages={logMessages} />;
+                        return <HomeView signals={signals} liveAnalysis={liveAnalysis} />;
                 }
             };
             
             return (
               <div className="h-screen w-screen flex flex-col p-4 sm:p-6 lg:p-8 gap-6">
-                  {/* Parte Fixa (Topo) */}
                   <div className="flex-shrink-0">
                     <Header />
                     <Scoreboard scoreboard={scoreboard} />
                   </div>
                   
-                  {/* Parte Rolável (Conteúdo Principal) */}
                   <main className="flex-grow overflow-y-auto pb-20 lg:pb-0 no-scrollbar">
                       {renderView()}
                   </main>
                   
-                  {/* TabBar Fixa (em baixo em mobile, no topo em desktop) */}
                   <div className="fixed bottom-0 left-0 right-0 lg:static lg:order-first z-50">
                       <TabBar activeTab={activeTab} setActiveTab={setActiveTab} />
                   </div>
@@ -311,16 +321,6 @@
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<ErrorBoundary><App /></ErrorBoundary>);
 
-    </script>
-    
-    <script>
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('/sw.js')
-                    .then(registration => console.log('Service Worker registado com sucesso:', registration))
-                    .catch(error => console.log('Falha ao registar Service Worker:', error));
-            });
-        }
     </script>
 </body>
 </html>
