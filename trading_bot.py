@@ -124,7 +124,7 @@ def exibir_banner():
       ██║   ██╔══██╗██║██╔══██║██║       ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║    ██║    ██║
       ██║   ██║  ██║██║██║  ██║███████╗    ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝    ██║
       ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝     ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝     ╚═╝ '''+y+'''
-              azkzero@gmail.com - v64.2 (Correção de Variável Global)
+              azkzero@gmail.com - v64.3 (Comunicação Aprimorada)
     ''')
     print(y + "*"*88)
     print(c + "="*88)
@@ -642,6 +642,10 @@ def main_bot_logic(state, PARAMS):
 
                     velas = validar_e_limpar_velas(API.get_candles(ativo, 60, 200, time.time()))
                     if not velas or len(velas) < PARAMS.get('Trend_MA_Period', 100): continue
+                    
+                    # Send live analysis update to frontend
+                    analysis_payload = {"type": "live_analysis", "data": {"pair": ativo, "strategy": estrategia, "candle": velas[-1]}}
+                    signal_queue.put(analysis_payload)
 
                     master_trend = get_master_trend(velas, PARAMS)
                     if master_trend == 'SIDEWAYS': log_info("Mercado lateral (filtro MA 100).", pair=ativo); continue
