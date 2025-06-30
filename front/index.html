@@ -68,7 +68,10 @@
     <script type="text/babel">
         const { useState, useEffect, useCallback, useMemo, useRef, Component } = React;
         
-        const WEBSOCKET_URL = 'ws://127.0.0.1:8765'; // <<< CONEXÃO LOCAL PARA GARANTIR FUNCIONAMENTO
+        // --- INSTRUÇÃO IMPORTANTE ---
+        // Substitua 'botexnova.marombiew.com' pelo endereço público que o Coolify deu à sua aplicação do BOT.
+        // O protocolo 'wss://' é necessário para conexões seguras.
+        const WEBSOCKET_URL = 'wss://botexnova.marombiew.com';
 
         function convertTimeToUserTimezone(timeString) {
             if (!timeString || !timeString.includes(':')) return timeString;
