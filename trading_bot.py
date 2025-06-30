@@ -122,7 +122,7 @@ def exibir_banner():
       ██║   ██╔══██╗██║██╔══██║██║       ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║    ██║    ██║
       ██║   ██║  ██║██║██║  ██║███████╗    ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝    ██║
       ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝     ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝     ╚═╝ '''+y+'''
-              azkzero@gmail.com - v64.3 (Comunicação Aprimorada)
+              azkzero@gmail.com - v65 (Novas Estratégias MQL)
     ''')
     print(y + "*"*88)
     print(c + "="*88)
@@ -221,206 +221,95 @@ def get_candle_props(vela):
     return props
 
 # --- Indicator Calculations (Pure Python) ---
-def calculate_ema(closes, period):
-    if len(closes) < period: return None
-    ema = []
-    sma = sum(closes[:period]) / period
-    ema.append(sma)
-    multiplier = 2 / (period + 1)
-    for price in closes[period:]:
-        ema_value = (price - ema[-1]) * multiplier + ema[-1]
-        ema.append(ema_value)
-    return ema[-1]
-
-def calculate_rsi(closes, period=14):
+def sma_slope(closes, period):
     if len(closes) < period + 1: return None
+    sma1 = sum(closes[-(period+1):-1]) / period; sma2 = sum(closes[-period:]) / period
+    if sma1 == sma2: return None
+    return sma2 > sma1
+
+def detect_fractals(velas, n_levels):
+    highs = [v['high'] for v in velas]
+    lows = [v['low'] for v in velas]
+    res_levels, sup_levels = [], []
+    for i in range(2, len(velas) - 2):
+        if highs[i] > highs[i-1] and highs[i] > highs[i-2] and highs[i] > highs[i+1] and highs[i] > highs[i+2]:
+            res_levels.append(highs[i])
+        if lows[i] < lows[i-1] and lows[i] < lows[i-2] and lows[i] < lows[i+1] and lows[i] < lows[i+2]:
+            sup_levels.append(lows[i])
+    return sorted(res_levels, reverse=True)[:n_levels], sorted(sup_levels, reverse=True)[:n_levels]
+
+# --- NEW STRATEGIES ---
+def strategy_mql_pullback(velas, p, state=None, ativo=None):
+    if len(velas) < p['MAPeriod'] + 2: return 0, None
+    nano_up = sma_slope([v['close'] for v in velas], p['MAPeriod'])
+    if nano_up is None: return 0, None
     
-    deltas = [closes[i] - closes[i-1] for i in range(1, len(closes))]
-    gains = [d if d > 0 else 0 for d in deltas]
-    losses = [-d if d < 0 else 0 for d in deltas]
-
-    if len(gains) < period: return None
-
-    avg_gain = sum(gains[:period]) / period
-    avg_loss = sum(losses[:period]) / period
-
-    for i in range(period, len(gains)):
-        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
-        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
-
-    if avg_loss == 0: return 100
+    res_levels, sup_levels = detect_fractals(velas, p['MaxLevels'])
+    last = velas[-1]
     
-    rs = avg_gain / avg_loss
-    return 100 - (100 / (1 + rs))
+    direcao = None
+    if nano_up and sup_levels and last['close'] > last['open']:
+        sup_level = sup_levels[0]; target_price = sup_level + p['Proximity'] * p.get('Point', 0.00001)
+        if last['low'] <= target_price and last['close'] >= sup_level:
+            direcao = 'BUY'
+            
+    if not nano_up and res_levels and last['close'] < last['open']:
+        res_level = res_levels[0]; target_price = res_level - p['Proximity'] * p.get('Point', 0.00001)
+        if last['high'] >= target_price and last['close'] <= res_level:
+            direcao = 'SELL'
+            
+    return (1, direcao) if direcao else (0, None)
 
-# --- MASTER TREND FILTERS ---
-def calculate_ma_slope(closes, period, lookback=3):
-    if len(closes) < period + lookback: return 0
-    ma_values = [sum(closes[-(period+i):-i if i > 0 else len(closes)]) / period for i in range(lookback, -1, -1)]
-    if ma_values[-1] > ma_values[0]: return 1
-    if ma_values[-1] < ma_values[0]: return -1
-    return 0
-
-def check_trend_with_emas(closes, p):
-    """Checks the short-term trend using two EMAs."""
-    ema_short = calculate_ema(closes, p.get('EMA_Short_Period', 9))
-    ema_long = calculate_ema(closes, p.get('EMA_Long_Period', 21))
-    if ema_short is None or ema_long is None: return 'NEUTRAL'
+def strategy_flow(velas, p, state=None, ativo=None):
+    if len(velas) < p['MAPeriod'] + 3: return 0, None
+    nano_up = sma_slope([v['close'] for v in velas], p['MAPeriod'])
+    if nano_up is None: return 0, None
     
-    last_close = closes[-1]
-    if ema_short > ema_long and last_close > ema_short: return 'BUY'
-    if ema_short < ema_long and last_close < ema_short: return 'SELL'
-    return 'NEUTRAL'
-
-def get_master_trend(velas, p):
-    period = p.get('Trend_MA_Period', 100)
-    if len(velas) < period: return 'SIDEWAYS'
-    
-    closes = [v['close'] for v in velas]
-    last_close = closes[-1]
-    
-    ma_value = calculate_ema(closes, period)
-    if ma_value is None: return 'SIDEWAYS'
-
-    ma_slope = calculate_ma_slope(closes, period)
-
-    if last_close > ma_value and ma_slope > 0: return 'UPTREND'
-    if last_close < ma_value and ma_slope < 0: return 'DOWNTREND'
-    return 'SIDEWAYS'
-
-def is_market_consolidating(velas, p):
-    lookback = p.get('Consolidation_Lookback', 10)
-    threshold = p.get('Consolidation_Threshold', 0.0005)
-    if len(velas) < lookback: return False
-    closes = [v['close'] for v in velas[-lookback:]]
-    return (max(closes) - min(closes)) < threshold
-
-def is_exhaustion_pattern(velas, p):
-    if len(velas) < 3: return False
-    c1, c2 = get_candle_props(velas[-2]), get_candle_props(velas[-3])
-    if not c1 or not c2: return False
-    
-    doji_like_threshold = p.get('Exhaustion_DojiLike_Ratio', 0.2)
-    if c1['body_ratio'] < doji_like_threshold and c2['body_ratio'] < doji_like_threshold:
-        return True
-    return False
-
-# --- STRATEGIES ---
-def strategy_sr_breakout(velas, p, state, ativo=None):
-    score, direcao = 0, None
-    lookback = p.get('SR_Lookback', 15)
-    min_candles = max(p.get('EMA_Short_Period', 9), p.get('EMA_Long_Period', 21), p.get('SR_RSIPeriod', 14)) + lookback
-    if len(velas) < min_candles: return score, direcao
-
-    zona_analise = velas[-(lookback + 1):-1]
-    highest_high, lowest_low = max(v['high'] for v in zona_analise), min(v['low'] for v in zona_analise)
-    props_breakout = get_candle_props(velas[-1])
-    if not props_breakout or props_breakout['body_ratio'] < p.get('SR_BodyRatio', 0.70): return score, direcao
-
-    corpos_zona = [prop.get('corpo', 0) for prop in (get_candle_props(v) for v in zona_analise) if prop]
-    avg_body_size = sum(corpos_zona) / len(corpos_zona) if corpos_zona else 0
-    if props_breakout['corpo'] <= avg_body_size: return score, direcao
-
-    max_wick = p.get('SR_MaxOppositeWickRatio', 0.30)
-    
-    if velas[-1]['close'] > highest_high and (props_breakout['pavio_superior'] / props_breakout['corpo'] if props_breakout['corpo'] > 0 else 1) < max_wick: direcao = 'BUY'
-    elif velas[-1]['close'] < lowest_low and (props_breakout['pavio_inferior'] / props_breakout['corpo'] if props_breakout['corpo'] > 0 else 1) < max_wick: direcao = 'SELL'
-    
-    if not direcao: return score, direcao
-    score += 1
-
-    closes = [v['close'] for v in velas]
-    trend_ema = check_trend_with_emas(closes, p)
-    rsi_value = calculate_rsi(closes, p.get('SR_RSIPeriod', 14))
-
-    if trend_ema == direcao: score += 1
-    if (direcao == 'BUY' and rsi_value > 50) or (direcao == 'SELL' and rsi_value < 50): score += 1
-    if state and ativo and state.consecutive_losses.get(ativo, 0) == 0: score += 1
-    
-    return score, direcao
-
-def strategy_engulfing(velas, p, state, ativo=None):
-    score, direcao = 0, None
-    min_candles = max(p.get('EMA_Short_Period', 9), p.get('EMA_Long_Period', 21), p.get('Engulfing_RSIPeriod', 14)) + 4
-    if len(velas) < min_candles: return score, direcao
-
-    props = [get_candle_props(velas[i]) for i in [-1, -2, -3, -4]]
-    if not all(props): return score, direcao
-    p_eng, p_ed, p_t1, p_t2 = props
-
-    strong_body, max_wick = p.get('Engulfing_BodyRatio', 0.70), p.get('Engulfing_MaxOppositeWickRatio', 0.3)
-    
-    is_bullish = p_t1['is_baixa'] and p_t2['is_baixa'] and p_ed['is_baixa'] and p_eng['is_alta'] and \
-                 velas[-1]['close'] > velas[-2]['open'] and velas[-1]['open'] < velas[-2]['close'] and \
-                 p_eng['body_ratio'] >= strong_body and (p_eng['pavio_superior'] / p_eng['corpo'] if p_eng['corpo'] > 0 else 1) < max_wick
-    
-    is_bearish = p_t1['is_alta'] and p_t2['is_alta'] and p_ed['is_alta'] and p_eng['is_baixa'] and \
-                 velas[-1]['close'] < velas[-2]['open'] and velas[-1]['open'] > velas[-2]['close'] and \
-                 p_eng['body_ratio'] >= strong_body and (p_eng['pavio_inferior'] / p_eng['corpo'] if p_eng['corpo'] > 0 else 1) < max_wick
-    
-    if is_bullish: direcao = 'BUY'
-    elif is_bearish: direcao = 'SELL'
-    else: return score, direcao
-    score += 1
-
-    closes = [v['close'] for v in velas]
-    trend_ema = check_trend_with_emas(closes, p)
-    rsi_value = calculate_rsi(closes, p.get('Engulfing_RSIPeriod', 14))
-
-    if (direcao == 'BUY' and trend_ema == 'SELL') or (direcao == 'SELL' and trend_ema == 'BUY'): score += 1
-    if (direcao == 'BUY' and rsi_value < 40) or (direcao == 'SELL' and rsi_value > 60): score += 1
-    if state and ativo and state.consecutive_losses.get(ativo, 0) == 0: score += 1
+    last_candles = velas[-3:]
+    direcao = None
+    if nano_up and all(v['close'] > v['open'] for v in last_candles):
+        direcao = 'BUY'
+    if not nano_up and all(v['close'] < v['open'] for v in last_candles):
+        direcao = 'SELL'
         
-    return score, direcao
+    return (1, direcao) if direcao else (0, None)
 
-def strategy_candle_flow(velas, p, state, ativo=None):
-    score, direcao = 0, None
-    min_candles = max(p.get('EMA_Short_Period', 9), p.get('EMA_Long_Period', 21), p.get('Flow_RSIPeriod', 14)) + 3
-    if len(velas) < min_candles: return score, direcao
-
-    p1, p2 = get_candle_props(velas[-2]), get_candle_props(velas[-1])
-    if not all([p1, p2]): return score, direcao
-
-    strong_body, max_wick = p.get('Flow_BodyRatio', 0.70), p.get('Flow_MaxWickRatio', 0.40)
+def strategy_patterns(velas, p, state=None, ativo=None):
+    if len(velas) < p['MAPeriod'] + 2: return 0, None
+    nano_up = sma_slope([v['close'] for v in velas], p['MAPeriod'])
+    if nano_up is None: return 0, None
     
-    is_bullish = p1['is_alta'] and p2['is_alta'] and p1['body_ratio'] >= strong_body and p2['body_ratio'] >= strong_body and \
-                 (p1['pavio_superior'] / p1['corpo'] if p1['corpo'] > 0 else 1) < max_wick and (p2['pavio_superior'] / p2['corpo'] if p2['corpo'] > 0 else 1) < max_wick
-    
-    is_bearish = p1['is_baixa'] and p2['is_baixa'] and p1['body_ratio'] >= strong_body and p2['body_ratio'] >= strong_body and \
-                 (p1['pavio_inferior'] / p1['corpo'] if p1['corpo'] > 0 else 1) < max_wick and (p2['pavio_inferior'] / p2['corpo'] if p2['corpo'] > 0 else 1) < max_wick
+    penultimate, last = velas[-2], velas[-1]
+    direcao = None
+    if nano_up:
+        # Bullish Engulfing
+        if (penultimate['close'] < penultimate['open'] and last['close'] > last['open'] and last['open'] < penultimate['close'] and last['close'] > penultimate['open']):
+            direcao = 'BUY'
+        # Piercing Line (aproximado)
+        if (penultimate['close'] < penultimate['open'] and last['close'] > last['open'] and last['open'] > penultimate['close'] and last['close'] < penultimate['open']):
+            direcao = 'BUY'
+    if not nano_up:
+        # Bearish Engulfing
+        if (penultimate['close'] > penultimate['open'] and last['close'] < last['open'] and last['open'] > penultimate['close'] and last['close'] < penultimate['open']):
+            direcao = 'SELL'
+        # Dark Cloud Cover (aproximado)
+        if (penultimate['close'] > penultimate['open'] and last['close'] < last['open'] and last['open'] < penultimate['close'] and last['close'] > penultimate['open']):
+            direcao = 'SELL'
+            
+    return (1, direcao) if direcao else (0, None)
 
-    if is_bullish: direcao = 'BUY'
-    elif is_bearish: direcao = 'SELL'
-    else: return score, direcao
-    score += 1
-
-    closes = [v['close'] for v in velas]
-    trend_ema = check_trend_with_emas(closes, p)
-    rsi_curr = calculate_rsi(closes, p.get('Flow_RSIPeriod', 14))
-    if rsi_curr is None: return 0, None
-
-    rsi_prev = calculate_rsi(closes[:-1], p.get('Flow_RSIPeriod', 14))
-    if rsi_prev is None: return 0, None
-
-    if trend_ema == direcao: score += 1
-    if (direcao == 'BUY' and rsi_curr > 50 and rsi_curr > rsi_prev) or (direcao == 'SELL' and rsi_curr < 50 and rsi_curr < rsi_prev): score += 1
-    if state and ativo and state.consecutive_losses.get(ativo, 0) == 0: score += 1
-
-    return score, direcao
-
-# --- New Strategy Dispatcher ---
+# --- Strategy Dispatchers ---
 ALL_STRATEGIES = {
-    'sr_breakout': 'Rompimento', 
-    'engulfing': 'Engolfo',
-    'candle_flow': 'Fluxo de Velas',
+    'mql_pullback': 'Pullback MQL', 
+    'flow': 'Fluxo',
+    'patterns': 'Padrões de Velas',
 }
 STRATEGY_FUNCTIONS = {
-    'sr_breakout': strategy_sr_breakout,
-    'engulfing': strategy_engulfing,
-    'candle_flow': strategy_candle_flow,
+    'mql_pullback': strategy_mql_pullback,
+    'flow': strategy_flow,
+    'patterns': strategy_patterns,
 }
 
-# --- RE-ADDED MISSING FUNCTION ---
 def catalogar_e_selecionar(api, params, state):
     log_info("MODO DE CATALOGAÇÃO E SELEÇÃO INICIADO...")
     
@@ -458,7 +347,7 @@ def catalogar_e_selecionar(api, params, state):
                     velas_atuais, vela_resultado = todas_as_velas[:i], todas_as_velas[i]
                     strategy_function = STRATEGY_FUNCTIONS[cod]
                     score, direcao = strategy_function(velas_atuais, params, None, ativo_original)
-                    if score >= params.get('Minimum_Confidence_Score', 3):
+                    if score > 0 and direcao:
                         sinal = direcao
                         total += 1
                         if (sinal == 'BUY' and vela_resultado['close'] > velas_atuais[-1]['close']) or \
@@ -600,21 +489,6 @@ def main_bot_logic(state, PARAMS):
                 elif state.standby_mode:
                     log_success("Modo Stand-by finalizado. Retomando análises."); state.standby_mode = False
 
-                if len(state.global_loss_timestamps) >= PARAMS.get('Standby_Loss_Count', 3):
-                    time_diff = state.global_loss_timestamps[-1] - state.global_loss_timestamps[0]
-                    if time_diff <= PARAMS.get('Standby_Timeframe_Minutes', 5) * 60:
-                        log_error(f"{PARAMS.get('Standby_Loss_Count', 3)} perdas em menos de {PARAMS.get('Standby_Timeframe_Minutes', 5)} min. Entrando em modo Stand-by.")
-                        state.standby_mode, state.standby_until = True, time.time() + 180
-                        state.global_loss_timestamps.clear(); continue
-            
-            if config['modo_operacao'] == '1' and (time.time() - ultimo_ciclo_catalogacao > PARAMS.get('Recatalog_Cycle_Hours', 2) * 3600 or state.global_losses_since_catalog >= PARAMS.get('Recatalog_Loss_Trigger', 5)):
-                log_warning("Gatilho de segurança ativado. Recatalogando todo o mercado...")
-                state.champion_strategies = catalogar_e_selecionar(API, PARAMS, state)
-                with state.lock:
-                    state.consecutive_losses = {par: 0 for par in state.champion_strategies.keys()}
-                    state.suspended_pairs.clear(); state.global_losses_since_catalog = 0
-                ultimo_ciclo_catalogacao = time.time()
-
             timestamp = time.time(); dt_objeto = datetime.fromtimestamp(timestamp)
             if dt_objeto.minute != minuto_anterior: minuto_anterior, analise_feita = dt_objeto.minute, False
 
@@ -639,17 +513,10 @@ def main_bot_logic(state, PARAMS):
                     if payout < config['pay_minimo']: continue
 
                     velas = validar_e_limpar_velas(API.get_candles(ativo, 60, 200, time.time()))
-                    if not velas or len(velas) < PARAMS.get('Trend_MA_Period', 100): continue
+                    if not velas or len(velas) < 30: continue
                     
-                    # Send live analysis update to frontend
                     analysis_payload = {"type": "live_analysis", "data": {"pair": ativo, "strategy": estrategia, "candle": velas[-1]}}
                     signal_queue.put(analysis_payload)
-
-                    master_trend = get_master_trend(velas, PARAMS)
-                    if master_trend == 'SIDEWAYS': continue # Silently skip sideways markets
-                    
-                    if is_market_consolidating(velas, PARAMS): continue
-                    if is_exhaustion_pattern(velas, PARAMS): continue
 
                     cod_est = next((cod for cod, nome in ALL_STRATEGIES.items() if nome == estrategia), None)
                     if not cod_est: continue
@@ -657,12 +524,7 @@ def main_bot_logic(state, PARAMS):
                     strategy_function = STRATEGY_FUNCTIONS[cod_est]
                     score, direcao_sinal = strategy_function(velas, PARAMS, state, ativo)
 
-                    if score >= PARAMS.get('Minimum_Confidence_Score', 3):
-                        if (master_trend == 'UPTREND' and direcao_sinal != 'BUY') or \
-                           (master_trend == 'DOWNTREND' and direcao_sinal != 'SELL'):
-                            log_warning(f"Sinal de {direcao_sinal} bloqueado pela tendência principal ({master_trend}).", pair=ativo)
-                            continue
-                        
+                    if score > 0 and direcao_sinal:
                         horario_entrada_str = (dt_objeto.replace(second=0, microsecond=0) + timedelta(minutes=1)).strftime('%H:%M')
                         log_success(f"SINAL CONFIRMADO (Score: {score}) -> {direcao_sinal} para as {horario_entrada_str}", pair=ativo)
                         
@@ -689,16 +551,13 @@ def main_bot_logic(state, PARAMS):
 
 def main():
     PARAMS = { 
-        'Assertividade_Minima': 60, 'Recatalog_Cycle_Hours': 2, 'Recatalog_Loss_Trigger': 5,
+        'Assertividade_Minima': 60,
         'MAX_SIMULTANEOUS_TRADES': 1,
-        'Consolidation_Lookback': 10, 'Consolidation_Threshold': 0.0005, 'Exhaustion_DojiLike_Ratio': 0.2,
-        'Standby_Loss_Count': 3, 'Standby_Timeframe_Minutes': 5, 'Minimum_Confidence_Score': 3,
-        # Trend Filters
-        'EMA_Short_Period': 9, 'EMA_Long_Period': 21, 'Trend_MA_Period': 100,
-        # Strategies
-        'SR_Lookback': 15, 'SR_BodyRatio': 0.70, 'SR_MaxOppositeWickRatio': 0.30, 'SR_RSIPeriod': 14,
-        'Engulfing_BodyRatio': 0.70, 'Engulfing_MaxOppositeWickRatio': 0.3, 'Engulfing_RSIPeriod': 14,
-        'Flow_BodyRatio': 0.70, 'Flow_MaxWickRatio': 0.40, 'Flow_RSIPeriod': 14,
+        # New Strategy Params
+        'MAPeriod': 14,
+        'MaxLevels': 5,
+        'Proximity': 2,
+        'Point': 0.00001, # Adjust based on asset precision
     }
     bot_state = BotState(PARAMS)
     
