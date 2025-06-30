@@ -123,51 +123,37 @@
             return `<svg viewBox="0 0 30 100" class="w-full h-full"><rect x="14" y="0" width="2" height="100" fill="${candleColor}" /><rect x="5" y="${bodyTop}" width="20" height="${bodyHeight}" fill="${candleColor}" /></svg>`;
         };
 
-        const LiveAnalysisCard = React.memo(({ analysis }) => {
+        const LiveAnalysisCard = React.memo(({ analysis, showTimer }) => {
             return (
-                <div className="glass-card rounded-2xl p-4 flex flex-col text-center h-[340px] card-enter-animation">
-                     <h3 className="text-xl font-bold text-white mb-3 text-left flex items-center gap-2 flex-shrink-0"><i className="fa-solid fa-magnifying-glass-chart text-teal-400"></i> Análise ao Vivo</h3>
-                     <div className="flex-grow flex flex-col items-center justify-center">
-                        {analysis && analysis.pair ? (
-                            <>
-                                <p className="font-bold text-2xl text-white">{analysis.pair}</p>
-                                <p className="text-sm bg-gray-700 text-gray-300 px-2 py-1 rounded-md my-2">{analysis.strategy}</p>
-                                <div className="w-16 h-28 mx-auto mt-4" dangerouslySetInnerHTML={{ __html: renderCandle(analysis.candle) }}></div>
-                                <p className="text-xs text-gray-400 mt-2">Vela anterior em análise</p>
-                            </>
-                        ) : (
-                            <div className="text-center text-gray-500">
-                                <i className="fa-solid fa-satellite-dish text-4xl mb-4"></i>
-                                <p>Aguardando dados de análise...</p>
-                            </div>
-                        )}
+                <div className="glass-card rounded-2xl p-4 flex flex-col text-center h-[340px] card-enter-animation relative">
+                     {showTimer && <Timer />}
+                     <div className="relative z-10 flex flex-col h-full">
+                        <h3 className="text-xl font-bold text-white mb-3 text-left flex items-center gap-2 flex-shrink-0"><i className="fa-solid fa-magnifying-glass-chart text-teal-400"></i> Análise ao Vivo</h3>
+                        <div className="flex-grow flex flex-col items-center justify-center">
+                            {analysis && analysis.pair ? (
+                                <>
+                                    <p className="font-bold text-2xl text-white">{analysis.pair}</p>
+                                    <p className="text-sm bg-gray-700 text-gray-300 px-2 py-1 rounded-md my-2">{analysis.strategy}</p>
+                                    <div className="w-16 h-28 mx-auto mt-4" dangerouslySetInnerHTML={{ __html: renderCandle(analysis.candle) }}></div>
+                                    <p className="text-xs text-gray-400 mt-2">Vela anterior em análise</p>
+                                </>
+                            ) : (
+                                <div className="text-center text-gray-500">
+                                    <i className="fa-solid fa-satellite-dish text-4xl mb-4"></i>
+                                    <p>Aguardando dados de análise...</p>
+                                </div>
+                            )}
+                        </div>
                      </div>
                 </div>
             );
         });
 
         const SignalCard = React.memo(({ signal, isLatestActive }) => {
-            const [progress, setProgress] = useState(0);
-            const isCall = signal.direction.toUpperCase() === 'CALL' || signal.direction.toUpperCase() === 'BUY';
+            const isCall = signal.direction.toUpperCase() === 'BUY';
+            const directionText = isCall ? 'CALL' : 'PUT';
             const directionColor = isCall ? 'text-green-400' : 'text-red-400';
             const directionIcon = isCall ? 'fa-arrow-trend-up' : 'fa-arrow-trend-down';
-            
-            useEffect(() => {
-                let intervalId = null;
-                if (isLatestActive && !signal.result) {
-                    const updateTimer = () => {
-                        const seconds = new Date().getSeconds();
-                        setProgress(seconds);
-                    };
-                    updateTimer();
-                    intervalId = setInterval(updateTimer, 1000);
-                } else {
-                    setProgress(0);
-                }
-                return () => clearInterval(intervalId);
-            }, [isLatestActive, signal.result]);
-            
-            const timerStyle = { '--gradient': `conic-gradient(#14b8a6 ${progress * 6}deg, rgba(255,255,255,0.1) 0deg)` };
 
             const ResultFooter = () => {
                 if (!signal.result) return <div className="w-full mt-3 h-16"></div>;
@@ -176,7 +162,7 @@
             };
 
             return (<div className="glass-card rounded-2xl p-4 flex flex-col text-center card-enter-animation relative h-[340px]">
-                {isLatestActive && !signal.result && <div className="timer-border-wrapper" style={timerStyle}></div>}
+                {isLatestActive && !signal.result && <Timer />}
                 <div className="relative z-10 flex flex-col h-full">
                     {signal.gale_level > 0 && <div className="absolute top-0 right-0 bg-amber-500 text-gray-900 text-xs font-bold px-2 py-0.5 rounded-full z-20">GALE {signal.gale_level}</div>}
                     <div className="flex justify-between items-center w-full mb-3">
@@ -189,7 +175,7 @@
                             <p className="font-mono text-3xl font-bold text-white my-1">{convertTimeToUserTimezone(signal.entry_time)}</p>
                             <div className={`font-semibold text-2xl ${directionColor}`}>
                                 <i className={`fa-solid ${directionIcon} mr-1`}></i>
-                                {signal.direction.toUpperCase()}
+                                {directionText}
                             </div>
                         </div>
                         <div className="flex items-center justify-center gap-2">
@@ -203,6 +189,21 @@
             </div>);
         });
         
+        const Timer = () => {
+            const [progress, setProgress] = useState(0);
+            useEffect(() => {
+                const updateTimer = () => {
+                    const seconds = new Date().getSeconds();
+                    setProgress(seconds);
+                };
+                updateTimer();
+                const intervalId = setInterval(updateTimer, 1000);
+                return () => clearInterval(intervalId);
+            }, []);
+            const timerStyle = { '--gradient': `conic-gradient(#14b8a6 ${progress * 6}deg, rgba(255,255,255,0.1) 0deg)` };
+            return <div className="timer-border-wrapper" style={timerStyle}></div>;
+        };
+
         function HomeView({ signals, liveAnalysis }) {
             const latestActiveSignalId = useMemo(() => {
                 const activeSignals = signals.filter(s => !s.result);
@@ -210,8 +211,8 @@
             }, [signals]);
 
             return (<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                        <LiveAnalysisCard analysis={liveAnalysis} />
-                        {signals.map(signal => <SignalCard key={signal.signal_id} signal={signal} isLatestActive={signal.signal_id === latestActiveSignalId} />)}
+                        <LiveAnalysisCard analysis={liveAnalysis} showTimer={!latestActiveSignalId} />
+                        {signals.map(signal => <SignalCard key={`${signal.signal_id}-${signal.result}`} signal={signal} isLatestActive={signal.signal_id === latestActiveSignalId} />)}
                     </div>);
         }
 
@@ -263,6 +264,7 @@
 
             const handleMessage = useCallback((message) => {
                 if (!message || !message.type) return;
+                console.log("Mensagem recebida:", message);
 
                 switch (message.type) {
                     case 'init':
