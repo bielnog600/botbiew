@@ -31,12 +31,9 @@
         const { createClient } = supabase;
 
         // --- INFORMAÇÕES DE CONEXÃO COM O SUPABASE ---
-        // ⬇️⬇️⬇️ SUBSTITUA PELOS SEUS DADOS AQUI ⬇️⬇️⬇️
         const SUPABASE_URL = 'https://ioduahwknfsktujthfyc.supabase.co';
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlvZHVhaHdrbmZza3R1anRoZnljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEzMDc0NDcsImV4cCI6MjA2Njg4MzQ0N30.96f8wZO6SvABKFMWjIiw1pSugAB4Isldj7yxLcLJRSE';
-        // ⬆️⬆️⬆️ SUBSTITUA PELOS SEUS DADOS AQUI ⬆️⬆️⬆️
         const WEBSOCKET_URL = 'wss://botexnova.marombiew.com';
-
 
         let supabaseClient;
         let supabaseInitializationError = null;
@@ -217,13 +214,18 @@
             );
         }
 
-        function ClientDashboard() {
+        // --- Componentes do Cliente (Recriados e Corrigidos) ---
+
+        const ClientDashboard = ({ userProfile }) => {
             const [activeTab, setActiveTab] = useState('home');
             const [signals, setSignals] = useState([]);
             const [scoreboard, setScoreboard] = useState({ wins: 0, losses: 0, gale_wins: 0 });
             const [liveAnalysis, setLiveAnalysis] = useState({});
             const [isConnected, setIsConnected] = useState(false);
             const socketRef = useRef(null);
+            
+            const subscription = userProfile.subscriptions[0] || {};
+            const isSubscriptionActive = subscription.status === 'active' && new Date(subscription.expires_at) > new Date();
 
             const handleMessage = useCallback((message) => {
                 if (!message || !message.type) return;
@@ -255,11 +257,22 @@
             }, [handleMessage]);
 
             useEffect(() => {
-                connect();
-                return () => { if (socketRef.current) socketRef.current.close(); };
-            }, [connect]);
+                if (isSubscriptionActive) {
+                    connect();
+                    return () => { if (socketRef.current) socketRef.current.close(); };
+                }
+            }, [connect, isSubscriptionActive]);
 
             const renderView = () => {
+                if (!isSubscriptionActive) {
+                    return (
+                        <div className="glass-card rounded-xl p-8 text-center card-enter-animation">
+                            <i className="fa-solid fa-lock text-4xl text-amber-400 mb-4"></i>
+                            <h3 className="text-xl font-bold">Acesso Expirado ou Inativo</h3>
+                            <p className="text-gray-400 mt-2">A sua subscrição não está ativa. Por favor, contacte o suporte.</p>
+                        </div>
+                    );
+                }
                 switch(activeTab) {
                     case 'reports': return <ReportsView signals={signals} />;
                     case 'home':
@@ -282,8 +295,6 @@
             );
         }
 
-        // --- Componentes do Cliente (Home, Reports, etc.) ---
-        // (Estes componentes são os mesmos da versão anterior do dashboard)
         const HomeView = ({ signals, liveAnalysis }) => {
             const latestActiveSignalId = useMemo(() => {
                 const activeSignals = signals.filter(s => !s.result);
@@ -377,7 +388,7 @@
                     const { data: { session } } = await supabaseClient.auth.getSession();
                     setSession(session);
                     if (session) {
-                        const { data: profile } = await supabaseClient.from('profiles').select('*').eq('id', session.user.id).single();
+                        const { data: profile } = await supabaseClient.from('profiles').select('*, subscriptions(*)').eq('id', session.user.id).single();
                         setUserProfile(profile);
                     }
                     setLoading(false);
@@ -387,7 +398,7 @@
                 const { data: { subscription } } = supabaseClient.auth.onAuthStateChange(async (_event, session) => {
                     setSession(session);
                     if (session) {
-                         const { data: profile } = await supabaseClient.from('profiles').select('*').eq('id', session.user.id).single();
+                         const { data: profile } = await supabaseClient.from('profiles').select('*, subscriptions(*)').eq('id', session.user.id).single();
                          setUserProfile(profile);
                     } else {
                         setUserProfile(null);
@@ -413,7 +424,11 @@
                 return <AdminDashboard />;
             }
             
-            return <ClientDashboard />;
+            if (userProfile) {
+                return <ClientDashboard userProfile={userProfile} />;
+            }
+
+            return <div className="min-h-screen flex items-center justify-center"><p>A carregar perfil...</p></div>;
         }
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
