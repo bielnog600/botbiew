@@ -129,7 +129,7 @@ def exibir_banner():
       ██║   ██╔══██╗██║██╔══██║██║       ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║    ██║    ██║
       ██║   ██║  ██║██║██║  ██║███████╗    ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝    ██║
       ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝     ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝     ╚═╝ '''+y+'''
-              azkzero@gmail.com - v63 (Filtro de Tendência Principal)
+              azkzero@gmail.com - v63.1 (Correção de Filtro de Tendência)
     ''')
     print(y + "*"*88)
     print(c + "="*88)
@@ -320,6 +320,17 @@ def calculate_ma_slope(closes, period, lookback=3):
     if ma_values[-1] < ma_values[0]: return -1
     return 0
 
+def check_trend_with_emas(closes, p):
+    """Checks the short-term trend using two EMAs."""
+    ema_short = calculate_ema(closes, p.get('EMA_Short_Period', 9))
+    ema_long = calculate_ema(closes, p.get('EMA_Long_Period', 21))
+    if ema_short is None or ema_long is None: return 'NEUTRAL'
+    
+    last_close = closes[-1]
+    if ema_short > ema_long and last_close > ema_short: return 'BUY'
+    if ema_short < ema_long and last_close < ema_short: return 'SELL'
+    return 'NEUTRAL'
+
 def get_master_trend(velas, p):
     period = p.get('Trend_MA_Period', 100)
     if len(velas) < period: return 'SIDEWAYS'
@@ -365,7 +376,7 @@ def strategy_sr_breakout(velas, p, state, ativo=None):
     props_breakout = get_candle_props(velas[-1])
     if not props_breakout or props_breakout['body_ratio'] < p.get('SR_BodyRatio', 0.70): return score, direcao
 
-    avg_body_size = sum(p.get('corpo', 0) for p in (get_candle_props(v) for v in zona_analise) if p) / len(zona_analise)
+    avg_body_size = sum(prop.get('corpo', 0) for prop in (get_candle_props(v) for v in zona_analise) if prop) / len(zona_analise)
     if props_breakout['corpo'] <= avg_body_size: return score, direcao
 
     max_wick = p.get('SR_MaxOppositeWickRatio', 0.30)
