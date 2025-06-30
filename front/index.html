@@ -151,7 +151,7 @@
 
         const LiveAnalysisCard = React.memo(({ analysis, showTimer }) => {
             return (
-                <div className="glass-card rounded-2xl p-4 flex flex-col text-center h-[240px] card-enter-animation relative">
+                <div className="glass-card rounded-2xl p-4 flex flex-col text-center h-[340px] card-enter-animation relative">
                      {showTimer && <Timer />}
                      <div className="relative z-10 flex flex-col h-full">
                         <h3 className="text-xl font-bold text-white mb-3 text-left flex items-center gap-2 flex-shrink-0"><i className="fa-solid fa-magnifying-glass-chart text-teal-400"></i> Análise ao Vivo</h3>
@@ -187,7 +187,7 @@
                 return (<div className={`w-full mt-3 h-16 flex items-center justify-center rounded-lg border ${resultBg}`}><div className="text-center"><p className={`text-xs ${resultColor}`}>RESULTADO</p><p className={`font-mono text-2xl font-bold ${resultColor} flex items-center justify-center gap-2`}><i className={resultIcon}></i><span>{signal.result}</span></p></div></div>);
             };
 
-            return (<div className="glass-card rounded-2xl p-4 flex flex-col text-center card-enter-animation relative h-[240px]">
+            return (<div className="glass-card rounded-2xl p-4 flex flex-col text-center card-enter-animation relative h-[340px]">
                 {isLatestActive && !signal.result && <Timer />}
                 <div className="relative z-10 flex flex-col h-full">
                     {signal.gale_level > 0 && <div className="absolute top-0 right-0 bg-amber-500 text-gray-900 text-xs font-bold px-2 py-0.5 rounded-full z-20">GALE {signal.gale_level}</div>}
