@@ -73,7 +73,7 @@
                 #14b8a6 calc(var(--progress-value) * 1s / 60s * 360deg), 
                 rgba(255,255,255,0.1) 0
             );
-            animation: progress 60s linear infinite;
+            animation: progress 60s linear forwards;
         }
     </style>
 </head>
@@ -83,14 +83,14 @@
     <script type="text/babel">
         const { useState, useEffect, useCallback, useMemo, useRef, Component } = React;
         
-        const BOT_UTC_OFFSET = "-00:00";
-        const WEBSOCKET_URL = 'ws://127.0.0.1:8765';
+        const WEBSOCKET_URL = 'wss://botexnova.marombiew.com';
 
         function convertTimeToUserTimezone(timeString) {
             if (!timeString || !timeString.includes(':')) return timeString;
             try {
                 const todayStr = new Date().toISOString().slice(0, 10);
-                const fullDateTimeString = `${todayStr}T${timeString}:00${BOT_UTC_OFFSET}`;
+                // Assume bot time is UTC
+                const fullDateTimeString = `${todayStr}T${timeString}:00Z`;
                 const dateObj = new Date(fullDateTimeString);
                 if (isNaN(dateObj)) return timeString;
                 return dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
@@ -144,12 +144,12 @@
                 <div className="glass-card rounded-2xl p-4 flex flex-col text-center h-[340px] card-enter-animation">
                      <h3 className="text-xl font-bold text-white mb-3 text-left flex items-center gap-2 flex-shrink-0"><i className="fa-solid fa-magnifying-glass-chart text-teal-400"></i> Análise ao Vivo</h3>
                      <div className="flex-grow flex flex-col items-center justify-center">
-                        {analysis.pair ? (
+                        {analysis && analysis.pair ? (
                             <>
                                 <p className="font-bold text-2xl text-white">{analysis.pair}</p>
                                 <p className="text-sm bg-gray-700 text-gray-300 px-2 py-1 rounded-md my-2">{analysis.strategy}</p>
                                 <div className="w-16 h-28 mx-auto mt-4" dangerouslySetInnerHTML={{ __html: renderCandle(analysis.candle) }}></div>
-                                <p className="text-xs text-gray-400 mt-2">Vela anterior</p>
+                                <p className="text-xs text-gray-400 mt-2">Vela anterior em análise</p>
                             </>
                         ) : (
                             <div className="text-center text-gray-500">
@@ -169,8 +169,11 @@
             const directionIcon = isCall ? 'fa-arrow-trend-up' : 'fa-arrow-trend-down';
 
             useEffect(() => {
-                if (!signal.result) {
-                    setTimerKey(Date.now());
+                const now = new Date();
+                const seconds = now.getSeconds();
+                const element = document.getElementById(signal.signal_id);
+                if (element && !signal.result) {
+                    element.style.setProperty('--progress-value', seconds);
                 }
             }, [signal.result]);
 
@@ -182,7 +185,7 @@
 
             const cardClasses = `glass-card rounded-2xl p-4 flex flex-col text-center card-enter-animation relative h-[340px] ${!signal.result ? 'timer-border' : ''}`;
             
-            return (<div id={signal.signal_id} key={timerKey} className={cardClasses}>
+            return (<div id={signal.signal_id} key={signal.signal_id} className={cardClasses}>
                 {signal.gale_level > 0 && <div className="absolute top-2 right-2 bg-amber-500 text-gray-900 text-xs font-bold px-2 py-0.5 rounded-full">GALE {signal.gale_level}</div>}
                 <div className="flex justify-between items-center w-full mb-3">
                     <p className="font-bold text-xl text-white">{signal.pair}</p>
