@@ -122,7 +122,7 @@ def exibir_banner():
       ██║   ██╔══██╗██║██╔══██║██║       ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║    ██║    ██║
       ██║   ██║  ██║██║██║  ██║███████╗    ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝    ██║
       ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝     ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝     ╚═╝ '''+y+'''
-              azkzero@gmail.com - v65.1 (Comunicação Aprimorada)
+              azkzero@gmail.com - v65.3 (Filtros de Mercado Ajustáveis)
     ''')
     print(y + "*"*88)
     print(c + "="*88)
@@ -238,6 +238,24 @@ def detect_fractals(velas, n_levels):
             sup_levels.append(lows[i])
     return sorted(res_levels, reverse=True)[:n_levels], sorted(sup_levels, reverse=True)[:n_levels]
 
+# --- Global Market Filters ---
+def is_market_consolidating(velas, p):
+    lookback = p.get('Consolidation_Lookback', 10)
+    threshold = p.get('Consolidation_Threshold', 0.0005)
+    if len(velas) < lookback: return False
+    closes = [v['close'] for v in velas[-lookback:]]
+    return (max(closes) - min(closes)) < threshold
+
+def is_exhaustion_pattern(velas, p):
+    if len(velas) < 3: return False
+    c1, c2 = get_candle_props(velas[-2]), get_candle_props(velas[-3])
+    if not c1 or not c2: return False
+    
+    doji_like_threshold = p.get('Exhaustion_DojiLike_Ratio', 0.2)
+    if c1['body_ratio'] < doji_like_threshold and c2['body_ratio'] < doji_like_threshold:
+        return True
+    return False
+
 # --- NEW STRATEGIES ---
 def strategy_mql_pullback(velas, p, state=None, ativo=None):
     if len(velas) < p['MAPeriod'] + 2: return 0, None
@@ -282,33 +300,17 @@ def strategy_patterns(velas, p, state=None, ativo=None):
     penultimate, last = velas[-2], velas[-1]
     direcao = None
     if nano_up:
-        # Bullish Engulfing
-        if (penultimate['close'] < penultimate['open'] and last['close'] > last['open'] and last['open'] < penultimate['close'] and last['close'] > penultimate['open']):
-            direcao = 'BUY'
-        # Piercing Line (aproximado)
-        if (penultimate['close'] < penultimate['open'] and last['close'] > last['open'] and last['open'] > penultimate['close'] and last['close'] < penultimate['open']):
-            direcao = 'BUY'
+        if (penultimate['close'] < penultimate['open'] and last['close'] > last['open'] and last['open'] < penultimate['close'] and last['close'] > penultimate['open']): direcao = 'BUY'
+        if (penultimate['close'] < penultimate['open'] and last['close'] > last['open'] and last['open'] > penultimate['close'] and last['close'] < penultimate['open']): direcao = 'BUY'
     if not nano_up:
-        # Bearish Engulfing
-        if (penultimate['close'] > penultimate['open'] and last['close'] < last['open'] and last['open'] > penultimate['close'] and last['close'] < penultimate['open']):
-            direcao = 'SELL'
-        # Dark Cloud Cover (aproximado)
-        if (penultimate['close'] > penultimate['open'] and last['close'] < last['open'] and last['open'] < penultimate['close'] and last['close'] > penultimate['open']):
-            direcao = 'SELL'
+        if (penultimate['close'] > penultimate['open'] and last['close'] < last['open'] and last['open'] > penultimate['close'] and last['close'] < penultimate['open']): direcao = 'SELL'
+        if (penultimate['close'] > penultimate['open'] and last['close'] < last['open'] and last['open'] < penultimate['close'] and last['close'] > penultimate['open']): direcao = 'SELL'
             
     return (1, direcao) if direcao else (0, None)
 
 # --- Strategy Dispatchers ---
-ALL_STRATEGIES = {
-    'mql_pullback': 'Pullback MQL', 
-    'flow': 'Fluxo',
-    'patterns': 'Padrões de Velas',
-}
-STRATEGY_FUNCTIONS = {
-    'mql_pullback': strategy_mql_pullback,
-    'flow': strategy_flow,
-    'patterns': strategy_patterns,
-}
+ALL_STRATEGIES = { 'mql_pullback': 'Pullback MQL', 'flow': 'Fluxo', 'patterns': 'Padrões de Velas' }
+STRATEGY_FUNCTIONS = { 'mql_pullback': strategy_mql_pullback, 'flow': strategy_flow, 'patterns': strategy_patterns }
 
 def catalogar_e_selecionar(api, params, state):
     log_info("MODO DE CATALOGAÇÃO E SELEÇÃO INICIADO...")
@@ -321,14 +323,13 @@ def catalogar_e_selecionar(api, params, state):
                 for ativo, info in all_assets[tipo_mercado].items():
                     if info.get('open', False) and ativo not in ativos_abertos: ativos_abertos.append(ativo)
     except Exception as e:
-        log_error(f"Não foi possível obter os ativos abertos: {e}")
-        return {}
+        log_error(f"Não foi possível obter os ativos abertos: {e}"); return {}
 
     if not ativos_abertos: log_error("Nenhum par aberto encontrado para catalogar."); return {}
 
     log_info(f"Encontrados {len(ativos_abertos)} pares abertos para análise.")
     champion_strategies = {}
-    assertividade_minima = params.get('Assertividade_Minima', 60)
+    assertividade_minima = params.get('Assertividade_Minima', 80)
 
     for ativo_original in ativos_abertos:
         try:
@@ -336,8 +337,7 @@ def catalogar_e_selecionar(api, params, state):
             velas_historicas_raw = api.get_candles(ativo_original, 60, 300, time.time())
             todas_as_velas = validar_e_limpar_velas(velas_historicas_raw)
             if not todas_as_velas or len(todas_as_velas) < 150: 
-                log_warning(f"Dados históricos insuficientes.", pair=ativo_original)
-                continue
+                log_warning(f"Dados históricos insuficientes.", pair=ativo_original); continue
             
             best_strategy, highest_assertiveness = None, 0
 
@@ -358,7 +358,6 @@ def catalogar_e_selecionar(api, params, state):
                 
                 if total > 5:
                     assertividade = (wins / total) * 100
-                    log_info(f"Estratégia '{nome}': {assertividade:.2f}% ({wins}W/{losses}L)", pair=ativo_original)
                     if assertividade > highest_assertiveness:
                         highest_assertiveness, best_strategy = assertividade, nome
             
@@ -393,18 +392,19 @@ def get_config_from_env():
     }
 
 def compra_thread(api, ativo, valor, direcao, expiracao, tipo_op, state, config, cifrao, signal_id, target_entry_timestamp):
+    resultado_final = "ERROR" # Default result
     try:
         wait_time = target_entry_timestamp - time.time() - 5.0
         if wait_time > 0: time.sleep(wait_time)
 
         if time.time() > target_entry_timestamp + 10:
             log_error("Oportunidade perdida (atraso >10s).", pair=ativo)
-            with state.lock: state.active_trades -= 1
             return
 
         entrada_atual, niveis_mg = valor, config['mg_niveis'] if config['usar_mg'] else 0
         for i in range(niveis_mg + 1):
             if state.stop: break
+            
             if i > 0:
                 signal_queue.put({"type": "gale", "signal_id": signal_id, "gale_level": i})
                 if signal_id in state.signal_history: state.signal_history[signal_id]["gale_level"] = i
@@ -413,20 +413,30 @@ def compra_thread(api, ativo, valor, direcao, expiracao, tipo_op, state, config,
             log_info(f"ORDEM {gale_info}: {cifrao}{entrada_atual:.2f} | {direcao.upper()} | {expiracao}M", pair=ativo)
             
             check, id_ordem = api.buy(entrada_atual, ativo, direcao, expiracao)
-            if not check: log_error(f"Falha ao abrir ordem {gale_info}.", pair=ativo); break
+            if not check: 
+                log_error(f"Falha ao abrir ordem {gale_info}.", pair=ativo)
+                resultado_final = "ERROR"
+                break
             
-            resultado, status_encontrado = 0.0, False; tempo_limite = time.time() + expiracao * 60 + 15
+            resultado, status_encontrado = 0.0, False
+            tempo_limite = time.time() + expiracao * 60 + 15
             while time.time() < tempo_limite:
                 status, lucro = api.check_win_v4(id_ordem)
-                if status: resultado, status_encontrado = lucro, True; break
+                if status: 
+                    resultado, status_encontrado = lucro, True
+                    break
                 time.sleep(0.5)
             
-            if not status_encontrado: log_error(f"Timeout na ordem {id_ordem}.", pair=ativo); break
+            if not status_encontrado: 
+                log_error(f"Timeout na ordem {id_ordem}.", pair=ativo)
+                resultado_final = "ERROR"
+                break
             
             if resultado > 0:
                 log_success(f"RESULTADO: WIN {gale_info} | Lucro: {cifrao}{resultado:.2f}", pair=ativo)
                 with state.lock: state.win_count += 1; state.consecutive_losses[ativo] = 0;
                 if i > 0: state.gale_wins[f'g{i}'] += 1
+                resultado_final = 'WIN'
                 break
             elif resultado < 0:
                 log_error(f"RESULTADO: LOSS {gale_info} | Perda: {cifrao}{abs(resultado):.2f}", pair=ativo)
@@ -436,13 +446,20 @@ def compra_thread(api, ativo, valor, direcao, expiracao, tipo_op, state, config,
                     if state.consecutive_losses[ativo] >= 2:
                         state.suspended_pairs[ativo] = time.time() + 1800
                         log_error("Par suspenso por 30 min (2 derrotas seguidas).", pair=ativo)
-                if i < niveis_mg: entrada_atual *= config['mg_fator']
+                
+                if i < niveis_mg: 
+                    entrada_atual *= config['mg_fator']
+                else: 
+                    resultado_final = 'LOSS'
             else:
                 log_warning(f"RESULTADO: EMPATE {gale_info}.", pair=ativo)
-                if i >= niveis_mg: break
+                if i >= niveis_mg:
+                    resultado_final = 'DRAW'
+                    break
         
         placar = { "wins": state.win_count, "losses": state.loss_count, "gale_wins": sum(state.gale_wins.values()) }
-        signal_queue.put({ "type": "result", "signal_id": signal_id, "result": "WIN" if resultado > 0 else ("LOSS" if resultado < 0 else "DRAW"), "placar": placar })
+        signal_queue.put({ "type": "result", "signal_id": signal_id, "result": resultado_final, "placar": placar })
+
     except Exception as e: log_error(f"ERRO CRÍTICO NA THREAD: {e}", pair=ativo); traceback.print_exc()
     finally:
         with state.lock: state.active_trades -= 1
@@ -482,13 +499,6 @@ def main_bot_logic(state, PARAMS):
 
     while not state.stop:
         try:
-            with state.lock:
-                if state.standby_mode and time.time() < state.standby_until:
-                    if int(time.time()) % 10 == 0: log_warning(f"Bot em modo Stand-by. Retomando em {int(state.standby_until - time.time())}s...")
-                    time.sleep(5); continue
-                elif state.standby_mode:
-                    log_success("Modo Stand-by finalizado. Retomando análises."); state.standby_mode = False
-
             timestamp = time.time(); dt_objeto = datetime.fromtimestamp(timestamp)
             if dt_objeto.minute != minuto_anterior: minuto_anterior, analise_feita = dt_objeto.minute, False
 
@@ -518,6 +528,9 @@ def main_bot_logic(state, PARAMS):
                     analysis_payload = {"type": "live_analysis", "data": {"pair": ativo, "strategy": estrategia, "candle": velas[-1]}}
                     signal_queue.put(analysis_payload)
                     
+                    if is_market_consolidating(velas, PARAMS): continue
+                    if is_exhaustion_pattern(velas, PARAMS): continue
+
                     cod_est = next((cod for cod, nome in ALL_STRATEGIES.items() if nome == estrategia), None)
                     if not cod_est: continue
                     
@@ -551,13 +564,15 @@ def main_bot_logic(state, PARAMS):
 
 def main():
     PARAMS = { 
-        'Assertividade_Minima': 60,
+        'Assertividade_Minima': 80,
         'MAX_SIMULTANEOUS_TRADES': 1,
         'Standby_Loss_Count': 3,
         'Standby_Timeframe_Minutes': 5,
         'Recatalog_Cycle_Hours': 2,
         'Recatalog_Loss_Trigger': 5,
-        'Minimum_Confidence_Score': 1, # Set to 1 for new MQL strategies
+        'Consolidation_Lookback': 10, 
+        'Consolidation_Threshold': 0.0005, 
+        'Exhaustion_DojiLike_Ratio': 0.2,
         # New Strategy Params
         'MAPeriod': 14,
         'MaxLevels': 5,
