@@ -133,7 +133,7 @@ def exibir_banner():
       ██║   ██╔══██╗██║██╔══██║██║       ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║    ██║    ██║
       ██║   ██║  ██║██║██║  ██║███████╗    ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝    ██║
       ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝     ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝     ╚═╝ '''+y+'''
-              azkzero@gmail.com - v61 (Logging Integrado ao Frontend)
+              azkzero@gmail.com - v62 (Correção de Entradas Simultâneas)
     ''')
     print(y + "*"*88)
     print(c + "="*88)
@@ -545,7 +545,6 @@ def main_bot_logic(state, PARAMS):
     
     log_success("Conexão estabelecida!"); API.change_balance(config['conta'])
     
-    # --- FIXED PROFILE HANDLING ---
     cifrao = "$"
     try:
         profile_data = API.get_profile_ansyc()
@@ -600,10 +599,11 @@ def main_bot_logic(state, PARAMS):
             if dt_objeto.minute != minuto_anterior:
                 minuto_anterior, analise_feita = dt_objeto.minute, False
 
-            with state.lock: active_trades_count = state.active_trades
-            MAX_SIMULTANEOUS_TRADES = 1
+            MAX_TRADES = PARAMS.get('MAX_SIMULTANEOUS_TRADES', 1)
+            with state.lock:
+                active_trades_count = state.active_trades
             
-            if dt_objeto.second >= 30 and not analise_feita and active_trades_count < MAX_SIMULTANEOUS_TRADES:
+            if dt_objeto.second >= 30 and not analise_feita and active_trades_count < MAX_TRADES:
                 analise_feita = True
                 
                 with state.lock:
@@ -615,6 +615,11 @@ def main_bot_logic(state, PARAMS):
                 all_profits = API.get_all_profit()
 
                 for ativo, estrategia in state.champion_strategies.items():
+                    # --- FIXED SIMULTANEOUS TRADES LOGIC ---
+                    with state.lock:
+                        if state.active_trades >= MAX_TRADES:
+                            break # Para de procurar se o limite já foi atingido
+
                     if ativo in state.suspended_pairs: continue
                     
                     payout = all_profits.get(ativo, {}).get('turbo', 0) * 100 or all_profits.get(ativo, {}).get('binary', 0) * 100
@@ -655,6 +660,7 @@ def main_bot_logic(state, PARAMS):
 def main():
     PARAMS = { 
         'Assertividade_Minima': 60, 'Recatalog_Cycle_Hours': 2, 'Recatalog_Loss_Trigger': 5,
+        'MAX_SIMULTANEOUS_TRADES': 1, # <--- CONFIGURAÇÃO CENTRALIZADA
         'Consolidation_Lookback': 10, 'Consolidation_Threshold': 0.0005, 'Exhaustion_DojiLike_Ratio': 0.2,
         'Standby_Loss_Count': 3, 'Standby_Timeframe_Minutes': 5, 'Minimum_Confidence_Score': 3,
         'EMA_Short_Period': 9, 'EMA_Long_Period': 21,
