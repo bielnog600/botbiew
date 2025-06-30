@@ -114,7 +114,7 @@ def exibir_banner():
       ██║   ██╔══██╗██║██╔══██║██║         ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║   ██║   ██║
       ██║   ██║  ██║██║██║  ██║███████╗     ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝   ██║
       ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝      ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝    ╚═╝ '''+y+'''
-              azkzero@gmail.com - v53 (Estratégias Profissionais)
+              azkzero@gmail.com - v54 (Estratégias Profissionais)
     ''')
     print(y + "*"*88)
     print(c + "="*88)
@@ -284,14 +284,6 @@ def get_candle_props(vela):
     props['pavio_inferior'] = min(vela['open'], vela['close']) - vela['low']
     return props
 
-def detect_fractals(velas, max_levels):
-    highs, lows = [v['high'] for v in velas], [v['low'] for v in velas]
-    res, sup = deque(maxlen=max_levels), deque(maxlen=max_levels)
-    for i in range(len(velas) - 3, 2, -1):
-        if highs[i-1] > max(highs[i-3:i-1] + highs[i:i+2]): res.append(highs[i-1])
-        if lows[i-1] < min(lows[i-3:i-1] + lows[i:i+2]): sup.append(lows[i-1])
-    return list(res), list(sup)
-    
 # --- STRATEGIES ---
 def strategy_sr_breakout(velas, p):
     lookback = p.get('SR_Lookback', 5)
@@ -350,20 +342,28 @@ def strategy_engulfing(velas, p):
     return None
 
 def strategy_rest_candle(velas, p):
-    if len(velas) < 4: return None
+    if len(velas) < 3: return None
+    
     tendencia_alta = sma_slope([v['close'] for v in velas], p['MAPeriod'])
     if tendencia_alta is None: return None
-    
-    v1, v2, v3 = velas[-3], velas[-2], velas[-1]
-    p1, p2 = get_candle_props(v1), get_candle_props(v2)
-    if not all([p1, p2]): return None
-    
-    is_inside_bar = v2['high'] < v1['high'] and v2['low'] > v1['low']
-    if p1['body_ratio'] < 0.6 or not is_inside_bar or p2['body_ratio'] > 0.3:
-        return None
 
-    if tendencia_alta and p1['is_alta'] and v3['close'] > v1['high']: return 'BUY'
-    if not tendencia_alta and p1['is_baixa'] and v3['close'] < v1['low']: return 'SELL'
+    vela_tendencia, vela_descanso = velas[-2], velas[-1]
+    
+    props_tendencia = get_candle_props(vela_tendencia)
+    props_descanso = get_candle_props(vela_descanso)
+    
+    if not props_tendencia or not props_descanso: return None
+
+    if not tendencia_alta and props_tendencia['is_baixa'] and \
+       props_tendencia['body_ratio'] > 0.6 and props_descanso['is_alta'] and \
+       props_descanso['body_ratio'] < 0.4:
+        return 'SELL'
+
+    if tendencia_alta and props_tendencia['is_alta'] and \
+       props_tendencia['body_ratio'] > 0.6 and props_descanso['is_baixa'] and \
+       props_descanso['body_ratio'] < 0.4:
+        return 'BUY'
+        
     return None
     
 def is_market_too_volatile(velas, p):
@@ -543,7 +543,7 @@ def main_bot_logic(state):
 
     while not state.stop:
         try:
-            MAX_SIMULTANEOUS_TRADES = 1
+            MAX_SIMULTANEOUS_TRADES = 5
             
             if config['modo_operacao'] == '1':
                 if time.time() - ultimo_ciclo_catalogacao > TEMPO_CICLO_CATALOGACAO or state.global_losses_since_catalog >= 5:
