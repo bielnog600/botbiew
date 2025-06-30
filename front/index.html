@@ -2,363 +2,263 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>MAROMBIEW BOT</title>
-    
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="MAROMBIEW BOT">
-    <link rel="apple-touch-icon" href="https://placehold.co/180x180/0a0a0a/14b8a6?text=M">
-    <link rel="manifest" href="manifest.json">
-    <meta name="theme-color" content="#0d9488">
-    
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard - MAROMBIEW BOT</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Roboto+Mono:wght@500;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-    
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
-        html, body, #root {
-            height: 100%;
-            overflow: hidden;
-        }
-        body { 
-            font-family: 'Poppins', sans-serif; 
-            background-color: #0a0a0a; 
-            color: #e5e7eb; 
-            background-image: radial-gradient(#1e293b 1px, transparent 1px); 
-            background-size: 20px 20px;
-            -webkit-user-select: none;
-            -ms-user-select: none;
-            user-select: none;
-            -webkit-tap-highlight-color: transparent;
-            color-scheme: dark;
-        }
-        .font-mono { font-family: 'Roboto Mono', monospace; }
-        .glass-card { background: rgba(17, 24, 39, 0.6); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.05); }
-        @keyframes card-enter { from { opacity: 0; transform: scale(0.95) translateY(10px); } to { opacity: 1; transform: scale(1) translateY(0); } }
-        .card-enter-animation { animation: card-enter 0.4s ease-out forwards; }
-        @keyframes score-pop { 0% { transform: scale(1); } 50% { transform: scale(1.25); color: #ffffff; } 100% { transform: scale(1); } }
-        .score-updated { animation: score-pop 0.3s ease-in-out; }
-        .form-input { color: white !important; background-color: #1f2937 !important; }
-        input[type="number"] { -moz-appearance: textfield; }
-        input::-webkit-outer-spin-button, input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-        
-        .no-scrollbar::-webkit-scrollbar { display: none; }
-        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-
-        .timer-border-wrapper {
-            position: absolute;
-            top: -2px; right: -2px; bottom: -2px; left: -2px;
-            border-radius: 1.125rem; /* 18px */
-            z-index: 0;
-            background: var(--gradient);
-        }
+        body { background-color: #0a0a0a; color: #e5e7eb; }
+        .glass-card { background: rgba(17, 24, 39, 0.6); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.1); }
+        .form-input { background-color: #1f2937; border-color: #374151; }
+        .btn-primary { background-color: #0d9488; }
+        .btn-primary:hover { background-color: #14b8a6; }
+        .nav-link-active { background-color: #14b8a6; color: white; }
     </style>
 </head>
 <body>
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect, useCallback, useMemo, useRef, Component } = React;
-        
-        // --- INSTRUÇÃO IMPORTANTE ---
-        // Substitua 'botexnova.marombiew.com' pelo endereço público que o Coolify deu à sua aplicação do BOT.
-        // O protocolo 'wss://' é necessário para conexões seguras.
-        const WEBSOCKET_URL = 'wss://botexnova.marombiew.com';
+        const { useState, useEffect, useCallback } = React;
+        const { createClient } = supabase;
 
-        function convertTimeToUserTimezone(timeString) {
-            if (!timeString || !timeString.includes(':')) return timeString;
-            try {
-                const todayStr = new Date().toISOString().slice(0, 10);
-                const fullDateTimeString = `${todayStr}T${timeString}:00Z`;
-                const dateObj = new Date(fullDateTimeString);
-                if (isNaN(dateObj)) return timeString;
-                return dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
-            } catch (e) {
-                console.error("Erro ao converter hora:", e);
-                return timeString;
-            }
-        }
+        // --- INFORMAÇÕES DE CONEXÃO COM O SUPABASE ---
+        // Substitua pelos seus dados, que encontra em "Project Settings" -> "API" no seu painel do Supabase.
+        const SUPABASE_URL = 'SEU_URL_DO_SUPABASE';
+        const SUPABASE_ANON_KEY = 'SUA_CHAVE_ANON_DO_SUPABASE';
+        const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-        class ErrorBoundary extends Component {
-            constructor(props) { super(props); this.state = { hasError: false, error: null }; }
-            static getDerivedStateFromError(error) { return { hasError: true, error: error }; }
-            componentDidCatch(error, errorInfo) { console.error("React Tree Error:", error, errorInfo); }
-            render() {
-                if (this.state.hasError) {
-                    return (<div className="text-center text-red-400 p-8 glass-card rounded-xl max-w-lg mx-auto"><h1 className="text-2xl font-bold mb-2"><i className="fa-solid fa-triangle-exclamation mr-2"></i>Oops! Algo correu mal.</h1><p>A aplicação encontrou um erro. Por favor, tente atualizar a página.</p><pre className="mt-4 text-xs text-left bg-gray-900 p-2 rounded overflow-auto">{this.state.error && this.state.error.toString()}</pre></div>);
+        function LoginPage({ onLogin }) {
+            const [email, setEmail] = useState('');
+            const [password, setPassword] = useState('');
+            const [error, setError] = useState('');
+            const [loading, setLoading] = useState(false);
+
+            const handleLogin = async (e) => {
+                e.preventDefault();
+                setLoading(true);
+                setError('');
+                const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+                if (error) {
+                    setError(error.message);
+                } else if (data.user) {
+                    onLogin(data.user);
                 }
-                return this.props.children;
-            }
-        }
-
-        const Header = ({ isConnected }) => (
-            <header className="flex flex-col sm:flex-row justify-between items-center gap-4">
-                <h1 className="text-3xl font-bold text-white"><i className="fa-solid fa-robot text-teal-400"></i> MAROMBIEW <span className="text-teal-400">BOT</span></h1>
-                <div className="flex items-center gap-2 glass-card px-3 py-1.5 rounded-full">
-                    <div className={`w-3 h-3 rounded-full transition-colors ${isConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></div>
-                    <span className="text-sm font-semibold text-gray-300">{isConnected ? 'Conectado' : 'Desconectado'}</span>
-                </div>
-            </header>
-        );
-        const TabButton = ({ icon, label, isActive, onClick }) => (<button onClick={onClick} className={`flex flex-col items-center gap-1 w-24 py-2 rounded-lg transition-all duration-200 ${isActive ? 'text-teal-400 bg-teal-500/10' : 'text-gray-400 hover:bg-gray-700/50'}`}><i className={`${icon} text-xl`}></i><span className="text-xs font-semibold">{label}</span></button>);
-        
-        const TabBar = ({ activeTab, setActiveTab }) => (<nav className="w-full lg:mb-4"><div className="flex justify-around lg:justify-center lg:gap-6 max-w-md mx-auto lg:max-w-none glass-card p-2 rounded-xl lg:bg-transparent lg:p-0 lg:glass-card-none">
-            <TabButton icon="fa-solid fa-house" label="Home" isActive={activeTab === 'home'} onClick={() => setActiveTab('home')} />
-            <TabButton icon="fa-solid fa-chart-pie" label="Relatórios" isActive={activeTab === 'reports'} onClick={() => setActiveTab('reports')} />
-            <TabButton icon="fa-solid fa-shield-halved" label="Gerenciamento" isActive={activeTab === 'risk'} onClick={() => setActiveTab('risk')} />
-        </div></nav>);
-
-        const Scoreboard = ({ scoreboard }) => {
-            const animateScore = (ref, value) => { if (ref.current && ref.current.textContent !== String(value)) { ref.current.classList.add('score-updated'); setTimeout(() => ref.current.classList.remove('score-updated'), 300); }};
-            const winsRef = useRef(); useEffect(() => animateScore(winsRef, scoreboard.wins), [scoreboard.wins]);
-            const lossesRef = useRef(); useEffect(() => animateScore(lossesRef, scoreboard.losses), [scoreboard.losses]);
-            const galesRef = useRef(); useEffect(() => animateScore(galesRef, scoreboard.gale_wins), [scoreboard.gale_wins]);
-            return (<div className="grid grid-cols-3 gap-4 w-full glass-card p-3 rounded-xl"><div className="text-center px-2"><p className="text-sm font-semibold text-green-400">WINS</p><p ref={winsRef} className="text-2xl font-bold font-mono">{scoreboard.wins}</p></div><div className="text-center px-2"><p className="text-sm font-semibold text-red-400">LOSSES</p><p ref={lossesRef} className="text-2xl font-bold font-mono">{scoreboard.losses}</p></div><div className="text-center px-2"><p className="text-sm font-semibold text-amber-400">GALE WINS</p><p ref={galesRef} className="text-2xl font-bold font-mono">{scoreboard.gale_wins}</p></div></div>);
-        };
-        
-        const renderCandle = (candle) => {
-            if (!candle || candle.high === undefined || candle.low === undefined) return '<div class="h-full w-full flex items-center justify-center text-gray-500"><i class="fa-solid fa-hourglass-half"></i></div>';
-            const candleColor = candle.close >= candle.open ? '#22c55e' : '#ef4444';
-            const priceRange = candle.high - candle.low;
-            if (priceRange <= 0) return `<svg viewBox="0 0 30 100" class="w-full h-full"><line x1="5" y1="50" x2="25" y2="50" stroke="${candleColor}" stroke-width="2"/></svg>`;
-            const bodyHeight = (Math.abs(candle.open - candle.close) / priceRange) * 100;
-            const bodyTop = ((candle.high - Math.max(candle.open, candle.close)) / priceRange) * 100;
-            return `<svg viewBox="0 0 30 100" class="w-full h-full"><rect x="14" y="0" width="2" height="100" fill="${candleColor}" /><rect x="5" y="${bodyTop}" width="20" height="${bodyHeight}" fill="${candleColor}" /></svg>`;
-        };
-
-        const Timer = () => {
-            const [progress, setProgress] = useState(0);
-            useEffect(() => {
-                const updateTimer = () => {
-                    const seconds = new Date().getSeconds();
-                    setProgress(seconds);
-                };
-                updateTimer();
-                const intervalId = setInterval(updateTimer, 1000);
-                return () => clearInterval(intervalId);
-            }, []);
-            const timerStyle = { '--gradient': `conic-gradient(#14b8a6 ${progress * 6}deg, rgba(255,255,255,0.1) 0deg)` };
-            return <div className="timer-border-wrapper" style={timerStyle}></div>;
-        };
-
-        const LiveAnalysisCard = React.memo(({ analysis, showTimer }) => {
-            return (
-                <div className="glass-card rounded-2xl p-4 flex flex-col text-center h-[340px] card-enter-animation relative">
-                     {showTimer && <Timer />}
-                     <div className="relative z-10 flex flex-col h-full">
-                        <h3 className="text-xl font-bold text-white mb-3 text-left flex items-center gap-2 flex-shrink-0"><i className="fa-solid fa-magnifying-glass-chart text-teal-400"></i> Análise ao Vivo</h3>
-                        <div className="flex-grow flex flex-col items-center justify-center">
-                            {analysis && analysis.pair ? (
-                                <>
-                                    <p className="font-bold text-2xl text-white">{analysis.pair}</p>
-                                    <p className="text-sm bg-gray-700 text-gray-300 px-2 py-1 rounded-md my-2">{analysis.strategy}</p>
-                                    <div className="w-16 h-28 mx-auto mt-4" dangerouslySetInnerHTML={{ __html: renderCandle(analysis.candle) }}></div>
-                                    <p className="text-xs text-gray-400 mt-2">Vela anterior em análise</p>
-                                </>
-                            ) : (
-                                <div className="text-center text-gray-500">
-                                    <i className="fa-solid fa-satellite-dish text-4xl mb-4"></i>
-                                    <p>Aguardando dados de análise...</p>
-                                </div>
-                            )}
-                        </div>
-                     </div>
-                </div>
-            );
-        });
-
-        const SignalCard = React.memo(({ signal, isLatestActive }) => {
-            const isCall = signal.direction.toUpperCase() === 'BUY';
-            const directionText = isCall ? 'CALL' : 'PUT';
-            const directionColor = isCall ? 'text-green-400' : 'text-red-400';
-            const directionIcon = isCall ? 'fa-arrow-trend-up' : 'fa-arrow-trend-down';
-
-            const ResultFooter = () => {
-                if (!signal.result) return <div className="w-full mt-3 h-16"></div>;
-                const isWin = signal.result === 'WIN'; const resultColor = isWin ? 'text-green-400' : 'text-red-400'; const resultIcon = isWin ? 'fa-solid fa-trophy' : 'fa-solid fa-shield-halved'; const resultBg = isWin ? 'bg-green-500/10 border-green-500/30' : 'bg-red-500/10 border-red-500/30';
-                return (<div className={`w-full mt-3 h-16 flex items-center justify-center rounded-lg border ${resultBg}`}><div className="text-center"><p className={`text-xs ${resultColor}`}>RESULTADO</p><p className={`font-mono text-2xl font-bold ${resultColor} flex items-center justify-center gap-2`}><i className={resultIcon}></i><span>{signal.result}</span></p></div></div>);
+                setLoading(false);
             };
 
-            return (<div className="glass-card rounded-2xl p-4 flex flex-col text-center card-enter-animation relative h-[340px]">
-                {isLatestActive && !signal.result && <Timer />}
-                <div className="relative z-10 flex flex-col h-full">
-                    {signal.gale_level > 0 && <div className="absolute top-0 right-0 bg-amber-500 text-gray-900 text-xs font-bold px-2 py-0.5 rounded-full z-20">GALE {signal.gale_level}</div>}
-                    <div className="flex justify-between items-center w-full mb-3">
-                        <p className="font-bold text-xl text-white">{signal.pair}</p>
-                        <p className="text-xs bg-gray-700 text-gray-300 px-2 py-1 rounded-md">{signal.strategy}</p>
+            return (
+                <div className="min-h-screen flex items-center justify-center bg-gray-900">
+                    <div className="w-full max-w-md p-8 space-y-8 glass-card rounded-xl">
+                        <div>
+                            <h2 className="mt-6 text-center text-3xl font-extrabold text-white">Admin Login</h2>
+                        </div>
+                        <form className="mt-8 space-y-6" onSubmit={handleLogin}>
+                            <div className="rounded-md shadow-sm -space-y-px">
+                                <div><input type="email" required className="form-input appearance-none rounded-none relative block w-full px-3 py-2 border placeholder-gray-500 text-gray-300 rounded-t-md focus:outline-none focus:ring-teal-500 focus:border-teal-500" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} /></div>
+                                <div><input type="password" required className="form-input appearance-none rounded-none relative block w-full px-3 py-2 border placeholder-gray-500 text-gray-300 rounded-b-md focus:outline-none focus:ring-teal-500 focus:border-teal-500" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} /></div>
+                            </div>
+                            {error && <p className="text-red-500 text-sm">{error}</p>}
+                            <div><button type="submit" className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white btn-primary focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500" disabled={loading}>{loading ? 'A entrar...' : 'Entrar'}</button></div>
+                        </form>
                     </div>
-                    <div className="flex-grow flex justify-between items-center gap-4">
-                        <div className="flex flex-col justify-center h-full text-left">
-                            <p className="text-xs text-gray-400">HORÁRIO DA ENTRADA</p>
-                            <p className="font-mono text-3xl font-bold text-white my-1">{convertTimeToUserTimezone(signal.entry_time)}</p>
-                            <div className={`font-semibold text-2xl ${directionColor}`}>
-                                <i className={`fa-solid ${directionIcon} mr-1`}></i>
-                                {directionText}
+                </div>
+            );
+        }
+
+        function Dashboard() {
+            const [view, setView] = useState('bot_control');
+            const [user, setUser] = useState(null);
+
+            useEffect(() => {
+                const getSession = async () => {
+                    const { data: { session } } = await supabaseClient.auth.getSession();
+                    if(session) setUser(session.user);
+                };
+                getSession();
+            }, []);
+
+            const handleLogout = async () => {
+                await supabaseClient.auth.signOut();
+                setUser(null);
+                window.location.reload();
+            };
+
+            return (
+                <div className="flex h-screen bg-gray-900">
+                    <aside className="w-64 bg-gray-800 text-white flex flex-col">
+                        <div className="h-16 flex items-center justify-center text-2xl font-bold border-b border-gray-700">Admin</div>
+                        <nav className="flex-1 px-2 py-4 space-y-2">
+                            <a href="#" onClick={() => setView('bot_control')} className={`block px-4 py-2 rounded-md ${view === 'bot_control' ? 'nav-link-active' : ''}`}>Controlo do Bot</a>
+                            <a href="#" onClick={() => setView('user_management')} className={`block px-4 py-2 rounded-md ${view === 'user_management' ? 'nav-link-active' : ''}`}>Gestão de Alunos</a>
+                        </nav>
+                        <div className="p-4 border-t border-gray-700">
+                            <button onClick={handleLogout} className="w-full text-left px-4 py-2 rounded-md hover:bg-red-500">Sair</button>
+                        </div>
+                    </aside>
+                    <main className="flex-1 p-10 overflow-y-auto">
+                        {view === 'bot_control' && <BotControl />}
+                        {view === 'user_management' && <UserManagement />}
+                    </main>
+                </div>
+            );
+        }
+        
+        function BotControl() {
+            const [botStatus, setBotStatus] = useState('PAUSED');
+            const [params, setParams] = useState('');
+            const [loading, setLoading] = useState(false);
+
+            const fetchConfig = useCallback(async () => {
+                const { data, error } = await supabaseClient.table('bot_config').select('*').eq('id', 1).single();
+                if (data) {
+                    setBotStatus(data.status);
+                    setParams(JSON.stringify(data.params, null, 2));
+                }
+            }, []);
+
+            useEffect(() => { fetchConfig(); }, [fetchConfig]);
+
+            const handleStatusChange = async (newStatus) => {
+                setLoading(true);
+                await supabaseClient.table('bot_config').update({ status: newStatus }).eq('id', 1);
+                fetchConfig();
+                setLoading(false);
+            };
+
+            const handleParamsSave = async () => {
+                try {
+                    const parsedParams = JSON.parse(params);
+                    setLoading(true);
+                    await supabaseClient.table('bot_config').update({ params: parsedParams }).eq('id', 1);
+                    alert('Parâmetros guardados com sucesso!');
+                    setLoading(false);
+                } catch (e) {
+                    alert('Erro: JSON inválido!');
+                }
+            };
+
+            return (
+                <div>
+                    <h1 className="text-3xl font-bold text-white mb-6">Controlo do Bot</h1>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="glass-card p-6 rounded-xl">
+                            <h2 className="text-xl font-bold mb-4">Estado do Bot</h2>
+                            <p className="mb-4">Estado atual: <span className={`font-bold ${botStatus === 'RUNNING' ? 'text-green-400' : 'text-amber-400'}`}>{botStatus}</span></p>
+                            <div className="flex gap-4">
+                                <button onClick={() => handleStatusChange('RUNNING')} className="btn-primary px-4 py-2 rounded-md disabled:opacity-50" disabled={loading || botStatus === 'RUNNING'}>Iniciar Bot</button>
+                                <button onClick={() => handleStatusChange('PAUSED')} className="bg-amber-500 hover:bg-amber-600 px-4 py-2 rounded-md disabled:opacity-50" disabled={loading || botStatus === 'PAUSED'}>Pausar Bot</button>
                             </div>
                         </div>
-                        <div className="flex items-center justify-center gap-2">
-                            <div className="w-10 h-24" dangerouslySetInnerHTML={{ __html: renderCandle(signal.previous_candle) }}></div>
-                            <i className="fa-solid fa-chevron-right text-gray-500"></i>
-                            <div className="w-10 h-24" dangerouslySetInnerHTML={{ __html: renderCandle(signal.candle) }}></div>
+                         <div className="glass-card p-6 rounded-xl">
+                            <h2 className="text-xl font-bold mb-4">Parâmetros das Estratégias</h2>
+                            <textarea value={params} onChange={(e) => setParams(e.target.value)} className="form-input w-full h-64 font-mono text-sm p-2 rounded-md"></textarea>
+                            <button onClick={handleParamsSave} className="mt-4 btn-primary w-full py-2 rounded-md disabled:opacity-50" disabled={loading}>Guardar Parâmetros</button>
                         </div>
                     </div>
-                    <ResultFooter />
                 </div>
-            </div>);
-        });
-        
-        function HomeView({ signals, liveAnalysis }) {
-            const latestActiveSignalId = useMemo(() => {
-                const activeSignals = signals.filter(s => !s.result);
-                return activeSignals.length > 0 ? activeSignals[0].signal_id : null;
-            }, [signals]);
-
-            return (<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                        <LiveAnalysisCard analysis={liveAnalysis} showTimer={!latestActiveSignalId} />
-                        {signals.map(signal => <SignalCard key={`${signal.signal_id}-${signal.result}`} signal={signal} isLatestActive={signal.signal_id === latestActiveSignalId} />)}
-                    </div>);
+            );
         }
 
-        function ReportsView({ signals }) {
-            const completedSignals = useMemo(() => signals.filter(s => s.result && s.result !== 'DRAW'), [signals]);
+        function UserManagement() {
+            const [users, setUsers] = useState([]);
+
+            const fetchUsers = useCallback(async () => {
+                const { data, error } = await supabaseClient
+                    .from('profiles')
+                    .select(`
+                        id,
+                        email,
+                        role,
+                        subscriptions ( status, expires_at )
+                    `);
+                if(data) setUsers(data);
+            }, []);
+
+            useEffect(() => { fetchUsers(); }, [fetchUsers]);
             
-            const reports = useMemo(() => {
-                if (completedSignals.length === 0) return { strategyReport: {}, pairReport: {} };
-                const strategyReport = {}; const pairReport = {};
-                completedSignals.forEach(signal => {
-                    if (!signal.strategy) return;
-                    const isWin = signal.result === 'WIN';
-                    if (!strategyReport[signal.strategy]) strategyReport[signal.strategy] = { wins: 0, losses: 0 };
-                    if (isWin) strategyReport[signal.strategy].wins++; else strategyReport[signal.strategy].losses++;
-                    if (!pairReport[signal.pair]) pairReport[signal.pair] = { wins: 0, losses: 0 };
-                    if (isWin) pairReport[signal.pair].wins++; else pairReport[signal.pair].losses++;
-                });
-                return { strategyReport, pairReport };
-            }, [completedSignals]);
+            const handleSubscriptionChange = async (userId, newStatus, newExpiry) => {
+                 const { data, error } = await supabaseClient
+                    .from('subscriptions')
+                    .select('user_id')
+                    .eq('user_id', userId)
+                    .single();
 
-            const ReportCard = ({ title, data }) => (<div className="glass-card rounded-xl p-6"><h3 className="text-xl font-bold mb-4">{title}</h3><div className="space-y-4">{Object.entries(data).length > 0 ? Object.entries(data).map(([key, value]) => {const total = value.wins + value.losses; const winRate = total > 0 ? ((value.wins / total) * 100).toFixed(1) : 0; return (<div key={key}><div className="flex justify-between items-center mb-1 text-sm"><span className="font-semibold">{key}</span><span className="font-mono text-gray-400">{value.wins}W / {value.losses}L</span></div><div className="w-full bg-gray-700 rounded-full h-2.5"><div className="bg-teal-500 h-2.5 rounded-full" style={{ width: `${winRate}%` }}></div></div><p className="text-xs text-right mt-1 text-teal-400">{winRate}% de Acerto</p></div>);}) : <p className="text-gray-500 text-center">Nenhum dado disponível.</p>}</div></div>);
+                if (data) { // Update
+                    await supabaseClient.from('subscriptions').update({ status: newStatus, expires_at: newExpiry }).eq('user_id', userId);
+                } else { // Insert
+                    await supabaseClient.from('subscriptions').insert({ user_id: userId, status: newStatus, expires_at: newExpiry });
+                }
+                fetchUsers();
+            };
 
-            if (completedSignals.length === 0) {
-                 return (
-                    <div className="glass-card rounded-xl p-8 text-center card-enter-animation">
-                        <i className="fa-solid fa-chart-simple text-4xl text-gray-500 mb-4"></i>
-                        <h3 className="text-xl font-bold">Sem Dados de Relatório</h3>
-                        <p className="text-gray-400 mt-2">Aguardando a finalização das primeiras operações para gerar as estatísticas.</p>
+            return (
+                <div>
+                    <h1 className="text-3xl font-bold text-white mb-6">Gestão de Alunos</h1>
+                    <div className="glass-card rounded-xl overflow-hidden">
+                        <table className="min-w-full">
+                            <thead className="bg-gray-800">
+                                <tr>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Email</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Estado</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Expira em</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Ações</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-700">
+                                {users.filter(u => u.role === 'user').map(user => {
+                                    const sub = user.subscriptions[0] || {};
+                                    const expiryDate = sub.expires_at ? new Date(sub.expires_at).toISOString().split('T')[0] : '';
+                                    return (
+                                        <tr key={user.id}>
+                                            <td className="px-6 py-4 whitespace-nowrap">{user.email}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap">{sub.status || 'inactive'}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap">{expiryDate}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
+                                                <button onClick={() => {
+                                                    const newDate = prompt("Nova data de expiração (YYYY-MM-DD):", expiryDate);
+                                                    if(newDate) handleSubscriptionChange(user.id, 'active', newDate);
+                                                }} className="text-teal-400 hover:text-teal-300">Editar</button>
+                                                <button onClick={() => handleSubscriptionChange(user.id, 'inactive', sub.expires_at)} className="text-red-400 hover:text-red-300">Desativar</button>
+                                            </td>
+                                        </tr>
+                                    )
+                                })}
+                            </tbody>
+                        </table>
                     </div>
-                );
-            }
-
-            return (<div className="grid grid-cols-1 md:grid-cols-2 gap-8 card-enter-animation"><ReportCard title="Performance por Estratégia" data={reports.strategyReport} /><ReportCard title="Performance por Par" data={reports.pairReport} /></div>);
-        }
-        
-        function RiskManagementView() {
-            const [capital, setCapital] = useState(1000); const [risk, setRisk] = useState(2); const [payout, setPayout] = useState(85); const [stopLoss, setStopLoss] = useState(5); const [stopWin, setStopWin] = useState(10);
-            const entryValue = (capital * risk) / 100; const stopLossValue = (capital * stopLoss) / 100; const stopWinValue = (capital * stopWin) / 100; const profitPerTrade = entryValue * (payout / 100);
-            const FormInput = ({label, ...props}) => (<div><label className="text-sm">{label}</label><input {...props} className="form-input mt-1 w-full p-2 rounded-md border border-gray-600 focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none" /></div>);
-            return (<div className="grid grid-cols-1 md:grid-cols-2 gap-8 card-enter-animation"><div className="glass-card rounded-xl p-6 space-y-4"><h3 className="text-xl font-bold">Configuração de Risco</h3><FormInput label="Capital Inicial (R$)" type="number" value={capital} onChange={e => setCapital(e.target.value)} /><FormInput label="Risco por Operação (%)" type="number" value={risk} onChange={e => setRisk(e.target.value)} /><FormInput label="Payout da Corretora (%)" type="number" value={payout} onChange={e => setPayout(e.target.value)} /><FormInput label="Stop Loss do Dia (%)" type="number" value={stopLoss} onChange={e => setStopLoss(e.target.value)} /><FormInput label="Stop Win do Dia (%)" type="number" value={stopWin} onChange={e => setStopWin(e.target.value)} /></div><div className="glass-card rounded-xl p-6 flex flex-col justify-center"><h3 className="text-xl font-bold mb-6">Seu Plano Diário</h3><div className="space-y-5"><div className="flex justify-between items-center text-lg"><span className="text-gray-400">Valor da Entrada:</span><span className="font-mono font-bold text-white">R$ {entryValue.toFixed(2)}</span></div><div className="flex justify-between items-center text-lg"><span className="text-gray-400">Lucro por Operação:</span><span className="font-mono font-bold text-green-400">+ R$ {profitPerTrade.toFixed(2)}</span></div><hr className="border-gray-700" /><div className="flex justify-between items-center text-xl"><span className="text-gray-400">Meta de Lucro (Stop Win):</span><span className="font-mono font-bold text-green-400">+ R$ {stopWinValue.toFixed(2)}</span></div><div className="flex justify-between items-center text-xl"><span className="text-gray-400">Limite de Perda (Stop Loss):</span><span className="font-mono font-bold text-red-400">- R$ {stopLossValue.toFixed(2)}</span></div></div></div></div>);
+                </div>
+            );
         }
 
         function App() {
-            const [activeTab, setActiveTab] = useState('home');
-            const [signals, setSignals] = useState([]);
-            const [scoreboard, setScoreboard] = useState({ wins: 0, losses: 0, gale_wins: 0 });
-            const [liveAnalysis, setLiveAnalysis] = useState({});
-            const [isConnected, setIsConnected] = useState(false);
-            const socketRef = useRef(null);
-
-            const handleMessage = useCallback((message) => {
-                if (!message || !message.type) return;
-                console.log("Mensagem recebida:", message);
-
-                switch (message.type) {
-                    case 'init':
-                        const initialData = message.data || {};
-                        setScoreboard(initialData.placar || { wins: 0, losses: 0, gale_wins: 0 });
-                        setSignals((initialData.signals || []).sort((a,b) => (b.entry_time || "").localeCompare(a.entry_time || "")));
-                        setLiveAnalysis({ pair: null, strategy: null, candle: null });
-                        break;
-                    case 'live_analysis':
-                        setLiveAnalysis(message.data);
-                        break;
-                    case 'signal':
-                        setSignals(prev => [message, ...prev]);
-                        setLiveAnalysis({ pair: null, strategy: null, candle: null });
-                        break;
-                    case 'result':
-                        if (message.placar) setScoreboard(message.placar);
-                        setSignals(prev => prev.map(s => s.signal_id === message.signal_id ? { ...s, result: message.result } : s));
-                        break;
-                    case 'gale':
-                         setSignals(prev => prev.map(s => s.signal_id === message.signal_id ? { ...s, gale_level: message.gale_level } : s));
-                        break;
-                }
-            }, []);
-
-            const connect = useCallback(() => {
-                if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) return;
-                
-                console.log("Tentando conectar ao WebSocket em:", WEBSOCKET_URL);
-                socketRef.current = new WebSocket(WEBSOCKET_URL);
-                socketRef.current.onmessage = (event) => { try { handleMessage(JSON.parse(event.data)); } catch (e) { console.error('Failed to parse message:', event.data, e)} };
-                socketRef.current.onopen = () => {
-                    console.log("Conexão WebSocket estabelecida com sucesso!");
-                    setIsConnected(true);
-                };
-                socketRef.current.onclose = (event) => {
-                     console.log(`Conexão WebSocket fechada: Código ${event.code}. Tentando reconectar...`);
-                     setIsConnected(false);
-                     setTimeout(connect, 5000);
-                };
-                 socketRef.current.onerror = (err) => {
-                    console.error("Erro no WebSocket:", err);
-                    setIsConnected(false);
-                 };
-            }, [handleMessage]);
+            const [session, setSession] = useState(null);
 
             useEffect(() => {
-                connect();
-                return () => { if (socketRef.current) socketRef.current.close(); };
-            }, [connect]);
+                supabaseClient.auth.getSession().then(({ data: { session } }) => {
+                    setSession(session);
+                });
 
-            const renderView = () => {
-                switch(activeTab) {
-                    case 'reports': return <ReportsView signals={signals} />;
-                    case 'risk': return <RiskManagementView />;
-                    case 'home':
-                    default: 
-                        return <HomeView signals={signals} liveAnalysis={liveAnalysis} />;
-                }
-            };
-            
-            return (
-              <div className="h-screen w-screen flex flex-col p-4 sm:p-6 lg:p-8 gap-6">
-                  <div className="flex-shrink-0">
-                    <Header isConnected={isConnected} />
-                    <Scoreboard scoreboard={scoreboard} />
-                  </div>
-                  
-                  <main className="flex-grow overflow-y-auto pb-20 lg:pb-0 no-scrollbar">
-                      {renderView()}
-                  </main>
-                  
-                  <div className="fixed bottom-0 left-0 right-0 lg:static lg:order-first z-50">
-                      <TabBar activeTab={activeTab} setActiveTab={setActiveTab} />
-                  </div>
-              </div>
-            );
+                const { data: { subscription } } = supabaseClient.auth.onAuthStateChange((_event, session) => {
+                    setSession(session);
+                });
+
+                return () => subscription.unsubscribe();
+            }, []);
+
+            if (!session) {
+                return <LoginPage onLogin={(user) => setSession({ user })} />;
+            } else {
+                return <Dashboard />;
+            }
         }
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<ErrorBoundary><App /></ErrorBoundary>);
-
     </script>
 </body>
 </html>
