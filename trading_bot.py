@@ -16,12 +16,7 @@ import queue
 
 from colorama import init, Fore
 
-try:
-    import numpy as np
-    import pandas as pd
-except ImportError:
-    print("Warning: 'numpy' and 'pandas' not found. Please install them using: pip install numpy pandas")
-    sys.exit(1)
+# Removed numpy and pandas imports to ensure compatibility
 
 try:
     from exnovaapi.stable_api import Exnova
@@ -129,7 +124,7 @@ def exibir_banner():
       ██║   ██╔══██╗██║██╔══██║██║       ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║    ██║    ██║
       ██║   ██║  ██║██║██║  ██║███████╗    ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝    ██║
       ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝     ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝     ╚═╝ '''+y+'''
-              azkzero@gmail.com - v64 (Otimização e Qualidade de Código)
+              azkzero@gmail.com - v64.1 (Dependências Removidas)
     ''')
     print(y + "*"*88)
     print(c + "="*88)
@@ -227,30 +222,45 @@ def get_candle_props(vela):
     props['pavio_inferior'] = min(props['open'], props['close']) - props['low']
     return props
 
-# --- Indicator Calculations with NumPy/Pandas ---
+# --- Indicator Calculations (Pure Python) ---
 def calculate_ema(closes, period):
     if len(closes) < period: return None
-    return pd.Series(closes).ewm(span=period, adjust=False).mean().iloc[-1]
+    ema = []
+    sma = sum(closes[:period]) / period
+    ema.append(sma)
+    multiplier = 2 / (period + 1)
+    for price in closes[period:]:
+        ema_value = (price - ema[-1]) * multiplier + ema[-1]
+        ema.append(ema_value)
+    return ema[-1]
 
 def calculate_rsi(closes, period=14):
     if len(closes) < period + 1: return None
-    close_series = pd.Series(closes)
-    delta = close_series.diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-    rs = gain / loss
-    rsi = 100 - (100 / (1 + rs))
-    return rsi.iloc[-1]
+    
+    deltas = [closes[i] - closes[i-1] for i in range(1, len(closes))]
+    gains = [d if d > 0 else 0 for d in deltas]
+    losses = [-d if d < 0 else 0 for d in deltas]
+
+    if len(gains) < period: return None
+
+    avg_gain = sum(gains[:period]) / period
+    avg_loss = sum(losses[:period]) / period
+
+    for i in range(period, len(gains)):
+        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+
+    if avg_loss == 0: return 100
+    
+    rs = avg_gain / avg_loss
+    return 100 - (100 / (1 + rs))
 
 # --- MASTER TREND FILTERS ---
 def calculate_ma_slope(closes, period, lookback=3):
     if len(closes) < period + lookback: return 0
-    ma_series = pd.Series(closes).rolling(window=period).mean()
-    if len(ma_series.dropna()) < lookback: return 0
-    
-    ma_values = ma_series.dropna().iloc[-lookback:]
-    if ma_values.iloc[-1] > ma_values.iloc[0]: return 1
-    if ma_values.iloc[-1] < ma_values.iloc[0]: return -1
+    ma_values = [sum(closes[-(period+i):-i if i > 0 else len(closes)]) / period for i in range(lookback, -1, -1)]
+    if ma_values[-1] > ma_values[0]: return 1
+    if ma_values[-1] < ma_values[0]: return -1
     return 0
 
 def check_trend_with_emas(closes, p):
@@ -309,7 +319,8 @@ def strategy_sr_breakout(velas, p, state, ativo=None):
     props_breakout = get_candle_props(velas[-1])
     if not props_breakout or props_breakout['body_ratio'] < p.get('SR_BodyRatio', 0.70): return score, direcao
 
-    avg_body_size = np.mean([prop.get('corpo', 0) for prop in (get_candle_props(v) for v in zona_analise) if prop])
+    corpos_zona = [prop.get('corpo', 0) for prop in (get_candle_props(v) for v in zona_analise) if prop]
+    avg_body_size = sum(corpos_zona) / len(corpos_zona) if corpos_zona else 0
     if props_breakout['corpo'] <= avg_body_size: return score, direcao
 
     max_wick = p.get('SR_MaxOppositeWickRatio', 0.30)
@@ -387,16 +398,14 @@ def strategy_candle_flow(velas, p, state, ativo=None):
 
     closes = [v['close'] for v in velas]
     trend_ema = check_trend_with_emas(closes, p)
-    rsi_value = calculate_rsi(closes, p.get('Flow_RSIPeriod', 14))
-    if rsi_value is None: return 0, None
+    rsi_curr = calculate_rsi(closes, p.get('Flow_RSIPeriod', 14))
+    if rsi_curr is None: return 0, None
 
-    # Get previous RSI to check direction
-    closes_prev = [v['close'] for v in velas[:-1]]
-    rsi_prev = calculate_rsi(closes_prev, p.get('Flow_RSIPeriod', 14))
+    rsi_prev = calculate_rsi(closes[:-1], p.get('Flow_RSIPeriod', 14))
     if rsi_prev is None: return 0, None
 
     if trend_ema == direcao: score += 1
-    if (direcao == 'BUY' and rsi_value > 50 and rsi_value > rsi_prev) or (direcao == 'SELL' and rsi_value < 50 and rsi_value < rsi_prev): score += 1
+    if (direcao == 'BUY' and rsi_curr > 50 and rsi_curr > rsi_prev) or (direcao == 'SELL' and rsi_curr < 50 and rsi_curr < rsi_prev): score += 1
     if state and ativo and state.consecutive_losses.get(ativo, 0) == 0: score += 1
 
     return score, direcao
