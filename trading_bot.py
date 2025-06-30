@@ -519,7 +519,7 @@ def main_bot_logic(state):
         log_info(f"Olá! Iniciando bot em modo servidor.")
     
     PARAMS = { 
-        'MAPeriod': 14, 'MaxLevels': 10, 'Proximity': 0.0005, 
+        'MAPeriod': 21, 'MaxLevels': 10, 'Proximity': 0.0005, 
         'VolatilityCandles': 3, 'MaxWickRatio': 0.75, 'MinVolatileCandles': 3,
         'ConfirmationMaxOppositeWickRatio': 0.45,
         'SRBreakoutBodyMinRatio': 0.6,
