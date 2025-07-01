@@ -39,6 +39,8 @@
             --accent-primary: #238636;
             --accent-primary-hover: #2ea043;
             --accent-red: #da3633;
+            --accent-loss: #f87171;
+            --accent-win: #4ade80;
         }
         html, body {
             overscroll-behavior-y: contain;
@@ -112,7 +114,7 @@
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlvZHVhaHdrbmZza3R1anRoZnljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEzMDc0NDcsImV4cCI6MjA2Njg4MzQ0N30.96f8wZO6SvABKFMWjIiw1pSugAB4Isldj7yxLcLJRSE';
         const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-        // --- COMPONENTS (O código React permanece o mesmo) ---
+        // --- COMPONENTS ---
 
         function LoginPage({ onLogin }) {
             const [email, setEmail] = useState('');
@@ -187,7 +189,7 @@
                 const {error} = await supabaseClient.from('bot_config').update({ status: newStatus }).eq('id', 1);
                 if (error) {
                     alert('Erro ao atualizar status. Verifique as permissões (RLS) da tabela `bot_config`.');
-                    fetchConfig(); // Re-fetch to get the real state
+                    fetchConfig(); 
                 } else {
                     setBotStatus(newStatus);
                 }
@@ -296,15 +298,40 @@
                 };
                 fetchInitialSignals();
 
-                const channel = supabaseClient.channel('trade_signals_feed')
+                // Canal para ouvir INSERT e UPDATE na tabela de sinais
+                const channel = supabaseClient.channel('trade_signals_realtime')
                     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'trade_signals' }, payload => {
                         setError(null);
                         setSignals(currentSignals => [payload.new, ...currentSignals]);
+                    })
+                    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'trade_signals' }, payload => {
+                        // Atualiza o sinal na lista com o novo resultado
+                        setSignals(currentSignals =>
+                            currentSignals.map(signal =>
+                                signal.id === payload.new.id ? payload.new : signal
+                            )
+                        );
                     })
                     .subscribe();
                 
                 return () => supabaseClient.removeChannel(channel);
             }, []);
+
+            const ResultBadge = ({ result }) => {
+                if (!result) {
+                    return <span className="text-gray-500 text-xs animate-pulse">Aguardando...</span>;
+                }
+                const isWin = result.toUpperCase() === 'WIN';
+                const colorClass = isWin ? 'bg-green-500/20 text-accent-win' : 'bg-red-500/20 text-accent-loss';
+                const icon = isWin ? 'fa-check' : 'fa-times';
+
+                return (
+                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-sm font-bold ${colorClass}`}>
+                        <i className={`fas ${icon} mr-1.5`}></i>
+                        {result}
+                    </span>
+                );
+            };
 
             return (
                  <div>
@@ -318,17 +345,18 @@
                                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Par</th>
                                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Direção</th>
                                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Estratégia</th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Resultado</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-700">
                                     {error && (
-                                        <tr><td colSpan="4" className="text-center py-10 text-amber-400">{error}</td></tr>
+                                        <tr><td colSpan="5" className="text-center py-10 text-amber-400">{error}</td></tr>
                                     )}
                                     {!error && signals.length === 0 && (
-                                        <tr><td colSpan="4" className="text-center py-10 text-gray-400">Aguardando sinais do bot...</td></tr>
+                                        <tr><td colSpan="5" className="text-center py-10 text-gray-400">Aguardando sinais do bot...</td></tr>
                                     )}
                                     {!error && signals.map(signal => (
-                                        <tr key={signal.id}>
+                                        <tr key={signal.id} className="hover:bg-gray-800/40">
                                             <td className="px-6 py-4 whitespace-nowrap text-sm font-mono">{new Date(signal.created_at).toLocaleTimeString('pt-BR')}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm font-bold">{signal.pair}</td>
                                             <td className={`px-6 py-4 whitespace-nowrap text-sm font-bold ${signal.direction === 'BUY' ? 'text-green-400' : 'text-red-400'}`}>
@@ -336,6 +364,9 @@
                                                 {signal.direction}
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-400">{signal.strategy}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm">
+                                                <ResultBadge result={signal.result} />
+                                            </td>
                                         </tr>
                                     ))}
                                 </tbody>
