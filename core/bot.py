@@ -73,14 +73,23 @@ class TradingBot:
         for task in pending:
             task.cancel()
 
-    async def _wait_for_next_minute(self):
-        """Calcula e espera o tempo necessário para sincronizar com o início do próximo minuto."""
+    async def _wait_for_entry_time(self):
+        """
+        Calcula e espera o tempo necessário para sincronizar a análise para
+        os segundos finais da vela M1 atual, permitindo uma entrada precisa.
+        """
         now = datetime.now()
-        seconds_until_next_minute = 60 - now.second
-        # Adiciona uma pequena margem de 2 segundos para garantir que a API da corretora
-        # já processou e disponibilizou a vela M1 que acabou de fechar.
-        wait_time = seconds_until_next_minute + 2
-        await self.logger('INFO', f"A aguardar {wait_time}s para sincronizar com a próxima vela M1...")
+        second = now.second
+        
+        # O alvo é executar a análise por volta do segundo 58, para entrar no segundo 00.
+        target_second = 58
+
+        if second < target_second:
+            wait_time = target_second - second
+        else:
+            # Se já passamos do segundo 58, esperamos até o próximo minuto.
+            wait_time = (60 - second) + target_second
+        
         await asyncio.sleep(wait_time)
 
     async def _process_asset_task(self, full_asset_name: str):
@@ -90,10 +99,10 @@ class TradingBot:
 
         while True:
             try:
-                # FIX: Sincroniza a execução para o início da próxima vela.
-                await self._wait_for_next_minute()
+                # FIX: Sincroniza a execução para o final da vela atual.
+                await self._wait_for_entry_time()
                 
-                await self.logger('INFO', f"[{full_asset_name}] Nova vela M1. A iniciar análise...")
+                await self.logger('INFO', f"[{full_asset_name}] Fim da vela M1. A iniciar análise pré-fecho...")
                 
                 candles = await self.exnova.get_historical_candles(clean_asset_name, 60, 100)
                 if not candles:
@@ -112,9 +121,10 @@ class TradingBot:
                             strategy=strategy.name,
                             volatility_score=volatility
                         )
+                        # A execução é imediata, para a ordem entrar na viragem do minuto.
                         asyncio.create_task(self._execute_trade(signal, full_asset_name))
-                        # Após encontrar um sinal, espera o próximo ciclo para não entrar duas vezes na mesma vela.
-                        break 
+                        break # Encontrou um sinal, sai do loop de estratégias.
+            
             except asyncio.CancelledError:
                 break
             except Exception as e:
