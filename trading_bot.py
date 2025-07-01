@@ -37,7 +37,6 @@ except ImportError:
                 close_price = open_price + 0.0005 * (-1 if i % 3 == 0 else 1)
                 high_price = max(open_price, close_price) + 0.0003
                 low_price = min(open_price, close_price) - 0.0003
-                # A API real usa 'max' e 'min'
                 candles.append({'open': open_price, 'close': close_price, 'max': high_price, 'min': low_price})
             return candles
         def buy(self, amount, active, action, duration):
@@ -51,7 +50,7 @@ except ImportError:
                 result = trade['result']
                 del self._trades[order_id]
                 return result, 10.0
-            return None, 0 # Trade still open
+            return None, 0
 
 # --- Initialization ---
 from colorama import init, Fore
@@ -68,7 +67,7 @@ def log_error(msg, pair="Sistema"): log(r, f"{pair}: {msg}" if pair != "Sistema"
 # --- Banner ---
 def exibir_banner():
     print(c + "\n" + "="*88)
-    print(y + "MAROMBIEW BOT - v69 (Resultados em Tempo Real)")
+    print(y + "MAROMBIEW BOT - v70 (Sintaxe Corrigida)")
     print(c + "="*88 + "\n")
 
 
@@ -80,7 +79,6 @@ def sma_slope(closes, period):
     return sma2 > sma1
 
 def detect_fractals(velas, n_levels):
-    # FIX: Use 'max' and 'min' which are the correct keys from the Exnova API
     try:
         highs = [v['max'] for v in velas]
         lows = [v['min'] for v in velas]
@@ -102,7 +100,6 @@ def strategy_mql_pullback(velas, p):
     last = velas[-1]
     direcao = None
     
-    # FIX: Use 'min' and 'max' for price checks
     try:
         if nano_up and sup_levels and last['close'] > last['open']:
             sup_level = sup_levels[0]; target_price = sup_level + p.get('Proximity', 2) * p.get('Point', 0.00001)
@@ -116,9 +113,7 @@ def strategy_mql_pullback(velas, p):
 
     return (1, direcao) if direcao else (0, None)
 
-# Other strategies (flow, patterns) are the same and omitted for brevity
-ALL_STRATEGIES = { 'mql_pullback': 'Pullback MQL', 'flow': 'Fluxo', 'patterns': 'Padrões de Velas' }
-STRATEGY_FUNCTIONS = { 'mql_pullback': strategy_mql_pullback } # Add other strategies here
+ALL_STRATEGIES = { 'mql_pullback': 'Pullback MQL' }
 
 class BotState:
     def __init__(self):
@@ -158,12 +153,12 @@ def run_trading_cycle(API, supabase_client, state, params, config):
     max_trades = params.get('MAX_SIMULTANEOUS_TRADES', 1)
 
     if len(state.active_trades) >= max_trades:
-        log_warning(f"Limite de {max_trades} operações simultâneas atingido. Aguardando...")
+        if int(time.time()) % 20 == 0:
+            log_warning(f"Limite de {max_trades} operações simultâneas atingido. Aguardando...")
         return
 
     try:
         open_assets = API.get_all_open_time()
-        
         available_assets = {**open_assets.get('binary', {}), **open_assets.get('turbo', {})}
 
         for asset, details in available_assets.items():
@@ -183,12 +178,14 @@ def run_trading_cycle(API, supabase_client, state, params, config):
                     log_success(f"Sinal encontrado! Ativo: {clean_asset}, Direção: {direction}, Estratégia: {name}")
 
                     try:
+                        # FIX: Remove .select('id'). The insert response already contains the data.
                         response = supabase_client.table('trade_signals').insert({
                             'pair': clean_asset,
                             'direction': direction,
                             'strategy': name
-                        }).select('id').execute()
+                        }).execute()
                         
+                        # The data from the new row is in response.data
                         if response.data:
                             signal_id = response.data[0]['id']
                             log_info(f"Sinal registrado no painel com ID: {signal_id}", clean_asset)
@@ -197,6 +194,7 @@ def run_trading_cycle(API, supabase_client, state, params, config):
                             continue
                     except Exception as e:
                         log_error(f"Exceção ao registrar sinal: {e}", clean_asset)
+                        traceback.print_exc()
                         continue
 
                     status, order_id = API.buy(config['valor_entrada'], clean_asset, direction, config['expiracao'])
@@ -265,13 +263,14 @@ def main_bot_logic(state):
             remote_params = config_data.get('params', {})
 
             if bot_status == 'RUNNING':
-                log_info("Bot em modo RUNNING. Iniciando ciclo de análise...")
+                # No need to log this every time, it clutters the console
+                # log_info("Bot em modo RUNNING. Iniciando ciclo de análise...")
                 run_trading_cycle(API, supabase_client, state, remote_params, config)
             else:
                 if int(time.time()) % 20 == 0:
                     log_info("Bot em modo PAUSADO. A aguardar comando 'RUNNING' do painel.")
             
-            time.sleep(10)
+            time.sleep(2) # Sleep for a shorter time to be more responsive
 
         except APIError as e:
             if hasattr(e, 'code') and e.code == 'PGRST116':
