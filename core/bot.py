@@ -31,7 +31,6 @@ class TradingBot:
         # await self._learning_mode()
 
         print("Iniciando loop de negociação e verificação de resultados...")
-        # Cria e executa as tarefas principais concorrentemente
         trading_tasks = [self._process_asset_task(asset) for asset in self.active_assets]
         result_checker_task = asyncio.create_task(self._result_checker_loop())
         
@@ -47,14 +46,16 @@ class TradingBot:
                     await asyncio.sleep(5)
                     continue
 
-                # Análise de Volatilidade
                 volatility = calculate_volatility(candles, lookback=10)
+                
+                # FIX: Adiciona um log de "pulsação" para cada ciclo de análise
+                print(f"[{time.strftime('%H:%M:%S')}] {asset}: Analisando {len(candles)} velas. Volatilidade: {volatility:.2f}")
+
                 if volatility > 0.6: # Threshold de exemplo
-                    print(f"Ativo {asset} muito volátil ({volatility:.2f}), pulando ciclo.")
+                    # print(f"Ativo {asset} muito volátil ({volatility:.2f}), pulando ciclo.")
                     await asyncio.sleep(60)
                     continue
                 
-                # Avalia todas as estratégias
                 for strategy in STRATEGIES:
                     direction = strategy.analyze(candles)
                     if direction:
@@ -65,16 +66,14 @@ class TradingBot:
                             strategy=strategy.name,
                             volatility_score=volatility
                         )
-                        # Executa a operação sem bloquear a análise
                         asyncio.create_task(self._execute_trade(signal))
-                        # Pausa a análise para este ativo para não gerar sinais repetidos
                         await asyncio.sleep(60) 
-                        break # Sai do loop de estratégias e espera a próxima vela
+                        break
 
-                await asyncio.sleep(5) # Espera antes de buscar novas velas
+                await asyncio.sleep(5)
             except Exception as e:
                 print(f"Erro ao processar o ativo {asset}: {e}")
-                await asyncio.sleep(30) # Espera mais tempo em caso de erro
+                await asyncio.sleep(30)
 
     async def _execute_trade(self, signal: TradeSignal):
         """Executa uma única operação de trade."""
@@ -84,7 +83,7 @@ class TradingBot:
             return
 
         print(f"Executando ordem {signal.direction.upper()} para {signal.asset}...")
-        order_id = await self.exnova.execute_trade(1.0, signal.asset, signal.direction, 1) # Valor e expiração de exemplo
+        order_id = await self.exnova.execute_trade(1.0, signal.asset, signal.direction, 1)
         
         if order_id:
             print(f"Ordem {order_id} para o sinal {signal_id} enviada. Aguardando resultado.")
