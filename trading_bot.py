@@ -40,6 +40,9 @@ except ImportError:
                 candles.append({'open': open_price, 'close': close_price, 'max': high_price, 'min': low_price})
             return candles
         def buy(self, amount, active, action, duration):
+            # Mock API expects lowercase
+            if action not in ['buy', 'sell']:
+                return False, f"unknown value: '{action}'"
             order_id = "mock_order_id_" + str(uuid.uuid4())
             self._trades[order_id] = {'time': time.time(), 'duration': duration, 'result': 'win' if time.time() % 2 == 0 else 'loss'}
             return True, order_id
@@ -67,7 +70,7 @@ def log_error(msg, pair="Sistema"): log(r, f"{pair}: {msg}" if pair != "Sistema"
 # --- Banner ---
 def exibir_banner():
     print(c + "\n" + "="*88)
-    print(y + "MAROMBIEW BOT - v71 (NameError Corrigido)")
+    print(y + "MAROMBIEW BOT - v72 (API Case-sensitivity Corrigido)")
     print(c + "="*88 + "\n")
 
 
@@ -137,7 +140,6 @@ def strategy_patterns(velas, p):
         if (penultimate['close'] > penultimate['open'] and last['close'] < last['open'] and last['open'] < penultimate['close'] and last['close'] > penultimate['open']): direcao = 'SELL'
     return (1, direcao) if direcao else (0, None)
 
-# FIX: Restore the STRATEGY_FUNCTIONS dictionary
 ALL_STRATEGIES = { 'mql_pullback': 'Pullback MQL', 'flow': 'Fluxo', 'patterns': 'Padrões de Velas' }
 STRATEGY_FUNCTIONS = { 
     'mql_pullback': strategy_mql_pullback,
@@ -225,7 +227,10 @@ def run_trading_cycle(API, supabase_client, state, params, config):
                         traceback.print_exc()
                         continue
 
-                    status, order_id = API.buy(config['valor_entrada'], clean_asset, direction, config['expiracao'])
+                    # FIX: Convert direction to lowercase for the API call.
+                    # Example: 'SELL' becomes 'sell'.
+                    api_direction = direction.lower()
+                    status, order_id = API.buy(config['valor_entrada'], clean_asset, api_direction, config['expiracao'])
 
                     if status:
                         log_success(f"Operação realizada com sucesso! ID da Ordem: {order_id}", clean_asset)
