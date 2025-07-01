@@ -13,3 +13,6 @@ websocket-client
 # Dependências de teste
 pytest
 pytest-asyncio
+
+# ... (outras dependências)
+pandas
