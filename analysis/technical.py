@@ -2,7 +2,6 @@
 from typing import List, Tuple, Optional
 from core.data_models import Candle
 
-# --- Funções de Cálculo (SMA, Volatilidade) - Inalteradas ---
 def calculate_sma(closes: List[float], period: int) -> float:
     if len(closes) < period: return 0.0
     return sum(closes[-period:]) / period
@@ -25,7 +24,6 @@ def calculate_volatility(candles: List[Candle], lookback: int) -> float:
     if total_range == 0: return 0.0
     return (total_range - total_body) / total_range
 
-# --- Funções de Suporte e Resistência - Inalteradas ---
 def detect_sr_levels(candles: List[Candle], n_levels: int = 5) -> Tuple[List[float], List[float]]:
     if len(candles) < 5: return [], []
     highs = [c.max for c in candles]
@@ -41,46 +39,29 @@ def detect_sr_levels(candles: List[Candle], n_levels: int = 5) -> Tuple[List[flo
 def is_near_level(price: float, levels: List[float], candles: List[Candle]) -> bool:
     if not levels or not candles: return False
     avg_candle_size = sum(c.max - c.min for c in candles[-10:]) / 10
-    proximity = avg_candle_size * 0.25
+    proximity = avg_candle_size * 0.30 # Aumentamos um pouco a proximidade
     for level in levels:
         if abs(price - level) <= proximity: return True
     return False
 
-# --- NOVAS FUNÇÕES DE ANÁLISE DE PADRÕES ---
-
-def is_strong_candle(candle: Candle) -> bool:
-    """Verifica se uma vela é 'de força' (corpo grande, pavios pequenos)."""
-    body_size = abs(candle.close - candle.open)
-    total_range = candle.max - candle.min
-    # Considera-se forte se o corpo for pelo menos 70% do tamanho total da vela.
-    return body_size > 0 and body_size / total_range >= 0.7
-
-def is_pinbar(candle: Candle) -> Optional[str]:
-    """Verifica se uma vela é um Pin Bar (Martelo ou Estrela Cadente)."""
-    body_size = abs(candle.close - candle.open)
-    if body_size == 0: return None
-    
-    lower_wick = (candle.open if candle.close > candle.open else candle.close) - candle.min
-    upper_wick = candle.max - (candle.close if candle.close > candle.open else candle.open)
-
-    # Martelo (rejeição de baixa)
-    if lower_wick > body_size * 2 and upper_wick < body_size * 0.5:
-        return "HAMMER"
-    # Estrela Cadente (rejeição de alta)
-    if upper_wick > body_size * 2 and lower_wick < body_size * 0.5:
-        return "SHOOTING_STAR"
-    return None
-
-def is_engulfing(last: Candle, prev: Candle) -> Optional[str]:
-    """Verifica se a última vela engolfa a anterior."""
+def get_candle_pattern(last: Candle, prev: Candle) -> Optional[str]:
+    """Detecta padrões de candlestick de reversão e retorna o seu tipo."""
+    # Engolfo
     if (prev.close < prev.open and last.close > last.open and
             last.close > prev.open and last.open < prev.close):
-        return "BULLISH"
+        return "BULLISH_ENGULFING"
     if (prev.close > prev.open and last.close < last.open and
             last.close < prev.open and last.open > prev.close):
-        return "BEARISH"
-    return None
+        return "BEARISH_ENGULFING"
 
-def is_inside_bar(last: Candle, prev: Candle) -> bool:
-    """Verifica se a última vela é um Inside Bar."""
-    return prev.max > last.max and prev.min < last.min
+    # Pin Bar (Martelo / Estrela Cadente)
+    body_size = abs(last.close - last.open)
+    if body_size > 0:
+        lower_wick = (last.open if last.close > last.open else last.close) - last.min
+        upper_wick = last.max - (last.close if last.close > last.open else last.open)
+        if lower_wick > body_size * 2 and upper_wick < body_size * 0.7:
+            return "HAMMER"
+        if upper_wick > body_size * 2 and lower_wick < body_size * 0.7:
+            return "SHOOTING_STAR"
+            
+    return None
