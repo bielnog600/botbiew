@@ -39,10 +39,7 @@ class AsyncExnovaService:
         print(f"Balança alterada para: {balance_type}")
 
     async def get_current_balance(self) -> Optional[float]:
-        """Busca o saldo atual da conta selecionada."""
         loop = await self._get_loop()
-        # A maioria das APIs tem uma função get_balance() ou similar.
-        # Se o nome for diferente, ajuste aqui.
         try:
             balance = await loop.run_in_executor(None, self.api.get_balance)
             return float(balance) if balance else None
@@ -51,13 +48,17 @@ class AsyncExnovaService:
             return None
 
     async def get_open_assets(self) -> List[str]:
+        """
+        Retorna uma lista dos nomes COMPLETOS dos ativos abertos (ex: 'EURUSD-op').
+        """
         loop = await self._get_loop()
         open_times = await loop.run_in_executor(None, self.api.get_all_open_time)
         assets = []
         for asset_type in ['binary', 'turbo']:
             if open_times and asset_type in open_times:
+                # FIX: Retorna o nome completo do ativo, sem o limpar.
                 assets.extend([asset for asset, details in open_times[asset_type].items() if details.get('open')])
-        return list(set([asset.split('-')[0] for asset in assets]))
+        return list(set(assets))
 
     async def get_historical_candles(self, asset: str, interval: int, count: int) -> List[Candle]:
         loop = await self._get_loop()
@@ -69,6 +70,7 @@ class AsyncExnovaService:
 
     async def execute_trade(self, amount: float, asset: str, direction: str, expiration: int) -> Optional[str]:
         loop = await self._get_loop()
+        # A função de compra precisa do nome completo do ativo.
         status, order_id = await loop.run_in_executor(None, self.api.buy, amount, asset, direction, expiration)
         if status:
             return str(order_id)
