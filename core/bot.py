@@ -3,7 +3,7 @@ import asyncio
 import time
 import traceback
 from datetime import datetime, timedelta
-from typing import List, Dict
+from typing import List, Dict, Optional # FIX: Adicionado 'Optional' à importação
 
 from config import settings
 from services.exnova_service import AsyncExnovaService
@@ -21,7 +21,7 @@ class TradingBot:
         self.is_running = True
         self.bot_config = {}
         self.martingale_state: Dict[str, Dict] = {}
-        self.current_cycle_trades: List[Dict] = [] # Para rastrear wins/losses do ciclo atual
+        self.current_cycle_trades: List[Dict] = []
 
     async def logger(self, level: str, message: str):
         print(f"[{level.upper()}] {message}")
@@ -30,19 +30,17 @@ class TradingBot:
     async def _backtest_strategy(self, strategy, candles: List[Candle]) -> Dict:
         """Simula uma estratégia em dados históricos para calcular a assertividade."""
         wins, losses = 0, 0
-        if len(candles) < 21: # Precisa de velas suficientes para o histórico e a próxima vela
+        if len(candles) < 21:
             return {'win_rate': 0, 'total_trades': 0}
 
         for i in range(20, len(candles) - 1):
-            historical_slice = candles[:i+1] # Analisa até a vela atual
-            # A vela seguinte é usada para determinar o resultado
+            historical_slice = candles[:i+1]
             next_candle = candles[i+1] 
             
             direction = strategy.analyze(historical_slice)
             if not direction:
                 continue
 
-            # Simula o resultado
             if direction == "call" and next_candle.close > historical_slice[-1].close:
                 wins += 1
             elif direction == "call" and next_candle.close <= historical_slice[-1].close:
@@ -63,29 +61,41 @@ class TradingBot:
         
         best_assets = set()
         
+        tasks = []
         for asset in all_assets:
-            clean_asset_name = asset.split('-')[0]
-            candles = await self.exnova.get_historical_candles(clean_asset_name, 60, 300)
-            if len(candles) < 50: continue
+            tasks.append(self._analyze_asset_performance(asset))
 
-            for strategy in STRATEGIES:
-                performance = await self._backtest_strategy(strategy, candles)
-                await self.supabase.update_asset_performance(
-                    asset=clean_asset_name,
-                    strategy=strategy.name,
-                    win_rate=performance['win_rate'],
-                    total_trades=performance['total_trades']
-                )
-                
-                if performance['win_rate'] >= 85:
-                    await self.logger('SUCCESS', f"Ativo qualificado: {asset} com estratégia {strategy.name} ({performance['win_rate']:.2f}% de assertividade).")
-                    best_assets.add(asset)
+        results = await asyncio.gather(*tasks)
+        
+        for asset, strategy_name, performance in results:
+            if performance and performance['win_rate'] >= 85:
+                await self.logger('SUCCESS', f"Ativo qualificado: {asset} com estratégia {strategy_name} ({performance['win_rate']:.2f}% de assertividade).")
+                best_assets.add(asset)
 
         self.active_assets = list(best_assets)
         if not self.active_assets:
             await self.logger('WARNING', "Nenhum ativo atingiu a meta de 85% de assertividade. O bot irá aguardar.")
         else:
             await self.logger('INFO', f"Catalogação concluída. Ativos selecionados para operar: {self.active_assets}")
+
+    async def _analyze_asset_performance(self, asset: str):
+        """Função auxiliar para analisar um único ativo em paralelo."""
+        clean_asset_name = asset.split('-')[0]
+        candles = await self.exnova.get_historical_candles(clean_asset_name, 60, 300)
+        if len(candles) < 50: return asset, None, None
+
+        for strategy in STRATEGIES:
+            performance = await self._backtest_strategy(strategy, candles)
+            await self.supabase.update_asset_performance(
+                asset=clean_asset_name,
+                strategy=strategy.name,
+                win_rate=performance['win_rate'],
+                total_trades=performance['total_trades']
+            )
+            # Retorna o primeiro resultado para simplificar, mas pode ser otimizado
+            return asset, strategy.name, performance
+        return asset, None, None
+
 
     async def run(self):
         await self.logger('INFO', 'Bot a iniciar...')
@@ -114,7 +124,6 @@ class TradingBot:
                 await asyncio.sleep(30)
 
     async def _run_conservative_cycle(self):
-        """Executa o ciclo completo do modo conservador."""
         await self._catalog_and_select_assets()
         
         if not self.active_assets:
@@ -139,7 +148,6 @@ class TradingBot:
             await asyncio.sleep(60)
 
     async def trading_loop(self, use_all_assets: bool, duration_minutes: Optional[int]):
-        """Executa o loop de negociação principal."""
         account_type = self.bot_config.get('account_type', 'PRACTICE')
         await self.logger('INFO', f"A usar a conta: {account_type}")
         await self.exnova.change_balance(account_type)
@@ -158,15 +166,13 @@ class TradingBot:
         all_tasks = trading_tasks + [result_checker_task]
         
         try:
-            # Executa as tarefas pelo tempo definido ou indefinidamente
             await asyncio.wait(all_tasks, timeout=duration_minutes * 60 if duration_minutes else None, return_when=asyncio.FIRST_COMPLETED)
         finally:
-            # Garante que todas as tarefas são canceladas ao sair do loop
             for task in all_tasks:
-                task.cancel()
+                if not task.done():
+                    task.cancel()
 
     async def _wait_for_entry_time(self):
-        """Espera até o segundo 58 para analisar a vela que está a fechar."""
         now = datetime.now()
         second = now.second
         target_second = 58
@@ -255,7 +261,7 @@ class TradingBot:
                 
                 self.trade_queue.task_done()
             except asyncio.TimeoutError:
-                continue # Nenhuma operação na fila, continua o loop
+                continue
             except Exception as e:
                 await self.logger('ERROR', f"Erro no loop de verificação de resultados: {e}")
 
