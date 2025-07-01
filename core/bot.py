@@ -22,7 +22,6 @@ class TradingBot:
         self.bot_config = {}
         self.martingale_state: Dict[str, Dict] = {}
         self.current_cycle_trades: List[Dict] = []
-        # Novo: Guarda os ativos em cooldown para evitar sobre-operação
         self.cooldown_assets = set()
 
     async def logger(self, level: str, message: str):
@@ -40,7 +39,6 @@ class TradingBot:
                 bot_status = self.bot_config.get('status', 'PAUSED')
 
                 if bot_status == 'RUNNING':
-                    # A lógica de modos foi simplificada para focar na nova estratégia
                     await self.logger('INFO', f"Bot em modo RUNNING. A iniciar ciclo de negociação...")
                     await self.trading_loop()
                 else:
@@ -53,7 +51,6 @@ class TradingBot:
                 await asyncio.sleep(30)
 
     async def trading_loop(self):
-        """Ciclo principal que gere as tarefas de negociação."""
         account_type = self.bot_config.get('account_type', 'PRACTICE')
         await self.logger('INFO', f"A usar a conta: {account_type}")
         await self.exnova.change_balance(account_type)
@@ -64,19 +61,18 @@ class TradingBot:
 
         self.active_assets = await self.exnova.get_open_assets()
         
-        # Filtra os ativos que não estão em cooldown
         assets_to_trade = [asset for asset in self.active_assets if asset not in self.cooldown_assets]
         assets_to_trade = assets_to_trade[:settings.MAX_CONCURRENT_ASSETS]
         
         await self.logger('INFO', f"Ativos a serem monitorizados (fora de cooldown): {assets_to_trade}")
 
-        trading_tasks = [self._process_asset_task(asset) for asset in assets_to_trade]
+        # FIX: Transforma cada corrotina de análise numa Tarefa agendada.
+        trading_tasks = [asyncio.create_task(self._process_asset_task(asset)) for asset in assets_to_trade]
         result_checker_task = asyncio.create_task(self._result_checker_loop())
         
         all_tasks = trading_tasks + [result_checker_task]
         
         try:
-            # Executa as tarefas por um ciclo (60s) antes de reavaliar a lista de ativos
             await asyncio.wait(all_tasks, timeout=60, return_when=asyncio.FIRST_COMPLETED)
         finally:
             for task in all_tasks:
@@ -84,7 +80,6 @@ class TradingBot:
                     task.cancel()
 
     async def _wait_for_entry_time(self):
-        """Espera até o segundo 58 para analisar a vela que está a fechar."""
         now = datetime.now()
         second = now.second
         target_second = 58
@@ -95,7 +90,6 @@ class TradingBot:
         await asyncio.sleep(wait_time)
 
     async def _process_asset_task(self, full_asset_name: str):
-        """Tarefa que analisa um único ativo, procurando por uma confluência de sinais."""
         clean_asset_name = full_asset_name.split('-')[0]
         
         while True:
@@ -105,14 +99,12 @@ class TradingBot:
                 candles = await self.exnova.get_historical_candles(clean_asset_name, 60, 100)
                 if not candles: continue
 
-                # A nossa única e poderosa estratégia
                 strategy = STRATEGIES[0] 
                 direction = strategy.analyze(candles)
                 
                 if direction:
                     await self.logger('SUCCESS', f"[{full_asset_name}] Sinal de CONFLUÊNCIA encontrado! Direção: {direction.upper()}")
                     
-                    # Adiciona o ativo ao cooldown para evitar entradas repetidas
                     self.cooldown_assets.add(full_asset_name)
                     
                     signal = TradeSignal(
@@ -123,10 +115,8 @@ class TradingBot:
                     )
                     asyncio.create_task(self._execute_trade(signal, full_asset_name))
                     
-                    # Inicia a tarefa para remover o ativo do cooldown após 5 minutos
                     asyncio.create_task(self._remove_from_cooldown(full_asset_name, 300))
                     
-                    # Para a análise deste par neste ciclo, pois já encontrou uma entrada.
                     break 
 
             except asyncio.CancelledError:
@@ -137,7 +127,6 @@ class TradingBot:
                 await asyncio.sleep(30)
 
     async def _remove_from_cooldown(self, asset: str, delay: int):
-        """Remove um ativo da lista de cooldown após um tempo."""
         await asyncio.sleep(delay)
         self.cooldown_assets.discard(asset)
         await self.logger('INFO', f"[{asset}] Cooldown terminado. O ativo voltou a ser analisado.")
