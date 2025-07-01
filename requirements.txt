@@ -8,6 +8,7 @@ python-dotenv
 
 # Dependências da biblioteca local exnovaapi
 requests
+websocket-client
 
 # Dependências de teste
 pytest
