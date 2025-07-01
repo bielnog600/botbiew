@@ -2,6 +2,7 @@
 import asyncio
 import time
 import traceback
+from datetime import datetime, timedelta
 from typing import List, Dict
 
 from config import settings
@@ -72,23 +73,30 @@ class TradingBot:
         for task in pending:
             task.cancel()
 
+    async def _wait_for_next_minute(self):
+        """Calcula e espera o tempo necessário para sincronizar com o início do próximo minuto."""
+        now = datetime.now()
+        seconds_until_next_minute = 60 - now.second
+        # Adiciona uma pequena margem de 2 segundos para garantir que a API da corretora
+        # já processou e disponibilizou a vela M1 que acabou de fechar.
+        wait_time = seconds_until_next_minute + 2
+        await self.logger('INFO', f"A aguardar {wait_time}s para sincronizar com a próxima vela M1...")
+        await asyncio.sleep(wait_time)
+
     async def _process_asset_task(self, full_asset_name: str):
-        """
-        Tarefa assíncrona que monitora e opera um único ativo.
-        Recebe o nome completo do ativo (ex: 'EURUSD-op').
-        """
-        # FIX: Extrai o nome limpo para buscar velas, mas guarda o nome completo.
         clean_asset_name = full_asset_name.split('-')[0]
-        
         operation_mode = self.bot_config.get('operation_mode', 'CONSERVADOR')
         volatility_threshold = 0.6 if operation_mode == 'CONSERVADOR' else 0.85
 
         while True:
             try:
-                # Usa o nome limpo para buscar as velas.
+                # FIX: Sincroniza a execução para o início da próxima vela.
+                await self._wait_for_next_minute()
+                
+                await self.logger('INFO', f"[{full_asset_name}] Nova vela M1. A iniciar análise...")
+                
                 candles = await self.exnova.get_historical_candles(clean_asset_name, 60, 100)
                 if not candles:
-                    await asyncio.sleep(5)
                     continue
 
                 volatility = calculate_volatility(candles, lookback=10)
@@ -99,16 +107,14 @@ class TradingBot:
                         await self.logger('SUCCESS', f"[{full_asset_name}] Sinal encontrado! Direção: {direction.upper()}, Estratégia: {strategy.name}")
                         
                         signal = TradeSignal(
-                            pair=clean_asset_name, # Salva o nome limpo no DB para consistência
+                            pair=clean_asset_name,
                             direction=direction,
                             strategy=strategy.name,
                             volatility_score=volatility
                         )
-                        # Passa o nome completo do ativo para a execução da ordem.
                         asyncio.create_task(self._execute_trade(signal, full_asset_name))
-                        await asyncio.sleep(60)
-                        break
-                await asyncio.sleep(5)
+                        # Após encontrar um sinal, espera o próximo ciclo para não entrar duas vezes na mesma vela.
+                        break 
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -117,7 +123,6 @@ class TradingBot:
                 await asyncio.sleep(30)
 
     def _get_entry_value(self, asset: str) -> float:
-        # ... (código inalterado) ...
         base_value = self.bot_config.get('entry_value', 1.0)
         use_mg = self.bot_config.get('use_martingale', False)
         if not use_mg: return base_value
@@ -128,7 +133,6 @@ class TradingBot:
         return round(next_value, 2)
 
     async def _execute_trade(self, signal: TradeSignal, full_asset_name: str):
-        """Executa uma única operação de trade usando o nome completo do ativo."""
         try:
             entry_value = self._get_entry_value(signal.pair)
             
@@ -139,7 +143,6 @@ class TradingBot:
 
             await self.logger('INFO', f"[{signal.pair}] A executar ordem {signal.direction.upper()} em '{full_asset_name}'...")
             
-            # FIX: Usa o nome completo do ativo para a chamada da API de compra.
             order_id = await self.exnova.execute_trade(entry_value, full_asset_name, signal.direction, 1)
             
             if order_id:
@@ -160,7 +163,6 @@ class TradingBot:
             traceback.print_exc()
 
     async def _result_checker_loop(self):
-        # ... (código inalterado) ...
         while self.is_running:
             trade = await self.trade_queue.get()
             result = None
@@ -178,7 +180,6 @@ class TradingBot:
             self.trade_queue.task_done()
 
     def _update_martingale_state(self, asset: str, result: str, last_value: float):
-        # ... (código inalterado) ...
         if not self.bot_config.get('use_martingale', False): return
         max_levels = self.bot_config.get('martingale_levels', 2)
         current_level = self.martingale_state.get(asset, {}).get('level', 0)
