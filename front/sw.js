@@ -1,39 +1,52 @@
-// Nome do cache da nossa aplicação
-const CACHE_NAME = 'marombiew-signals-cache-v1';
+// Define um nome para o cache atual
+const CACHE_NAME = 'marombiew-bot-cache-v1';
 
-// Ficheiros essenciais para guardar em cache para a aplicação funcionar offline
+// Lista de arquivos para armazenar em cache na instalação
+// O '/' garante que a página principal (index.html) seja cacheada
 const urlsToCache = [
   '/',
-  '/index.html',
-  'https://cdn.tailwindcss.com',
-  'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css'
 ];
 
-// Evento de Instalação: é acionado quando o service worker é registado pela primeira vez.
+// Evento de Instalação: Armazena os arquivos essenciais em cache
 self.addEventListener('install', event => {
-  console.log('[Service Worker] Instalando...');
-  // Espera até que o cache seja aberto e todos os ficheiros essenciais sejam adicionados
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then(cache => {
-        console.log('[Service Worker] Cache aberto. Guardando ficheiros essenciais...');
+        console.log('Cache aberto');
         return cache.addAll(urlsToCache);
       })
   );
 });
 
-// Evento de Fetch: é acionado sempre que a aplicação tenta obter um recurso (ex: imagem, script, etc.)
+// Evento de Fetch: Intercepta as requisições
+// Responde com o cache se disponível, senão busca na rede
 self.addEventListener('fetch', event => {
   event.respondWith(
-    // Tenta encontrar o recurso no cache primeiro
     caches.match(event.request)
       .then(response => {
-        // Se encontrar no cache, retorna-o
+        // Se a resposta estiver no cache, retorna ela
         if (response) {
           return response;
         }
-        // Se não encontrar, vai à rede para o obter
+        // Senão, busca na rede
         return fetch(event.request);
-      })
+      }
+    )
+  );
+});
+
+// Evento de Ativação: Limpa caches antigos
+self.addEventListener('activate', event => {
+  const cacheWhitelist = [CACHE_NAME];
+  event.waitUntil(
+    caches.keys().then(cacheNames => {
+      return Promise.all(
+        cacheNames.map(cacheName => {
+          if (cacheWhitelist.indexOf(cacheName) === -1) {
+            return caches.delete(cacheName);
+          }
+        })
+      );
+    })
   );
 });
