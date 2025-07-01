@@ -40,8 +40,8 @@ except ImportError:
                 candles.append({'open': open_price, 'close': close_price, 'max': high_price, 'min': low_price})
             return candles
         def buy(self, amount, active, action, duration):
-            # Mock API expects lowercase
-            if action not in ['buy', 'sell']:
+            # Mock API expects 'call' or 'put'
+            if action not in ['call', 'put']:
                 return False, f"unknown value: '{action}'"
             order_id = "mock_order_id_" + str(uuid.uuid4())
             self._trades[order_id] = {'time': time.time(), 'duration': duration, 'result': 'win' if time.time() % 2 == 0 else 'loss'}
@@ -70,7 +70,7 @@ def log_error(msg, pair="Sistema"): log(r, f"{pair}: {msg}" if pair != "Sistema"
 # --- Banner ---
 def exibir_banner():
     print(c + "\n" + "="*88)
-    print(y + "MAROMBIEW BOT - v72 (API Case-sensitivity Corrigido)")
+    print(y + "MAROMBIEW BOT - v73 (API call/put Corrigido)")
     print(c + "="*88 + "\n")
 
 
@@ -227,9 +227,15 @@ def run_trading_cycle(API, supabase_client, state, params, config):
                         traceback.print_exc()
                         continue
 
-                    # FIX: Convert direction to lowercase for the API call.
-                    # Example: 'SELL' becomes 'sell'.
-                    api_direction = direction.lower()
+                    # FIX: Translate internal direction (BUY/SELL) to API direction (call/put)
+                    if direction == 'BUY':
+                        api_direction = 'call'
+                    elif direction == 'SELL':
+                        api_direction = 'put'
+                    else:
+                        log_error(f"Direção interna inválida: {direction}", clean_asset)
+                        continue # Skip if direction is not recognized
+
                     status, order_id = API.buy(config['valor_entrada'], clean_asset, api_direction, config['expiracao'])
 
                     if status:
