@@ -2,6 +2,5 @@ pydantic
 pydantic-settings
 supabase
 python-dotenv
-exnovaapi
 pytest
 pytest-asyncio
