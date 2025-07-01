@@ -85,7 +85,6 @@ class TradingBot:
                     if direction:
                         await self.logger('SUCCESS', f"[{asset}] Sinal encontrado! Direção: {direction.upper()}, Estratégia: {strategy.name}")
                         
-                        # FIX: Usa 'pair=asset' para corresponder ao modelo de dados TradeSignal.
                         signal = TradeSignal(
                             pair=asset,
                             direction=direction,
@@ -120,23 +119,35 @@ class TradingBot:
             return round(next_value, 2)
 
     async def _execute_trade(self, signal: TradeSignal):
-        entry_value = self._get_entry_value(signal.pair)
-        
-        signal_id = await self.supabase.insert_trade_signal(signal)
-        if not signal_id:
-            await self.logger('ERROR', f"[{signal.pair}] Falha ao registrar sinal. A operação não será executada.")
-            return
+        try:
+            entry_value = self._get_entry_value(signal.pair)
+            
+            signal_id = await self.supabase.insert_trade_signal(signal)
+            if not signal_id:
+                await self.logger('ERROR', f"[{signal.pair}] Falha ao registrar sinal. A operação não será executada.")
+                return
 
-        await self.logger('INFO', f"[{signal.pair}] A executar ordem {signal.direction.upper()} com valor de ${entry_value}...")
-        order_id = await self.exnova.execute_trade(entry_value, signal.pair, signal.direction, 1)
-        
-        if order_id:
-            await self.logger('SUCCESS', f"[{signal.pair}] Ordem {order_id} (sinal ID: {signal_id}) enviada.")
-            active_trade = ActiveTrade(order_id=order_id, signal_id=signal_id, pair=signal.pair, entry_value=entry_value)
-            await self.trade_queue.put(active_trade)
-        else:
-            await self.logger('ERROR', f"[{signal.pair}] Falha na execução da ordem na Exnova.")
-            await self.supabase.update_trade_result(signal_id, "ERROR")
+            await self.logger('INFO', f"[{signal.pair}] A executar ordem {signal.direction.upper()} com valor de ${entry_value}...")
+            order_id = await self.exnova.execute_trade(entry_value, signal.pair, signal.direction, 1)
+            
+            if order_id:
+                await self.logger('SUCCESS', f"[{signal.pair}] Ordem {order_id} (sinal ID: {signal_id}) enviada.")
+                
+                # FIX: Converte o order_id para string antes de criar o objeto ActiveTrade.
+                active_trade = ActiveTrade(
+                    order_id=str(order_id), 
+                    signal_id=signal_id, 
+                    pair=signal.pair, 
+                    entry_value=entry_value
+                )
+                await self.trade_queue.put(active_trade)
+            else:
+                await self.logger('ERROR', f"[{signal.pair}] Falha na execução da ordem na Exnova.")
+                await self.supabase.update_trade_result(signal_id, "ERROR")
+        except Exception as e:
+            # Captura qualquer exceção inesperada dentro da tarefa para evitar "Task exception was never retrieved"
+            await self.logger('ERROR', f"Exceção não tratada em _execute_trade para {signal.pair}: {e}")
+            traceback.print_exc()
 
     async def _result_checker_loop(self):
         while self.is_running:
@@ -175,4 +186,3 @@ class TradingBot:
             else:
                 self.martingale_state[asset] = {'level': 0, 'last_value': self.bot_config.get('entry_value', 1.0)}
                 asyncio.create_task(self.logger('ERROR', f"[{asset}] Limite de Martingale ({max_levels}) atingido. A resetar."))
-
