@@ -82,7 +82,7 @@ class TradingBot:
         second = now.second
         
         # O alvo é executar a análise por volta do segundo 58, para entrar no segundo 00.
-        target_second = 50
+        target_second = 0
 
         if second < target_second:
             wait_time = target_second - second
