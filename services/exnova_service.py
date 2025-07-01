@@ -6,19 +6,12 @@ from typing import List, Dict, Optional
 from core.data_models import Candle
 
 class AsyncExnovaService:
-    """
-    Wrapper assíncrono para a API da Exnova, com lógica de reconexão.
-    """
+    """Wrapper assíncrono para a API da Exnova, com lógica de reconexão."""
     def __init__(self, email: str, password: str, account_type: str = "PRACTICE"):
-        print(f"[{time.strftime('%H:%M:%S')}] [DIAGNÓSTICO] Dentro de AsyncExnovaService.__init__")
         self._email = email
         self._password = password
         self._account_type = account_type
-        print(f"[{time.strftime('%H:%M:%S')}] [DIAGNÓSTICO] A inicializar a API síncrona da Exnova...")
-        
         self.api = Exnova(email, password)
-        
-        print(f"[{time.strftime('%H:%M:%S')}] [DIAGNÓSTICO] API síncrona da Exnova inicializada com sucesso.")
         self._is_connected = False
         self._loop = None
 
@@ -29,7 +22,7 @@ class AsyncExnovaService:
 
     async def connect(self):
         loop = await self._get_loop()
-        print(f"[{time.strftime('%H:%M:%S')}] Conectando à Exnova...")
+        print(f"Conectando à Exnova...")
         status, reason = await loop.run_in_executor(None, self.api.connect)
         if status:
             self._is_connected = True
@@ -45,32 +38,40 @@ class AsyncExnovaService:
         await loop.run_in_executor(None, self.api.change_balance, balance_type)
         print(f"Balança alterada para: {balance_type}")
 
+    async def get_current_balance(self) -> Optional[float]:
+        """Busca o saldo atual da conta selecionada."""
+        loop = await self._get_loop()
+        # A maioria das APIs tem uma função get_balance() ou similar.
+        # Se o nome for diferente, ajuste aqui.
+        try:
+            balance = await loop.run_in_executor(None, self.api.get_balance)
+            return float(balance) if balance else None
+        except Exception as e:
+            print(f"Erro ao obter saldo da API: {e}")
+            return None
+
     async def get_open_assets(self) -> List[str]:
         loop = await self._get_loop()
         open_times = await loop.run_in_executor(None, self.api.get_all_open_time)
         assets = []
         for asset_type in ['binary', 'turbo']:
-            if asset_type in open_times:
+            if open_times and asset_type in open_times:
                 assets.extend([asset for asset, details in open_times[asset_type].items() if details.get('open')])
         return list(set([asset.split('-')[0] for asset in assets]))
 
     async def get_historical_candles(self, asset: str, interval: int, count: int) -> List[Candle]:
         loop = await self._get_loop()
         candles_data = await loop.run_in_executor(None, self.api.get_candles, asset, interval, count, time.time())
-        
-        # FIX: Verifica se a resposta da API é None antes de tentar iterar.
-        # Se for None, retorna uma lista vazia, que é um valor seguro.
         if candles_data is None:
             print(f"Aviso: A API retornou 'None' para as velas do ativo {asset}. Pulando.")
             return []
-            
         return [Candle(**data) for data in candles_data if data]
 
     async def execute_trade(self, amount: float, asset: str, direction: str, expiration: int) -> Optional[str]:
         loop = await self._get_loop()
         status, order_id = await loop.run_in_executor(None, self.api.buy, amount, asset, direction, expiration)
         if status:
-            return order_id
+            return str(order_id)
         print(f"Falha ao executar ordem para {asset}: {order_id}")
         return None
 
