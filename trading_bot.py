@@ -67,7 +67,7 @@ def log_error(msg, pair="Sistema"): log(r, f"{pair}: {msg}" if pair != "Sistema"
 # --- Banner ---
 def exibir_banner():
     print(c + "\n" + "="*88)
-    print(y + "MAROMBIEW BOT - v70 (Sintaxe Corrigida)")
+    print(y + "MAROMBIEW BOT - v71 (NameError Corrigido)")
     print(c + "="*88 + "\n")
 
 
@@ -113,7 +113,37 @@ def strategy_mql_pullback(velas, p):
 
     return (1, direcao) if direcao else (0, None)
 
-ALL_STRATEGIES = { 'mql_pullback': 'Pullback MQL' }
+def strategy_flow(velas, p):
+    if len(velas) < p.get('MAPeriod', 14) + 3: return 0, None
+    nano_up = sma_slope([v['close'] for v in velas], p.get('MAPeriod', 14))
+    if nano_up is None: return 0, None
+    last_candles = velas[-3:]
+    direcao = None
+    if nano_up and all(v['close'] > v['open'] for v in last_candles): direcao = 'BUY'
+    if not nano_up and all(v['close'] < v['open'] for v in last_candles): direcao = 'SELL'
+    return (1, direcao) if direcao else (0, None)
+
+def strategy_patterns(velas, p):
+    if len(velas) < p.get('MAPeriod', 14) + 2: return 0, None
+    nano_up = sma_slope([v['close'] for v in velas], p.get('MAPeriod', 14))
+    if nano_up is None: return 0, None
+    penultimate, last = velas[-2], velas[-1]
+    direcao = None
+    if nano_up:
+        if (penultimate['close'] < penultimate['open'] and last['close'] > last['open'] and last['open'] < penultimate['close'] and last['close'] > penultimate['open']): direcao = 'BUY'
+        if (penultimate['close'] < penultimate['open'] and last['close'] > last['open'] and last['open'] > penultimate['close'] and last['close'] < penultimate['open']): direcao = 'BUY'
+    if not nano_up:
+        if (penultimate['close'] > penultimate['open'] and last['close'] < last['open'] and last['open'] > penultimate['close'] and last['close'] < penultimate['open']): direcao = 'SELL'
+        if (penultimate['close'] > penultimate['open'] and last['close'] < last['open'] and last['open'] < penultimate['close'] and last['close'] > penultimate['open']): direcao = 'SELL'
+    return (1, direcao) if direcao else (0, None)
+
+# FIX: Restore the STRATEGY_FUNCTIONS dictionary
+ALL_STRATEGIES = { 'mql_pullback': 'Pullback MQL', 'flow': 'Fluxo', 'patterns': 'Padrões de Velas' }
+STRATEGY_FUNCTIONS = { 
+    'mql_pullback': strategy_mql_pullback,
+    'flow': strategy_flow,
+    'patterns': strategy_patterns
+}
 
 class BotState:
     def __init__(self):
@@ -178,14 +208,12 @@ def run_trading_cycle(API, supabase_client, state, params, config):
                     log_success(f"Sinal encontrado! Ativo: {clean_asset}, Direção: {direction}, Estratégia: {name}")
 
                     try:
-                        # FIX: Remove .select('id'). The insert response already contains the data.
                         response = supabase_client.table('trade_signals').insert({
                             'pair': clean_asset,
                             'direction': direction,
                             'strategy': name
                         }).execute()
                         
-                        # The data from the new row is in response.data
                         if response.data:
                             signal_id = response.data[0]['id']
                             log_info(f"Sinal registrado no painel com ID: {signal_id}", clean_asset)
@@ -263,14 +291,12 @@ def main_bot_logic(state):
             remote_params = config_data.get('params', {})
 
             if bot_status == 'RUNNING':
-                # No need to log this every time, it clutters the console
-                # log_info("Bot em modo RUNNING. Iniciando ciclo de análise...")
                 run_trading_cycle(API, supabase_client, state, remote_params, config)
             else:
                 if int(time.time()) % 20 == 0:
                     log_info("Bot em modo PAUSADO. A aguardar comando 'RUNNING' do painel.")
             
-            time.sleep(2) # Sleep for a shorter time to be more responsive
+            time.sleep(2)
 
         except APIError as e:
             if hasattr(e, 'code') and e.code == 'PGRST116':
