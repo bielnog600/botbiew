@@ -37,7 +37,8 @@ except ImportError:
                 close_price = open_price + 0.0005 * (-1 if i % 3 == 0 else 1)
                 high_price = max(open_price, close_price) + 0.0003
                 low_price = min(open_price, close_price) - 0.0003
-                candles.append({'open': open_price, 'close': close_price, 'high': high_price, 'low': low_price, 'max': high_price, 'min': low_price})
+                # A API real usa 'max' e 'min'
+                candles.append({'open': open_price, 'close': close_price, 'max': high_price, 'min': low_price})
             return candles
         def buy(self, amount, active, action, duration):
             order_id = "mock_order_id_" + str(uuid.uuid4())
@@ -66,13 +67,12 @@ def log_error(msg, pair="Sistema"): log(r, f"{pair}: {msg}" if pair != "Sistema"
 
 # --- Banner ---
 def exibir_banner():
-    # Banner code is omitted for brevity but is the same as before
     print(c + "\n" + "="*88)
     print(y + "MAROMBIEW BOT - v69 (Resultados em Tempo Real)")
     print(c + "="*88 + "\n")
 
 
-# --- Logic and Strategy Functions (Same as before) ---
+# --- Logic and Strategy Functions ---
 def sma_slope(closes, period):
     if len(closes) < period + 1: return None
     sma1 = sum(closes[-(period+1):-1]) / period; sma2 = sum(closes[-period:]) / period
@@ -80,7 +80,14 @@ def sma_slope(closes, period):
     return sma2 > sma1
 
 def detect_fractals(velas, n_levels):
-    highs = [v['high'] for v in velas]; lows = [v['low'] for v in velas]
+    # FIX: Use 'max' and 'min' which are the correct keys from the Exnova API
+    try:
+        highs = [v['max'] for v in velas]
+        lows = [v['min'] for v in velas]
+    except KeyError as e:
+        log_error(f"Chave de vela ausente: {e}. Verifique o formato dos dados da API. Vela problemática: {velas[-1] if velas else 'N/A'}")
+        return [], []
+        
     res_levels, sup_levels = [], []
     for i in range(2, len(velas) - 2):
         if highs[i] > highs[i-1] and highs[i] > highs[i-2] and highs[i] > highs[i+1] and highs[i] > highs[i+2]: res_levels.append(highs[i])
@@ -94,12 +101,19 @@ def strategy_mql_pullback(velas, p):
     res_levels, sup_levels = detect_fractals(velas, p.get('MaxLevels', 5))
     last = velas[-1]
     direcao = None
-    if nano_up and sup_levels and last['close'] > last['open']:
-        sup_level = sup_levels[0]; target_price = sup_level + p.get('Proximity', 2) * p.get('Point', 0.00001)
-        if last['low'] <= target_price and last['close'] >= sup_level: direcao = 'BUY'
-    if not nano_up and res_levels and last['close'] < last['open']:
-        res_level = res_levels[0]; target_price = res_level - p.get('Proximity', 2) * p.get('Point', 0.00001)
-        if last['high'] >= target_price and last['close'] <= res_level: direcao = 'SELL'
+    
+    # FIX: Use 'min' and 'max' for price checks
+    try:
+        if nano_up and sup_levels and last['close'] > last['open']:
+            sup_level = sup_levels[0]; target_price = sup_level + p.get('Proximity', 2) * p.get('Point', 0.00001)
+            if last['min'] <= target_price and last['close'] >= sup_level: direcao = 'BUY'
+        if not nano_up and res_levels and last['close'] < last['open']:
+            res_level = res_levels[0]; target_price = res_level - p.get('Proximity', 2) * p.get('Point', 0.00001)
+            if last['max'] >= target_price and last['close'] <= res_level: direcao = 'SELL'
+    except KeyError as e:
+        log_error(f"Chave ausente na estratégia MQL Pullback: {e}. Vela: {last}")
+        return 0, None
+
     return (1, direcao) if direcao else (0, None)
 
 # Other strategies (flow, patterns) are the same and omitted for brevity
@@ -109,8 +123,8 @@ STRATEGY_FUNCTIONS = { 'mql_pullback': strategy_mql_pullback } # Add other strat
 class BotState:
     def __init__(self):
         self.stop = False
-        self.active_trades = [] # List to store dicts of active trades
-        self.lock = Lock() # To safely modify the active_trades list from different threads
+        self.active_trades = [] 
+        self.lock = Lock()
 
 def get_config_from_env():
     return {
@@ -120,20 +134,14 @@ def get_config_from_env():
     }
 
 def check_and_update_results(state, API, supabase_client):
-    """
-    This function runs in a separate thread to check the results of active trades.
-    """
     while not state.stop:
         with state.lock:
-            # Iterate over a copy of the list to allow safe removal
             for trade in list(state.active_trades):
                 result, _ = API.check_win_v4(trade['order_id'])
                 
-                # If the trade is closed (result is not None)
                 if result:
                     log_info(f"Resultado da operação {trade['order_id']}: {result.upper()}", trade['pair'])
                     
-                    # Update the signal in Supabase with the result
                     try:
                         supabase_client.table('trade_signals').update({
                             'result': result.upper()
@@ -142,50 +150,38 @@ def check_and_update_results(state, API, supabase_client):
                     except Exception as e:
                         log_error(f"Falha ao atualizar resultado do sinal {trade['signal_id']}: {e}", trade['pair'])
 
-                    # Remove the trade from the active list
                     state.active_trades.remove(trade)
         
-        # Wait before checking again to avoid spamming the API
         time.sleep(5)
 
 def run_trading_cycle(API, supabase_client, state, params, config):
-    """
-    Main logic for a single trading analysis cycle.
-    """
     max_trades = params.get('MAX_SIMULTANEOUS_TRADES', 1)
 
-    # Check if we can open more trades
     if len(state.active_trades) >= max_trades:
         log_warning(f"Limite de {max_trades} operações simultâneas atingido. Aguardando...")
         return
 
     try:
         open_assets = API.get_all_open_time()
-        all_profits = API.get_all_profit()
         
-        # Combine binary and turbo assets
         available_assets = {**open_assets.get('binary', {}), **open_assets.get('turbo', {})}
 
         for asset, details in available_assets.items():
             if not details.get('open'):
                 continue
 
-            # Clean asset name for API calls (e.g., 'EURUSD-op' -> 'EURUSD')
             clean_asset = asset.split('-')[0]
             
-            # Get candles for analysis
             velas = API.get_candles(clean_asset, 60, 100, time.time())
             if not velas or len(velas) < 20:
                 continue
 
-            # Check all available strategies
             for name, func in STRATEGY_FUNCTIONS.items():
                 signal, direction = func(velas, params)
                 
                 if signal and direction:
                     log_success(f"Sinal encontrado! Ativo: {clean_asset}, Direção: {direction}, Estratégia: {name}")
 
-                    # --- PASSO 1: Enviar o sinal para o Supabase e obter o ID ---
                     try:
                         response = supabase_client.table('trade_signals').insert({
                             'pair': clean_asset,
@@ -198,18 +194,16 @@ def run_trading_cycle(API, supabase_client, state, params, config):
                             log_info(f"Sinal registrado no painel com ID: {signal_id}", clean_asset)
                         else:
                             log_error(f"Não foi possível registrar o sinal no painel: {response.error}", clean_asset)
-                            continue # Don't proceed if signal is not logged
+                            continue
                     except Exception as e:
                         log_error(f"Exceção ao registrar sinal: {e}", clean_asset)
                         continue
 
-                    # --- PASSO 2: Realizar a operação na Exnova ---
                     status, order_id = API.buy(config['valor_entrada'], clean_asset, direction, config['expiracao'])
 
                     if status:
                         log_success(f"Operação realizada com sucesso! ID da Ordem: {order_id}", clean_asset)
                         
-                        # Add the new trade to the active list with its signal_id
                         with state.lock:
                             state.active_trades.append({
                                 'order_id': order_id,
@@ -219,9 +213,8 @@ def run_trading_cycle(API, supabase_client, state, params, config):
                     else:
                         log_error(f"Falha ao realizar a operação: {order_id}", clean_asset)
                     
-                    # Wait a bit after a signal to avoid placing multiple trades on the same candle
                     time.sleep(2)
-                    return # Exit after finding and placing one trade to restart the cycle
+                    return
 
     except Exception as e:
         log_error(f"Erro no ciclo de negociação: {e}")
@@ -255,7 +248,6 @@ def main_bot_logic(state):
     log_success("Conexão com a Exnova estabelecida!")
     API.change_balance(config['conta'])
     
-    # Start the thread that checks for trade results
     result_checker_thread = Thread(target=check_and_update_results, args=(state, API, supabase_client))
     result_checker_thread.daemon = True
     result_checker_thread.start()
@@ -276,16 +268,15 @@ def main_bot_logic(state):
                 log_info("Bot em modo RUNNING. Iniciando ciclo de análise...")
                 run_trading_cycle(API, supabase_client, state, remote_params, config)
             else:
-                if int(time.time()) % 20 == 0: # Log less frequently
+                if int(time.time()) % 20 == 0:
                     log_info("Bot em modo PAUSADO. A aguardar comando 'RUNNING' do painel.")
             
-            # Main loop sleep time
             time.sleep(10)
 
         except APIError as e:
             if hasattr(e, 'code') and e.code == 'PGRST116':
                 log_warning("Configuração do bot não encontrada. Crie a configuração no painel.")
-                time.sleep(15) # Wait longer if config is missing
+                time.sleep(15)
             else:
                 log_error(f"ERRO DE API NO LOOP PRINCIPAL: {e}"); time.sleep(10)
         except Exception as e:
