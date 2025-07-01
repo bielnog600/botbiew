@@ -1,6 +1,6 @@
 # services/exnova_service.py
 import asyncio
-import time # FIX: Adicionado a importação do módulo 'time'
+import time
 from exnovaapi.stable_api import Exnova
 from typing import List, Dict, Optional
 from core.data_models import Candle
@@ -23,7 +23,6 @@ class AsyncExnovaService:
         self._loop = None
 
     async def _get_loop(self):
-        # Obtém o loop de eventos em execução de forma segura
         if self._loop is None:
             self._loop = asyncio.get_running_loop()
         return self._loop
@@ -58,6 +57,13 @@ class AsyncExnovaService:
     async def get_historical_candles(self, asset: str, interval: int, count: int) -> List[Candle]:
         loop = await self._get_loop()
         candles_data = await loop.run_in_executor(None, self.api.get_candles, asset, interval, count, time.time())
+        
+        # FIX: Verifica se a resposta da API é None antes de tentar iterar.
+        # Se for None, retorna uma lista vazia, que é um valor seguro.
+        if candles_data is None:
+            print(f"Aviso: A API retornou 'None' para as velas do ativo {asset}. Pulando.")
+            return []
+            
         return [Candle(**data) for data in candles_data if data]
 
     async def execute_trade(self, amount: float, asset: str, direction: str, expiration: int) -> Optional[str]:
