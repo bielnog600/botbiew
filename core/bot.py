@@ -2,7 +2,7 @@
 import asyncio
 import time
 import traceback
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import List, Dict, Optional
 
 from config import settings
@@ -59,16 +59,16 @@ class TradingBot:
         trading_tasks = [asyncio.create_task(self._process_asset_task(asset)) for asset in assets_to_trade]
         
         if not trading_tasks:
-            await asyncio.sleep(60)
+            await asyncio.sleep(55)
             return
             
-        done, pending = await asyncio.wait(trading_tasks, timeout=55) # Executa por 55s
+        done, pending = await asyncio.wait(trading_tasks, timeout=55)
         for task in pending:
             task.cancel()
 
     async def _wait_for_next_candle(self):
         now = datetime.now()
-        wait_time = (25 - now.second) + 2 if now.second > 2 else 2 - now.second
+        wait_time = (20 - now.second) + 2 if now.second > 2 else 2 - now.second
         await asyncio.sleep(wait_time)
 
     async def _process_asset_task(self, full_asset_name: str):
@@ -76,7 +76,7 @@ class TradingBot:
             await self._wait_for_next_candle()
             
             clean_asset_name = full_asset_name.split('-')[0]
-            candles = await self.exnova.get_historical_candles(clean_asset_name, 60, 240)
+            candles = await self.exnova.get_historical_candles(clean_asset_name, 60, 100)
             if not candles: return
 
             for strategy in STRATEGIES:
@@ -93,15 +93,17 @@ class TradingBot:
                         pair=clean_asset_name, 
                         direction=direction, 
                         strategy=strategy.name,
+                        # Adiciona os dados da vela ao sinal
                         setup_candle_open=last_candle.open,
                         setup_candle_high=last_candle.max,
                         setup_candle_low=last_candle.min,
                         setup_candle_close=last_candle.close
                     )
-                    await self._execute_trade(signal, full_asset_name)
+                    # A execução do trade é agora uma tarefa em segundo plano
+                    asyncio.create_task(self._execute_trade(signal, full_asset_name))
                     break 
         except asyncio.CancelledError:
-            pass # Ignora o cancelamento no final do ciclo
+            pass
         except Exception as e:
             await self.logger('ERROR', f"Erro ao processar o ativo {full_asset_name}: {e}")
             traceback.print_exc()
@@ -124,11 +126,14 @@ class TradingBot:
     async def _execute_trade(self, signal: TradeSignal, full_asset_name: str):
         try:
             entry_value = self._get_entry_value(signal.pair)
+            
+            # Passo 1: Envia o sinal para o painel IMEDIATAMENTE (antes de executar a ordem)
             signal_id = await self.supabase.insert_trade_signal(signal)
             if not signal_id:
                 await self.logger('ERROR', f"[{signal.pair}] Falha ao registrar sinal.")
                 return
 
+            # Passo 2: Executa a ordem na corretora
             order_id = await self.exnova.execute_trade(entry_value, full_asset_name, signal.direction, 1)
             if order_id:
                 await self.logger('SUCCESS', f"[{signal.pair}] Ordem {order_id} (sinal ID: {signal_id}) enviada.")
@@ -153,11 +158,11 @@ class TradingBot:
                 
                 if result:
                     await self.logger('SUCCESS' if result == 'WIN' else 'ERROR', f"[{trade.pair}] Resultado da ordem {trade.order_id}: {result}")
-                    await self.supabase.update_trade_result(trade.signal_id, result)
+                    await self.supabase.update_trade_result(signal_id=trade.signal_id, result=result, martingale_level=self.martingale_state.get(trade.pair, {}).get('level', 0))
                     self._update_martingale_state(trade.pair, result, trade.entry_value)
                 else:
                     await self.logger('WARNING', f"[{trade.pair}] Timeout ao obter resultado da ordem {trade.order_id}.")
-                    await self.supabase.update_trade_result(trade.signal_id, "TIMEOUT")
+                    await self.supabase.update_trade_result(signal_id=trade.signal_id, result="TIMEOUT")
                 
                 self.trade_queue.task_done()
             except asyncio.TimeoutError:
@@ -179,3 +184,4 @@ class TradingBot:
             else:
                 self.martingale_state[asset] = {'level': 0, 'last_value': self.bot_config.get('entry_value', 1.0)}
                 asyncio.create_task(self.logger('ERROR', f"[{asset}] Limite de Martingale ({max_levels}) atingido. A resetar."))
+
