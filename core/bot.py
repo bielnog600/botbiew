@@ -68,7 +68,6 @@ class TradingBot:
             task.cancel()
 
     async def _process_asset_task(self, asset: str):
-        # Define o comportamento com base no modo de operação
         operation_mode = self.bot_config.get('operation_mode', 'CONSERVADOR')
         volatility_threshold = 0.6 if operation_mode == 'CONSERVADOR' else 0.85
 
@@ -81,17 +80,14 @@ class TradingBot:
 
                 volatility = calculate_volatility(candles, lookback=10)
                 
-                if volatility > volatility_threshold:
-                    await self.logger('INFO', f"[{asset}] Volatilidade ({volatility:.2f}) acima do limite para o modo {operation_mode} ({volatility_threshold}). A aguardar.")
-                    await asyncio.sleep(60)
-                    continue
-                
                 for strategy in STRATEGIES:
                     direction = strategy.analyze(candles)
                     if direction:
                         await self.logger('SUCCESS', f"[{asset}] Sinal encontrado! Direção: {direction.upper()}, Estratégia: {strategy.name}")
+                        
+                        # FIX: Usa 'pair=asset' para corresponder ao modelo de dados TradeSignal.
                         signal = TradeSignal(
-                            asset=asset,
+                            pair=asset,
                             direction=direction,
                             strategy=strategy.name,
                             volatility_score=volatility
@@ -124,23 +120,22 @@ class TradingBot:
             return round(next_value, 2)
 
     async def _execute_trade(self, signal: TradeSignal):
-        entry_value = self._get_entry_value(signal.asset)
+        entry_value = self._get_entry_value(signal.pair)
         
         signal_id = await self.supabase.insert_trade_signal(signal)
         if not signal_id:
-            await self.logger('ERROR', f"[{signal.asset}] Falha ao registrar sinal. A operação não será executada.")
+            await self.logger('ERROR', f"[{signal.pair}] Falha ao registrar sinal. A operação não será executada.")
             return
 
-        await self.logger('INFO', f"[{signal.asset}] A executar ordem {signal.direction.upper()} com valor de ${entry_value}...")
-        order_id = await self.exnova.execute_trade(entry_value, signal.asset, signal.direction, 1)
+        await self.logger('INFO', f"[{signal.pair}] A executar ordem {signal.direction.upper()} com valor de ${entry_value}...")
+        order_id = await self.exnova.execute_trade(entry_value, signal.pair, signal.direction, 1)
         
         if order_id:
-            await self.logger('SUCCESS', f"[{signal.asset}] Ordem {order_id} (sinal ID: {signal_id}) enviada.")
-            # Precisamos adicionar o entry_value ao ActiveTrade para o Martingale
-            active_trade = ActiveTrade(order_id=order_id, signal_id=signal_id, asset=signal.asset, entry_value=entry_value)
+            await self.logger('SUCCESS', f"[{signal.pair}] Ordem {order_id} (sinal ID: {signal_id}) enviada.")
+            active_trade = ActiveTrade(order_id=order_id, signal_id=signal_id, pair=signal.pair, entry_value=entry_value)
             await self.trade_queue.put(active_trade)
         else:
-            await self.logger('ERROR', f"[{signal.asset}] Falha na execução da ordem na Exnova.")
+            await self.logger('ERROR', f"[{signal.pair}] Falha na execução da ordem na Exnova.")
             await self.supabase.update_trade_result(signal_id, "ERROR")
 
     async def _result_checker_loop(self):
@@ -154,12 +149,11 @@ class TradingBot:
                 await asyncio.sleep(5)
 
             if result:
-                await self.logger('SUCCESS' if result == 'WIN' else 'ERROR', f"[{trade.asset}] Resultado da ordem {trade.order_id}: {result}")
+                await self.logger('SUCCESS' if result == 'WIN' else 'ERROR', f"[{trade.pair}] Resultado da ordem {trade.order_id}: {result}")
                 await self.supabase.update_trade_result(trade.signal_id, result)
-                # Passamos o valor da entrada para a lógica de Martingale
-                self._update_martingale_state(trade.asset, result, trade.entry_value)
+                self._update_martingale_state(trade.pair, result, trade.entry_value)
             else:
-                await self.logger('WARNING', f"[{trade.asset}] Timeout ao obter resultado da ordem {trade.order_id}.")
+                await self.logger('WARNING', f"[{trade.pair}] Timeout ao obter resultado da ordem {trade.order_id}.")
                 await self.supabase.update_trade_result(trade.signal_id, "TIMEOUT")
             
             self.trade_queue.task_done()
