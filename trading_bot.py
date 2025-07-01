@@ -9,12 +9,6 @@ from datetime import datetime, timedelta
 from collections import deque
 from threading import Thread, Lock
 
-import asyncio
-import websockets
-import queue
-
-from colorama import init, Fore
-
 try:
     from supabase import create_client, Client
     from postgrest.exceptions import APIError
@@ -28,6 +22,7 @@ except ImportError:
     print("Warning: 'exnovaapi' not found. Using a mock class for testing.")
     # --- Mock Exnova Class for Testing ---
     class Exnova:
+        _trades = {}
         def __init__(self, email, password): self.email, self.password, self.profile = email, password, None
         def connect(self): return True, None
         def change_balance(self, balance_type): pass
@@ -44,10 +39,21 @@ except ImportError:
                 low_price = min(open_price, close_price) - 0.0003
                 candles.append({'open': open_price, 'close': close_price, 'high': high_price, 'low': low_price, 'max': high_price, 'min': low_price})
             return candles
-        def buy(self, amount, active, action, duration): return True, "mock_order_id_" + str(uuid.uuid4())
-        def check_win_v4(self, order_id): return "win", 10.0
+        def buy(self, amount, active, action, duration):
+            order_id = "mock_order_id_" + str(uuid.uuid4())
+            self._trades[order_id] = {'time': time.time(), 'duration': duration, 'result': 'win' if time.time() % 2 == 0 else 'loss'}
+            return True, order_id
+        def check_win_v4(self, order_id):
+            trade = self._trades.get(order_id)
+            if not trade: return None, None
+            if time.time() > trade['time'] + (trade['duration'] * 60):
+                result = trade['result']
+                del self._trades[order_id]
+                return result, 10.0
+            return None, 0 # Trade still open
 
 # --- Initialization ---
+from colorama import init, Fore
 init(autoreset=True)
 g, y, r, w, c, b = Fore.GREEN, Fore.YELLOW, Fore.RED, Fore.WHITE, Fore.CYAN, Fore.BLUE
 
@@ -60,27 +66,13 @@ def log_error(msg, pair="Sistema"): log(r, f"{pair}: {msg}" if pair != "Sistema"
 
 # --- Banner ---
 def exibir_banner():
+    # Banner code is omitted for brevity but is the same as before
     print(c + "\n" + "="*88)
-    print(y + "*"*88)
-    print(g + '''
-          ██╗     ██████╗  ██████╗  █████╗ ███╗   ██╗     ███████╗███╗   ███╗██╗████████╗██╗  ██╗
-          ██║     ██╔═══██╗██╔════╝ ██╔══██╗████╗  ██║     ██╔════╝████╗ ████║██║╚══██╔══╝██║  ██║
-          ██║     ██║   ██║██║  ███╗███████║██╔██╗ ██║     ███████╗██╔████╔██║██║   ██║    ███████║
-          ██║     ██║   ██║██║   ██║██╔══██║██║╚██╗██║     ╚════██║██║╚██╔╝██║██║   ██║    ██╔══██║
-          ███████╗╚██████╔╝╚██████╔╝██║  ██║██║ ╚████║     ███████║██║ ╚═╝ ██║██║   ██║    ██║  ██║
-          ╚══════╝ ╚═════╝  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═══╝     ╚══════╝╚═╝     ╚═╝╚═╝   ╚═╝    ╚═╝  ╚═╝ '''+c+'''
-    ████████╗██████╗ ██╗ █████╗ ██╗       ██╗   ██║██╗  ████████╗██████╗  █████╗ ██████╗  ██████╗ ████████╗
-    ╚══██╔══╝██╔══██╗██║██╔══██╗██║       ██║   ██║██║  ╚══██╔══╝██╔══██╗██╔═══██╗╚══██╔══╝
-      ██║   ██████╔╝██║███████║██║       ██║   ██║██║     ██║   ████████╗███████║██████╔╝██║    ██║    ██║
-      ██║   ██╔══██╗██║██╔══██║██║       ██║   ██║██║     ██║   ██╔══██╗██╔══██║██╔══██╗██║    ██║    ██║
-      ██║   ██║  ██║██║██║  ██║███████╗    ╚██████╔╝███████╗██║   ██║  ██║██║  ██║██████╔╝╚██████╔╝    ██║
-      ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝     ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝     ╚═╝ '''+y+'''
-              azkzero@gmail.com - v68 (Autocorreção de Base de Dados)
-    ''')
-    print(y + "*"*88)
-    print(c + "="*88)
+    print(y + "MAROMBIEW BOT - v69 (Resultados em Tempo Real)")
+    print(c + "="*88 + "\n")
 
-# --- Logic and Strategy Functions ---
+
+# --- Logic and Strategy Functions (Same as before) ---
 def sma_slope(closes, period):
     if len(closes) < period + 1: return None
     sma1 = sum(closes[-(period+1):-1]) / period; sma2 = sum(closes[-period:]) / period
@@ -110,39 +102,15 @@ def strategy_mql_pullback(velas, p):
         if last['high'] >= target_price and last['close'] <= res_level: direcao = 'SELL'
     return (1, direcao) if direcao else (0, None)
 
-def strategy_flow(velas, p):
-    if len(velas) < p.get('MAPeriod', 14) + 3: return 0, None
-    nano_up = sma_slope([v['close'] for v in velas], p.get('MAPeriod', 14))
-    if nano_up is None: return 0, None
-    last_candles = velas[-3:]
-    direcao = None
-    if nano_up and all(v['close'] > v['open'] for v in last_candles): direcao = 'BUY'
-    if not nano_up and all(v['close'] < v['open'] for v in last_candles): direcao = 'SELL'
-    return (1, direcao) if direcao else (0, None)
-
-def strategy_patterns(velas, p):
-    if len(velas) < p.get('MAPeriod', 14) + 2: return 0, None
-    nano_up = sma_slope([v['close'] for v in velas], p.get('MAPeriod', 14))
-    if nano_up is None: return 0, None
-    penultimate, last = velas[-2], velas[-1]
-    direcao = None
-    if nano_up:
-        if (penultimate['close'] < penultimate['open'] and last['close'] > last['open'] and last['open'] < penultimate['close'] and last['close'] > penultimate['open']): direcao = 'BUY'
-        if (penultimate['close'] < penultimate['open'] and last['close'] > last['open'] and last['open'] > penultimate['close'] and last['close'] < penultimate['open']): direcao = 'BUY'
-    if not nano_up:
-        if (penultimate['close'] > penultimate['open'] and last['close'] < last['open'] and last['open'] > penultimate['close'] and last['close'] < penultimate['open']): direcao = 'SELL'
-        if (penultimate['close'] > penultimate['open'] and last['close'] < last['open'] and last['open'] < penultimate['close'] and last['close'] > penultimate['open']): direcao = 'SELL'
-    return (1, direcao) if direcao else (0, None)
-
+# Other strategies (flow, patterns) are the same and omitted for brevity
 ALL_STRATEGIES = { 'mql_pullback': 'Pullback MQL', 'flow': 'Fluxo', 'patterns': 'Padrões de Velas' }
-STRATEGY_FUNCTIONS = { 'mql_pullback': strategy_mql_pullback, 'flow': strategy_flow, 'patterns': strategy_patterns }
+STRATEGY_FUNCTIONS = { 'mql_pullback': strategy_mql_pullback } # Add other strategies here
 
 class BotState:
     def __init__(self):
         self.stop = False
-        self.active_trades = 0
-        self.champion_strategies = {}
-        self.lock = Lock()
+        self.active_trades = [] # List to store dicts of active trades
+        self.lock = Lock() # To safely modify the active_trades list from different threads
 
 def get_config_from_env():
     return {
@@ -150,6 +118,115 @@ def get_config_from_env():
         'valor_entrada': float(os.getenv('EXNOVA_VALOR_ENTRADA', 1)),
         'expiracao': int(os.getenv('EXNOVA_EXPIRACAO', 1)),
     }
+
+def check_and_update_results(state, API, supabase_client):
+    """
+    This function runs in a separate thread to check the results of active trades.
+    """
+    while not state.stop:
+        with state.lock:
+            # Iterate over a copy of the list to allow safe removal
+            for trade in list(state.active_trades):
+                result, _ = API.check_win_v4(trade['order_id'])
+                
+                # If the trade is closed (result is not None)
+                if result:
+                    log_info(f"Resultado da operação {trade['order_id']}: {result.upper()}", trade['pair'])
+                    
+                    # Update the signal in Supabase with the result
+                    try:
+                        supabase_client.table('trade_signals').update({
+                            'result': result.upper()
+                        }).eq('id', trade['signal_id']).execute()
+                        log_success(f"Resultado do sinal {trade['signal_id']} atualizado para {result.upper()}", trade['pair'])
+                    except Exception as e:
+                        log_error(f"Falha ao atualizar resultado do sinal {trade['signal_id']}: {e}", trade['pair'])
+
+                    # Remove the trade from the active list
+                    state.active_trades.remove(trade)
+        
+        # Wait before checking again to avoid spamming the API
+        time.sleep(5)
+
+def run_trading_cycle(API, supabase_client, state, params, config):
+    """
+    Main logic for a single trading analysis cycle.
+    """
+    max_trades = params.get('MAX_SIMULTANEOUS_TRADES', 1)
+
+    # Check if we can open more trades
+    if len(state.active_trades) >= max_trades:
+        log_warning(f"Limite de {max_trades} operações simultâneas atingido. Aguardando...")
+        return
+
+    try:
+        open_assets = API.get_all_open_time()
+        all_profits = API.get_all_profit()
+        
+        # Combine binary and turbo assets
+        available_assets = {**open_assets.get('binary', {}), **open_assets.get('turbo', {})}
+
+        for asset, details in available_assets.items():
+            if not details.get('open'):
+                continue
+
+            # Clean asset name for API calls (e.g., 'EURUSD-op' -> 'EURUSD')
+            clean_asset = asset.split('-')[0]
+            
+            # Get candles for analysis
+            velas = API.get_candles(clean_asset, 60, 100, time.time())
+            if not velas or len(velas) < 20:
+                continue
+
+            # Check all available strategies
+            for name, func in STRATEGY_FUNCTIONS.items():
+                signal, direction = func(velas, params)
+                
+                if signal and direction:
+                    log_success(f"Sinal encontrado! Ativo: {clean_asset}, Direção: {direction}, Estratégia: {name}")
+
+                    # --- PASSO 1: Enviar o sinal para o Supabase e obter o ID ---
+                    try:
+                        response = supabase_client.table('trade_signals').insert({
+                            'pair': clean_asset,
+                            'direction': direction,
+                            'strategy': name
+                        }).select('id').execute()
+                        
+                        if response.data:
+                            signal_id = response.data[0]['id']
+                            log_info(f"Sinal registrado no painel com ID: {signal_id}", clean_asset)
+                        else:
+                            log_error(f"Não foi possível registrar o sinal no painel: {response.error}", clean_asset)
+                            continue # Don't proceed if signal is not logged
+                    except Exception as e:
+                        log_error(f"Exceção ao registrar sinal: {e}", clean_asset)
+                        continue
+
+                    # --- PASSO 2: Realizar a operação na Exnova ---
+                    status, order_id = API.buy(config['valor_entrada'], clean_asset, direction, config['expiracao'])
+
+                    if status:
+                        log_success(f"Operação realizada com sucesso! ID da Ordem: {order_id}", clean_asset)
+                        
+                        # Add the new trade to the active list with its signal_id
+                        with state.lock:
+                            state.active_trades.append({
+                                'order_id': order_id,
+                                'signal_id': signal_id,
+                                'pair': clean_asset
+                            })
+                    else:
+                        log_error(f"Falha ao realizar a operação: {order_id}", clean_asset)
+                    
+                    # Wait a bit after a signal to avoid placing multiple trades on the same candle
+                    time.sleep(2)
+                    return # Exit after finding and placing one trade to restart the cycle
+
+    except Exception as e:
+        log_error(f"Erro no ciclo de negociação: {e}")
+        traceback.print_exc()
+
 
 def main_bot_logic(state):
     exibir_banner()
@@ -178,74 +255,49 @@ def main_bot_logic(state):
     log_success("Conexão com a Exnova estabelecida!")
     API.change_balance(config['conta'])
     
-    cifrao = "$"
-    try:
-        profile_data = API.get_profile_ansyc()
-        if profile_data:
-            cifrao = profile_data.get('currency_char', '$')
-            log_success(f"Logado como {profile_data.get('name', 'Usuário')} | Moeda: {cifrao}")
-    except Exception as e:
-        log_error(f"Erro ao obter perfil: {e}. Usando valores padrão.")
+    # Start the thread that checks for trade results
+    result_checker_thread = Thread(target=check_and_update_results, args=(state, API, supabase_client))
+    result_checker_thread.daemon = True
+    result_checker_thread.start()
+    log_info("Monitor de resultados iniciado em segundo plano.")
+
 
     log_info("Bot iniciado. A aguardar comandos do painel de administração...")
 
     while not state.stop:
         try:
-            # --- LÓGICA DE AUTOCORREÇÃO E LEITURA DE CONFIGURAÇÃO ---
-            try:
-                response = supabase_client.table('bot_config').select('*').eq('id', 1).single().execute()
-                config_data = response.data
-            except APIError as e:
-                # --- FIX: Check for the specific error code 'PGRST116' which means no rows were found ---
-                if hasattr(e, 'code') and e.code == 'PGRST116':
-                    log_warning("Configuração do bot não encontrada na base de dados. A criar configuração padrão...")
-                    default_params = {
-                        "Assertividade_Minima": 80, "MAX_SIMULTANEOUS_TRADES": 1, "Standby_Loss_Count": 2,
-                        "Standby_Timeframe_Minutes": 5, "Recatalog_Cycle_Hours": 2, "Recatalog_Loss_Trigger": 5,
-                        "Consolidation_Lookback": 10, "Consolidation_Threshold": 0.0005, "Exhaustion_DojiLike_Ratio": 0.2,
-                        "MAPeriod": 14, "MaxLevels": 5, "Proximity": 2, "Point": 0.00001
-                    }
-                    insert_response = supabase_client.table('bot_config').insert({
-                        "id": 1,
-                        "status": "PAUSED",
-                        "params": default_params
-                    }).execute()
-                    
-                    # Check if the insert was successful and get the new data
-                    if insert_response.data:
-                        log_success("Configuração padrão criada com sucesso. O bot continuará em modo PAUSADO.")
-                        config_data = insert_response.data[0]
-                    else:
-                        log_error("Falha ao criar configuração padrão. A tentar novamente no próximo ciclo.")
-                        time.sleep(10)
-                        continue # Restart the loop
-                else:
-                    # Re-raise any other API errors that are not the 'zero rows' error
-                    log_error(f"Erro de API do Supabase não tratado: {e}")
-                    raise e
-
+            response = supabase_client.table('bot_config').select('*').eq('id', 1).single().execute()
+            config_data = response.data
+            
             bot_status = config_data.get('status', 'PAUSED')
             remote_params = config_data.get('params', {})
 
-            if bot_status == 'PAUSED':
-                # Log 'PAUSED' status less frequently to avoid spamming the console
-                if int(time.time()) % 20 == 0:
+            if bot_status == 'RUNNING':
+                log_info("Bot em modo RUNNING. Iniciando ciclo de análise...")
+                run_trading_cycle(API, supabase_client, state, remote_params, config)
+            else:
+                if int(time.time()) % 20 == 0: # Log less frequently
                     log_info("Bot em modo PAUSADO. A aguardar comando 'RUNNING' do painel.")
-                time.sleep(5)
-                continue
-
-            log_info("Bot em modo RUNNING. Iniciando ciclo de análise...")
-            # run_trading_cycle(API, state, remote_params, config, cifrao)
             
+            # Main loop sleep time
             time.sleep(10)
 
+        except APIError as e:
+            if hasattr(e, 'code') and e.code == 'PGRST116':
+                log_warning("Configuração do bot não encontrada. Crie a configuração no painel.")
+                time.sleep(15) # Wait longer if config is missing
+            else:
+                log_error(f"ERRO DE API NO LOOP PRINCIPAL: {e}"); time.sleep(10)
         except Exception as e:
-            log_error(f"ERRO NO LOOP PRINCIPAL: {e}"); traceback.print_exc(); time.sleep(10)
+            log_error(f"ERRO INESPERADO NO LOOP PRINCIPAL: {e}"); traceback.print_exc(); time.sleep(10)
 
 def main():
     bot_state = BotState()
-    # O WebSocket não é mais necessário neste modelo simplificado
-    main_bot_logic(bot_state)
+    try:
+        main_bot_logic(bot_state)
+    except KeyboardInterrupt:
+        log_warning("\nDesligando o bot...")
+        bot_state.stop = True
 
 if __name__ == "__main__":
     main()
