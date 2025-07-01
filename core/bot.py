@@ -3,7 +3,7 @@ import asyncio
 import time
 import traceback
 from datetime import datetime, timedelta
-from typing import List, Dict, Optional # FIX: Adicionado 'Optional' à importação
+from typing import List, Dict, Optional
 
 from config import settings
 from services.exnova_service import AsyncExnovaService
@@ -28,7 +28,6 @@ class TradingBot:
         await self.supabase.insert_log(level, message)
 
     async def _backtest_strategy(self, strategy, candles: List[Candle]) -> Dict:
-        """Simula uma estratégia em dados históricos para calcular a assertividade."""
         wins, losses = 0, 0
         if len(candles) < 21:
             return {'win_rate': 0, 'total_trades': 0}
@@ -55,7 +54,6 @@ class TradingBot:
         return {'win_rate': win_rate, 'total_trades': total}
 
     async def _catalog_and_select_assets(self):
-        """Cataloga todos os ativos e seleciona os melhores com base na performance."""
         await self.logger('INFO', "Iniciando fase de catalogação de ativos...")
         all_assets = await self.exnova.get_open_assets()
         
@@ -79,20 +77,20 @@ class TradingBot:
             await self.logger('INFO', f"Catalogação concluída. Ativos selecionados para operar: {self.active_assets}")
 
     async def _analyze_asset_performance(self, asset: str):
-        """Função auxiliar para analisar um único ativo em paralelo."""
         clean_asset_name = asset.split('-')[0]
         candles = await self.exnova.get_historical_candles(clean_asset_name, 60, 300)
         if len(candles) < 50: return asset, None, None
 
         for strategy in STRATEGIES:
             performance = await self._backtest_strategy(strategy, candles)
+            # FIX: Adicionado o parâmetro 'timeframe=1' na chamada da função.
             await self.supabase.update_asset_performance(
                 asset=clean_asset_name,
                 strategy=strategy.name,
+                timeframe=1, # Estamos a operar em M1
                 win_rate=performance['win_rate'],
                 total_trades=performance['total_trades']
             )
-            # Retorna o primeiro resultado para simplificar, mas pode ser otimizado
             return asset, strategy.name, performance
         return asset, None, None
 
