@@ -1,6 +1,7 @@
-websockets
-colorama
-configobj
-requests
-websocket-client
+pydantic
+pydantic-settings
 supabase
+python-dotenv
+exnovaapi
+pytest
+pytest-asyncio
