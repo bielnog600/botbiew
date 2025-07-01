@@ -22,78 +22,12 @@ class TradingBot:
         self.bot_config = {}
         self.martingale_state: Dict[str, Dict] = {}
         self.current_cycle_trades: List[Dict] = []
+        # Novo: Guarda os ativos em cooldown para evitar sobre-operação
+        self.cooldown_assets = set()
 
     async def logger(self, level: str, message: str):
         print(f"[{level.upper()}] {message}")
         await self.supabase.insert_log(level, message)
-
-    async def _backtest_strategy(self, strategy, candles: List[Candle]) -> Dict:
-        wins, losses = 0, 0
-        if len(candles) < 21:
-            return {'win_rate': 0, 'total_trades': 0}
-
-        for i in range(20, len(candles) - 1):
-            historical_slice = candles[:i+1]
-            next_candle = candles[i+1] 
-            
-            direction = strategy.analyze(historical_slice)
-            if not direction:
-                continue
-
-            if direction == "call" and next_candle.close > historical_slice[-1].close:
-                wins += 1
-            elif direction == "call" and next_candle.close <= historical_slice[-1].close:
-                losses += 1
-            elif direction == "put" and next_candle.close < historical_slice[-1].close:
-                wins += 1
-            elif direction == "put" and next_candle.close >= historical_slice[-1].close:
-                losses += 1
-        
-        total = wins + losses
-        win_rate = (wins / total * 100) if total > 0 else 0
-        return {'win_rate': win_rate, 'total_trades': total}
-
-    async def _catalog_and_select_assets(self):
-        await self.logger('INFO', "Iniciando fase de catalogação de ativos...")
-        all_assets = await self.exnova.get_open_assets()
-        
-        best_assets = set()
-        
-        tasks = []
-        for asset in all_assets:
-            tasks.append(self._analyze_asset_performance(asset))
-
-        results = await asyncio.gather(*tasks)
-        
-        for asset, strategy_name, performance in results:
-            if performance and performance['win_rate'] >= 85:
-                await self.logger('SUCCESS', f"Ativo qualificado: {asset} com estratégia {strategy_name} ({performance['win_rate']:.2f}% de assertividade).")
-                best_assets.add(asset)
-
-        self.active_assets = list(best_assets)
-        if not self.active_assets:
-            await self.logger('WARNING', "Nenhum ativo atingiu a meta de 85% de assertividade. O bot irá aguardar.")
-        else:
-            await self.logger('INFO', f"Catalogação concluída. Ativos selecionados para operar: {self.active_assets}")
-
-    async def _analyze_asset_performance(self, asset: str):
-        clean_asset_name = asset.split('-')[0]
-        candles = await self.exnova.get_historical_candles(clean_asset_name, 60, 300)
-        if len(candles) < 50: return asset, None, None
-
-        for strategy in STRATEGIES:
-            performance = await self._backtest_strategy(strategy, candles)
-            # FIX: Adicionado o parâmetro 'timeframe=1' na chamada da função.
-            await self.supabase.update_asset_performance(
-                asset=clean_asset_name,
-                strategy=strategy.name,
-                timeframe=1, # Estamos a operar em M1
-                win_rate=performance['win_rate'],
-                total_trades=performance['total_trades']
-            )
-            return asset, strategy.name, performance
-        return asset, None, None
-
 
     async def run(self):
         await self.logger('INFO', 'Bot a iniciar...')
@@ -106,12 +40,9 @@ class TradingBot:
                 bot_status = self.bot_config.get('status', 'PAUSED')
 
                 if bot_status == 'RUNNING':
-                    operation_mode = self.bot_config.get('operation_mode', 'CONSERVADOR')
-                    if operation_mode == 'CONSERVADOR':
-                        await self._run_conservative_cycle()
-                    else:
-                        await self.logger('INFO', f"Bot em modo AGRESSIVO. A iniciar ciclo de negociação...")
-                        await self.trading_loop(use_all_assets=True, duration_minutes=None)
+                    # A lógica de modos foi simplificada para focar na nova estratégia
+                    await self.logger('INFO', f"Bot em modo RUNNING. A iniciar ciclo de negociação...")
+                    await self.trading_loop()
                 else:
                     await self.logger('INFO', 'Bot em modo PAUSADO. A aguardar...')
                     await asyncio.sleep(15)
@@ -121,31 +52,8 @@ class TradingBot:
                 traceback.print_exc()
                 await asyncio.sleep(30)
 
-    async def _run_conservative_cycle(self):
-        await self._catalog_and_select_assets()
-        
-        if not self.active_assets:
-            await asyncio.sleep(300)
-            return
-
-        await self.logger('INFO', f"Iniciando ciclo de negociação de 5 minutos com os melhores ativos.")
-        self.current_cycle_trades = []
-        await self.trading_loop(use_all_assets=False, duration_minutes=5)
-
-        wins = len([t for t in self.current_cycle_trades if t['result'] == 'WIN'])
-        losses = len([t for t in self.current_cycle_trades if t['result'] == 'LOSS'])
-        total = wins + losses
-        win_rate = (wins / total * 100) if total > 0 else 100
-
-        await self.logger('INFO', f"Ciclo de 5 minutos concluído. Performance: {wins} WINS, {losses} LOSSES ({win_rate:.2f}%).")
-
-        if win_rate < 70:
-            await self.logger('WARNING', "Performance do ciclo abaixo da meta. A recatalogar para encontrar melhores ativos.")
-        else:
-            await self.logger('SUCCESS', "Performance do ciclo acima da meta. A continuar com os mesmos ativos.")
-            await asyncio.sleep(60)
-
-    async def trading_loop(self, use_all_assets: bool, duration_minutes: Optional[int]):
+    async def trading_loop(self):
+        """Ciclo principal que gere as tarefas de negociação."""
         account_type = self.bot_config.get('account_type', 'PRACTICE')
         await self.logger('INFO', f"A usar a conta: {account_type}")
         await self.exnova.change_balance(account_type)
@@ -154,23 +62,29 @@ class TradingBot:
         if current_balance is not None:
             await self.supabase.update_current_balance(current_balance)
 
-        if use_all_assets:
-            self.active_assets = await self.exnova.get_open_assets()
-            self.active_assets = self.active_assets[:settings.MAX_CONCURRENT_ASSETS]
+        self.active_assets = await self.exnova.get_open_assets()
         
-        trading_tasks = [self._process_asset_task(asset) for asset in self.active_assets]
+        # Filtra os ativos que não estão em cooldown
+        assets_to_trade = [asset for asset in self.active_assets if asset not in self.cooldown_assets]
+        assets_to_trade = assets_to_trade[:settings.MAX_CONCURRENT_ASSETS]
+        
+        await self.logger('INFO', f"Ativos a serem monitorizados (fora de cooldown): {assets_to_trade}")
+
+        trading_tasks = [self._process_asset_task(asset) for asset in assets_to_trade]
         result_checker_task = asyncio.create_task(self._result_checker_loop())
         
         all_tasks = trading_tasks + [result_checker_task]
         
         try:
-            await asyncio.wait(all_tasks, timeout=duration_minutes * 60 if duration_minutes else None, return_when=asyncio.FIRST_COMPLETED)
+            # Executa as tarefas por um ciclo (60s) antes de reavaliar a lista de ativos
+            await asyncio.wait(all_tasks, timeout=60, return_when=asyncio.FIRST_COMPLETED)
         finally:
             for task in all_tasks:
                 if not task.done():
                     task.cancel()
 
     async def _wait_for_entry_time(self):
+        """Espera até o segundo 58 para analisar a vela que está a fechar."""
         now = datetime.now()
         second = now.second
         target_second = 58
@@ -181,32 +95,52 @@ class TradingBot:
         await asyncio.sleep(wait_time)
 
     async def _process_asset_task(self, full_asset_name: str):
+        """Tarefa que analisa um único ativo, procurando por uma confluência de sinais."""
         clean_asset_name = full_asset_name.split('-')[0]
-        operation_mode = self.bot_config.get('operation_mode', 'CONSERVADOR')
-        volatility_threshold = 0.6 if operation_mode == 'CONSERVADOR' else 0.85
-
+        
         while True:
             try:
                 await self._wait_for_entry_time()
+                
                 candles = await self.exnova.get_historical_candles(clean_asset_name, 60, 100)
                 if not candles: continue
 
-                volatility = calculate_volatility(candles, lookback=10)
-                if volatility > volatility_threshold: continue
+                # A nossa única e poderosa estratégia
+                strategy = STRATEGIES[0] 
+                direction = strategy.analyze(candles)
                 
-                for strategy in STRATEGIES:
-                    direction = strategy.analyze(candles)
-                    if direction:
-                        await self.logger('SUCCESS', f"[{full_asset_name}] Sinal encontrado! Direção: {direction.upper()}, Estratégia: {strategy.name}")
-                        signal = TradeSignal(pair=clean_asset_name, direction=direction, strategy=strategy.name, volatility_score=volatility)
-                        asyncio.create_task(self._execute_trade(signal, full_asset_name))
-                        break
+                if direction:
+                    await self.logger('SUCCESS', f"[{full_asset_name}] Sinal de CONFLUÊNCIA encontrado! Direção: {direction.upper()}")
+                    
+                    # Adiciona o ativo ao cooldown para evitar entradas repetidas
+                    self.cooldown_assets.add(full_asset_name)
+                    
+                    signal = TradeSignal(
+                        pair=clean_asset_name, 
+                        direction=direction, 
+                        strategy=strategy.name, 
+                        volatility_score=calculate_volatility(candles, 10)
+                    )
+                    asyncio.create_task(self._execute_trade(signal, full_asset_name))
+                    
+                    # Inicia a tarefa para remover o ativo do cooldown após 5 minutos
+                    asyncio.create_task(self._remove_from_cooldown(full_asset_name, 300))
+                    
+                    # Para a análise deste par neste ciclo, pois já encontrou uma entrada.
+                    break 
+
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 await self.logger('ERROR', f"Erro ao processar o ativo {full_asset_name}: {e}")
                 traceback.print_exc()
                 await asyncio.sleep(30)
+
+    async def _remove_from_cooldown(self, asset: str, delay: int):
+        """Remove um ativo da lista de cooldown após um tempo."""
+        await asyncio.sleep(delay)
+        self.cooldown_assets.discard(asset)
+        await self.logger('INFO', f"[{asset}] Cooldown terminado. O ativo voltou a ser analisado.")
 
     def _get_entry_value(self, asset: str) -> float:
         base_value = self.bot_config.get('entry_value', 1.0)
@@ -251,7 +185,6 @@ class TradingBot:
                 if result:
                     await self.logger('SUCCESS' if result == 'WIN' else 'ERROR', f"[{trade.pair}] Resultado da ordem {trade.order_id}: {result}")
                     await self.supabase.update_trade_result(trade.signal_id, result)
-                    self.current_cycle_trades.append({'result': result})
                     self._update_martingale_state(trade.pair, result, trade.entry_value)
                 else:
                     await self.logger('WARNING', f"[{trade.pair}] Timeout ao obter resultado da ordem {trade.order_id}.")
