@@ -47,7 +47,6 @@ class TradingBot:
                 await asyncio.sleep(30)
 
     async def trading_cycle(self):
-        """Ciclo principal que gere as tarefas de negociação."""
         account_type = self.bot_config.get('account_type', 'PRACTICE')
         await self.exnova.change_balance(account_type)
 
@@ -60,27 +59,24 @@ class TradingBot:
         trading_tasks = [asyncio.create_task(self._process_asset_task(asset)) for asset in assets_to_trade]
         
         if not trading_tasks:
-            await asyncio.sleep(60) # Espera se não houver ativos para negociar
+            await asyncio.sleep(60)
             return
             
-        # Espera que as tarefas de análise terminem (ou o tempo limite)
-        done, pending = await asyncio.wait(trading_tasks, timeout=60, return_when=asyncio.ALL_COMPLETED)
+        done, pending = await asyncio.wait(trading_tasks, timeout=55) # Executa por 55s
         for task in pending:
             task.cancel()
 
     async def _wait_for_next_candle(self):
-        """Espera até 2 segundos após a viragem do minuto."""
         now = datetime.now()
-        wait_time = (60 - now.second) + 2 if now.second > 2 else 2 - now.second
+        wait_time = (25 - now.second) + 2 if now.second > 2 else 2 - now.second
         await asyncio.sleep(wait_time)
 
     async def _process_asset_task(self, full_asset_name: str):
-        """Analisa um único ativo para encontrar um sinal."""
         try:
             await self._wait_for_next_candle()
             
             clean_asset_name = full_asset_name.split('-')[0]
-            candles = await self.exnova.get_historical_candles(clean_asset_name, 60, 100)
+            candles = await self.exnova.get_historical_candles(clean_asset_name, 60, 240)
             if not candles: return
 
             for strategy in STRATEGIES:
@@ -91,9 +87,21 @@ class TradingBot:
                     self.cooldown_assets.add(full_asset_name)
                     asyncio.create_task(self._remove_from_cooldown(full_asset_name, 300))
                     
-                    signal = TradeSignal(pair=clean_asset_name, direction=direction, strategy=strategy.name, volatility_score=0)
+                    # FIX: Captura os dados da última vela para enviar ao painel
+                    last_candle = candles[-1]
+                    signal = TradeSignal(
+                        pair=clean_asset_name, 
+                        direction=direction, 
+                        strategy=strategy.name,
+                        setup_candle_open=last_candle.open,
+                        setup_candle_high=last_candle.max,
+                        setup_candle_low=last_candle.min,
+                        setup_candle_close=last_candle.close
+                    )
                     await self._execute_trade(signal, full_asset_name)
                     break 
+        except asyncio.CancelledError:
+            pass # Ignora o cancelamento no final do ciclo
         except Exception as e:
             await self.logger('ERROR', f"Erro ao processar o ativo {full_asset_name}: {e}")
             traceback.print_exc()
