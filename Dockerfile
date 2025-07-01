@@ -1,21 +1,21 @@
-# Use uma imagem base oficial do Python.
-# Usar uma versão específica (ex: 3.10-slim) é uma boa prática para consistência.
+# Usa uma imagem base oficial do Python.
 FROM python:3.10-slim
 
-# Define o diretório de trabalho dentro do container
+# Define o diretório de trabalho dentro do container.
 WORKDIR /app
 
-# Copia o arquivo de dependências para o diretório de trabalho
+# Copia o arquivo de dependências para o diretório de trabalho.
 COPY requirements.txt .
 
-# Instala as dependências listadas no requirements.txt
-# --no-cache-dir reduz o tamanho da imagem
-# --upgrade pip garante que temos a versão mais recente do pip
-RUN pip install --no-cache-dir --upgrade pip && pip install --no-cache-dir -r requirements.txt
+# Instala as dependências.
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Copia o resto dos arquivos da sua aplicação para o diretório de trabalho
+# Copia todo o código do projeto para o diretório de trabalho.
 COPY . .
 
-# Comando que será executado quando o container iniciar
-# Isso executa o seu script do bot.
-CMD ["python", "trading_bot.py"]
+# Expõe a porta para métricas Prometheus (opcional).
+# EXPOSE 8000
+
+# Comando para executar o bot quando o container iniciar.
+# Aponta para o novo ponto de entrada da aplicação.
+CMD ["python", "main.py"]
