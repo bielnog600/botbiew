@@ -1,0 +1,9 @@
+# Ficheiro de variáveis de ambiente (contém segredos)
+.env
+
+# Cache do Python
+__pycache__/
+*.pyc
+
+# Outros
+.DS_Store
