@@ -96,7 +96,7 @@ class TradingBot:
             try:
                 await self._wait_for_entry_time()
                 
-                candles = await self.exnova.get_historical_candles(clean_asset_name, 60, 100)
+                candles = await self.exnova.get_historical_candles(clean_asset_name, 60, 240)
                 if not candles: continue
 
                 strategy = STRATEGIES[0] 
