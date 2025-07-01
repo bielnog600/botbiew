@@ -51,31 +51,25 @@ class ContextualCrossoverStrategy(TradingStrategy):
         is_call_signal = moment_prev < signal_line_prev and moment_current > signal_line_current
         is_put_signal = moment_prev > signal_line_prev and moment_current < signal_line_current
 
-        # Se não houver nenhum gatilho de cruzamento, não há nada a fazer.
         if not is_call_signal and not is_put_signal:
             return None
 
-        # --- ANÁLISE DE CONTEXTO (A PARTE INTELIGENTE) ---
+        # --- ANÁLISE DE CONTEXTO (FILTRO DE S/R) ---
         last_candle = candles[-1]
         resistance_levels, support_levels = detect_sr_levels(candles[:-1], n_levels=3)
 
-        # Se o preço está perto de um SUPORTE, SÓ consideramos sinais de COMPRA (CALL).
-        if is_near_level(last_candle.min, support_levels, candles):
-            if is_call_signal:
-                print(f"DEBUG: Sinal de CALL confirmado perto de um suporte.")
-                return "call"
-            # Se for um sinal de PUT perto de um suporte, é inválido.
-            return None
+        if is_call_signal:
+            if is_near_level(last_candle.max, resistance_levels, candles):
+                print(f"DEBUG: Sinal de CALL ignorado. Preço próximo a uma resistência.")
+                return None
+            return "call"
 
-        # Se o preço está perto de uma RESISTÊNCIA, SÓ consideramos sinais de VENDA (PUT).
-        if is_near_level(last_candle.max, resistance_levels, candles):
-            if is_put_signal:
-                print(f"DEBUG: Sinal de PUT confirmado perto de uma resistência.")
-                return "put"
-            # Se for um sinal de CALL perto de uma resistência, é inválido.
-            return None
+        if is_put_signal:
+            if is_near_level(last_candle.min, support_levels, candles):
+                print(f"DEBUG: Sinal de PUT ignorado. Preço próximo a um suporte.")
+                return None
+            return "put"
 
-        # Se o gatilho ocorreu, mas LONGE de uma zona de valor, ignora o sinal.
         return None
 
 # Lista de estratégias ativas.
