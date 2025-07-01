@@ -21,7 +21,6 @@ class TradingBot:
         self.is_running = True
         self.bot_config = {}
         self.martingale_state: Dict[str, Dict] = {}
-        self.current_cycle_trades: List[Dict] = []
         self.cooldown_assets = set()
 
     async def logger(self, level: str, message: str):
@@ -66,7 +65,6 @@ class TradingBot:
         
         await self.logger('INFO', f"Ativos a serem monitorizados (fora de cooldown): {assets_to_trade}")
 
-        # FIX: Transforma cada corrotina de análise numa Tarefa agendada.
         trading_tasks = [asyncio.create_task(self._process_asset_task(asset)) for asset in assets_to_trade]
         result_checker_task = asyncio.create_task(self._result_checker_loop())
         
@@ -79,14 +77,14 @@ class TradingBot:
                 if not task.done():
                     task.cancel()
 
-    async def _wait_for_entry_time(self):
+    async def _wait_for_next_candle(self):
+        """
+        Calcula e espera o tempo necessário para sincronizar a análise para
+        APÓS o fecho da vela M1 atual.
+        """
         now = datetime.now()
-        second = now.second
-        target_second = 58
-        if second < target_second:
-            wait_time = target_second - second
-        else:
-            wait_time = (60 - second) + target_second
+        # Espera até 2 segundos após a viragem do minuto
+        wait_time = (60 - now.second) + 2
         await asyncio.sleep(wait_time)
 
     async def _process_asset_task(self, full_asset_name: str):
@@ -94,16 +92,19 @@ class TradingBot:
         
         while True:
             try:
-                await self._wait_for_entry_time()
+                # FIX: Sincroniza a execução para DEPOIS do fecho da vela.
+                await self._wait_for_next_candle()
                 
-                candles = await self.exnova.get_historical_candles(clean_asset_name, 60, 240)
+                await self.logger('INFO', f"[{full_asset_name}] Nova vela M1 confirmada. A iniciar análise...")
+                
+                candles = await self.exnova.get_historical_candles(clean_asset_name, 60, 100)
                 if not candles: continue
 
                 strategy = STRATEGIES[0] 
                 direction = strategy.analyze(candles)
                 
                 if direction:
-                    await self.logger('SUCCESS', f"[{full_asset_name}] Sinal de CONFLUÊNCIA encontrado! Direção: {direction.upper()}")
+                    await self.logger('SUCCESS', f"[{full_asset_name}] Sinal confirmado! Direção: {direction.upper()}, Estratégia: {strategy.name}")
                     
                     self.cooldown_assets.add(full_asset_name)
                     
@@ -111,12 +112,13 @@ class TradingBot:
                         pair=clean_asset_name, 
                         direction=direction, 
                         strategy=strategy.name, 
-                        volatility_score=calculate_volatility(candles, 10)
+                        volatility_score=0.0 # Volatilidade não é usada nesta estratégia
                     )
                     asyncio.create_task(self._execute_trade(signal, full_asset_name))
                     
                     asyncio.create_task(self._remove_from_cooldown(full_asset_name, 300))
                     
+                    # Para a análise deste par neste ciclo, pois já encontrou uma entrada.
                     break 
 
             except asyncio.CancelledError:
@@ -199,3 +201,4 @@ class TradingBot:
             else:
                 self.martingale_state[asset] = {'level': 0, 'last_value': self.bot_config.get('entry_value', 1.0)}
                 asyncio.create_task(self.logger('ERROR', f"[{asset}] Limite de Martingale ({max_levels}) atingido. A resetar."))
+
