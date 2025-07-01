@@ -69,7 +69,7 @@ class TradingBot:
     async def _wait_for_mid_minute(self):
         """Espera até o segundo 32 do minuto atual."""
         now = datetime.now()
-        target_second = 32
+        target_second = 28
         if now.second < target_second:
             await asyncio.sleep(target_second - now.second)
 
