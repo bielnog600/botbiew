@@ -1,6 +1,7 @@
 # core/bot.py
 import asyncio
 import time
+import traceback
 from typing import List, Dict
 from config import settings
 from services.exnova_service import AsyncExnovaService
@@ -11,14 +12,23 @@ from core.data_models import TradeSignal, ActiveTrade
 
 class TradingBot:
     def __init__(self):
-        self.exnova = AsyncExnovaService(settings.EXNOVA_EMAIL, settings.EXNOVA_PASSWORD)
+        print(f"[{time.strftime('%H:%M:%S')}] [DIAGNÓSTICO] A inicializar TradingBot...")
+        print(f"[{time.strftime('%H:%M:%S')}] [DIAGNÓSTICO] A inicializar SupabaseService...")
         self.supabase = SupabaseService(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+        print(f"[{time.strftime('%H:%M:%S')}] [DIAGNÓSTICO] SupabaseService inicializado.")
+        
+        print(f"[{time.strftime('%H:%M:%S')}] [DIAGNÓSTICO] A inicializar AsyncExnovaService...")
+        self.exnova = AsyncExnovaService(settings.EXNOVA_EMAIL, settings.EXNOVA_PASSWORD)
+        print(f"[{time.strftime('%H:%M:%S')}] [DIAGNÓSTICO] AsyncExnovaService inicializado.")
+
         self.active_assets: List[str] = []
         self.trade_queue = asyncio.Queue()
         self.is_running = True
+        print(f"[{time.strftime('%H:%M:%S')}] [DIAGNÓSTICO] TradingBot __init__ concluído.")
 
     async def run(self):
         """Ponto de entrada principal para a execução do bot."""
+        print(f"[{time.strftime('%H:%M:%S')}] [DIAGNÓSTICO] Bot.run() iniciado.")
         await self.exnova.connect()
         
         print("Iniciando fase de catalogação de ativos...")
@@ -48,11 +58,10 @@ class TradingBot:
 
                 volatility = calculate_volatility(candles, lookback=10)
                 
-                # FIX: Adiciona um log de "pulsação" para cada ciclo de análise
+                # Log de "pulsação" para cada ciclo de análise
                 print(f"[{time.strftime('%H:%M:%S')}] {asset}: Analisando {len(candles)} velas. Volatilidade: {volatility:.2f}")
 
                 if volatility > 0.6: # Threshold de exemplo
-                    # print(f"Ativo {asset} muito volátil ({volatility:.2f}), pulando ciclo.")
                     await asyncio.sleep(60)
                     continue
                 
@@ -73,6 +82,7 @@ class TradingBot:
                 await asyncio.sleep(5)
             except Exception as e:
                 print(f"Erro ao processar o ativo {asset}: {e}")
+                traceback.print_exc()
                 await asyncio.sleep(30)
 
     async def _execute_trade(self, signal: TradeSignal):
