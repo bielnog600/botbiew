@@ -1,9 +1,7 @@
 # analysis/strategy.py
 from typing import Protocol, List, Optional
 from core.data_models import Candle
-from analysis.technical import (
-    detect_sr_levels, is_near_level, get_candle_pattern
-)
+from analysis.technical import calculate_sma, calculate_ema
 
 class TradingStrategy(Protocol):
     """Define a interface para todas as estratégias de negociação."""
@@ -11,47 +9,56 @@ class TradingStrategy(Protocol):
     def analyze(self, candles: List[Candle]) -> Optional[str]:
         ...
 
-class PriceActionConfluenceStrategy(TradingStrategy):
+class MacdCrossoverStrategy(TradingStrategy):
     """
-    Estratégia unificada que busca a CONFLUÊNCIA de múltiplos fatores de Price Action.
-    Opera apenas quando um padrão de gatilho ocorre numa zona de valor.
+    Estratégia baseada no cruzamento de médias móveis, traduzida do script Lua.
+    Semelhante a um indicador MACD, opera o cruzamento da linha de momento com a linha de sinal.
     """
-    name = "price_action_confluence"
+    name = "macd_crossover"
+    
+    # Parâmetros da estratégia, como no script Lua
+    FAST_MA_PERIOD = 5
+    SLOW_MA_PERIOD = 34
+    SIGNAL_PERIOD = 6
 
     def analyze(self, candles: List[Candle]) -> Optional[str]:
-        if len(candles) < 20:
+        # Precisa de dados suficientes para calcular a média lenta + a linha de sinal
+        if len(candles) < self.SLOW_MA_PERIOD + self.SIGNAL_PERIOD:
             return None
 
-        # 1. CONTEXTO: Identifica as Zonas de Valor (Suporte e Resistência)
-        # Usamos as velas passadas para não ter viés da vela atual
-        resistance_levels, support_levels = detect_sr_levels(candles[:-1], n_levels=3)
+        closes = [c.close for c in candles]
+
+        # Calcula o histórico da linha de momento (diferença entre as SMAs)
+        moment_line = []
+        for i in range(self.SLOW_MA_PERIOD, len(closes) + 1):
+            historical_closes = closes[:i]
+            sma_fast = calculate_sma(historical_closes, self.FAST_MA_PERIOD)
+            sma_slow = calculate_sma(historical_closes, self.SLOW_MA_PERIOD)
+            moment_line.append(sma_fast - sma_slow)
+
+        if len(moment_line) < 2:
+            return None
+
+        # Calcula a linha de sinal (EMA da linha de momento)
+        signal_line_current = calculate_ema(moment_line, self.SIGNAL_PERIOD)
+        signal_line_prev = calculate_ema(moment_line[:-1], self.SIGNAL_PERIOD)
         
-        last_candle = candles[-1]
-        prev_candle = candles[-2]
+        moment_current = moment_line[-1]
+        moment_prev = moment_line[-2]
 
-        # 2. GATILHO: Procura por um padrão de candlestick de reversão
-        pattern = get_candle_pattern(last_candle, prev_candle)
+        # --- LÓGICA DE DECISÃO ---
 
-        # --- LÓGICA DE DECISÃO DE ALTA PROBABILIDADE ---
+        # Condição de Compra (CALL): Momento cruza a linha de sinal para cima.
+        if moment_prev < signal_line_prev and moment_current > signal_line_current:
+            return "call"
 
-        # Cenário de COMPRA (CALL):
-        # A confluência perfeita é um padrão de reversão de alta
-        # que ocorre exatamente numa zona de suporte.
-        if pattern in ["BULLISH_ENGULFING", "HAMMER"]:
-            if is_near_level(last_candle.min, support_levels, candles):
-                return "call"
+        # Condição de Venda (PUT): Momento cruza a linha de sinal para baixo.
+        if moment_prev > signal_line_prev and moment_current < signal_line_current:
+            return "put"
 
-        # Cenário de VENDA (PUT):
-        # A confluência perfeita é um padrão de reversão de baixa
-        # que ocorre exatamente numa zona de resistência.
-        if pattern in ["BEARISH_ENGULFING", "SHOOTING_STAR"]:
-            if is_near_level(last_candle.max, resistance_levels, candles):
-                return "put"
-
-        # Se nenhuma confluência for encontrada, o bot permanece paciente.
         return None
 
-# Lista de estratégias ativas. Agora, apenas a nossa estratégia principal.
+# Lista de estratégias ativas. Agora, apenas a nossa nova estratégia.
 STRATEGIES: List[TradingStrategy] = [
-    PriceActionConfluenceStrategy(),
+    MacdCrossoverStrategy(),
 ]
