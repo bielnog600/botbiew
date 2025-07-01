@@ -1,6 +1,14 @@
+# requirements.txt
+
+# Dependências da aplicação principal
 pydantic
 pydantic-settings
 supabase
 python-dotenv
+
+# Dependências da biblioteca local exnovaapi
+requests
+
+# Dependências de teste
 pytest
 pytest-asyncio
