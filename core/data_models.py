@@ -3,27 +3,24 @@ from pydantic import BaseModel
 from typing import Optional
 
 class Candle(BaseModel):
-    """
-    Modelo de dados para uma vela (candle).
-    """
+    """Modelo de dados para uma vela (candle)."""
     open: float
     close: float
-    max: float # Corrigido de 'high' para 'max'
-    min: float # Corrigido de 'low' para 'min'
+    max: float
+    min: float
 
 class TradeSignal(BaseModel):
-    """
-    Representa um sinal de negociação gerado por uma estratégia.
-    """
-    asset: str
+    """Representa um sinal de negociação gerado por uma estratégia."""
+    # FIX: Alterado de 'asset' para 'pair' para corresponder ao banco de dados.
+    pair: str
     direction: str # 'call' ou 'put'
     strategy: str
     volatility_score: float
 
 class ActiveTrade(BaseModel):
-    """
-    Representa uma operação ativa na plataforma.
-    """
+    """Representa uma operação ativa na plataforma."""
     order_id: str
     signal_id: int
-    asset: str
+    # FIX: Alterado de 'asset' para 'pair' para consistência.
+    pair: str
+    entry_value: float
