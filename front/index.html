@@ -3,11 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    
-    <!-- FIX: Removidas todas as meta tags e links relacionados a PWA/Manifest/Ícones para eliminar erros 404. -->
-    
     <title>MAROMBIEW BOT</title>
-    
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -54,6 +50,8 @@
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlvZHVhaHdrbmZza3R1anRoZnljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEzMDc0NDcsImV4cCI6MjA2Njg4MzQ0N30.96f8wZO6SvABKFMWjIiw1pSugAB4Isldj7yxLcLJRSE';
         const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+        // --- COMPONENTES ---
+
         function LoginPage({ onLogin }) {
             const [email, setEmail] = useState('');
             const [password, setPassword] = useState('');
@@ -97,14 +95,20 @@
             const [saving, setSaving] = useState(false);
 
             const fetchConfig = useCallback(async () => {
-                setLoading(true);
                 const { data, error } = await supabaseClient.from('bot_config').select('*').eq('id', 1).single();
                 if (data) setConfig(data);
                 else alert("Erro ao carregar configuração: " + error?.message);
                 setLoading(false);
             }, []);
 
-            useEffect(() => { fetchConfig(); }, [fetchConfig]);
+            useEffect(() => {
+                fetchConfig();
+                const channel = supabaseClient.channel('bot_config_realtime')
+                    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'bot_config' }, payload => {
+                        setConfig(payload.new);
+                    }).subscribe();
+                return () => supabaseClient.removeChannel(channel);
+            }, [fetchConfig]);
 
             const handleUpdate = (key, value) => {
                 setConfig(prev => ({ ...prev, [key]: value }));
@@ -122,46 +126,38 @@
                 setSaving(false);
             };
 
-            if (loading) return <p>A carregar configurações...</p>;
-            if (!config) return <p>Não foi possível carregar a configuração.</p>;
+            if (loading) return <div className="p-6"><p>A carregar configurações...</p></div>;
+            if (!config) return <div className="p-6"><p>Não foi possível carregar a configuração.</p></div>;
 
             return (
                 <div className="space-y-8">
                     <h1 className="text-3xl font-bold text-white">Configurações e Controlo</h1>
                     
-                    <div className="glass-card p-6 rounded-xl">
-                        <h2 className="text-xl font-bold mb-4">Controlo Geral</h2>
-                        <div className="flex items-center justify-between bg-gray-900 p-4 rounded-lg">
-                            <div className="flex items-center">
-                                <i className={`fas fa-circle mr-3 ${config.status === 'RUNNING' ? 'text-green-500 animate-pulse' : 'text-gray-500'}`}></i>
-                                <div>
-                                    <span className="font-semibold">Estado do Bot</span>
-                                    <p className={`font-bold ${config.status === 'RUNNING' ? 'text-green-400' : 'text-amber-400'}`}>{config.status}</p>
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                        <div className="space-y-8">
+                            <div className="glass-card p-6 rounded-xl">
+                                <h2 className="text-xl font-bold mb-4">Controlo Geral</h2>
+                                <div className="flex items-center justify-between bg-gray-900 p-4 rounded-lg">
+                                    <div className="flex items-center"><i className={`fas fa-circle mr-3 ${config.status === 'RUNNING' ? 'text-green-500 animate-pulse' : 'text-gray-500'}`}></i><div><span className="font-semibold">Estado do Bot</span><p className={`font-bold ${config.status === 'RUNNING' ? 'text-green-400' : 'text-amber-400'}`}>{config.status}</p></div></div>
+                                    <button onClick={() => handleUpdate('status', config.status === 'RUNNING' ? 'PAUSED' : 'RUNNING')} className={`btn ${config.status === 'RUNNING' ? 'bg-red-600 hover:bg-red-700' : 'btn-primary'} px-5 py-2 rounded-md text-white`}><i className={`fas ${config.status === 'RUNNING' ? 'fa-pause' : 'fa-play'} mr-2`}></i>{config.status === 'RUNNING' ? 'Pausar' : 'Iniciar'}</button>
                                 </div>
                             </div>
-                            <button onClick={() => handleUpdate('status', config.status === 'RUNNING' ? 'PAUSED' : 'RUNNING')} className={`btn ${config.status === 'RUNNING' ? 'bg-red-600 hover:bg-red-700' : 'btn-primary'} px-5 py-2 rounded-md text-white`}>
-                                <i className={`fas ${config.status === 'RUNNING' ? 'fa-pause' : 'fa-play'} mr-2`}></i>
-                                {config.status === 'RUNNING' ? 'Pausar' : 'Iniciar'}
-                            </button>
-                        </div>
-                    </div>
-
-                    <div className="glass-card p-6 rounded-xl space-y-6">
-                        <h2 className="text-xl font-bold">Perfil de Risco</h2>
-                        <div className="flex rounded-lg border border-gray-700">
-                            <div className="w-1/2">
-                                <input type="radio" id="mode-conservative" name="op-mode" value="CONSERVADOR" checked={config.operation_mode === 'CONSERVADOR'} onChange={e => handleUpdate('operation_mode', e.target.value)} className="hidden" />
-                                <label htmlFor="mode-conservative" className="radio-label flex flex-col items-center justify-center p-4 rounded-l-lg cursor-pointer text-center">
-                                    <i className="fas fa-shield-alt text-2xl mb-2"></i>
-                                    <span className="font-bold">Conservador</span>
-                                </label>
+                            
+                            <div className="glass-card p-6 rounded-xl">
+                                <h2 className="text-xl font-bold mb-4">Banca</h2>
+                                <div className="bg-gray-900 p-4 rounded-lg text-center">
+                                    <p className="text-sm text-gray-400">Saldo da Conta {config.account_type}</p>
+                                    <p className="text-4xl font-bold text-green-400 mt-2">
+                                        {config.current_balance ? `$${Number(config.current_balance).toFixed(2)}` : 'Aguardando...'}
+                                    </p>
+                                </div>
                             </div>
-                            <div className="w-1/2">
-                                <input type="radio" id="mode-aggressive" name="op-mode" value="AGRESSIVO" checked={config.operation_mode === 'AGRESSIVO'} onChange={e => handleUpdate('operation_mode', e.target.value)} className="hidden" />
-                                <label htmlFor="mode-aggressive" className="radio-label flex flex-col items-center justify-center p-4 rounded-r-lg cursor-pointer text-center">
-                                    <i className="fas fa-rocket text-2xl mb-2"></i>
-                                    <span className="font-bold">Agressivo</span>
-                                </label>
+                        </div>
+
+                        <div className="space-y-8">
+                             <div className="glass-card p-6 rounded-xl space-y-6">
+                                <h2 className="text-xl font-bold">Perfil de Risco</h2>
+                                <div className="flex rounded-lg border border-gray-700"><div className="w-1/2"><input type="radio" id="mode-conservative" name="op-mode" value="CONSERVADOR" checked={config.operation_mode === 'CONSERVADOR'} onChange={e => handleUpdate('operation_mode', e.target.value)} className="hidden" /><label htmlFor="mode-conservative" className="radio-label flex flex-col items-center justify-center p-4 rounded-l-lg cursor-pointer text-center"><i className="fas fa-shield-alt text-2xl mb-2"></i><span className="font-bold">Conservador</span></label></div><div className="w-1/2"><input type="radio" id="mode-aggressive" name="op-mode" value="AGRESSIVO" checked={config.operation_mode === 'AGRESSIVO'} onChange={e => handleUpdate('operation_mode', e.target.value)} className="hidden" /><label htmlFor="mode-aggressive" className="radio-label flex flex-col items-center justify-center p-4 rounded-r-lg cursor-pointer text-center"><i className="fas fa-rocket text-2xl mb-2"></i><span className="font-bold">Agressivo</span></label></div></div>
                             </div>
                         </div>
                     </div>
@@ -169,49 +165,17 @@
                     <div className="glass-card p-6 rounded-xl space-y-6">
                         <h2 className="text-xl font-bold">Parâmetros de Negociação</h2>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div>
-                                <label className="block mb-1 text-gray-400">Tipo de Conta</label>
-                                <select value={config.account_type} onChange={e => handleUpdate('account_type', e.target.value)} className="form-input w-full p-2 rounded-md">
-                                    <option value="PRACTICE">Prática (PRACTICE)</option>
-                                    <option value="REAL">Real</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label className="block mb-1 text-gray-400">Valor de Entrada Padrão ($)</label>
-                                <input type="number" step="0.01" value={config.entry_value} onChange={e => handleUpdate('entry_value', parseFloat(e.target.value))} className="form-input w-full p-2 rounded-md" />
-                            </div>
+                            <div><label className="block mb-1 text-gray-400">Tipo de Conta</label><select value={config.account_type} onChange={e => handleUpdate('account_type', e.target.value)} className="form-input w-full p-2 rounded-md"><option value="PRACTICE">Prática</option><option value="REAL">Real</option></select></div>
+                            <div><label className="block mb-1 text-gray-400">Valor de Entrada Padrão ($)</label><input type="number" step="0.01" value={config.entry_value} onChange={e => handleUpdate('entry_value', parseFloat(e.target.value))} className="form-input w-full p-2 rounded-md" /></div>
                         </div>
                     </div>
 
                     <div className="glass-card p-6 rounded-xl space-y-6">
-                        <div className="flex items-center justify-between">
-                            <h2 className="text-xl font-bold">Gestão de Martingale</h2>
-                            <div className="flex items-center">
-                                <input className="hidden" type="checkbox" id="martingale-toggle" checked={config.use_martingale} onChange={() => handleUpdate('use_martingale', !config.use_martingale)} />
-                                <label htmlFor="martingale-toggle" className="flex items-center cursor-pointer">
-                                    <div className="relative"><div className="toggle-bg block bg-gray-600 w-14 h-8 rounded-full"></div></div>
-                                    <div className="ml-3 text-white font-medium">{config.use_martingale ? 'Ativado' : 'Desativado'}</div>
-                                </label>
-                            </div>
-                        </div>
-                        {config.use_martingale && (
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t border-gray-700">
-                                <div>
-                                    <label className="block mb-1 text-gray-400">Níveis de Martingale</label>
-                                    <input type="number" step="1" value={config.martingale_levels} onChange={e => handleUpdate('martingale_levels', parseInt(e.target.value))} className="form-input w-full p-2 rounded-md" />
-                                </div>
-                                <div>
-                                    <label className="block mb-1 text-gray-400">Fator de Multiplicação</label>
-                                    <input type="number" step="0.1" value={config.martingale_factor} onChange={e => handleUpdate('martingale_factor', parseFloat(e.target.value))} className="form-input w-full p-2 rounded-md" />
-                                </div>
-                            </div>
-                        )}
+                        <div className="flex items-center justify-between"><h2 className="text-xl font-bold">Gestão de Martingale</h2><div className="flex items-center"><input className="hidden" type="checkbox" id="martingale-toggle" checked={config.use_martingale} onChange={() => handleUpdate('use_martingale', !config.use_martingale)} /><label htmlFor="martingale-toggle" className="flex items-center cursor-pointer"><div className="relative"><div className="toggle-bg block bg-gray-600 w-14 h-8 rounded-full"></div></div><div className="ml-3 text-white font-medium">{config.use_martingale ? 'Ativado' : 'Desativado'}</div></label></div></div>
+                        {config.use_martingale && (<div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t border-gray-700"><div><label className="block mb-1 text-gray-400">Níveis de Martingale</label><input type="number" step="1" value={config.martingale_levels} onChange={e => handleUpdate('martingale_levels', parseInt(e.target.value))} className="form-input w-full p-2 rounded-md" /></div><div><label className="block mb-1 text-gray-400">Fator de Multiplicação</label><input type="number" step="0.1" value={config.martingale_factor} onChange={e => handleUpdate('martingale_factor', parseFloat(e.target.value))} className="form-input w-full p-2 rounded-md" /></div></div>)}
                     </div>
 
-                    <button onClick={handleSave} className="btn btn-primary w-full py-3 rounded-lg mt-8 text-lg" disabled={saving}>
-                        <i className="fas fa-save mr-2"></i>
-                        {saving ? 'A guardar...' : 'Guardar Todas as Alterações'}
-                    </button>
+                    <button onClick={handleSave} className="btn btn-primary w-full py-3 rounded-lg mt-8 text-lg" disabled={saving}><i className="fas fa-save mr-2"></i>{saving ? 'A guardar...' : 'Guardar Todas as Alterações'}</button>
                 </div>
             );
         }
@@ -256,7 +220,7 @@
             return (
                 <div>
                     <h1 className="text-3xl font-bold text-white mb-6">Logs em Tempo Real</h1>
-                    <div ref={logContainerRef} className="glass-card font-mono text-sm p-4 rounded-xl h-96 overflow-y-auto space-y-2">
+                    <div ref={logContainerRef} className="glass-card font-mono text-sm p-4 rounded-xl h-[60vh] overflow-y-auto space-y-2">
                         {logs.map(log => <LogLine key={log.id} log={log} />)}
                     </div>
                 </div>
