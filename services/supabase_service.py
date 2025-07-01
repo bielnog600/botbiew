@@ -1,6 +1,6 @@
 # services/supabase_service.py
 from supabase import create_client, Client
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional # FIX: Adicionado 'Optional' à importação
 from core.data_models import TradeSignal
 
 class SupabaseService:
