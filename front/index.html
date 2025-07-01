@@ -2,18 +2,33 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <!-- This meta tag is crucial for a responsive, app-like experience on mobile -->
+    <!-- Meta tags essenciais para a experiência de aplicativo (PWA) -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Admin Dashboard - MAROMBIEW BOT</title>
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="MAROMBIEW BOT">
+    <meta name="theme-color" content="#0D1117">
+    <link rel="manifest" href="manifest.json">
+    
+    <title>MAROMBIEW BOT</title>
+    
+    <!-- Links para fontes e estilos -->
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+    <!-- Ícone para a aba do navegador e para "Adicionar à Tela de Início" -->
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🤖</text></svg>">
+    <link rel="apple-touch-icon" href="icons/icon-192x192.png">
+
+    <!-- Scripts do React e Supabase -->
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+    
     <style>
         :root {
             --bg-dark: #0D1117;
@@ -23,11 +38,10 @@
             --text-secondary: #8b949e;
             --accent-primary: #238636;
             --accent-primary-hover: #2ea043;
-            --accent-secondary: #db6d28;
             --accent-red: #da3633;
         }
         html, body {
-            overscroll-behavior-y: contain; /* Prevents pull-to-refresh on mobile */
+            overscroll-behavior-y: contain;
         }
         body {
             background-color: var(--bg-dark);
@@ -98,7 +112,7 @@
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlvZHVhaHdrbmZza3R1anRoZnljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEzMDc0NDcsImV4cCI6MjA2Njg4MzQ0N30.96f8wZO6SvABKFMWjIiw1pSugAB4Isldj7yxLcLJRSE';
         const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-        // --- COMPONENTS ---
+        // --- COMPONENTS (O código React permanece o mesmo) ---
 
         function LoginPage({ onLogin }) {
             const [email, setEmail] = useState('');
@@ -145,7 +159,6 @@
 
             const fetchConfig = useCallback(async () => {
                 setLoading(true);
-                // FIX: Use .from() instead of .table()
                 const { data, error } = await supabaseClient.from('bot_config').select('*').eq('id', 1).single();
                 if (data) {
                     setBotStatus(data.status);
@@ -160,7 +173,6 @@
                 fetchConfig();
                 const channel = supabaseClient.channel('bot_config_changes')
                     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'bot_config', filter: 'id=eq.1' }, payload => {
-                        console.log('Config alterada:', payload.new);
                         setBotStatus(payload.new.status);
                         setParams(payload.new.params);
                     })
@@ -172,9 +184,13 @@
             const handleStatusToggle = async () => {
                 const newStatus = botStatus === 'RUNNING' ? 'PAUSED' : 'RUNNING';
                 setSaving(true);
-                // FIX: Use .from() instead of .table()
-                await supabaseClient.from('bot_config').update({ status: newStatus }).eq('id', 1);
-                setBotStatus(newStatus); // Optimistic update
+                const {error} = await supabaseClient.from('bot_config').update({ status: newStatus }).eq('id', 1);
+                if (error) {
+                    alert('Erro ao atualizar status. Verifique as permissões (RLS) da tabela `bot_config`.');
+                    fetchConfig(); // Re-fetch to get the real state
+                } else {
+                    setBotStatus(newStatus);
+                }
                 setSaving(false);
             };
 
@@ -191,7 +207,6 @@
 
             const handleParamsSave = async () => {
                 setSaving(true);
-                // FIX: Use .from() instead of .table()
                 const { error } = await supabaseClient.from('bot_config').update({ params: params }).eq('id', 1);
                 if (error) {
                     alert('Erro ao guardar parâmetros: ' + error.message);
@@ -266,7 +281,6 @@
             
             useEffect(() => {
                 const fetchInitialSignals = async () => {
-                    // FIX: Use .from() instead of .table()
                     const { data, error } = await supabaseClient
                         .from('trade_signals')
                         .select('*')
@@ -274,7 +288,6 @@
                         .limit(50);
                     
                     if (error) {
-                         // FIX: Gracefully handle error if table doesn't exist
                         console.error("Erro ao buscar sinais:", error);
                         setError("A tabela 'trade_signals' não foi encontrada. Por favor, crie-a no seu painel Supabase.");
                     } else {
@@ -285,7 +298,7 @@
 
                 const channel = supabaseClient.channel('trade_signals_feed')
                     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'trade_signals' }, payload => {
-                        setError(null); // Clear error on new signal
+                        setError(null);
                         setSignals(currentSignals => [payload.new, ...currentSignals]);
                     })
                     .subscribe();
@@ -333,31 +346,6 @@
             );
         }
 
-        /*
-        // --- FIX: UserManagement Component Disabled for Security ---
-        // The function supabaseClient.auth.admin.listUsers() requires a service_role key.
-        // This key is secret and MUST NOT be exposed in client-side code like this.
-        // The correct way to implement this is with a Supabase Edge Function, which runs on a server.
-        // To prevent security risks, this feature is temporarily disabled.
-        
-        function UserManagement() {
-            return (
-                 <div>
-                    <h1 className="text-3xl font-bold text-white mb-6">Gestão de Alunos</h1>
-                    <div className="glass-card rounded-xl p-8 text-center">
-                        <i className="fas fa-shield-halved text-4xl text-amber-400 mb-4"></i>
-                        <h2 className="text-xl font-bold text-white mb-2">Função Indisponível</h2>
-                        <p className="text-gray-400">
-                            Por razões de segurança, a gestão de usuários não pode ser feita diretamente do browser.
-                            <br/>
-                            Isto requer uma implementação segura com Edge Functions.
-                        </p>
-                    </div>
-                </div>
-            )
-        }
-        */
-
         function AdminDashboard() {
             const [view, setView] = useState('bot_control');
             const handleLogout = async () => { await supabaseClient.auth.signOut(); };
@@ -373,7 +361,6 @@
                 switch (view) {
                     case 'bot_control': return <BotControl />;
                     case 'signals': return <SignalsView />;
-                    // case 'user_management': return <UserManagement />; // Disabled for security
                     default: return <BotControl />;
                 }
             };
@@ -388,7 +375,6 @@
                         <nav className="flex-1 space-y-2">
                             <NavLink viewName="bot_control" icon="fa-gamepad" text="Controle do Bot" />
                             <NavLink viewName="signals" icon="fa-satellite-dish" text="Sinais ao Vivo" />
-                            {/* <NavLink viewName="user_management" icon="fa-users" text="Gestão de Alunos" /> */}
                         </nav>
                         <div className="p-2">
                             <button onClick={handleLogout} className="w-full flex items-center space-x-3 px-4 py-3 rounded-lg text-sm font-semibold hover:bg-red-500/80">
@@ -411,10 +397,6 @@
                         <a href="#" onClick={() => setView('signals')} className={`flex-1 flex flex-col items-center py-2 text-xs ${view === 'signals' ? 'text-green-400' : 'text-gray-400'}`}>
                             <i className="fa-solid fa-satellite-dish text-xl mb-1"></i>Sinais
                         </a>
-                        {/* <a href="#" onClick={() => setView('user_management')} className={`flex-1 flex flex-col items-center py-2 text-xs ${view === 'user_management' ? 'text-green-400' : 'text-gray-400'}`}>
-                            <i className="fa-solid fa-users text-xl mb-1"></i>Alunos
-                        </a>
-                        */}
                          <a href="#" onClick={handleLogout} className="flex-1 flex flex-col items-center py-2 text-xs text-gray-400">
                             <i className="fa-solid fa-right-from-bracket text-xl mb-1"></i>Sair
                         </a>
@@ -453,6 +435,19 @@
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<App />);
+    </script>
+
+    <!-- Script para registrar o Service Worker -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/sw.js').then(registration => {
+                    console.log('ServiceWorker registrado com sucesso: ', registration.scope);
+                }, function(err) {
+                    console.log('Falha no registro do ServiceWorker: ', err);
+                });
+            });
+        }
     </script>
 </body>
 </html>
