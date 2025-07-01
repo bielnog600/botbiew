@@ -19,7 +19,6 @@ class TradingBot:
         self.trade_queue = asyncio.Queue()
         self.is_running = True
         self.bot_config = {}
-        # Dicionário para gerir o estado do Martingale por ativo
         self.martingale_state: Dict[str, Dict] = {}
 
     async def logger(self, level: str, message: str):
@@ -37,7 +36,8 @@ class TradingBot:
                 bot_status = self.bot_config.get('status', 'PAUSED')
 
                 if bot_status == 'RUNNING':
-                    await self.logger('INFO', 'Bot em modo RUNNING. A iniciar ciclo de negociação...')
+                    operation_mode = self.bot_config.get('operation_mode', 'CONSERVADOR')
+                    await self.logger('INFO', f"Bot em modo RUNNING ({operation_mode}). A iniciar ciclo de negociação...")
                     await self.trading_loop()
                 else:
                     await self.logger('INFO', 'Bot em modo PAUSADO. A aguardar...')
@@ -55,8 +55,7 @@ class TradingBot:
 
         self.active_assets = await self.exnova.get_open_assets()
         self.active_assets = self.active_assets[:settings.MAX_CONCURRENT_ASSETS]
-        await self.logger('INFO', f"A monitorizar os seguintes ativos: {self.active_assets}")
-
+        
         trading_tasks = [self._process_asset_task(asset) for asset in self.active_assets]
         result_checker_task = asyncio.create_task(self._result_checker_loop())
         
@@ -69,6 +68,10 @@ class TradingBot:
             task.cancel()
 
     async def _process_asset_task(self, asset: str):
+        # Define o comportamento com base no modo de operação
+        operation_mode = self.bot_config.get('operation_mode', 'CONSERVADOR')
+        volatility_threshold = 0.6 if operation_mode == 'CONSERVADOR' else 0.85
+
         while True:
             try:
                 candles = await self.exnova.get_historical_candles(asset, 60, 100)
@@ -77,6 +80,11 @@ class TradingBot:
                     continue
 
                 volatility = calculate_volatility(candles, lookback=10)
+                
+                if volatility > volatility_threshold:
+                    await self.logger('INFO', f"[{asset}] Volatilidade ({volatility:.2f}) acima do limite para o modo {operation_mode} ({volatility_threshold}). A aguardar.")
+                    await asyncio.sleep(60)
+                    continue
                 
                 for strategy in STRATEGIES:
                     direction = strategy.analyze(candles)
@@ -100,7 +108,6 @@ class TradingBot:
                 await asyncio.sleep(30)
 
     def _get_entry_value(self, asset: str) -> float:
-        """Calcula o valor de entrada, aplicando a lógica de Martingale se necessário."""
         base_value = self.bot_config.get('entry_value', 1.0)
         use_mg = self.bot_config.get('use_martingale', False)
 
@@ -112,15 +119,13 @@ class TradingBot:
         if asset_mg_state['level'] == 0:
             return base_value
         else:
-            # Calcula o próximo valor de Martingale
             mg_factor = self.bot_config.get('martingale_factor', 2.3)
             next_value = asset_mg_state['last_value'] * mg_factor
             return round(next_value, 2)
 
     async def _execute_trade(self, signal: TradeSignal):
         entry_value = self._get_entry_value(signal.asset)
-        await self.logger('INFO', f"[{signal.asset}] Valor de entrada calculado: ${entry_value}")
-
+        
         signal_id = await self.supabase.insert_trade_signal(signal)
         if not signal_id:
             await self.logger('ERROR', f"[{signal.asset}] Falha ao registrar sinal. A operação não será executada.")
@@ -131,6 +136,7 @@ class TradingBot:
         
         if order_id:
             await self.logger('SUCCESS', f"[{signal.asset}] Ordem {order_id} (sinal ID: {signal_id}) enviada.")
+            # Precisamos adicionar o entry_value ao ActiveTrade para o Martingale
             active_trade = ActiveTrade(order_id=order_id, signal_id=signal_id, asset=signal.asset, entry_value=entry_value)
             await self.trade_queue.put(active_trade)
         else:
@@ -150,6 +156,7 @@ class TradingBot:
             if result:
                 await self.logger('SUCCESS' if result == 'WIN' else 'ERROR', f"[{trade.asset}] Resultado da ordem {trade.order_id}: {result}")
                 await self.supabase.update_trade_result(trade.signal_id, result)
+                # Passamos o valor da entrada para a lógica de Martingale
                 self._update_martingale_state(trade.asset, result, trade.entry_value)
             else:
                 await self.logger('WARNING', f"[{trade.asset}] Timeout ao obter resultado da ordem {trade.order_id}.")
@@ -158,7 +165,6 @@ class TradingBot:
             self.trade_queue.task_done()
 
     def _update_martingale_state(self, asset: str, result: str, last_value: float):
-        """Atualiza o estado do Martingale para um ativo específico."""
         if not self.bot_config.get('use_martingale', False):
             return
 
@@ -166,16 +172,13 @@ class TradingBot:
         current_level = self.martingale_state.get(asset, {}).get('level', 0)
 
         if result == 'WIN':
-            # Zera o Martingale em caso de vitória
             self.martingale_state[asset] = {'level': 0, 'last_value': self.bot_config.get('entry_value', 1.0)}
             asyncio.create_task(self.logger('INFO', f"[{asset}] Martingale resetado após WIN."))
         elif result == 'LOSS':
             if current_level < max_levels:
-                # Avança para o próximo nível de Martingale
                 self.martingale_state[asset] = {'level': current_level + 1, 'last_value': last_value}
                 asyncio.create_task(self.logger('WARNING', f"[{asset}] LOSS. A ativar Martingale nível {current_level + 1}."))
             else:
-                # Atingiu o limite, zera o Martingale
                 self.martingale_state[asset] = {'level': 0, 'last_value': self.bot_config.get('entry_value', 1.0)}
                 asyncio.create_task(self.logger('ERROR', f"[{asset}] Limite de Martingale ({max_levels}) atingido. A resetar."))
 
