@@ -18,8 +18,7 @@ class TradingBot:
         self.is_running = True
         self.bot_config = {}
         self.trade_queue = asyncio.Queue()
-        # Dicionário para guardar os setups encontrados no início do minuto
-        self.pending_setups: Dict[str, Dict] = {}
+        self.cooldown_assets = set()
         self.martingale_state: Dict[str, Dict] = {}
 
     async def logger(self, level: str, message: str):
@@ -31,13 +30,13 @@ class TradingBot:
         await self.exnova.connect()
         await self.logger('SUCCESS', f"Conexão com a Exnova estabelecida.")
         
-        # Inicia o loop de verificação de resultados em segundo plano
         asyncio.create_task(self._result_checker_loop())
 
         while self.is_running:
             try:
                 self.bot_config = await self.supabase.get_bot_config()
                 if self.bot_config.get('status') == 'RUNNING':
+                    await self.logger('INFO', "Bot em modo RUNNING. A iniciar ciclo de negociação...")
                     await self.trading_cycle()
                 else:
                     await self.logger('INFO', 'Bot em modo PAUSADO. A aguardar...')
@@ -48,84 +47,61 @@ class TradingBot:
                 await asyncio.sleep(30)
 
     async def trading_cycle(self):
-        """Ciclo principal que gere a análise em duas fases."""
-        # --- FASE 1: Identificação de Setups (Início do Minuto) ---
-        await self._wait_for_minute_start()
-        await self._find_setups()
+        """Ciclo principal que gere as tarefas de negociação."""
+        account_type = self.bot_config.get('account_type', 'PRACTICE')
+        await self.exnova.change_balance(account_type)
 
-        if not self.pending_setups:
+        open_assets = await self.exnova.get_open_assets()
+        assets_to_trade = [asset for asset in open_assets if asset not in self.cooldown_assets]
+        assets_to_trade = assets_to_trade[:settings.MAX_CONCURRENT_ASSETS]
+        
+        await self.logger('INFO', f"Ativos a serem monitorizados: {assets_to_trade}")
+
+        trading_tasks = [asyncio.create_task(self._process_asset_task(asset)) for asset in assets_to_trade]
+        
+        if not trading_tasks:
+            await asyncio.sleep(60) # Espera se não houver ativos para negociar
             return
+            
+        # Espera que as tarefas de análise terminem (ou o tempo limite)
+        done, pending = await asyncio.wait(trading_tasks, timeout=60, return_when=asyncio.ALL_COMPLETED)
+        for task in pending:
+            task.cancel()
 
-        # --- FASE 2: Confirmação de Gatilhos (Meio do Minuto) ---
-        await self._wait_for_mid_minute()
-        await self._check_and_execute_breakouts()
-
-    async def _wait_for_minute_start(self):
+    async def _wait_for_next_candle(self):
         """Espera até 2 segundos após a viragem do minuto."""
         now = datetime.now()
         wait_time = (60 - now.second) + 2 if now.second > 2 else 2 - now.second
         await asyncio.sleep(wait_time)
 
-    async def _wait_for_mid_minute(self):
-        """Espera até o segundo 32 do minuto atual."""
-        now = datetime.now()
-        target_second = 15
-        if now.second < target_second:
-            await asyncio.sleep(target_second - now.second)
+    async def _process_asset_task(self, full_asset_name: str):
+        """Analisa um único ativo para encontrar um sinal."""
+        try:
+            await self._wait_for_next_candle()
+            
+            clean_asset_name = full_asset_name.split('-')[0]
+            candles = await self.exnova.get_historical_candles(clean_asset_name, 60, 100)
+            if not candles: return
 
-    async def _find_setups(self):
-        """Busca por setups de negociação em todos os ativos abertos."""
-        await self.logger('INFO', "Nova vela M1. A procurar por setups...")
-        self.pending_setups.clear()
-        open_assets = await self.exnova.get_open_assets()
-        
-        tasks = [self._analyze_for_setup(asset) for asset in open_assets[:settings.MAX_CONCURRENT_ASSETS]]
-        await asyncio.gather(*tasks)
+            for strategy in STRATEGIES:
+                direction = strategy.analyze(candles)
+                if direction:
+                    await self.logger('SUCCESS', f"[{full_asset_name}] Sinal confirmado! Direção: {direction.upper()}, Estratégia: {strategy.name}")
+                    
+                    self.cooldown_assets.add(full_asset_name)
+                    asyncio.create_task(self._remove_from_cooldown(full_asset_name, 300))
+                    
+                    signal = TradeSignal(pair=clean_asset_name, direction=direction, strategy=strategy.name, volatility_score=0)
+                    await self._execute_trade(signal, full_asset_name)
+                    break 
+        except Exception as e:
+            await self.logger('ERROR', f"Erro ao processar o ativo {full_asset_name}: {e}")
+            traceback.print_exc()
 
-        if self.pending_setups:
-            setup_keys = list(self.pending_setups.keys())
-            await self.logger('SUCCESS', f"Setups encontrados em: {setup_keys}. A aguardar confirmação de rompimento...")
-
-    async def _analyze_for_setup(self, full_asset_name: str):
-        """Analisa um único ativo para encontrar um setup."""
-        clean_asset_name = full_asset_name.split('-')[0]
-        candles = await self.exnova.get_historical_candles(clean_asset_name, 60, 100)
-        if not candles: return
-
-        for strategy in STRATEGIES:
-            setup = strategy.find_setup(candles)
-            if setup:
-                self.pending_setups[full_asset_name] = setup
-                break
-
-    async def _check_and_execute_breakouts(self):
-        """Verifica os setups pendentes e executa as ordens se houver rompimento."""
-        if not self.pending_setups: return
-
-        await self.logger('INFO', "Meio do minuto. A verificar rompimentos...")
-        tasks = [self._check_single_breakout(asset, setup) for asset, setup in self.pending_setups.items()]
-        await asyncio.gather(*tasks)
-        self.pending_setups.clear()
-
-    async def _check_single_breakout(self, full_asset_name: str, setup: Dict):
-        """Verifica o rompimento para um único ativo."""
-        clean_asset_name = full_asset_name.split('-')[0]
-        live_candles = await self.exnova.get_historical_candles(clean_asset_name, 60, 1)
-        if not live_candles: return
-
-        live_price = live_candles[0].close
-        direction = setup['direction']
-        breakout_level = setup['breakout_level']
-
-        if direction == 'call' and live_price > breakout_level:
-            await self.logger('SUCCESS', f"[{full_asset_name}] ROMPIMENTO DE ALTA CONFIRMADO!")
-            signal = TradeSignal(pair=clean_asset_name, direction='call', strategy=setup['strategy'], volatility_score=0)
-            await self._execute_trade(signal, full_asset_name)
-        
-        elif direction == 'put' and live_price < breakout_level:
-            await self.logger('SUCCESS', f"[{full_asset_name}] ROMPIMENTO DE BAIXA CONFIRMADO!")
-            signal = TradeSignal(pair=clean_asset_name, direction='put', strategy=setup['strategy'], volatility_score=0)
-            await self._execute_trade(signal, full_asset_name)
+    async def _remove_from_cooldown(self, asset: str, delay: int):
+        await asyncio.sleep(delay)
+        self.cooldown_assets.discard(asset)
+        await self.logger('INFO', f"[{asset}] Cooldown terminado. O ativo voltou a ser analisado.")
 
     def _get_entry_value(self, asset: str) -> float:
         base_value = self.bot_config.get('entry_value', 1.0)
