@@ -164,28 +164,29 @@
             const [error, setError] = useState(null);
             const [nextAnalysisTime, setNextAnalysisTime] = useState('');
 
-            useEffect(() => {
-                const fetchInitialSignals = async () => {
-                    const { data, error } = await supabaseClient.from('trade_signals').select('*').order('created_at', { ascending: false }).limit(20);
-                    if (error) setError("A tabela 'trade_signals' não foi encontrada.");
-                    else setSignals(data);
-                };
-                fetchInitialSignals();
+            // Esta função será chamada tanto no início quanto em cada atualização.
+            const fetchSignals = useCallback(async () => {
+                const { data, error } = await supabaseClient.from('trade_signals').select('*').order('created_at', { ascending: false }).limit(20);
+                if (error) {
+                    console.error("Erro ao buscar sinais:", error);
+                    setError("A tabela 'trade_signals' não foi encontrada.");
+                } else {
+                    setSignals(data);
+                }
+            }, []);
 
-                // FIX: Lógica de Real-Time aprimorada para atualizações instantâneas.
+            useEffect(() => {
+                // Busca os dados iniciais ao carregar a página.
+                fetchSignals();
+
+                // FIX: Lógica de Real-Time simplificada e mais robusta.
+                // Ouve TODOS os eventos (*) na tabela e simplesmente re-busca a lista inteira.
+                // Isto garante que a UI é sempre um espelho perfeito do banco de dados.
                 const channel = supabaseClient.channel('trade_signals_realtime')
-                    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'trade_signals' }, 
+                    .on('postgres_changes', { event: '*', schema: 'public', table: 'trade_signals' }, 
                         (payload) => {
-                            setSignals(currentSignals => [payload.new, ...currentSignals]);
-                        }
-                    )
-                    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'trade_signals' }, 
-                        (payload) => {
-                            setSignals(currentSignals => 
-                                currentSignals.map(signal => 
-                                    signal.id === payload.new.id ? payload.new : signal
-                                )
-                            );
+                            console.log('Mudança detetada no banco de dados!', payload);
+                            fetchSignals();
                         }
                     )
                     .subscribe();
@@ -201,7 +202,7 @@
                     supabaseClient.removeChannel(channel);
                     clearInterval(timer);
                 };
-            }, []);
+            }, [fetchSignals]);
 
             return (
                 <div className="space-y-6">
