@@ -64,29 +64,3 @@ class AsyncExnovaService:
         if status: return str(order_id)
         print(f"Falha ao executar ordem para {asset}: {order_id}", flush=True)
         return None
-
-    async def check_trade_result(self, order_id: str) -> Optional[str]:
-        """
-        Verifica o resultado de uma operação usando a função 'check_win',
-        que foi identificada como a mais provável durante o diagnóstico.
-        """
-        loop = await self._get_loop()
-        try:
-            # FIX: Usando a função 'check_win' com um timeout de segurança.
-            api_call = loop.run_in_executor(None, self.api.check_win, order_id)
-            result_data = await asyncio.wait_for(api_call, timeout=15.0)
-            
-            # A função check_win retorna uma tupla (resultado, lucro)
-            if isinstance(result_data, tuple) and len(result_data) > 0:
-                result = result_data[0]
-                return result.upper() if result else None
-            else:
-                print(f"Resposta inesperada de check_win para a ordem {order_id}: {result_data}", flush=True)
-                return None
-
-        except asyncio.TimeoutError:
-            print(f"Aviso: Timeout ao verificar a ordem {order_id}. A API não respondeu a tempo.", flush=True)
-            return None
-        except Exception as e:
-            print(f"Erro inesperado ao verificar a ordem {order_id}: {e}", flush=True)
-            return None
