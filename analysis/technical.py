@@ -4,80 +4,63 @@ import pandas as pd
 from core.data_models import Candle
 
 def calculate_sma(closes: List[float], period: int) -> float:
-    """Calcula a Média Móvel Simples."""
     if len(closes) < period: return 0.0
     return sum(closes[-period:]) / period
 
 def calculate_ema(closes: List[float], period: int) -> float:
-    """Calcula a Média Móvel Exponencial (EMA) usando pandas."""
-    if len(closes) < period:
-        return 0.0
+    if len(closes) < period: return 0.0
     series = pd.Series(closes)
     ema = series.ewm(span=period, adjust=False).mean()
     return ema.iloc[-1]
 
-def get_sma_slope(closes: List[float], period: int) -> float:
-    """Calcula a inclinação da SMA, indicando a nano-tendência."""
-    if len(closes) < period + 2: return 0.0
-    sma1 = sum(closes[-(period+1):-1]) / period
-    sma2 = sum(closes[-period:]) / period
-    return sma2 - sma1
-
-def calculate_volatility(candles: List[Candle], lookback: int) -> float:
-    """Calcula uma pontuação de volatilidade (0-1)."""
-    if len(candles) < lookback: return 1.0
-    recent_candles = candles[-lookback:]
-    total_range, total_body = 0, 0
-    for c in recent_candles:
-        candle_range = c.max - c.min
-        if candle_range > 0:
-            total_range += candle_range
-            total_body += abs(c.close - c.open)
-    if total_range == 0: return 0.0
-    return (total_range - total_body) / total_range
-
-# FIX: Adicionadas as funções de Suporte e Resistência que estavam em falta.
-def detect_sr_levels(candles: List[Candle], n_levels: int = 5) -> Tuple[List[float], List[float]]:
+def get_m15_sr_zones(m15_candles: List[Candle]) -> Tuple[Optional[float], Optional[float]]:
     """
-    Detecta os níveis de Suporte e Resistência mais recentes usando fractais.
-    Retorna (resistance_levels, support_levels).
+    Identifica as zonas de Suporte e Resistência com base nos pavios das últimas velas M15.
+    Retorna (zona_de_resistencia, zona_de_suporte).
     """
-    if len(candles) < 5:
-        return [], []
-
-    highs = [c.max for c in candles]
-    lows = [c.min for c in candles]
+    if not m15_candles:
+        return None, None
     
-    resistance_levels = []
-    support_levels = []
+    # A zona de resistência é a máxima mais alta dos últimos pavios.
+    resistance = max(c.max for c in m15_candles)
+    # A zona de suporte é a mínima mais baixa dos últimos pavios.
+    support = min(c.min for c in m15_candles)
+    
+    return resistance, support
 
-    for i in range(2, len(candles) - 2):
-        # Fractal de Topo (Resistência)
-        if highs[i] > highs[i-1] and highs[i] > highs[i-2] and highs[i] > highs[i+1] and highs[i] > highs[i+2]:
-            resistance_levels.append(highs[i])
+def is_rejection_candle(candle: Candle) -> Optional[str]:
+    """
+    Verifica se uma vela mostra forte rejeição.
+    Retorna 'TOP' para rejeição de topo (pavio superior longo)
+    ou 'BOTTOM' para rejeição de fundo (pavio inferior longo).
+    """
+    body_size = abs(candle.close - candle.open)
+    if body_size == 0: return None # Doji não é uma vela de rejeição clara
+
+    total_range = candle.max - candle.min
+    if total_range == 0: return None
+
+    upper_wick = candle.max - max(candle.open, candle.close)
+    lower_wick = min(candle.open, candle.close) - candle.min
+
+    # Rejeição de topo se o pavio superior for pelo menos 30% da vela
+    if (upper_wick / total_range) >= 0.3:
+        return "TOP"
+    
+    # Rejeição de fundo se o pavio inferior for pelo menos 30% da vela
+    if (lower_wick / total_range) >= 0.3:
+        return "BOTTOM"
         
-        # Fractal de Fundo (Suporte)
-        if lows[i] < lows[i-1] and lows[i] < lows[i-2] and lows[i] < lows[i+1] and lows[i] < lows[i+2]:
-            support_levels.append(lows[i])
-            
-    return sorted(resistance_levels, reverse=True)[:n_levels], sorted(support_levels, reverse=True)[:n_levels]
+    return None
 
-def is_near_level(price: float, levels: List[float], candles: List[Candle]) -> bool:
-    """
-    Verifica se um preço está próximo de algum dos níveis fornecidos.
-    A proximidade é definida dinamicamente com base no tamanho médio das velas.
-    """
-    if not levels or not candles:
-        return False
-    
-    avg_candle_size = sum(c.max - c.min for c in candles[-10:]) / 10
-    # Se o tamanho médio for zero, define uma proximidade mínima para evitar divisão por zero
-    if avg_candle_size == 0:
-        avg_candle_size = price * 0.0001 
-
-    proximity = avg_candle_size * 0.25
-
-    for level in levels:
-        if abs(price - level) <= proximity:
-            return True
-    return False
+def is_engulfing(last: Candle, prev: Candle) -> Optional[str]:
+    """Verifica se a última vela engolfa a anterior."""
+    # Engolfo de Alta
+    if (prev.close < prev.open and last.close > last.open and
+            last.close > prev.open and last.open < prev.close):
+        return "BULLISH"
+    # Engolfo de Baixa
+    if (prev.close > prev.open and last.close < last.open and
+            last.close < prev.open and last.open > prev.close):
+        return "BEARISH"
+    return None
