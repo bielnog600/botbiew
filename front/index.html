@@ -3,14 +3,6 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <!-- PWA Tags -->
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="MAROMBIEW BOT">
-    <meta name="theme-color" content="#0D1117">
-    <link rel="manifest" href="/manifest.json">
-    <link rel="apple-touch-icon" href="/icons/icon-192x192.png">
-
     <title>MAROMBIEW BOT</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
@@ -49,14 +41,12 @@
 <body>
     <div id="root"></div>
     <script type="text/babel">
-        const { useState, useEffect, useCallback, Fragment, useRef } = React;
+        const { useState, useEffect, useCallback, Fragment, useRef, useMemo } = React;
         const { createClient } = supabase;
 
         const SUPABASE_URL = 'https://ioduahwknfsktujthfyc.supabase.co';
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlvZHVhaHdrbmZza3R1anRoZnljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEzMDc0NDcsImV4cCI6MjA2Njg4MzQ0N30.96f8wZO6SvABKFMWjIiw1pSugAB4Isldj7yxLcLJRSE';
         const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
-        // --- COMPONENTES ---
 
         function LoginPage({ onLogin }) {
             const [email, setEmail] = useState('');
@@ -96,7 +86,7 @@
         }
 
         function CandleStick({ open, high, low, close }) {
-            if (!open || !high || !low || !close) return null;
+            if (!open || !high || !low || !close) return <div className="w-10 h-24 flex items-center justify-center text-xs text-gray-500">Sem dados</div>;
             const isBullish = close > open;
             const color = isBullish ? 'var(--accent-win)' : 'var(--accent-loss)';
             const range = high - low;
@@ -118,15 +108,18 @@
         }
 
         function Scoreboard({ signals }) {
-            const scores = signals.reduce((acc, signal) => {
+            const scores = useMemo(() => signals.reduce((acc, signal) => {
                 const result = signal.result;
-                if (result === 'WIN') acc.wins++;
-                else if (result === 'LOSS') {
+                if (result === 'WIN') {
+                    acc.wins++;
+                } else if (result === 'LOSS') {
                     acc.losses++;
-                    if (signal.martingale_level > 0) acc.gales++;
+                    if (signal.martingale_level > 0) {
+                        acc.gales++;
+                    }
                 }
                 return acc;
-            }, { wins: 0, losses: 0, gales: 0 });
+            }, { wins: 0, losses: 0, gales: 0 }), [signals]);
 
             const assertividade = scores.wins + scores.losses > 0 ? (scores.wins / (scores.wins + scores.losses) * 100).toFixed(0) : 0;
 
@@ -143,23 +136,10 @@
         }
 
         function SignalCard({ signal }) {
-            const [countdown, setCountdown] = useState('');
-
-            useEffect(() => {
-                if (signal.result) { setCountdown(''); return; }
-                const interval = setInterval(() => {
-                    const now = new Date();
-                    const signalTime = new Date(signal.created_at);
-                    const secondsSinceSignal = (now - signalTime) / 1000;
-                    const secondsUntilNextCandle = 62 - (secondsSinceSignal % 60);
-                    if (secondsUntilNextCandle > 60 || secondsUntilNextCandle < 0) setCountdown('Expirado');
-                    else setCountdown(`${Math.floor(secondsUntilNextCandle)}s`);
-                }, 1000);
-                return () => clearInterval(interval);
-            }, [signal]);
-
             const ResultBadge = ({ result }) => {
-                if (!result) return <div className="text-center"><p className="text-sm text-gray-400">TEMPO RESTANTE</p><p className="text-2xl font-bold text-yellow-400">{countdown || 'Aguardando...'}</p></div>;
+                if (!result) {
+                    return <div className="text-center"><p className="text-sm text-gray-400">RESULTADO</p><p className="text-2xl font-bold text-yellow-400 animate-pulse">Aguardando...</p></div>;
+                }
                 const isWin = result === 'WIN';
                 const color = isWin ? 'text-green-400' : 'text-red-400';
                 const icon = isWin ? 'fa-check-circle' : 'fa-times-circle';
@@ -193,8 +173,8 @@
                 const timer = setInterval(() => {
                     const now = new Date();
                     const seconds = now.getSeconds();
-                    const wait = 62 - seconds;
-                    setNextAnalysisTime(wait > 60 ? `~${Math.round(wait/60)} min` : `${wait}s`);
+                    const wait = 62 - (seconds > 2 ? seconds : 60 + seconds);
+                    setNextAnalysisTime(wait > 0 ? `${wait}s` : 'Analisando...');
                 }, 1000);
 
                 return () => {
@@ -212,7 +192,7 @@
                         <p className="text-gray-400">Próxima análise de mercado em: <span className="font-bold text-white text-xl">{nextAnalysisTime}</span></p>
                     </div>
                     <div className="space-y-4">
-                        <h2 className="text-lg font-bold">Sinais Recentes</h2>
+                        <h2 className="text-lg font-bold">Histórico de Sinais Recentes</h2>
                         {error && <p className="text-red-400">{error}</p>}
                         {signals.map(signal => <SignalCard key={signal.id} signal={signal} />)}
                     </div>
@@ -424,13 +404,6 @@
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<App />);
-    </script>
-    <script>
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('/sw.js').catch(err => console.error('Service worker registration failed:', err));
-            });
-        }
     </script>
 </body>
 </html>
