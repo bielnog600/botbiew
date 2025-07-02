@@ -1,64 +1,89 @@
 # analysis/strategy.py
-from typing import Protocol, List, Optional, Dict
+from typing import Protocol, List, Optional, Dict, Tuple, Union
 from core.data_models import Candle
-from analysis.technical import (
-    is_rejection_candle,
-    is_engulfing
-)
+from analysis.technical import is_rejection_candle, is_engulfing
+
+Price = float
+Zone   = Union[Price, Tuple[Price, Price]]
+
+def touches_zone(price: float, zone: Zone, tol: float = 0.00005) -> bool:
+    """Verifica se um preço toca (±tol) uma zona que pode ser float ou (low, high)."""
+    if isinstance(zone, tuple):
+        low, high = zone
+        return low - tol <= price <= high + tol
+    return abs(price - zone) <= tol
+
+def average_wick_ratio(candles: List[Candle]) -> float:
+    """Retorna média (pavio_total / tamanho_total) das velas fornecidas."""
+    ratios = []
+    for c in candles:
+        wick = (c.max - max(c.open, c.close)) + (min(c.open, c.close) - c.min)
+        ratios.append(wick / (c.max - c.min) if c.max != c.min else 0)
+    return sum(ratios) / len(ratios)
 
 class TradingStrategy(Protocol):
-    """Define a interface para todas as estratégias de negociação."""
     name: str
-    def analyze(self, m1_candles: List[Candle], m15_sr_zones: Dict) -> Optional[str]:
-        ...
+    def analyze(self, m1_candles: List[Candle], m15_sr_zones: Dict[str, Zone]) -> Optional[Dict]: ...
 
-class M15ConfluenceEngulfStrategy(TradingStrategy):
-    """
-    Estratégia de Engolfo com Confluência em Zonas de S/R de M15.
-    1. Contexto: Identifica uma zona de S/R em M15.
-    2. Rejeição: Espera uma vela M1 tocar essa zona e mostrar rejeição.
-    3. Confirmação: Entra após uma vela de engolfo que confirma a reversão.
-    """
+class M15ConfluenceEngulfStrategy:
     name = "m15_confluence_engulf"
+    wick_req   = 0.30   # 30 %
+    body_limit = 0.40   # ≤40 % do range para ser “corpo pequeno”
+    max_volatility_ratio = 0.60  # média pavio/total nas 3 velas ≤ 60 %
 
-    def analyze(self, m1_candles: List[Candle], m15_sr_zones: Dict) -> Optional[str]:
-        if len(m1_candles) < 2:
+    def analyze(
+        self, m1_candles: List[Candle], m15_sr_zones: Dict[str, Zone]
+    ) -> Optional[Dict]:
+        if len(m1_candles) < 5:
             return None
 
-        resistance_zone = m15_sr_zones.get('resistance')
-        support_zone = m15_sr_zones.get('support')
-        
-        # A vela de setup é a penúltima, a de confirmação é a última
-        setup_candle = m1_candles[-2]
-        confirmation_candle = m1_candles[-1]
+        # Filtro de volatilidade
+        if average_wick_ratio(m1_candles[-4:-1]) > self.max_volatility_ratio:
+            return None
 
-        # --- LÓGICA DE VENDA (PUT) ---
-        if resistance_zone:
-            # Condição 1: A vela de setup tocou a resistência de M15
-            touched_resistance = setup_candle.max >= resistance_zone
-            # Condição 2: A vela de setup mostrou rejeição de topo
-            rejection_type = is_rejection_candle(setup_candle)
-            # Condição 3: A vela seguinte é um engolfo de baixa
-            engulfing_type = is_engulfing(confirmation_candle, setup_candle)
+        setup     = m1_candles[-2]
+        confirm   = m1_candles[-1]
+        res_zone  = m15_sr_zones.get("resistance")
+        sup_zone  = m15_sr_zones.get("support")
 
-            if touched_resistance and rejection_type == "TOP" and engulfing_type == "BEARISH":
-                return "put"
+        # --- VENDA (PUT) ---
+        if res_zone and touches_zone(setup.max, res_zone):
+            if setup.is_bullish and self._valid_rejection(setup, top=True):
+                if is_engulfing(confirm, setup) == "BEARISH":
+                    return {
+                        "signal": "put",
+                        "reason": "bearish_engulf_m15_res",
+                        "at_price": confirm.open,
+                    }
 
-        # --- LÓGICA DE COMPRA (CALL) ---
-        if support_zone:
-            # Condição 1: A vela de setup tocou o suporte de M15
-            touched_support = setup_candle.min <= support_zone
-            # Condição 2: A vela de setup mostrou rejeição de fundo
-            rejection_type = is_rejection_candle(setup_candle)
-            # Condição 3: A vela seguinte é um engolfo de alta
-            engulfing_type = is_engulfing(confirmation_candle, setup_candle)
-
-            if touched_support and rejection_type == "BOTTOM" and engulfing_type == "BULLISH":
-                return "call"
-
+        # --- COMPRA (CALL) ---
+        if sup_zone and touches_zone(setup.min, sup_zone):
+            if setup.is_bearish and self._valid_rejection(setup, top=False):
+                if is_engulfing(confirm, setup) == "BULLISH":
+                    return {
+                        "signal": "call",
+                        "reason": "bullish_engulf_m15_sup",
+                        "at_price": confirm.open,
+                    }
         return None
 
-# Lista de estratégias ativas. Focada na nossa nova estratégia principal.
+    # ------------- helpers -----------------
+    def _valid_rejection(self, candle: Candle, *, top: bool) -> bool:
+        """Checa pavio ≥30 % e corpo ≤40 % do range total."""
+        rng  = candle.max - candle.min
+        if rng == 0:
+            return False
+        upper_wick = candle.max - max(candle.open, candle.close)
+        lower_wick = min(candle.open, candle.close) - candle.min
+        body       = rng - (upper_wick + lower_wick)
+
+        if top:
+            return (upper_wick / rng >= self.wick_req) and (body / rng <= self.body_limit)
+        else:
+            return (lower_wick / rng >= self.wick_req) and (body / rng <= self.body_limit)
+
+
+# Estratégias ativas
 STRATEGIES: List[TradingStrategy] = [
     M15ConfluenceEngulfStrategy(),
 ]
