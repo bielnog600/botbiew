@@ -125,7 +125,7 @@
         function SignalCard({ signal }) {
             const ResultBadge = ({ result }) => {
                 if (!result) {
-                    return <div className="text-center"><p className="text-sm text-gray-400">RESULTADO</p><p className="text-2xl font-bold text-yellow-400 animate-pulse">...</p></div>;
+                    return <div className="text-center"><p className="text-sm text-gray-400">RESULTADO</p><p className="text-2xl font-bold text-yellow-400 animate-pulse">Aguardando...</p></div>;
                 }
                 let color, icon, text;
                 switch (result.toUpperCase()) {
@@ -154,10 +154,7 @@
 
             const fetchAllData = useCallback(async () => {
                 const { data: signalsData, error: signalsError } = await supabaseClient
-                    .from('trade_signals')
-                    .select('*')
-                    .order('created_at', { ascending: false })
-                    .limit(20);
+                    .from('trade_signals').select('*').order('created_at', { ascending: false }).limit(20);
                 
                 if (signalsError) setError("Não foi possível carregar os sinais.");
                 else setSignals(signalsData);
@@ -176,7 +173,15 @@
                 const timer = setInterval(() => {
                     const now = new Date();
                     const seconds = now.getSeconds();
-                    const wait = 62 - (seconds > 2 ? seconds : 60 + seconds);
+                    const targetSecond = 5; // O bot acorda no segundo 5
+                    
+                    let wait;
+                    if (seconds < targetSecond) {
+                        wait = targetSecond - seconds;
+                    } else {
+                        wait = (60 - seconds) + targetSecond;
+                    }
+                    
                     setNextAnalysisTime(wait > 0 ? `${wait}s` : 'Analisando...');
                 }, 1000);
 
