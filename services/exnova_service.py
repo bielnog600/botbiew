@@ -65,17 +65,22 @@ class AsyncExnovaService:
         print(f"Falha ao executar ordem para {asset}: {order_id}")
         return None
 
-    async def check_profit(self, order_id: str) -> Optional[float]:
+    async def check_trade_result(self, order_id: str) -> Optional[str]:
         """
-        Verifica o lucro de uma operação. Esta é uma abordagem mais fiável.
-        A maioria das APIs tem uma função como esta.
+        Verifica o resultado de uma operação usando a função 'check_win',
+        que foi identificada como a mais provável durante o diagnóstico.
         """
         loop = await self._get_loop()
         try:
-            # Tenta usar uma função comum em APIs deste tipo. Se o nome for diferente,
-            # teremos um AttributeError que é fácil de corrigir.
-            profit = await loop.run_in_executor(None, self.api.get_digital_spot_profit_after_sale, order_id)
-            return float(profit) if profit is not None else None
+            # FIX: Usando a função 'check_win' que é a mais provável.
+            api_call = loop.run_in_executor(None, self.api.check_win, order_id)
+            # Retornamos o resultado diretamente. A função provavelmente retorna 'win' ou 'loose'.
+            result, _ = await asyncio.wait_for(api_call, timeout=15.0) 
+            
+            return result.upper() if result else None
+        except asyncio.TimeoutError:
+            print(f"Aviso: Timeout ao verificar a ordem {order_id}. A API não respondeu a tempo.")
+            return None
         except Exception as e:
-            print(f"Erro ao verificar lucro da ordem {order_id}: {e}")
+            print(f"Erro inesperado ao verificar a ordem {order_id}: {e}")
             return None
