@@ -1,78 +1,64 @@
 # analysis/strategy.py
-from typing import Protocol, List, Optional
+from typing import Protocol, List, Optional, Dict
 from core.data_models import Candle
 from analysis.technical import (
-    calculate_sma, 
-    calculate_ema, 
-    detect_sr_levels, 
-    is_near_level
+    is_rejection_candle,
+    is_engulfing
 )
 
 class TradingStrategy(Protocol):
     """Define a interface para todas as estratégias de negociação."""
     name: str
-    def analyze(self, candles: List[Candle]) -> Optional[str]:
+    def analyze(self, m1_candles: List[Candle], m15_sr_zones: Dict) -> Optional[str]:
         ...
 
-class ContextualCrossoverStrategy(TradingStrategy):
+class M15ConfluenceEngulfStrategy(TradingStrategy):
     """
-    Estratégia que opera o cruzamento de médias móveis, mas APENAS quando
-    o preço está numa zona de valor (Suporte ou Resistência), respeitando
-    a direção esperada para essa zona.
+    Estratégia de Engolfo com Confluência em Zonas de S/R de M15.
+    1. Contexto: Identifica uma zona de S/R em M15.
+    2. Rejeição: Espera uma vela M1 tocar essa zona e mostrar rejeição.
+    3. Confirmação: Entra após uma vela de engolfo que confirma a reversão.
     """
-    name = "contextual_crossover"
-    
-    FAST_MA_PERIOD = 5
-    SLOW_MA_PERIOD = 34
-    SIGNAL_PERIOD = 6
+    name = "m15_confluence_engulf"
 
-    def analyze(self, candles: List[Candle]) -> Optional[str]:
-        if len(candles) < self.SLOW_MA_PERIOD + self.SIGNAL_PERIOD:
+    def analyze(self, m1_candles: List[Candle], m15_sr_zones: Dict) -> Optional[str]:
+        if len(m1_candles) < 2:
             return None
 
-        # --- CÁLCULO DO GATILHO (CRUZAMENTO) ---
-        closes = [c.close for c in candles]
-        moment_line = []
-        for i in range(self.SLOW_MA_PERIOD, len(closes) + 1):
-            historical_closes = closes[:i]
-            sma_fast = calculate_sma(historical_closes, self.FAST_MA_PERIOD)
-            sma_slow = calculate_sma(historical_closes, self.SLOW_MA_PERIOD)
-            moment_line.append(sma_fast - sma_slow)
-
-        if len(moment_line) < 2:
-            return None
-
-        signal_line_current = calculate_ema(moment_line, self.SIGNAL_PERIOD)
-        signal_line_prev = calculate_ema(moment_line[:-1], self.SIGNAL_PERIOD)
+        resistance_zone = m15_sr_zones.get('resistance')
+        support_zone = m15_sr_zones.get('support')
         
-        moment_current = moment_line[-1]
-        moment_prev = moment_line[-2]
+        # A vela de setup é a penúltima, a de confirmação é a última
+        setup_candle = m1_candles[-2]
+        confirmation_candle = m1_candles[-1]
 
-        is_call_signal = moment_prev < signal_line_prev and moment_current > signal_line_current
-        is_put_signal = moment_prev > signal_line_prev and moment_current < signal_line_current
+        # --- LÓGICA DE VENDA (PUT) ---
+        if resistance_zone:
+            # Condição 1: A vela de setup tocou a resistência de M15
+            touched_resistance = setup_candle.max >= resistance_zone
+            # Condição 2: A vela de setup mostrou rejeição de topo
+            rejection_type = is_rejection_candle(setup_candle)
+            # Condição 3: A vela seguinte é um engolfo de baixa
+            engulfing_type = is_engulfing(confirmation_candle, setup_candle)
 
-        if not is_call_signal and not is_put_signal:
-            return None
+            if touched_resistance and rejection_type == "TOP" and engulfing_type == "BEARISH":
+                return "put"
 
-        # --- ANÁLISE DE CONTEXTO (FILTRO DE S/R) ---
-        last_candle = candles[-1]
-        resistance_levels, support_levels = detect_sr_levels(candles[:-1], n_levels=3)
+        # --- LÓGICA DE COMPRA (CALL) ---
+        if support_zone:
+            # Condição 1: A vela de setup tocou o suporte de M15
+            touched_support = setup_candle.min <= support_zone
+            # Condição 2: A vela de setup mostrou rejeição de fundo
+            rejection_type = is_rejection_candle(setup_candle)
+            # Condição 3: A vela seguinte é um engolfo de alta
+            engulfing_type = is_engulfing(confirmation_candle, setup_candle)
 
-        if is_call_signal:
-            if is_near_level(last_candle.max, resistance_levels, candles):
-                print(f"DEBUG: Sinal de CALL ignorado. Preço próximo a uma resistência.")
-                return None
-            return "call"
-
-        if is_put_signal:
-            if is_near_level(last_candle.min, support_levels, candles):
-                print(f"DEBUG: Sinal de PUT ignorado. Preço próximo a um suporte.")
-                return None
-            return "put"
+            if touched_support and rejection_type == "BOTTOM" and engulfing_type == "BULLISH":
+                return "call"
 
         return None
 
-# Lista de estratégias ativas.
+# Lista de estratégias ativas. Focada na nossa nova estratégia principal.
 STRATEGIES: List[TradingStrategy] = [
-    ContextualCrossoverStrategy(),
+    M15ConfluenceEngulfStrategy(),
 ]
