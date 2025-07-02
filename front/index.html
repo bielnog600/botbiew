@@ -138,22 +138,14 @@
         function SignalCard({ signal }) {
             const ResultBadge = ({ result }) => {
                 if (!result) {
-                    return <div className="text-center"><p className="text-sm text-gray-400">RESULTADO</p><p className="text-2xl font-bold text-yellow-400 animate-pulse">...</p></div>;
+                    return <div className="text-center"><p className="text-sm text-gray-400">RESULTADO</p><p className="text-2xl font-bold text-yellow-400 animate-pulse">Aguardando...</p></div>;
                 }
                 let color, icon, text;
                 switch (result.toUpperCase()) {
-                    case 'WIN':
-                        color = 'text-green-400'; icon = 'fa-check-circle'; text = 'WIN';
-                        break;
-                    case 'LOSS':
-                        color = 'text-red-400'; icon = 'fa-times-circle'; text = 'LOSS';
-                        break;
-                    case 'REJEITADO':
-                        color = 'text-yellow-400'; icon = 'fa-ban'; text = '';
-                        break;
-                    default:
-                        color = 'text-gray-500'; icon = 'fa-question-circle'; text = result;
-                        break;
+                    case 'WIN': color = 'text-green-400'; icon = 'fa-check-circle'; text = 'WIN'; break;
+                    case 'LOSS': color = 'text-red-400'; icon = 'fa-times-circle'; text = 'LOSS'; break;
+                    case 'REJEITADO': color = 'text-yellow-400'; icon = 'fa-ban'; text = 'REJEITADO'; break;
+                    default: color = 'text-gray-500'; icon = 'fa-question-circle'; text = result; break;
                 }
                 return <div className="text-center"><p className="text-sm text-gray-400">RESULTADO</p><p className={`text-2xl font-bold ${color}`}><i className={`fas ${icon} mr-2`}></i>{text}</p></div>;
             };
@@ -180,7 +172,23 @@
                 };
                 fetchInitialSignals();
 
-                const channel = supabaseClient.channel('trade_signals_realtime').on('postgres_changes', { event: '*', schema: 'public', table: 'trade_signals' }, payload => fetchInitialSignals()).subscribe();
+                // FIX: Lógica de Real-Time aprimorada para atualizações instantâneas.
+                const channel = supabaseClient.channel('trade_signals_realtime')
+                    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'trade_signals' }, 
+                        (payload) => {
+                            setSignals(currentSignals => [payload.new, ...currentSignals]);
+                        }
+                    )
+                    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'trade_signals' }, 
+                        (payload) => {
+                            setSignals(currentSignals => 
+                                currentSignals.map(signal => 
+                                    signal.id === payload.new.id ? payload.new : signal
+                                )
+                            );
+                        }
+                    )
+                    .subscribe();
                 
                 const timer = setInterval(() => {
                     const now = new Date();
