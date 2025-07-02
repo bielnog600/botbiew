@@ -151,6 +151,7 @@
             const [scores, setScores] = useState({ wins: 0, losses: 0, gales: 0 });
             const [error, setError] = useState(null);
             const [nextAnalysisTime, setNextAnalysisTime] = useState('');
+            const [timeOffset, setTimeOffset] = useState(0);
 
             const fetchAllData = useCallback(async () => {
                 const { data: signalsData, error: signalsError } = await supabaseClient
@@ -167,13 +168,28 @@
             }, []);
 
             useEffect(() => {
+                const syncTime = async () => {
+                    const { data, error } = await supabaseClient.rpc('get_server_timestamp');
+                    if (data) {
+                        const serverTime = new Date(data).getTime();
+                        const localTime = new Date().getTime();
+                        setTimeOffset(serverTime - localTime);
+                    } else {
+                        console.error("Falha ao sincronizar tempo com o servidor:", error);
+                    }
+                };
+                syncTime();
                 fetchAllData();
                 const intervalId = setInterval(fetchAllData, 5000);
                 
+                return () => clearInterval(intervalId);
+            }, [fetchAllData]);
+
+            useEffect(() => {
                 const timer = setInterval(() => {
-                    const now = new Date();
+                    const now = new Date(new Date().getTime() + timeOffset);
                     const seconds = now.getSeconds();
-                    const targetSecond = 5; // O bot acorda no segundo 5
+                    const targetSecond = 5;
                     
                     let wait;
                     if (seconds < targetSecond) {
@@ -185,11 +201,8 @@
                     setNextAnalysisTime(wait > 0 ? `${wait}s` : 'Analisando...');
                 }, 1000);
 
-                return () => {
-                    clearInterval(intervalId);
-                    clearInterval(timer);
-                };
-            }, [fetchAllData]);
+                return () => clearInterval(timer);
+            }, [timeOffset]);
 
             return (
                 <div className="space-y-6">
