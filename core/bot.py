@@ -134,8 +134,9 @@ class TradingBot:
                 active_trade = ActiveTrade(order_id=str(order_id), signal_id=signal_id, pair=signal.pair, entry_value=entry_value)
                 await self.trade_queue.put(active_trade)
             else:
-                await self.logger('ERROR', f"[{signal.pair}] Falha na execução da ordem na Exnova para '{full_asset_name}'.")
-                await self.supabase.update_trade_result(signal_id, "ERROR")
+                await self.logger('WARNING', f"[{signal.pair}] Ordem REJEITADA pela corretora para '{full_asset_name}'.")
+                # FIX: Atualiza o status para 'REJEITADO' em vez de 'ERROR'.
+                await self.supabase.update_trade_result(signal_id, "REJEITADO")
         except Exception as e:
             await self.logger('ERROR', f"Exceção não tratada em _execute_trade para {signal.pair}: {e}")
             traceback.print_exc()
