@@ -20,15 +20,13 @@ class TradingBot:
         self.trade_queue = asyncio.Queue()
         self.cooldown_assets = set()
         self.martingale_state: Dict[str, Dict] = {}
-        # FIX: Criação do "porteiro" (Semaphore) que limita as entradas simultâneas.
-        self.trade_semaphore = asyncio.Semaphore(settings.MAX_CONCURRENT_TRADES)
 
     async def logger(self, level: str, message: str):
         print(f"[{level.upper()}] {message}", flush=True)
         await self.supabase.insert_log(level, message)
 
     async def run(self):
-        await self.logger('INFO', f"Bot a iniciar com um limite de {settings.MAX_CONCURRENT_TRADES} operações simultâneas.")
+        await self.logger('INFO', 'Bot a iniciar...')
         await self.exnova.connect()
         await self.logger('SUCCESS', f"Conexão com a Exnova estabelecida.")
         
@@ -99,8 +97,7 @@ class TradingBot:
                         setup_candle_low=last_candle.min,
                         setup_candle_close=last_candle.close
                     )
-                    # Não executa diretamente, mas cria uma tarefa para isso.
-                    asyncio.create_task(self._execute_trade(signal, full_asset_name))
+                    await self._execute_trade(signal, full_asset_name)
                     break 
         except asyncio.CancelledError:
             pass
@@ -124,40 +121,24 @@ class TradingBot:
         return round(next_value, 2)
 
     async def _execute_trade(self, signal: TradeSignal, full_asset_name: str):
-        # FIX: Pede permissão ao "porteiro" antes de continuar.
-        await self.logger('INFO', f"[{signal.pair}] Sinal na fila, a aguardar por uma vaga de execução...")
-        async with self.trade_semaphore:
-            await self.logger('SUCCESS', f"[{signal.pair}] Vaga de execução obtida. A processar ordem.")
-            try:
-                entry_value = self._get_entry_value(signal.pair)
-                
-                balance_before = await self.exnova.get_current_balance()
-                if balance_before is None:
-                    await self.logger('ERROR', f"[{signal.pair}] Não foi possível obter o saldo antes da operação. A abortar.")
-                    return
+        try:
+            entry_value = self._get_entry_value(signal.pair)
+            signal_id = await self.supabase.insert_trade_signal(signal)
+            if not signal_id:
+                await self.logger('ERROR', f"[{signal.pair}] Falha ao registrar sinal.")
+                return
 
-                signal_id = await self.supabase.insert_trade_signal(signal)
-                if not signal_id:
-                    await self.logger('ERROR', f"[{signal.pair}] Falha ao registrar sinal.")
-                    return
-
-                order_id = await self.exnova.execute_trade(entry_value, full_asset_name, signal.direction, 1)
-                if order_id:
-                    await self.logger('SUCCESS', f"[{signal.pair}] Ordem {order_id} (sinal ID: {signal_id}) enviada.")
-                    active_trade = ActiveTrade(
-                        order_id=str(order_id), 
-                        signal_id=signal_id, 
-                        pair=signal.pair, 
-                        entry_value=entry_value,
-                        balance_before=balance_before
-                    )
-                    await self.trade_queue.put(active_trade)
-                else:
-                    await self.logger('ERROR', f"[{signal.pair}] Falha na execução da ordem na Exnova para '{full_asset_name}'.")
-                    await self.supabase.update_trade_result(signal_id, "REJEITADO")
-            except Exception as e:
-                await self.logger('ERROR', f"Exceção não tratada em _execute_trade para {signal.pair}: {e}")
-                traceback.print_exc()
+            order_id = await self.exnova.execute_trade(entry_value, full_asset_name, signal.direction, 1)
+            if order_id:
+                await self.logger('SUCCESS', f"[{signal.pair}] Ordem {order_id} (sinal ID: {signal_id}) enviada.")
+                active_trade = ActiveTrade(order_id=str(order_id), signal_id=signal_id, pair=signal.pair, entry_value=entry_value)
+                await self.trade_queue.put(active_trade)
+            else:
+                await self.logger('ERROR', f"[{signal.pair}] Falha na execução da ordem na Exnova para '{full_asset_name}'.")
+                await self.supabase.update_trade_result(signal_id, "REJEITADO")
+        except Exception as e:
+            await self.logger('ERROR', f"Exceção não tratada em _execute_trade para {signal.pair}: {e}")
+            traceback.print_exc()
 
     async def _result_checker_loop(self):
         while self.is_running:
@@ -174,29 +155,25 @@ class TradingBot:
             await asyncio.sleep(65)
 
             await self.logger('INFO', f"[{trade.pair}] Expiração da ordem {trade.order_id}. A verificar resultado...")
-            profit = await self.exnova.check_profit(trade.order_id)
+            result = await self.exnova.check_trade_result(trade.order_id)
             
-            result = "UNKNOWN"
-            if profit is not None:
-                result = "WIN" if profit > 0 else "LOSS"
-            
-            current_mg_level = self.martingale_state.get(trade.pair, {}).get('level', 0)
-            update_success = await self.supabase.update_trade_result(trade.signal_id, result, current_mg_level)
-            
-            if update_success:
-                await self.logger('SUCCESS', f"[{trade.pair}] Resultado da ordem {trade.order_id} atualizado para {result}.")
+            if result:
+                current_mg_level = self.martingale_state.get(trade.pair, {}).get('level', 0)
+                update_success = await self.supabase.update_trade_result(trade.signal_id, result, current_mg_level)
+                
+                if update_success:
+                    await self.logger('SUCCESS', f"[{trade.pair}] Resultado da ordem {trade.order_id} atualizado para {result}.")
+                else:
+                    await self.logger('ERROR', f"[{trade.pair}] FALHA CRÍTICA ao atualizar o resultado da ordem {trade.order_id} no Supabase.")
+                
+                self._update_martingale_state(trade.pair, result, trade.entry_value)
             else:
-                await self.logger('ERROR', f"[{trade.pair}] FALHA CRÍTICA ao atualizar o resultado da ordem {trade.order_id} no Supabase.")
-            
-            self._update_martingale_state(trade.pair, result, trade.entry_value)
+                await self.logger('WARNING', f"[{trade.pair}] Não foi possível obter o resultado da ordem {trade.order_id}.")
+                await self.supabase.update_trade_result(trade.signal_id, "UNKNOWN")
 
         except Exception as e:
             await self.logger('ERROR', f"Exceção não tratada em _check_and_process_single_trade para {trade.pair}: {e}")
             traceback.print_exc()
-        finally:
-            # FIX: Liberta a vaga de execução, permitindo que a próxima operação entre.
-            self.trade_semaphore.release()
-            await self.logger('INFO', f"[{trade.pair}] Vaga de execução libertada.")
 
     def _update_martingale_state(self, asset: str, result: str, last_value: float):
         if not self.bot_config.get('use_martingale', False): return
