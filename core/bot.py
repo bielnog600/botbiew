@@ -22,7 +22,9 @@ class TradingBot:
         self.martingale_state: Dict[str, Dict] = {}
 
     async def logger(self, level: str, message: str):
-        print(f"[{level.upper()}] {message}")
+        # FIX: Adicionado flush=True para forçar a saída imediata do log.
+        # Isto resolve o atraso na visualização dos logs no Coolify.
+        print(f"[{level.upper()}] {message}", flush=True)
         await self.supabase.insert_log(level, message)
 
     async def run(self):
