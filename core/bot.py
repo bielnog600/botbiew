@@ -146,6 +146,41 @@ class TradingBot:
             await self.logger('ERROR', f"Exceção não tratada em _execute_trade para {signal.pair}: {e}")
             traceback.print_exc()
 
+    # core/bot.py
+# ... (código do __init__ até _execute_trade inalterado) ...
+
+    async def _result_checker_loop(self):
+        while self.is_running:
+            try:
+                trade = await asyncio.wait_for(self.trade_queue.get(), timeout=1.0)
+                result = None
+                for _ in range(15):
+                    result = await self.exnova.check_trade_result(trade.order_id)
+                    if result: break
+                    await asyncio.sleep(5)
+                
+                if result:
+                    await self.logger('SUCCESS' if result == 'WIN' else 'ERROR', f"[{trade.pair}] Resultado da ordem {trade.order_id}: {result}")
+                    
+                    # FIX: Passa o nível de martingale atual ao atualizar o resultado.
+                    current_mg_level = self.martingale_state.get(trade.pair, {}).get('level', 0)
+                    await self.supabase.update_trade_result(trade.signal_id, result, current_mg_level)
+                    
+                    self._update_martingale_state(trade.pair, result, trade.entry_value)
+                else:
+                    await self.logger('WARNING', f"[{trade.pair}] Timeout ao obter resultado da ordem {trade.order_id}.")
+                    await self.supabase.update_trade_result(trade.signal_id, "TIMEOUT")
+                
+                self.trade_queue.task_done()
+            except asyncio.TimeoutError:
+                continue
+            except Exception as e:
+                await self.logger('ERROR', f"Erro no loop de verificação de resultados: {e}")
+
+    # ... (resto do código: _update_martingale_state, etc. inalterado) ...
+
+
+
     async def _result_checker_loop(self):
         while self.is_running:
             try:
