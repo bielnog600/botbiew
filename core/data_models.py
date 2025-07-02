@@ -12,18 +12,13 @@ class Candle(BaseModel):
 class TradeSignal(BaseModel):
     """Representa um sinal de negociação gerado por uma estratégia."""
     pair: str
-    direction: str # 'call' ou 'put'
+    direction: str
     strategy: str
-    
-    # FIX: Tornamos este campo opcional, pois a estratégia atual não o utiliza.
     volatility_score: Optional[float] = None
-    
-    # Dados da vela para visualização no painel
     setup_candle_open: Optional[float] = None
     setup_candle_high: Optional[float] = None
     setup_candle_low: Optional[float] = None
     setup_candle_close: Optional[float] = None
-
 
 class ActiveTrade(BaseModel):
     """Representa uma operação ativa na plataforma."""
@@ -31,3 +26,5 @@ class ActiveTrade(BaseModel):
     signal_id: int
     pair: str
     entry_value: float
+    # FIX: Adicionado o campo para guardar o saldo antes da operação.
+    balance_before: float
