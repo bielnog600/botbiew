@@ -67,8 +67,13 @@ class TradingBot:
             task.cancel()
 
     async def _wait_for_next_candle(self):
+        """
+        Calcula e espera o tempo necessário para sincronizar a análise para
+        APÓS o fecho da vela M1 atual.
+        """
         now = datetime.now()
-        wait_time = (60 - now.second) + 2 if now.second > 2 else 2 - now.second
+        # FIX: Margem de segurança aumentada para 5 segundos.
+        wait_time = (60 - now.second) + 5 if now.second > 5 else 5 - now.second
         await asyncio.sleep(wait_time)
 
     async def _process_asset_task(self, full_asset_name: str):
@@ -123,8 +128,6 @@ class TradingBot:
     async def _execute_trade(self, signal: TradeSignal, full_asset_name: str):
         try:
             entry_value = self._get_entry_value(signal.pair)
-            
-            # FIX: Obtém o saldo ANTES de executar a ordem.
             balance_before = await self.exnova.get_current_balance()
             if balance_before is None:
                 await self.logger('ERROR', f"[{signal.pair}] Não foi possível obter o saldo antes da operação. A abortar.")
@@ -138,8 +141,6 @@ class TradingBot:
             order_id = await self.exnova.execute_trade(entry_value, full_asset_name, signal.direction, 1)
             if order_id:
                 await self.logger('SUCCESS', f"[{signal.pair}] Ordem {order_id} (sinal ID: {signal_id}) enviada.")
-                
-                # FIX: Passa o 'balance_before' ao criar o objeto ActiveTrade.
                 active_trade = ActiveTrade(
                     order_id=str(order_id), 
                     signal_id=signal_id, 
