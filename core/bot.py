@@ -68,7 +68,7 @@ class TradingBot:
 
     async def _wait_for_next_candle(self):
         now = datetime.now()
-        wait_time = (1 - now.second) + 2 if now.second > 2 else 2 - now.second
+        wait_time = (2 - now.second) + 2 if now.second > 2 else 2 - now.second
         await asyncio.sleep(wait_time)
 
     async def _process_asset_task(self, full_asset_name: str):
@@ -141,43 +141,42 @@ class TradingBot:
             traceback.print_exc()
 
     async def _result_checker_loop(self):
-        await self.logger('DIAGNOSTIC', "Loop de verificação de resultados iniciado.")
+        """Loop de fundo que consome da fila e inicia a verificação de cada trade."""
         while self.is_running:
             try:
-                trade = await asyncio.wait_for(self.trade_queue.get(), timeout=5.0)
-                await self.logger('DIAGNOSTIC', f"Operação {trade.order_id} (Sinal ID: {trade.signal_id}) retirada da fila. A iniciar verificação.")
-                
-                result = None
-                for i in range(15):
-                    await self.logger('DIAGNOSTIC', f"[{trade.pair}] Tentativa {i+1}/15 de verificar o resultado da ordem {trade.order_id}...")
-                    result = await self.exnova.check_trade_result(trade.order_id)
-                    await self.logger('DIAGNOSTIC', f"[{trade.pair}] Resposta da API Exnova: {result}")
-                    if result:
-                        break
-                    await asyncio.sleep(5)
-                
-                if result:
-                    await self.logger('DIAGNOSTIC', f"[{trade.pair}] Resultado final obtido: {result}. A tentar atualizar no Supabase...")
-                    current_mg_level = self.martingale_state.get(trade.pair, {}).get('level', 0)
-                    
-                    update_success = await self.supabase.update_trade_result(trade.signal_id, result, current_mg_level)
-                    
-                    if update_success:
-                        await self.logger('SUCCESS', f"[{trade.pair}] Resultado da ordem {trade.order_id} atualizado com sucesso para {result}.")
-                    else:
-                        await self.logger('ERROR', f"[{trade.pair}] FALHA CRÍTICA ao atualizar o resultado da ordem {trade.order_id} no Supabase.")
-                    
-                    self._update_martingale_state(trade.pair, result, trade.entry_value)
-                else:
-                    await self.logger('WARNING', f"[{trade.pair}] Timeout ao obter resultado da ordem {trade.order_id}.")
-                    await self.supabase.update_trade_result(trade.signal_id, "TIMEOUT")
-                
+                trade = await self.trade_queue.get()
+                # Inicia uma tarefa para cada trade, para que não bloqueiem uns aos outros
+                asyncio.create_task(self._check_and_process_single_trade(trade))
                 self.trade_queue.task_done()
-            except asyncio.TimeoutError:
-                continue
             except Exception as e:
                 await self.logger('ERROR', f"Erro no loop de verificação de resultados: {e}")
-                traceback.print_exc()
+
+    async def _check_and_process_single_trade(self, trade: ActiveTrade):
+        """Verifica e processa o resultado de uma única operação com um timeout longo."""
+        try:
+            await self.logger('DIAGNOSTIC', f"[{trade.pair}] A aguardar resultado para a ordem {trade.order_id}...")
+            
+            # FIX: Faz uma única chamada com um timeout longo, esperando que a API bloqueie.
+            result = await self.exnova.check_trade_result(trade.order_id)
+            
+            if result:
+                await self.logger('DIAGNOSTIC', f"[{trade.pair}] Resultado final obtido: {result}. A atualizar no Supabase...")
+                current_mg_level = self.martingale_state.get(trade.pair, {}).get('level', 0)
+                update_success = await self.supabase.update_trade_result(trade.signal_id, result, current_mg_level)
+                
+                if update_success:
+                    await self.logger('SUCCESS', f"[{trade.pair}] Resultado da ordem {trade.order_id} atualizado com sucesso para {result}.")
+                else:
+                    await self.logger('ERROR', f"[{trade.pair}] FALHA CRÍTICA ao atualizar o resultado da ordem {trade.order_id} no Supabase.")
+                
+                self._update_martingale_state(trade.pair, result, trade.entry_value)
+            else:
+                # O timeout aconteceu dentro de check_trade_result
+                await self.logger('WARNING', f"[{trade.pair}] Timeout ao obter resultado da ordem {trade.order_id}.")
+                await self.supabase.update_trade_result(trade.signal_id, "TIMEOUT")
+        except Exception as e:
+            await self.logger('ERROR', f"Exceção não tratada em _check_and_process_single_trade para {trade.pair}: {e}")
+            traceback.print_exc()
 
     def _update_martingale_state(self, asset: str, result: str, last_value: float):
         if not self.bot_config.get('use_martingale', False): return
