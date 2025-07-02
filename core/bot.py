@@ -2,7 +2,8 @@
 import asyncio
 import time
 import traceback
-from datetime import datetime
+import sys # Importa o módulo do sistema para poder sair
+from datetime import datetime, timezone
 from typing import List, Dict, Optional
 
 from config import settings
@@ -20,6 +21,8 @@ class TradingBot:
         self.trade_queue = asyncio.Queue()
         self.cooldown_assets = set()
         self.martingale_state: Dict[str, Dict] = {}
+        # Guarda o timestamp do último reinício solicitado para evitar loops
+        self.last_restart_request: Optional[datetime] = None
 
     async def logger(self, level: str, message: str):
         print(f"[{level.upper()}] {message}", flush=True)
@@ -35,6 +38,19 @@ class TradingBot:
         while self.is_running:
             try:
                 self.bot_config = await self.supabase.get_bot_config()
+                
+                # Lógica de Reinício
+                restart_ts_str = self.bot_config.get('restart_requested_at')
+                if restart_ts_str:
+                    # Converte a string ISO para um objeto datetime ciente do fuso horário
+                    restart_ts = datetime.fromisoformat(restart_ts_str).replace(tzinfo=timezone.utc)
+                    if self.last_restart_request is None or restart_ts > self.last_restart_request:
+                        await self.logger('WARNING', "Pedido de reinício recebido do painel. A encerrar...")
+                        self.is_running = False
+                        # sys.exit(0) é uma forma limpa de terminar o processo.
+                        # O Coolify irá detetar que o processo terminou e irá reiniciá-lo automaticamente.
+                        sys.exit(0) 
+                
                 if self.bot_config.get('status') == 'RUNNING':
                     await self.logger('INFO', "Bot em modo RUNNING. A iniciar ciclo de negociação...")
                     await self.trading_cycle()
@@ -68,7 +84,7 @@ class TradingBot:
 
     async def _wait_for_next_candle(self):
         now = datetime.now()
-        wait_time = (2 - now.second) + 2 if now.second > 2 else 2 - now.second
+        wait_time = (60 - now.second) + 2 if now.second > 2 else 2 - now.second
         await asyncio.sleep(wait_time)
 
     async def _process_asset_task(self, full_asset_name: str):
@@ -123,7 +139,6 @@ class TradingBot:
     async def _execute_trade(self, signal: TradeSignal, full_asset_name: str):
         try:
             entry_value = self._get_entry_value(signal.pair)
-            
             balance_before = await self.exnova.get_current_balance()
             if balance_before is None:
                 await self.logger('ERROR', f"[{signal.pair}] Não foi possível obter o saldo antes da operação. A abortar.")
@@ -137,8 +152,6 @@ class TradingBot:
             order_id = await self.exnova.execute_trade(entry_value, full_asset_name, signal.direction, 1)
             if order_id:
                 await self.logger('SUCCESS', f"[{signal.pair}] Ordem {order_id} (sinal ID: {signal_id}) enviada.")
-                
-                # FIX: Passa o 'balance_before' ao criar o objeto ActiveTrade.
                 active_trade = ActiveTrade(
                     order_id=str(order_id), 
                     signal_id=signal_id, 
