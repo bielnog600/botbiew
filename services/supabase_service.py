@@ -18,6 +18,23 @@ class SupabaseService:
     def _create_client(self) -> Client:
         return create_client(self._url, self._key)
 
+    async def update_trade_result(self, signal_id: int, result: str, martingale_level: int = 0):
+        """Atualiza o resultado de um trade e o nível de martingale."""
+        try:
+            loop = await self._get_loop()
+            await loop.run_in_executor(
+                None,
+                lambda: self._create_client().table('trade_signals').update({
+                    'result': result,
+                    'martingale_level': martingale_level
+                }).eq('id', signal_id).execute()
+            )
+        except Exception as e:
+            await self.insert_log('ERROR', f"Falha ao atualizar resultado do trade {signal_id}: {e}")
+            
+   
+
+
     async def _get_loop(self):
         if self._loop is None:
             self._loop = asyncio.get_running_loop()
