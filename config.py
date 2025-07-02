@@ -20,10 +20,13 @@ class Settings(BaseSettings):
     LEARNING_MODE_DURATION_SECONDS: int = 300 # 5 minutos
     CATALOG_HISTORY_HOURS: int = 24
 
+    # AQUI: Define o número máximo de operações abertas em simultâneo.
+    MAX_CONCURRENT_TRADES: int = 2
+
     class Config:
-        # Define o arquivo .env como uma fonte de variáveis
         env_file = ".env"
         env_file_encoding = "utf-8"
+        extra = 'ignore'
         
         # FIX: Ignora quaisquer variáveis de ambiente extras que não estão definidas
         # nesta classe. Isto resolve o erro de validação no Coolify.
