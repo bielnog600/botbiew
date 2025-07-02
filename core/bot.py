@@ -30,6 +30,8 @@ class TradingBot:
         await self.exnova.connect()
         await self.logger('SUCCESS', f"Conexão com a Exnova estabelecida.")
         
+        # FIX: Inicia o loop de verificação de resultados como uma tarefa de fundo
+        # que irá correr para sempre, de forma independente do ciclo de negociação.
         asyncio.create_task(self._result_checker_loop())
 
         while self.is_running:
@@ -47,6 +49,7 @@ class TradingBot:
                 await asyncio.sleep(30)
 
     async def trading_cycle(self):
+        """Ciclo principal que apenas gere as tarefas de análise de mercado."""
         account_type = self.bot_config.get('account_type', 'PRACTICE')
         await self.exnova.change_balance(account_type)
 
@@ -59,9 +62,10 @@ class TradingBot:
         trading_tasks = [asyncio.create_task(self._process_asset_task(asset)) for asset in assets_to_trade]
         
         if not trading_tasks:
-            await asyncio.sleep(55)
+            await asyncio.sleep(55) # Espera se não houver ativos para negociar
             return
             
+        # Espera que as tarefas de análise terminem (ou o tempo limite)
         done, pending = await asyncio.wait(trading_tasks, timeout=55)
         for task in pending:
             task.cancel()
@@ -141,7 +145,7 @@ class TradingBot:
             traceback.print_exc()
 
     async def _result_checker_loop(self):
-        """Loop de fundo que consome da fila e inicia a verificação de cada trade."""
+        """Loop de fundo perpétuo que consome da fila e inicia a verificação de cada trade."""
         while self.is_running:
             try:
                 trade = await self.trade_queue.get()
@@ -151,11 +155,8 @@ class TradingBot:
                 await self.logger('ERROR', f"Erro no loop de verificação de resultados: {e}")
 
     async def _check_and_process_single_trade(self, trade: ActiveTrade):
-        """
-        Espera a operação expirar e depois verifica o lucro para determinar o resultado.
-        """
+        """Verifica e processa o resultado de uma única operação com um timeout longo."""
         try:
-            # FIX: Espera 65 segundos (1 min de operação + 5s de margem)
             await self.logger('INFO', f"[{trade.pair}] Operação {trade.order_id} em andamento. A aguardar expiração...")
             await asyncio.sleep(65)
 
@@ -165,8 +166,6 @@ class TradingBot:
             result = "UNKNOWN"
             if profit is not None:
                 result = "WIN" if profit > 0 else "LOSS"
-            
-            await self.logger('DIAGNOSTIC', f"[{trade.pair}] Lucro obtido: {profit}. Resultado definido como: {result}.")
             
             current_mg_level = self.martingale_state.get(trade.pair, {}).get('level', 0)
             update_success = await self.supabase.update_trade_result(trade.signal_id, result, current_mg_level)
