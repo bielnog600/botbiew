@@ -107,20 +107,7 @@
             );
         }
 
-        function Scoreboard({ signals }) {
-            const scores = useMemo(() => signals.reduce((acc, signal) => {
-                const result = signal.result;
-                if (result === 'WIN') {
-                    acc.wins++;
-                } else if (result === 'LOSS') {
-                    acc.losses++;
-                    if (signal.martingale_level > 0) {
-                        acc.gales++;
-                    }
-                }
-                return acc;
-            }, { wins: 0, losses: 0, gales: 0 }), [signals]);
-
+        function Scoreboard({ scores }) {
             const assertividade = scores.wins + scores.losses > 0 ? (scores.wins / (scores.wins + scores.losses) * 100).toFixed(0) : 0;
 
             return (
@@ -161,22 +148,30 @@
 
         function HomeView() {
             const [signals, setSignals] = useState([]);
+            const [scores, setScores] = useState({ wins: 0, losses: 0, gales: 0 });
             const [error, setError] = useState(null);
             const [nextAnalysisTime, setNextAnalysisTime] = useState('');
 
-            const fetchSignals = useCallback(async () => {
-                const { data, error } = await supabaseClient.from('trade_signals').select('*').order('created_at', { ascending: false }).limit(20);
-                if (error) {
-                    console.error("Erro ao buscar sinais:", error);
-                    setError("A tabela 'trade_signals' não foi encontrada.");
-                } else {
-                    setSignals(data);
-                }
+            const fetchAllData = useCallback(async () => {
+                const { data: signalsData, error: signalsError } = await supabaseClient
+                    .from('trade_signals')
+                    .select('*')
+                    .order('created_at', { ascending: false })
+                    .limit(20);
+                
+                if (signalsError) setError("Não foi possível carregar os sinais.");
+                else setSignals(signalsData);
+
+                const { count: wins } = await supabaseClient.from('trade_signals').select('id', { count: 'exact', head: true }).eq('result', 'WIN');
+                const { count: losses } = await supabaseClient.from('trade_signals').select('id', { count: 'exact', head: true }).eq('result', 'LOSS');
+                const { count: gales } = await supabaseClient.from('trade_signals').select('id', { count: 'exact', head: true }).eq('result', 'LOSS').gt('martingale_level', 0);
+
+                setScores({ wins, losses, gales });
             }, []);
 
             useEffect(() => {
-                fetchSignals();
-                const intervalId = setInterval(fetchSignals, 5000); // Atualiza a cada 5 segundos
+                fetchAllData();
+                const intervalId = setInterval(fetchAllData, 5000);
                 
                 const timer = setInterval(() => {
                     const now = new Date();
@@ -189,12 +184,12 @@
                     clearInterval(intervalId);
                     clearInterval(timer);
                 };
-            }, [fetchSignals]);
+            }, [fetchAllData]);
 
             return (
                 <div className="space-y-6">
                     <h1 className="text-3xl font-bold text-white">Home</h1>
-                    <Scoreboard signals={signals} />
+                    <Scoreboard scores={scores} />
                     <div className="glass-card p-4 rounded-xl text-center">
                         <h2 className="text-lg font-bold mb-2">Análise ao Vivo</h2>
                         <p className="text-gray-400">Próxima análise de mercado em: <span className="font-bold text-white text-xl">{nextAnalysisTime}</span></p>
@@ -217,8 +212,8 @@
                 const { data, error } = await supabaseClient.from('bot_config').select('*').eq('id', 1).single();
                 if (data) setConfig(data);
                 else alert("Erro ao carregar configuração: " + error?.message);
-                setLoading(false);
-            }, []);
+                if(loading) setLoading(false);
+            }, [loading]);
 
             useEffect(() => {
                 fetchConfig();
