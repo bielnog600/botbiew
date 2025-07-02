@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     CATALOG_HISTORY_HOURS: int = 24
 
     # AQUI: Define o número máximo de operações abertas em simultâneo.
-    MAX_CONCURRENT_TRADES: int = 2
+    MAX_CONCURRENT_TRADES: int = 1
 
     class Config:
         env_file = ".env"
