@@ -84,7 +84,7 @@ class TradingBot:
 
     async def _wait_for_next_candle(self):
         now = datetime.now()
-        wait_time = (60 - now.second) + 2 if now.second > 2 else 2 - now.second
+        wait_time = (2 - now.second) + 2 if now.second > 2 else 2 - now.second
         await asyncio.sleep(wait_time)
 
     async def _process_asset_task(self, full_asset_name: str):
