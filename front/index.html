@@ -140,10 +140,22 @@
                 if (!result) {
                     return <div className="text-center"><p className="text-sm text-gray-400">RESULTADO</p><p className="text-2xl font-bold text-yellow-400 animate-pulse">Aguardando...</p></div>;
                 }
-                const isWin = result === 'WIN';
-                const color = isWin ? 'text-green-400' : 'text-red-400';
-                const icon = isWin ? 'fa-check-circle' : 'fa-times-circle';
-                return <div className="text-center"><p className="text-sm text-gray-400">RESULTADO</p><p className={`text-2xl font-bold ${color}`}><i className={`fas ${icon} mr-2`}></i>{result}</p></div>;
+                let color, icon, text;
+                switch (result.toUpperCase()) {
+                    case 'WIN':
+                        color = 'text-green-400'; icon = 'fa-check-circle'; text = 'WIN';
+                        break;
+                    case 'LOSS':
+                        color = 'text-red-400'; icon = 'fa-times-circle'; text = 'LOSS';
+                        break;
+                    case 'REJEITADO':
+                        color = 'text-yellow-400'; icon = 'fa-ban'; text = 'REJEITADO';
+                        break;
+                    default:
+                        color = 'text-gray-500'; icon = 'fa-question-circle'; text = result;
+                        break;
+                }
+                return <div className="text-center"><p className="text-sm text-gray-400">RESULTADO</p><p className={`text-2xl font-bold ${color}`}><i className={`fas ${icon} mr-2`}></i>{text}</p></div>;
             };
 
             return (
