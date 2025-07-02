@@ -9,6 +9,7 @@ from config import settings
 from services.exnova_service import AsyncExnovaService
 from services.supabase_service import SupabaseService
 from analysis.strategy import STRATEGIES
+from analysis.technical import get_m15_sr_zones # Importa a nova função
 from core.data_models import TradeSignal, ActiveTrade, Candle
 
 class TradingBot:
@@ -67,13 +68,8 @@ class TradingBot:
             task.cancel()
 
     async def _wait_for_next_candle(self):
-        """
-        Calcula e espera o tempo necessário para sincronizar a análise para
-        APÓS o fecho da vela M1 atual.
-        """
         now = datetime.now()
-        # FIX: Margem de segurança aumentada para 5 segundos.
-        wait_time = (60 - now.second) + 1 if now.second > 1 else 1 - now.second
+        wait_time = (60 - now.second) + 2 if now.second > 2 else 2 - now.second
         await asyncio.sleep(wait_time)
 
     async def _process_asset_task(self, full_asset_name: str):
@@ -81,18 +77,29 @@ class TradingBot:
             await self._wait_for_next_candle()
             
             clean_asset_name = full_asset_name.split('-')[0]
-            candles = await self.exnova.get_historical_candles(clean_asset_name, 60, 100)
-            if not candles: return
+            
+            # Busca os dados de M1 e M15 em paralelo para eficiência
+            m1_candles_task = self.exnova.get_historical_candles(clean_asset_name, 60, 20)
+            m15_candles_task = self.exnova.get_historical_candles(clean_asset_name, 900, 4)
+            
+            m1_candles, m15_candles = await asyncio.gather(m1_candles_task, m15_candles_task)
+            
+            if not m1_candles or not m15_candles:
+                return
+
+            # Calcula as zonas de S/R de M15 e passa para a estratégia
+            resistance, support = get_m15_sr_zones(m15_candles)
+            m15_zones = {'resistance': resistance, 'support': support}
 
             for strategy in STRATEGIES:
-                direction = strategy.analyze(candles)
+                direction = strategy.analyze(m1_candles, m15_zones)
                 if direction:
-                    await self.logger('SUCCESS', f"[{full_asset_name}] Sinal confirmado! Direção: {direction.upper()}, Estratégia: {strategy.name}")
+                    await self.logger('SUCCESS', f"[{full_asset_name}] Sinal de CONFLUÊNCIA M15 confirmado! Direção: {direction.upper()}")
                     
                     self.cooldown_assets.add(full_asset_name)
                     asyncio.create_task(self._remove_from_cooldown(full_asset_name, 300))
                     
-                    last_candle = candles[-1]
+                    last_candle = m1_candles[-1]
                     signal = TradeSignal(
                         pair=clean_asset_name, 
                         direction=direction, 
