@@ -66,6 +66,10 @@ class TradingBot:
         account_type = self.bot_config.get('account_type', 'PRACTICE')
         await self.exnova.change_balance(account_type)
 
+        current_balance = await self.exnova.get_current_balance()
+        if current_balance is not None:
+            await self.supabase.update_current_balance(current_balance)
+
         open_assets = await self.exnova.get_open_assets()
         assets_to_trade = [asset for asset in open_assets if asset not in self.cooldown_assets]
         assets_to_trade = assets_to_trade[:settings.MAX_CONCURRENT_ASSETS]
@@ -84,7 +88,7 @@ class TradingBot:
 
     async def _wait_for_next_candle(self):
         now = datetime.now()
-        wait_time = (2 - now.second) + 2 if now.second > 2 else 2 - now.second
+        wait_time = (60 - now.second) + 2 if now.second > 2 else 2 - now.second
         await asyncio.sleep(wait_time)
 
     async def _process_asset_task(self, full_asset_name: str):
