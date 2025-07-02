@@ -69,14 +69,14 @@ class AsyncExnovaService:
 
     async def check_trade_result(self, order_id: str) -> Optional[str]:
         """
-        Verifica o resultado de uma operação com um timeout de segurança.
-        Isto impede que o bot "congele" se a API não responder.
+        Verifica o resultado de uma operação com um timeout de segurança longo,
+        assumindo que a chamada da API pode ser bloqueante.
         """
         loop = await self._get_loop()
         try:
-            # FIX: Envolve a chamada da API num 'wait_for' com um timeout de 10 segundos.
+            # Timeout de 70 segundos (para uma operação de 1 minuto + margem)
             api_call = loop.run_in_executor(None, self.api.check_win_v4, order_id)
-            result, _ = await asyncio.wait_for(api_call, timeout=10.0)
+            result, _ = await asyncio.wait_for(api_call, timeout=70.0) 
             
             return result.upper() if result else None
         except asyncio.TimeoutError:
