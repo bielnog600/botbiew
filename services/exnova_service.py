@@ -23,11 +23,11 @@ class AsyncExnovaService:
         status, reason = await loop.run_in_executor(None, self.api.connect)
         if status:
             self._is_connected = True
-            print("Conexão com a Exnova estabelecida com sucesso.")
+            print("Conexão com a Exnova estabelecida com sucesso.", flush=True)
             await self.change_balance(self._account_type)
         else:
             self._is_connected = False
-            print(f"Falha na conexão com a Exnova: {reason}")
+            print(f"Falha na conexão com a Exnova: {reason}", flush=True)
         return self._is_connected
 
     async def change_balance(self, balance_type: str):
@@ -40,7 +40,7 @@ class AsyncExnovaService:
             balance = await loop.run_in_executor(None, self.api.get_balance)
             return float(balance) if balance else None
         except Exception as e:
-            print(f"Erro ao obter saldo da API: {e}")
+            print(f"Erro ao obter saldo da API: {e}", flush=True)
             return None
 
     async def get_open_assets(self) -> List[str]:
@@ -62,7 +62,7 @@ class AsyncExnovaService:
         loop = await self._get_loop()
         status, order_id = await loop.run_in_executor(None, self.api.buy, amount, asset, direction, expiration)
         if status: return str(order_id)
-        print(f"Falha ao executar ordem para {asset}: {order_id}")
+        print(f"Falha ao executar ordem para {asset}: {order_id}", flush=True)
         return None
 
     async def check_trade_result(self, order_id: str) -> Optional[str]:
@@ -72,15 +72,21 @@ class AsyncExnovaService:
         """
         loop = await self._get_loop()
         try:
-            # FIX: Usando a função 'check_win' que é a mais provável.
+            # FIX: Usando a função 'check_win' com um timeout de segurança.
             api_call = loop.run_in_executor(None, self.api.check_win, order_id)
-            # Retornamos o resultado diretamente. A função provavelmente retorna 'win' ou 'loose'.
-            result, _ = await asyncio.wait_for(api_call, timeout=15.0) 
+            result_data = await asyncio.wait_for(api_call, timeout=15.0)
             
-            return result.upper() if result else None
+            # A função check_win retorna uma tupla (resultado, lucro)
+            if isinstance(result_data, tuple) and len(result_data) > 0:
+                result = result_data[0]
+                return result.upper() if result else None
+            else:
+                print(f"Resposta inesperada de check_win para a ordem {order_id}: {result_data}", flush=True)
+                return None
+
         except asyncio.TimeoutError:
-            print(f"Aviso: Timeout ao verificar a ordem {order_id}. A API não respondeu a tempo.")
+            print(f"Aviso: Timeout ao verificar a ordem {order_id}. A API não respondeu a tempo.", flush=True)
             return None
         except Exception as e:
-            print(f"Erro inesperado ao verificar a ordem {order_id}: {e}")
+            print(f"Erro inesperado ao verificar a ordem {order_id}: {e}", flush=True)
             return None
