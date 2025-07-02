@@ -73,7 +73,7 @@ class TradingBot:
         """
         now = datetime.now()
         # FIX: Margem de segurança aumentada para 5 segundos.
-        wait_time = (60 - now.second) + 5 if now.second > 5 else 5 - now.second
+        wait_time = (60 - now.second) + 10 if now.second > 10 else 10 - now.second
         await asyncio.sleep(wait_time)
 
     async def _process_asset_task(self, full_asset_name: str):
