@@ -144,8 +144,7 @@ class TradingBot:
         await self.logger('DIAGNOSTIC', "Loop de verificação de resultados iniciado.")
         while self.is_running:
             try:
-                await self.logger('DIAGNOSTIC', "A aguardar por uma operação na fila...")
-                trade = await self.trade_queue.get()
+                trade = await asyncio.wait_for(self.trade_queue.get(), timeout=5.0)
                 await self.logger('DIAGNOSTIC', f"Operação {trade.order_id} (Sinal ID: {trade.signal_id}) retirada da fila. A iniciar verificação.")
                 
                 result = None
@@ -174,6 +173,8 @@ class TradingBot:
                     await self.supabase.update_trade_result(trade.signal_id, "TIMEOUT")
                 
                 self.trade_queue.task_done()
+            except asyncio.TimeoutError:
+                continue
             except Exception as e:
                 await self.logger('ERROR', f"Erro no loop de verificação de resultados: {e}")
                 traceback.print_exc()
