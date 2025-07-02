@@ -125,7 +125,7 @@
         function SignalCard({ signal }) {
             const ResultBadge = ({ result }) => {
                 if (!result) {
-                    return <div className="text-center"><p className="text-sm text-gray-400">RESULTADO</p><p className="text-2xl font-bold text-yellow-400 animate-pulse">Aguardando...</p></div>;
+                    return <div className="text-center"><p className="text-sm text-gray-400">RESULTADO</p><p className="text-2xl font-bold text-yellow-400 animate-pulse">...</p></div>;
                 }
                 let color, icon, text;
                 switch (result.toUpperCase()) {
