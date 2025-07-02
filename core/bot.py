@@ -50,16 +50,11 @@ class TradingBot:
         account_type = self.bot_config.get('account_type', 'PRACTICE')
         await self.exnova.change_balance(account_type)
 
-        current_balance = await self.exnova.get_current_balance()
-        if current_balance is not None:
-            await self.supabase.update_current_balance(current_balance)
-
         open_assets = await self.exnova.get_open_assets()
-        
         assets_to_trade = [asset for asset in open_assets if asset not in self.cooldown_assets]
         assets_to_trade = assets_to_trade[:settings.MAX_CONCURRENT_ASSETS]
         
-        await self.logger('INFO', f"Ativos a serem monitorizados (fora de cooldown): {assets_to_trade}")
+        await self.logger('INFO', f"Ativos a serem monitorizados: {assets_to_trade}")
 
         trading_tasks = [asyncio.create_task(self._process_asset_task(asset)) for asset in assets_to_trade]
         
@@ -87,7 +82,7 @@ class TradingBot:
             for strategy in STRATEGIES:
                 direction = strategy.analyze(candles)
                 if direction:
-                    await self.logger('SUCCESS', f"[{full_asset_name}] Sinal de CONFLUÊNCIA encontrado! Direção: {direction.upper()}")
+                    await self.logger('SUCCESS', f"[{full_asset_name}] Sinal confirmado! Direção: {direction.upper()}, Estratégia: {strategy.name}")
                     
                     self.cooldown_assets.add(full_asset_name)
                     asyncio.create_task(self._remove_from_cooldown(full_asset_name, 300))
@@ -156,8 +151,10 @@ class TradingBot:
                     await asyncio.sleep(5)
                 
                 if result:
+                    # LOG DE DIAGNÓSTICO
+                    await self.logger('DEBUG', f"A tentar atualizar o sinal ID {trade.signal_id} com o resultado: {result}")
+                    
                     current_mg_level = self.martingale_state.get(trade.pair, {}).get('level', 0)
-                    await self.logger('SUCCESS' if result == 'WIN' else 'ERROR', f"[{trade.pair}] Resultado da ordem {trade.order_id}: {result}")
                     await self.supabase.update_trade_result(trade.signal_id, result, current_mg_level)
                     self._update_martingale_state(trade.pair, result, trade.entry_value)
                 else:
