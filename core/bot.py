@@ -68,7 +68,7 @@ class TradingBot:
 
     async def _wait_for_next_candle(self):
         now = datetime.now()
-        wait_time = (2 - now.second) + 2 if now.second > 2 else 2 - now.second
+        wait_time = (60 - now.second) + 2 if now.second > 2 else 2 - now.second
         await asyncio.sleep(wait_time)
 
     async def _process_asset_task(self, full_asset_name: str):
@@ -145,35 +145,39 @@ class TradingBot:
         while self.is_running:
             try:
                 trade = await self.trade_queue.get()
-                # Inicia uma tarefa para cada trade, para que não bloqueiem uns aos outros
                 asyncio.create_task(self._check_and_process_single_trade(trade))
                 self.trade_queue.task_done()
             except Exception as e:
                 await self.logger('ERROR', f"Erro no loop de verificação de resultados: {e}")
 
     async def _check_and_process_single_trade(self, trade: ActiveTrade):
-        """Verifica e processa o resultado de uma única operação com um timeout longo."""
+        """
+        Espera a operação expirar e depois verifica o lucro para determinar o resultado.
+        """
         try:
-            await self.logger('DIAGNOSTIC', f"[{trade.pair}] A aguardar resultado para a ordem {trade.order_id}...")
+            # FIX: Espera 65 segundos (1 min de operação + 5s de margem)
+            await self.logger('INFO', f"[{trade.pair}] Operação {trade.order_id} em andamento. A aguardar expiração...")
+            await asyncio.sleep(65)
+
+            await self.logger('INFO', f"[{trade.pair}] Expiração da ordem {trade.order_id}. A verificar lucro...")
+            profit = await self.exnova.check_profit(trade.order_id)
             
-            # FIX: Faz uma única chamada com um timeout longo, esperando que a API bloqueie.
-            result = await self.exnova.check_trade_result(trade.order_id)
+            result = "UNKNOWN"
+            if profit is not None:
+                result = "WIN" if profit > 0 else "LOSS"
             
-            if result:
-                await self.logger('DIAGNOSTIC', f"[{trade.pair}] Resultado final obtido: {result}. A atualizar no Supabase...")
-                current_mg_level = self.martingale_state.get(trade.pair, {}).get('level', 0)
-                update_success = await self.supabase.update_trade_result(trade.signal_id, result, current_mg_level)
-                
-                if update_success:
-                    await self.logger('SUCCESS', f"[{trade.pair}] Resultado da ordem {trade.order_id} atualizado com sucesso para {result}.")
-                else:
-                    await self.logger('ERROR', f"[{trade.pair}] FALHA CRÍTICA ao atualizar o resultado da ordem {trade.order_id} no Supabase.")
-                
-                self._update_martingale_state(trade.pair, result, trade.entry_value)
+            await self.logger('DIAGNOSTIC', f"[{trade.pair}] Lucro obtido: {profit}. Resultado definido como: {result}.")
+            
+            current_mg_level = self.martingale_state.get(trade.pair, {}).get('level', 0)
+            update_success = await self.supabase.update_trade_result(trade.signal_id, result, current_mg_level)
+            
+            if update_success:
+                await self.logger('SUCCESS', f"[{trade.pair}] Resultado da ordem {trade.order_id} atualizado para {result}.")
             else:
-                # O timeout aconteceu dentro de check_trade_result
-                await self.logger('WARNING', f"[{trade.pair}] Timeout ao obter resultado da ordem {trade.order_id}.")
-                await self.supabase.update_trade_result(trade.signal_id, "TIMEOUT")
+                await self.logger('ERROR', f"[{trade.pair}] FALHA CRÍTICA ao atualizar o resultado da ordem {trade.order_id} no Supabase.")
+            
+            self._update_martingale_state(trade.pair, result, trade.entry_value)
+
         except Exception as e:
             await self.logger('ERROR', f"Exceção não tratada em _check_and_process_single_trade para {trade.pair}: {e}")
             traceback.print_exc()
