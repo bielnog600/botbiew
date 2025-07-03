@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field, computed_field
 from typing import Optional
 
 class Candle(BaseModel):
-    """Modelo de dados para uma vela (candle), com propriedades computadas."""
+    """Modelo de dados para uma vela (candle)."""
     open: float
     close: float
     max: float
@@ -36,4 +36,4 @@ class ActiveTrade(BaseModel):
     signal_id: int
     pair: str
     entry_value: float
-    balance_before: float
+    # O campo 'balance_before' foi removido.
