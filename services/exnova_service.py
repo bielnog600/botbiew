@@ -25,6 +25,12 @@ class AsyncExnovaService:
             print(f"Falha na conexão com a Exnova: {reason}", flush=True)
         return status
 
+    async def get_server_timestamp(self) -> int:
+        """Busca o timestamp oficial do servidor da corretora."""
+        loop = await self._get_loop()
+        # A função get_server_timestamp é a nossa fonte da verdade para o tempo.
+        return await loop.run_in_executor(None, self.api.get_server_timestamp)
+
     async def change_balance(self, balance_type: str):
         self._account_type = balance_type
         loop = await self._get_loop()
@@ -50,7 +56,9 @@ class AsyncExnovaService:
 
     async def get_historical_candles(self, asset: str, interval: int, count: int) -> List[Candle]:
         loop = await self._get_loop()
-        candles_data = await loop.run_in_executor(None, self.api.get_candles, asset, interval, count, time.time())
+        # Passamos o tempo do servidor para a chamada de velas
+        server_time = await self.get_server_timestamp()
+        candles_data = await loop.run_in_executor(None, self.api.get_candles, asset, interval, count, server_time)
         return [Candle(**data) for data in candles_data if data] if candles_data else []
 
     async def execute_trade(self, amount: float, asset: str, direction: str, expiration: int) -> Optional[str]:
@@ -60,6 +68,3 @@ class AsyncExnovaService:
             return str(order_id)
         print(f"Falha ao executar ordem para {asset}: {order_id}", flush=True)
         return None
-
-    # A função check_trade_result foi removida. A lógica de verificação
-    # será agora feita diretamente no bot, usando o preço.
