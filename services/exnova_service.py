@@ -7,6 +7,10 @@ from core.data_models import Candle
 
 class AsyncExnovaService:
     def __init__(self, email: str, password: str, account_type: str = "PRACTICE"):
+        # FIX: As variáveis de instância que foram removidas por engano foram restauradas.
+        self._email = email
+        self._password = password
+        self._account_type = account_type
         self.api = Exnova(email, password)
         self._loop = None
 
@@ -19,6 +23,7 @@ class AsyncExnovaService:
         status, reason = await loop.run_in_executor(None, self.api.connect)
         if status:
             print("Conexão com a Exnova estabelecida com sucesso.", flush=True)
+            # Esta chamada agora funcionará porque self._account_type existe.
             await self.change_balance(self._account_type)
         else:
             print(f"Falha na conexão com a Exnova: {reason}", flush=True)
@@ -61,15 +66,9 @@ class AsyncExnovaService:
         return None
 
     async def check_trade_result(self, order_id: str) -> Optional[str]:
-        """
-        Espera a operação expirar e depois verifica o resultado usando a função 'check_win'.
-        """
         loop = await self._get_loop()
         try:
-            # FIX: A lógica de espera agora está aqui, no serviço.
             await asyncio.sleep(65)
-            
-            print(f"A verificar o resultado final da ordem {order_id}...", flush=True)
             api_call = loop.run_in_executor(None, self.api.check_win, order_id)
             result_data = await asyncio.wait_for(api_call, timeout=15.0) 
             
