@@ -3,6 +3,7 @@ import asyncio
 from supabase import create_client, Client
 from typing import List, Dict, Any, Optional
 from core.data_models import TradeSignal
+from config import settings
 
 class SupabaseService:
     """
@@ -16,16 +17,13 @@ class SupabaseService:
         print("Serviço Supabase inicializado.")
 
     def _create_client(self) -> Client:
-        """Cria uma nova instância do cliente Supabase para cada operação."""
         return create_client(self._url, self._key)
 
     async def _get_loop(self):
-        """Obtém o loop de eventos em execução de forma segura."""
         if self._loop is None: self._loop = asyncio.get_running_loop()
         return self._loop
 
     async def get_bot_config(self) -> Dict[str, Any]:
-        """Busca a configuração completa do bot de forma assíncrona."""
         try:
             loop = await self._get_loop()
             response = await loop.run_in_executor(None, lambda: self._create_client().table('bot_config').select('*').eq('id', 1).single().execute())
@@ -35,7 +33,6 @@ class SupabaseService:
             return {'status': 'PAUSED'}
 
     async def update_current_balance(self, balance: float):
-        """Atualiza apenas o saldo da conta no banco de dados."""
         try:
             loop = await self._get_loop()
             await loop.run_in_executor(None, lambda: self._create_client().table('bot_config').update({'current_balance': balance}).eq('id', 1).execute())
@@ -43,7 +40,6 @@ class SupabaseService:
             print(f"Erro ao atualizar saldo no Supabase: {e}", flush=True)
 
     async def insert_log(self, level: str, message: str):
-        """Insere uma nova entrada de log no banco de dados de forma assíncrona."""
         try:
             loop = await self._get_loop()
             await loop.run_in_executor(None, lambda: self._create_client().table('bot_logs').insert({'level': level.upper(), 'message': message}).execute())
@@ -51,7 +47,6 @@ class SupabaseService:
             print(f"Erro ao inserir log no Supabase: {e}", flush=True)
 
     async def insert_trade_signal(self, signal: TradeSignal) -> Optional[int]:
-        """Insere um novo sinal de trade de forma assíncrona."""
         try:
             loop = await self._get_loop()
             response = await loop.run_in_executor(None, lambda: self._create_client().table('trade_signals').insert(signal.model_dump(exclude_none=True)).execute())
@@ -61,7 +56,6 @@ class SupabaseService:
             return None
 
     async def update_trade_result(self, signal_id: int, result: str, martingale_level: int = 0) -> bool:
-        """Atualiza o resultado de um trade e o nível de martingale."""
         try:
             loop = await self._get_loop()
             response = await loop.run_in_executor(
@@ -76,10 +70,10 @@ class SupabaseService:
             await self.insert_log('ERROR', f"Falha ao atualizar resultado do trade {signal_id}: {e}")
             return False
 
-    async def update_asset_performance(self, asset: str, strategy: str, win_rate: float, total_trades: int):
+    # FIX: Adicionado o parâmetro 'timeframe' à definição da função.
+    async def update_asset_performance(self, asset: str, strategy: str, timeframe: int, win_rate: float, total_trades: int):
         """
         Insere ou atualiza o registro de performance de uma estratégia para um ativo.
-        Usa 'upsert' para evitar erros de duplicados.
         """
         try:
             loop = await self._get_loop()
@@ -88,6 +82,7 @@ class SupabaseService:
                 lambda: self._create_client().table('asset_performance').upsert({
                     'asset_name': asset,
                     'strategy_name': strategy,
+                    'timeframe_minutes': timeframe, # Incluído o timeframe no payload.
                     'win_rate': win_rate,
                     'total_trades': total_trades,
                     'last_cataloged_at': 'now()'
@@ -96,7 +91,7 @@ class SupabaseService:
         except Exception as e:
             print(f"Erro ao atualizar performance do ativo {asset}: {e}", flush=True)
 
-    async def get_best_performing_assets(self, min_win_rate: float = 85.0) -> List[str]:
+    async def get_best_performing_assets(self) -> List[str]:
         """Busca no banco de dados os ativos com a melhor performance."""
         try:
             loop = await self._get_loop()
@@ -104,14 +99,12 @@ class SupabaseService:
                 None,
                 lambda: self._create_client().table('asset_performance')
                     .select('asset_name')
-                    .gte('win_rate', min_win_rate)
+                    .gte('win_rate', 85) # O threshold está hardcoded por enquanto
                     .order('win_rate', desc=True)
                     .limit(settings.MAX_ASSETS_TO_MONITOR)
                     .execute()
             )
-            if response.data:
-                return [item['asset_name'] for item in response.data]
-            return []
+            return [item['asset_name'] for item in response.data] if response.data else []
         except Exception as e:
             print(f"Erro ao buscar melhores ativos: {e}", flush=True)
             return []
