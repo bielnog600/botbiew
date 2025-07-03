@@ -1,7 +1,7 @@
 import asyncio
 import time
 from exnovaapi.stable_api import Exnova
-from typing import List, Optional, Tuple
+from typing import List, Optional
 from core.data_models import Candle
 
 class AsyncExnovaService:
@@ -55,12 +55,3 @@ class AsyncExnovaService:
             return str(order_id)
         except Exception:
             return None
-
-    async def check_win_v4(self, order_id: str) -> Tuple[Optional[bool], Optional[float]]:
-        """
-        Retorna (status_bool, profit):
-         - status_bool: True=win, False=loss, None=ainda não expirou
-         - profit: float (positivo para win, negativo para loss)
-        """
-        loop = await self._get_loop()
-        return await loop.run_in_executor(None, self.api.check_win_v4, order_id)
