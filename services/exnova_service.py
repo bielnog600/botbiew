@@ -62,9 +62,9 @@ class AsyncExnovaService:
         return None
 
     async def check_trade_result(self, order_id: str) -> Optional[str]:
-    """
-    Faz polling na API até obter WIN ou LOSS, ou retorna None após timeout.
-    """
+        """
+        Faz polling na API até obter WIN ou LOSS, ou retorna None após timeout.
+        """
         loop = await self._get_loop()
 
     # aguarda expirar o 1-min trade
