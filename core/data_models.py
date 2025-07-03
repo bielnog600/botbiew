@@ -1,5 +1,5 @@
 # core/data_models.py
-from pydantic import BaseModel, computed_field
+from pydantic import BaseModel, Field, computed_field
 from typing import Optional
 
 class Candle(BaseModel):
@@ -35,5 +35,3 @@ class ActiveTrade(BaseModel):
     signal_id: int
     pair: str
     entry_value: float
-    direction: Optional[str] = None
-    entry_price: Optional[float] = None
