@@ -62,30 +62,44 @@ class AsyncExnovaService:
         return None
 
     async def check_trade_result(self, order_id: str) -> Optional[str]:
-        """
-        Verifica o resultado de uma operação usando a função 'check_win',
-        com uma lógica de espera e timeout para robustez.
-        """
+    """
+    Faz polling na API até obter WIN ou LOSS, ou retorna None após timeout.
+    """
         loop = await self._get_loop()
-        try:
-            # Espera 65 segundos antes de verificar, garantindo que a operação de 1 min terminou.
-            await asyncio.sleep(65)
-            
-            print(f"A verificar o resultado final da ordem {order_id}...", flush=True)
-            api_call = loop.run_in_executor(None, self.api.check_win, order_id)
-            result_data = await asyncio.wait_for(api_call, timeout=15.0) 
-            
-            if isinstance(result_data, tuple) and len(result_data) > 0:
-                result_string = result_data[0]
-                if result_string == 'win': return 'WIN'
-                if result_string == 'loose': return 'LOSS'
-                # Trata outros possíveis retornos, como 'equal'
-                return result_string.upper() if result_string else "UNKNOWN"
-            return "UNKNOWN"
 
-        except asyncio.TimeoutError:
-            print(f"Aviso: Timeout ao verificar a ordem {order_id}.", flush=True)
-            return "UNKNOWN"
-        except Exception as e:
-            print(f"Erro inesperado ao verificar a ordem {order_id}: {e}", flush=True)
-            return "UNKNOWN"
+    # aguarda expirar o 1-min trade
+        await asyncio.sleep(65)
+
+        max_attempts = 5
+        for attempt in range(1, max_attempts + 1):
+            try:
+                print(f"Tentativa {attempt}/{max_attempts} para ordem {order_id}...", flush=True)
+                api_call = loop.run_in_executor(None, self.api.check_win, order_id)
+                result_data = await asyncio.wait_for(api_call, timeout=15.0)
+            except asyncio.TimeoutError:
+                print(f"Aviso: Timeout na tentativa {attempt} para {order_id}", flush=True)
+                await asyncio.sleep(2)
+                continue
+            except Exception as e:
+                print(f"Erro na tentativa {attempt} para {order_id}: {e}", flush=True)
+                await asyncio.sleep(2)
+                continue
+
+        # extrai o status da resposta
+            if isinstance(result_data, tuple) and result_data:
+                status = str(result_data[0]).lower()
+                if status == 'win':
+                    return 'WIN'
+                if status in ('loss', 'lose'):
+                    return 'LOSS'
+                if status == 'pending':
+                    await asyncio.sleep(2)
+                    continue
+            # outro retorno final (ex: 'equal')
+                return status.upper()
+            else:
+                await asyncio.sleep(2)
+
+    # esgotou as tentativas sem sucesso
+        return None
+
