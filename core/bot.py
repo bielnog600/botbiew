@@ -273,28 +273,28 @@ class TradingBot:
 
     async def _check_and_process_single_trade(self, trade: ActiveTrade):
         try:
-        # primeira tentativa
-            raw = await self.exnova.check_trade_result(trade.order_id)
-        except TimeoutError:
-            await self.logger('WARNING', f"Timeout ao verificar a ordem {trade.order_id}, aguardando antes de tentar novamente.")
-            await asyncio.sleep(5)
-            raw = await self.exnova.check_trade_result(trade.order_id)
+        # primeira tentativa de obter raw
+            try:
+                raw = await self.exnova.check_trade_result(trade.order_id)
+            except TimeoutError:
+                await self.logger('WARNING', f"Timeout ao verificar a ordem {trade.order_id}, aguardando antes de tentar novamente.")
+                await asyncio.sleep(5)
+                raw = await self.exnova.check_trade_result(trade.order_id)
 
-    # daqui pra frente raw será ou o valor real, ou None se falhar de novo
-        if raw is None:
-            result = "UNKNOWN"
-        elif isinstance(raw, bool):
-            result = "WIN" if raw else "LOSS"
-        elif isinstance(raw, str) and raw.upper() in ("WIN", "LOSS"):
-            result = raw.upper()
-        elif isinstance(raw, dict) and "profit" in raw:
-            result = "WIN" if raw["profit"] > 0 else "LOSS"
-        else:
-            result = "UNKNOWN"
+        # converte raw em WIN/LOSS/UNKNOWN
+            if raw is None:
+                result = "UNKNOWN"
+            elif isinstance(raw, bool):
+                result = "WIN" if raw else "LOSS"
+            elif isinstance(raw, str) and raw.upper() in ("WIN", "LOSS"):
+                result = raw.upper()
+            elif isinstance(raw, dict) and "profit" in raw:
+                result = "WIN" if raw["profit"] > 0 else "LOSS"
+            else:
+                result = "UNKNOWN"
 
+        # registra no ciclo atual e na base
             self.current_cycle_trades.append({'result': result})
-        # ... resto do código ...
-
             current_mg_level = self.martingale_state.get(trade.pair, {}).get('level', 0)
             update_success = await self.supabase.update_trade_result(trade.signal_id, result, current_mg_level)
 
@@ -303,12 +303,18 @@ class TradingBot:
             else:
                 await self.logger('ERROR', f"[{trade.pair}] FALHA CRÍTICA ao atualizar resultado.")
 
+        # atualiza martingale
             self._update_martingale_state(trade.pair, result, trade.entry_value)
+
         except Exception as e:
+        # esse except pega qualquer erro na lógica toda acima
             await self.logger('ERROR', f"Exceção em _check_and_process_single_trade: {e}")
+
         finally:
+        # garante liberar a vaga sempre
             self.trade_semaphore.release()
             await self.logger('INFO', f"[{trade.pair}] Vaga de execução libertada.")
+
 
     def _update_martingale_state(self, asset: str, result: str, last_value: float):
         if not self.bot_config.get('use_martingale', False):
