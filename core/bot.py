@@ -145,8 +145,8 @@ class TradingBot:
 
                 if signal.direction.upper() == 'CALL':
                     result = 'WIN' if outcome_close > entry_close else 'LOSS'
-            else:  # PUT
-                result = 'WIN' if outcome_close < entry_close else 'LOSS'
+                else:  # PUT
+                    result = 'WIN' if outcome_close < entry_close else 'LOSS'
 
 
 
