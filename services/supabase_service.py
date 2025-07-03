@@ -1,4 +1,3 @@
-# services/supabase_service.py
 import asyncio
 from supabase import create_client, Client
 from typing import List, Dict, Any, Optional
@@ -15,7 +14,7 @@ class SupabaseService:
     def _create_client(self) -> Client:
         return create_client(self._url, self._key)
 
-    async def _get_loop(self):
+    async def _get_loop(self) -> asyncio.AbstractEventLoop:
         if not self._loop:
             self._loop = asyncio.get_running_loop()
         return self._loop
