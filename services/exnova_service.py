@@ -7,6 +7,10 @@ from core.data_models import Candle
 
 class AsyncExnovaService:
     def __init__(self, email: str, password: str, account_type: str = "PRACTICE"):
+        # FIX: As variáveis de instância que foram removidas por engano foram restauradas.
+        self._email = email
+        self._password = password
+        self._account_type = account_type
         self.api = Exnova(email, password)
         self._loop = None
 
@@ -19,6 +23,7 @@ class AsyncExnovaService:
         status, reason = await loop.run_in_executor(None, self.api.connect)
         if status:
             print("Conexão com a Exnova estabelecida com sucesso.", flush=True)
+            # Esta chamada agora funcionará porque self._account_type existe.
             await self.change_balance(self._account_type)
         else:
             print(f"Falha na conexão com a Exnova: {reason}", flush=True)
@@ -58,3 +63,23 @@ class AsyncExnovaService:
             return str(order_id)
         print(f"Falha ao executar ordem para {asset}: {order_id}", flush=True)
         return None
+
+    async def check_trade_result(self, order_id: str) -> Optional[str]:
+        loop = await self._get_loop()
+        try:
+            await asyncio.sleep(65)
+            api_call = loop.run_in_executor(None, self.api.check_win, order_id)
+            result_data = await asyncio.wait_for(api_call, timeout=15.0) 
+            
+            if isinstance(result_data, tuple) and len(result_data) > 0:
+                result_string = result_data[0]
+                if result_string == 'win': return 'WIN'
+                if result_string == 'loose': return 'LOSS'
+                return result_string.upper() if result_string else "UNKNOWN"
+            return "UNKNOWN"
+        except asyncio.TimeoutError:
+            print(f"Aviso: Timeout ao verificar a ordem {order_id}.", flush=True)
+            return "UNKNOWN"
+        except Exception as e:
+            print(f"Erro inesperado ao verificar a ordem {order_id}: {e}", flush=True)
+            return "UNKNOWN"
