@@ -2,7 +2,7 @@ import asyncio
 import time
 import traceback
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
 from config import settings
 from services.exnova_service import AsyncExnovaService
@@ -107,7 +107,6 @@ class TradingBot:
 
     async def _execute_and_wait(self, signal: TradeSignal, full_name: str):
         self.is_trade_active = True
-        result: Optional[str] = None
         try:
             entry_value = self._get_entry_value(signal.pair)
             sid = await self.supabase.insert_trade_signal(signal)
@@ -119,60 +118,45 @@ class TradingBot:
                 await self.logger('ERROR', f"[{signal.pair}] Falha execução da ordem")
                 await self.supabase.update_trade_result(sid, 'REJEITADO')
                 return
-            await self.logger('INFO', f"[{signal.pair}] Ordem {order_id} enviada")
-            # Polling oficial
-            await self.logger('DEBUG', f"[{signal.pair}] Iniciando polling oficial por até 75s...")
+
+            await self.logger('INFO', f"[{signal.pair}] Ordem {order_id} enviada. Aguardando resultado oficial…")
+            # Polling oficial pelo lucro
             deadline = time.time() + 75
+            resultado_lucro: Optional[float] = None
             while time.time() < deadline:
-                await self.logger('DEBUG', f"[{signal.pair}] Polling oficial: check_win_v4({order_id})")
                 status_data = await self.exnova.check_win_v4(order_id)
                 if status_data:
-                    status, profit = status_data
-                    if isinstance(status, bool):
-                        result = 'WIN' if status else 'LOSS'
-                    else:
-                        s = str(status).lower()
-                        result = 'WIN' if s == 'win' else 'LOSS'
-                    await self.logger('DEBUG', f"[{signal.pair}] Resultado oficial: {result} (profit={profit})")
+                    status_bool, lucro = status_data
+                    resultado_lucro = lucro
+                    await self.logger('DEBUG', f"[{signal.pair}] API retornou status={status_bool}, lucro={lucro}")
                     break
                 await asyncio.sleep(0.5)
-            # Fallback por candle
-            if result is None:
-                await self.logger('DEBUG', f"[{signal.pair}] Oficial não respondeu em tempo, iniciando fallback por candle...")
-                extra = 5
-                now2 = datetime.now()
-                wait2 = (60 - now2.second) + extra
-                await self.logger('DEBUG', f"[{signal.pair}] Aguardando {wait2}s para candle completamente fechado...")
-                await asyncio.sleep(wait2)
-                await self.logger('DEBUG', f"[{signal.pair}] Obtendo 3 candles para fallback...")
-                candles = await self.exnova.get_historical_candles(signal.pair, 60, 3)
-                await self.logger('DEBUG', f"[{signal.pair}] Candles opens: {[c.open for c in candles]}")
-                await self.logger('DEBUG', f"[{signal.pair}] Candles closes: {[c.close for c in candles]}")
-                if len(candles) >= 3:
-                    entry_close = candles[-3].close
-                    outcome_close = candles[-2].close
-                    await self.logger('DEBUG', f"[{signal.pair}] entry_close={entry_close}, outcome_close={outcome_close}")
-                    if signal.direction.upper() == 'CALL':
-                        result = 'WIN' if outcome_close > entry_close else 'LOSS'
-                    else:
-                        result = 'WIN' if outcome_close < entry_close else 'LOSS'
-                else:
-                    await self.logger('ERROR', f"[{signal.pair}] Velas insuficientes para fallback (esperado 3, obteve {len(candles)})")
-                    result = 'UNKNOWN'
-            # Grava resultado
-            mg = self.martingale_state.get(signal.pair, {}).get('level', 0)
-            await self.supabase.update_trade_result(sid, result or 'UNKNOWN', mg)
-            await self.logger('SUCCESS', f"[{signal.pair}] Resultado: {result}")
-            # Atualiza martingale
-            if result == 'WIN':
+
+            # Interpretação do resultado pelo lucro
+            if resultado_lucro is None:
+                result = 'UNKNOWN'
+                await self.logger('WARNING', f"[{signal.pair}] Sem resposta oficial da API, marcado como UNKNOWN.")
+            elif resultado_lucro == 0:
+                result = 'DRAW'
+                await self.logger('WARNING', f"[{signal.pair}] RESULTADO: EMPATE (lucro=0).")
+            elif resultado_lucro > 0:
+                result = 'WIN'
                 self.martingale_state[signal.pair] = {'level': 0, 'last_value': entry_value}
+                await self.logger('SUCCESS', f"[{signal.pair}] RESULTADO: WIN — Lucro: {resultado_lucro:.2f}")
             else:
+                result = 'LOSS'
                 lvl = self.martingale_state.get(signal.pair, {}).get('level', 0) + 1
                 max_lv = self.bot_config.get('martingale_levels', settings.MARTINGALE_LEVELS)
                 if lvl <= max_lv:
                     self.martingale_state[signal.pair] = {'level': lvl, 'last_value': entry_value}
                 else:
                     self.martingale_state[signal.pair] = {'level': 0, 'last_value': settings.ENTRY_VALUE}
+                await self.logger('ERROR', f"[{signal.pair}] RESULTADO: LOSS — Prejuízo: {resultado_lucro:.2f}")
+
+            # Grava resultado no Supabase
+            martingale_lv = self.martingale_state.get(signal.pair, {}).get('level', 0)
+            await self.supabase.update_trade_result(sid, result, martingale_lv)
+
         except Exception as e:
             await self.logger('ERROR', f"Erro em _execute_and_wait para {signal.pair}: {e}")
             traceback.print_exc()
