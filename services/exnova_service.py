@@ -61,35 +61,5 @@ class AsyncExnovaService:
         print(f"Falha ao executar ordem para {asset}: {order_id}", flush=True)
         return None
 
-    async def check_trade_result(self, order_id: str, expiration: int = 1) -> Optional[str]:
-        """
-        Polling contínuo até o trade expirar (expiration em minutos) + 15 s de margem.
-        Retorna 'WIN' ou 'LOSS' assim que a API indicar status=True.
-        Retorna None se estourar o prazo.
-        """
-        loop = await self._get_loop()
-        # calcula deadline em UNIX time
-        deadline = time.time() + expiration * 60 + 15
-
-        while time.time() < deadline:
-            # chama a versão certa do check_win
-            if self._account_type.lower() == 'digital':
-                status, profit = await loop.run_in_executor(
-                    None, self.api.check_win_digital_v2, order_id
-                )
-            else:
-                status, profit = await loop.run_in_executor(
-                    None, self.api.check_win_v4, order_id
-                )
-
-            if status:
-                # devolve WIN/LOSS com base no lucro
-                return 'WIN' if profit > 0 else 'LOSS'
-
-            # aguarda 0.5 s antes de tentar de novo
-            await asyncio.sleep(0.5)
-
-    # nunca obteve status=True antes do prazo
-        return None
-
-
+    # A função check_trade_result foi removida. A lógica de verificação
+    # será agora feita diretamente no bot, usando o preço.
