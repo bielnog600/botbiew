@@ -132,19 +132,25 @@ class TradingBot:
             await asyncio.sleep(wait)
 
             # obtém as duas últimas velas
+# obtém candle de expiração
             candles = await self.exnova.get_historical_candles(signal.pair, 60, 2)
             if len(candles) < 2:
-                await self.logger('ERROR', f"[{signal.pair}] Não consegui obter velas de resultado.")
+                await self.logger('ERROR', f"[{signal.pair}] Velas insuficientes para inferir resultado.")
                 result = 'UNKNOWN'
             else:
-                entry_close = candles[-2].close
-                outcome_close = candles[-1].close
-                await self.logger('DEBUG', f"[{signal.pair}] entry={entry_close}, outcome={outcome_close}")
+                entry_close   = candles[-2].close
+                exp_candle    = candles[-1]
+                candle_low    = exp_candle.min
+                candle_high   = exp_candle.max
+                await self.logger('DEBUG', f"[{signal.pair}] entry={entry_close}, low={candle_low}, high={candle_high}")
 
                 if signal.direction.upper() == 'CALL':
-                    result = 'WIN' if outcome_close > entry_close else 'LOSS'
-                else:
-                    result = 'WIN' if outcome_close < entry_close else 'LOSS'
+        # ganhou se nem um instante a vela desceu abaixo do entry
+                    result = 'WIN' if candle_low > entry_close else 'LOSS'
+                else:  # PUT
+        # ganhou se nem um instante a vela subiu acima do entry
+                    result = 'WIN' if candle_high < entry_close else 'LOSS'
+
 
             # grava no Supabase
             mg = self.martingale_state.get(signal.pair, {}).get('level', 0)
