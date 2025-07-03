@@ -9,7 +9,7 @@ from config import settings
 from services.exnova_service import AsyncExnovaService
 from services.supabase_service import SupabaseService
 from analysis.strategy import STRATEGIES
-from analysis.technical import get_m15_sr_zones # Importa a função de análise M15
+from analysis.technical import get_m15_sr_zones
 from core.data_models import TradeSignal, ActiveTrade, Candle
 
 class TradingBot:
@@ -79,21 +79,16 @@ class TradingBot:
             
             clean_asset_name = full_asset_name.split('-')[0]
             
-            # FIX: Busca os dados de M1 e M15 em paralelo para eficiência.
             m1_candles_task = self.exnova.get_historical_candles(clean_asset_name, 60, 20)
             m15_candles_task = self.exnova.get_historical_candles(clean_asset_name, 900, 4)
-            
             m1_candles, m15_candles = await asyncio.gather(m1_candles_task, m15_candles_task)
             
-            if not m1_candles or not m15_candles:
-                return
+            if not m1_candles or not m15_candles: return
 
-            # FIX: Calcula as zonas de S/R de M15 para passar para a estratégia.
             resistance, support = get_m15_sr_zones(m15_candles)
             m15_zones = {'resistance': resistance, 'support': support}
 
             for strategy in STRATEGIES:
-                # FIX: Passa ambos os argumentos necessários para a análise.
                 direction = strategy.analyze(m1_candles, m15_zones)
                 if direction:
                     await self.logger('SUCCESS', f"[{full_asset_name}] Sinal de CONFLUÊNCIA M15 confirmado! Direção: {direction.upper()}")
@@ -174,7 +169,8 @@ class TradingBot:
 
     async def _check_and_process_single_trade(self, trade: ActiveTrade):
         try:
-            await self.logger('INFO', f"[{trade.pair}] Operação {trade.order_id} em andamento. A aguardar resultado...")
+            await self.logger('INFO', f"[{trade.pair}] Operação {trade.order_id} em andamento. A verificar resultado...")
+            
             result = await self.exnova.check_trade_result(trade.order_id)
             
             if not result:
