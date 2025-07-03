@@ -80,6 +80,7 @@ class TradingBot:
     async def _process_asset(self, full_name: str):
         try:
             base = full_name.split('-')[0]
+            # busca velas
             m1, m15 = await asyncio.gather(
                 self.exnova.get_historical_candles(base, 60, 20),
                 self.exnova.get_historical_candles(base, 900, 4),
@@ -91,15 +92,15 @@ class TradingBot:
             zones = {'resistance': res, 'support': sup}
 
             for strat in STRATEGIES:
-                dir_ = strat.analyze(m1, zones)
-                await self.logger('DEBUG', f"[{full_name}] Estratégia {strat.name} → {dir_!r}")
-                if not dir_:
+                direction = strat.analyze(m1, zones)
+                await self.logger('DEBUG', f"[{full_name}] Estratégia {strat.name} → {direction!r}")
+                if not direction:
                     continue
 
                 last = m1[-1]
                 signal = TradeSignal(
                     pair=base,
-                    direction=dir_,
+                    direction=direction,
                     strategy=strat.name,
                     setup_candle_open=last.open,
                     setup_candle_high=last.max,
@@ -107,11 +108,11 @@ class TradingBot:
                     setup_candle_close=last.close,
                 )
                 await self._execute_and_wait(signal, full_name)
-                return
-
+                # **aqui não retornamos** — continua analisando as demais estratégias
         except Exception as e:
             await self.logger('ERROR', f"Erro em _process_asset({full_name}): {e}")
             traceback.print_exc()
+
 
     def _get_entry_value(self, asset: str) -> float:
         base = self.bot_config.get('entry_value', settings.ENTRY_VALUE)
