@@ -1,3 +1,4 @@
+# core/bot.py
 import asyncio
 import time
 import traceback
@@ -136,7 +137,7 @@ class TradingBot:
                 return
 
             await self.logger('INFO', f"[{signal.pair}] Ordem {order_id} enviada. Aguardando expiração…")
-            await asyncio.sleep(65)  # vela de 1min + 5s folga
+            await asyncio.sleep(65)
 
             saldo_depois = await self.exnova.get_current_balance()
             diff = (saldo_depois or 0) - (saldo_antes or 0)
