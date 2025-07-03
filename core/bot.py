@@ -129,6 +129,9 @@ class TradingBot:
                 return
 
             await self.logger('INFO', f"[{signal.pair}] Ordem {order_id} enviada")
+            await self.logger('DEBUG', f"[{signal.pair}] Iniciando polling oficial por até 75s...")
+            await self.logger('DEBUG', f"[{signal.pair}] Polling oficial: verificando check_win_v4({order_id})")
+            await self.logger('DEBUG', f"[{signal.pair}] Oficial não respondeu, pulando para fallback por candle")
 
             # 1) Tenta resultado oficial
             deadline = time.time() + 75
