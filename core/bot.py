@@ -18,8 +18,6 @@ class TradingBot:
         self.exnova = AsyncExnovaService(settings.EXNOVA_EMAIL, settings.EXNOVA_PASSWORD)
         self.is_running = True
         self.bot_config = {}
-        self.trade_queue = asyncio.Queue()
-        self.cooldown_assets = set()
         self.martingale_state: Dict[str, Dict] = {}
         # Novo estado para garantir que apenas uma operação é feita de cada vez.
         self.is_trade_active = False
@@ -58,8 +56,7 @@ class TradingBot:
         await self.exnova.change_balance(account_type)
 
         open_assets = await self.exnova.get_open_assets()
-        assets_to_trade = [asset for asset in open_assets if asset not in self.cooldown_assets]
-        assets_to_trade = assets_to_trade[:settings.MAX_ASSETS_TO_MONITOR]
+        assets_to_trade = open_assets[:settings.MAX_ASSETS_TO_MONITOR]
         
         await self.logger('INFO', f"Ativos a serem monitorizados: {assets_to_trade}")
 
@@ -97,9 +94,6 @@ class TradingBot:
                 if direction:
                     await self.logger('SUCCESS', f"[{full_asset_name}] Sinal confirmado! Direção: {direction.upper()}, Estratégia: {strategy.name}")
                     
-                    self.cooldown_assets.add(full_asset_name)
-                    asyncio.create_task(self._remove_from_cooldown(full_asset_name, 300))
-                    
                     last_candle = m1_candles[-1]
                     signal = TradeSignal(
                         pair=clean_asset_name, 
@@ -116,11 +110,6 @@ class TradingBot:
         except Exception as e:
             await self.logger('ERROR', f"Erro ao processar o ativo {full_asset_name}: {e}")
             traceback.print_exc()
-
-    async def _remove_from_cooldown(self, asset: str, delay: int):
-        await asyncio.sleep(delay)
-        self.cooldown_assets.discard(asset)
-        await self.logger('INFO', f"[{asset}] Cooldown terminado. O ativo voltou a ser analisado.")
 
     def _get_entry_value(self, asset: str) -> float:
         base_value = self.bot_config.get('entry_value', 1.0)
@@ -150,6 +139,7 @@ class TradingBot:
                 await asyncio.sleep(65) # Espera a operação expirar
 
                 await self.logger('INFO', f"[{signal.pair}] Expiração da ordem {order_id}. A verificar preço de fecho...")
+                # Pega na vela mais recente para obter o preço de fecho
                 exit_candles = await self.exnova.get_historical_candles(signal.pair, 60, 1)
                 
                 result = "UNKNOWN"
