@@ -29,20 +29,22 @@ class TradingBot:
 
     async def run(self):
         await self.logger('INFO', 'Bot a iniciar...')
-        await self.exnova.connect()
-        await self.logger('SUCCESS', 'Conexão com a Exnova estabelecida.')
+        status = await self.exnova.connect()
+        await self.logger('SUCCESS', 'Conexão com a Exnova estabelecida.' if status else 'Falha na Exnova')
 
-        # registra saldo inicial
+        # registra e exibe saldo inicial
         bal = await self.exnova.get_current_balance()
         if bal is not None:
             await self.supabase.update_current_balance(bal)
+            await self.logger('INFO', f"Saldo inicial: {bal:.2f}")
 
         while self.is_running:
             try:
-                # atualiza saldo
+                # a cada iteração, atualiza saldo
                 bal = await self.exnova.get_current_balance()
                 if bal is not None:
                     await self.supabase.update_current_balance(bal)
+                    await self.logger('DEBUG', f"Saldo atualizado: {bal:.2f}")
 
                 self.bot_config = await self.supabase.get_bot_config()
                 status = self.bot_config.get('status', 'PAUSED')
@@ -79,7 +81,6 @@ class TradingBot:
     async def _process_asset(self, full_name: str):
         try:
             base = full_name.split('-')[0]
-            # histórico
             m1, m15 = await asyncio.gather(
                 self.exnova.get_historical_candles(base, 60, 20),
                 self.exnova.get_historical_candles(base, 900, 4),
@@ -177,6 +178,12 @@ class TradingBot:
 
             mg_lv = self.martingale_state.get(signal.pair, {}).get('level', 0)
             await self.supabase.update_trade_result(sid, result, mg_lv)
+
+            # Atualiza saldo logo após cada resultado
+            bal = await self.exnova.get_current_balance()
+            if bal is not None:
+                await self.supabase.update_current_balance(bal)
+                await self.logger('INFO', f"Saldo pós-operação: {bal:.2f}")
 
         except Exception as e:
             await self.logger('ERROR', f"_execute_and_wait({signal.pair}) falhou: {e}")
