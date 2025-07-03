@@ -120,11 +120,14 @@ class TradingBot:
                 return
 
             await self.logger('INFO', f"[{signal.pair}] Ordem {order_id} enviada. Aguardando resultado oficial…")
+
             # Polling oficial pelo lucro
             deadline = time.time() + 75
             resultado_lucro: Optional[float] = None
             while time.time() < deadline:
+                await self.logger('DEBUG', f"[{signal.pair}] Polling oficial: check_win_v4({order_id})")
                 status_data = await self.exnova.check_win_v4(order_id)
+                await self.logger('DEBUG', f"[{signal.pair}] status_data={status_data!r}")
                 if status_data:
                     status_bool, lucro = status_data
                     resultado_lucro = lucro
@@ -156,7 +159,6 @@ class TradingBot:
             # Grava resultado no Supabase
             martingale_lv = self.martingale_state.get(signal.pair, {}).get('level', 0)
             await self.supabase.update_trade_result(sid, result, martingale_lv)
-
         except Exception as e:
             await self.logger('ERROR', f"Erro em _execute_and_wait para {signal.pair}: {e}")
             traceback.print_exc()
