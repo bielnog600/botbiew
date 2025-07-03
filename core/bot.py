@@ -1,3 +1,4 @@
+# core/bot.py
 import asyncio
 import time
 import traceback
@@ -22,6 +23,7 @@ class TradingBot:
         self.martingale_state: Dict[str, Dict] = {}
         self.current_cycle_trades: List[Dict] = []
         self.trade_semaphore = asyncio.Semaphore(settings.MAX_CONCURRENT_TRADES)
+        self.active_assets: List[str] = []
 
     async def logger(self, level: str, message: str):
         print(f"[{level.upper()}] {message}", flush=True)
@@ -35,7 +37,7 @@ class TradingBot:
         for i in range(20, len(m1_candles) - 1):
             historical_slice = m1_candles[:i+1]
             outcome_candle = m1_candles[i+1]
-
+            
             resistance, support = get_m15_sr_zones(m15_candles)
             m15_zones = {'resistance': resistance, 'support': support}
 
@@ -90,10 +92,11 @@ class TradingBot:
 
         for strategy in STRATEGIES:
             performance = await self._backtest_strategy(strategy, m1_candles, m15_candles)
+            # FIX: Adicionado o parâmetro 'timeframe=1' na chamada da função.
             await self.supabase.update_asset_performance(
                 asset=clean_asset_name,
                 strategy=strategy.name,
-                timeframe=1,
+                timeframe=1, # Estamos a operar em M1
                 win_rate=performance['win_rate'],
                 total_trades=performance['total_trades']
             )
@@ -184,7 +187,7 @@ class TradingBot:
     async def _wait_for_next_candle(self):
         now = datetime.now()
         wait_time = (60 - now.second) + 2 if now.second > 2 else 2 - now.second
-        await asyncio.sleep(wait.time)
+        await asyncio.sleep(wait_time)
 
     async def _process_asset_task(self, full_asset_name: str):
         try:
