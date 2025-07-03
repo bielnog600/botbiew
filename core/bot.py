@@ -41,7 +41,7 @@ class TradingBot:
                         await self.trading_cycle()
                     else:
                         await self.logger('INFO', "A aguardar resultado da operação ativa...")
-                        await asyncio.sleep(5) # Espera 5s antes de verificar de novo
+                        await asyncio.sleep(10) # Espera 10s antes de verificar de novo
                 else:
                     await self.logger('INFO', 'Bot em modo PAUSADO. A aguardar...')
                     await asyncio.sleep(15)
@@ -82,6 +82,8 @@ class TradingBot:
         try:
             clean_asset_name = full_asset_name.split('-')[0]
             
+            await self.logger('INFO', f"[{full_asset_name}] Ponto de entrada atingido. A analisar...")
+            
             m1_candles_task = self.exnova.get_historical_candles(clean_asset_name, 60, 20)
             m15_candles_task = self.exnova.get_historical_candles(clean_asset_name, 900, 4)
             m1_candles, m15_candles = await asyncio.gather(m1_candles_task, m15_candles_task)
@@ -107,7 +109,7 @@ class TradingBot:
                         setup_candle_close=last_candle.close
                     )
                     # Executa o trade e espera pela sua conclusão
-                    await self._execute_and_wait_for_trade(signal, full_asset_name)
+                    await self._execute_and_wait_for_trade(signal, full_asset_name, last_candle.close)
                     return 
         except Exception as e:
             await self.logger('ERROR', f"Erro ao processar o ativo {full_asset_name}: {e}")
@@ -123,7 +125,7 @@ class TradingBot:
         next_value = asset_mg_state['last_value'] * mg_factor
         return round(next_value, 2)
 
-    async def _execute_and_wait_for_trade(self, signal: TradeSignal, full_asset_name: str):
+    async def _execute_and_wait_for_trade(self, signal: TradeSignal, full_asset_name: str, entry_price: float):
         self.is_trade_active = True
         try:
             entry_value = self._get_entry_value(signal.pair)
@@ -138,18 +140,21 @@ class TradingBot:
             if order_id:
                 await self.logger('SUCCESS', f"[{signal.pair}] Ordem {order_id} (sinal ID: {signal_id}) enviada. A aguardar resultado...")
                 
-                # Lógica de Polling Ativo, inspirada no seu bot original.
-                expiration_time = time.time() + 75 # Timeout de 75 segundos
-                result = None
-                while time.time() < expiration_time:
-                    status, _ = await self.exnova.check_win_v4(order_id)
-                    if status:
-                        result = "WIN" if status == 'win' else "LOSS"
-                        break
-                    await asyncio.sleep(0.5) # Pausa curta entre verificações
+                await asyncio.sleep(65) # Espera a operação expirar
+
+                await self.logger('INFO', f"[{signal.pair}] Expiração da ordem {order_id}. A verificar preço de fecho...")
+                # Pega na vela mais recente para obter o preço de fecho
+                exit_candles = await self.exnova.get_historical_candles(signal.pair, 60, 1)
                 
-                if result is None:
-                    result = "UNKNOWN"
+                result = "UNKNOWN"
+                if exit_candles:
+                    exit_price = exit_candles[0].close
+                    if signal.direction == 'call' and exit_price > entry_price:
+                        result = "WIN"
+                    elif signal.direction == 'put' and exit_price < entry_price:
+                        result = "WIN"
+                    else: # Inclui empate
+                        result = "LOSS"
                 
                 current_mg_level = self.martingale_state.get(signal.pair, {}).get('level', 0)
                 update_success = await self.supabase.update_trade_result(signal_id, result, current_mg_level)
