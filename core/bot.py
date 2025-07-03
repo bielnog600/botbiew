@@ -136,11 +136,6 @@ class TradingBot:
             try:
                 entry_value = self._get_entry_value(signal.pair)
                 
-                balance_before = await self.exnova.get_current_balance()
-                if balance_before is None:
-                    await self.logger('ERROR', f"[{signal.pair}] Não foi possível obter o saldo antes da operação. A abortar.")
-                    return
-
                 signal_id = await self.supabase.insert_trade_signal(signal)
                 if not signal_id:
                     await self.logger('ERROR', f"[{signal.pair}] Falha ao registrar sinal.")
@@ -153,8 +148,7 @@ class TradingBot:
                         order_id=str(order_id), 
                         signal_id=signal_id, 
                         pair=signal.pair, 
-                        entry_value=entry_value,
-                        balance_before=balance_before
+                        entry_value=entry_value
                     )
                     await self.trade_queue.put(active_trade)
                 else:
@@ -175,18 +169,13 @@ class TradingBot:
 
     async def _check_and_process_single_trade(self, trade: ActiveTrade):
         try:
-            await self.logger('INFO', f"[{trade.pair}] Operação {trade.order_id} em andamento. A aguardar expiração...")
-            await asyncio.sleep(65)
-
-            await self.logger('INFO', f"[{trade.pair}] Expiração da ordem {trade.order_id}. A verificar saldo...")
-            balance_after = await self.exnova.get_current_balance()
+            await self.logger('INFO', f"[{trade.pair}] Operação {trade.order_id} em andamento. A verificar resultado...")
             
-            result = "UNKNOWN"
-            if balance_after is not None:
-                if balance_after > trade.balance_before:
-                    result = "WIN"
-                else: # Inclui empate
-                    result = "LOSS"
+            # FIX: A lógica de espera foi movida para o serviço. Esta chamada agora espera o tempo necessário.
+            result = await self.exnova.check_trade_result(trade.order_id)
+            
+            if not result:
+                result = "UNKNOWN"
             
             current_mg_level = self.martingale_state.get(trade.pair, {}).get('level', 0)
             update_success = await self.supabase.update_trade_result(trade.signal_id, result, current_mg_level)
