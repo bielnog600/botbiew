@@ -272,21 +272,21 @@ class TradingBot:
                 await self.logger('ERROR', f"Erro no loop de verificação: {e}")
 
     async def _check_and_process_single_trade(self, trade: ActiveTrade):
-    try:
-        raw = await self.exnova.check_trade_result(trade.order_id)
+        try:
+            raw = await self.exnova.check_trade_result(trade.order_id)
 
-        if raw is None:
-            result = "UNKNOWN"
-        elif isinstance(raw, bool):
-            result = "WIN" if raw else "LOSS"
-        elif isinstance(raw, str) and raw.upper() in ("WIN", "LOSS"):
-            result = raw.upper()
-        elif isinstance(raw, dict) and "profit" in raw:
-            result = "WIN" if raw["profit"] > 0 else "LOSS"
-        else:
-            result = "UNKNOWN"
+            if raw is None:
+                result = "UNKNOWN"
+            elif isinstance(raw, bool):
+                result = "WIN" if raw else "LOSS"
+            elif isinstance(raw, str) and raw.upper() in ("WIN", "LOSS"):
+                result = raw.upper()
+            elif isinstance(raw, dict) and "profit" in raw:
+                result = "WIN" if raw["profit"] > 0 else "LOSS"
+            else:
+                result = "UNKNOWN"
 
-        self.current_cycle_trades.append({'result': result})
+            self.current_cycle_trades.append({'result': result})
         # ... resto do código ...
 
             current_mg_level = self.martingale_state.get(trade.pair, {}).get('level', 0)
