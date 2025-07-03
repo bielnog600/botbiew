@@ -1,32 +1,28 @@
-from pydantic import BaseSettings, Field
+# config.py
+import os
+from pydantic_settings import BaseSettings
+from pydantic import Extra
 
 class Settings(BaseSettings):
-    # Exnova API credentials
-    EXNOVA_EMAIL: str = Field(..., env='EXNOVA_EMAIL')
-    EXNOVA_PASSWORD: str = Field(..., env='EXNOVA_PASSWORD')
+    """
+    Carrega e valida as configurações a partir de variáveis de ambiente.
+    """
+    EXNOVA_EMAIL: str
+    EXNOVA_PASSWORD: str
+    SUPABASE_URL: str
+    SUPABASE_KEY: str
 
-    # Supabase credentials
-    SUPABASE_URL: str = Field(..., env='SUPABASE_URL')
-    SUPABASE_KEY: str = Field(..., env='SUPABASE_KEY')
-
-    # Bot behavior settings
-    MAX_ASSETS_TO_MONITOR: int = Field(5, env='MAX_ASSETS_TO_MONITOR')
-    MAX_CONCURRENT_TRADES: int = Field(2, env='MAX_CONCURRENT_TRADES')
-
-    ENTRY_VALUE: float = Field(1.0, env='ENTRY_VALUE')
-    USE_MARTINGALE: bool = Field(False, env='USE_MARTINGALE')
-    MARTINGALE_FACTOR: float = Field(2.3, env='MARTINGALE_FACTOR')
-    MARTINGALE_LEVELS: int = Field(2, env='MARTINGALE_LEVELS')
-
-    # Operation mode: CONSERVADOR or AGRESSIVO
-    OPERATION_MODE: str = Field('CONSERVADOR', env='OPERATION_MODE')
-
-    # Supabase bot config polling interval
-    BOT_CONFIG_POLL_INTERVAL: int = Field(15, env='BOT_CONFIG_POLL_INTERVAL')
+    LOG_LEVEL: str = "INFO"
+    
+    # Define o número máximo de pares que o bot irá analisar em cada ciclo.
+    MAX_ASSETS_TO_MONITOR: int = 15
+    
+    # Define o número máximo de operações abertas em simultâneo.
+    MAX_CONCURRENT_TRADES: int = 2
 
     class Config:
-        env_file = '.env'
-        env_file_encoding = 'utf-8'
+        env_file = ".env"
+        env_file_encoding = "utf-8"
+        extra = 'ignore'
 
-# Instantiate settings
 settings = Settings()
