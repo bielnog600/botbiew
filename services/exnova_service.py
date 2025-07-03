@@ -68,18 +68,15 @@ class AsyncExnovaService:
     async def check_trade_result(self, order_id: str) -> Optional[str]:
         """
         Verifica o resultado de uma operação usando a função 'check_win',
-        identificada como a correta durante o diagnóstico.
+        que foi identificada como a correta durante o diagnóstico.
         """
         loop = await self._get_loop()
         try:
-            # Usando a função 'check_win' com um timeout de segurança.
             api_call = loop.run_in_executor(None, self.api.check_win, order_id)
             result_data = await asyncio.wait_for(api_call, timeout=15.0) 
             
-            # A função check_win retorna uma tupla (resultado, lucro)
             if isinstance(result_data, tuple) and len(result_data) > 0:
                 result_string = result_data[0]
-                # A API pode retornar 'win' ou 'loose'. Normalizamos para 'WIN' ou 'LOSS'.
                 if result_string == 'win':
                     return 'WIN'
                 elif result_string == 'loose':
