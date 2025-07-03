@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     MAX_ASSETS_TO_MONITOR: int = 50
     
     # Define o número máximo de operações abertas em simultâneo.
-    MAX_CONCURRENT_TRADES: int = 3
+    MAX_CONCURRENT_TRADES: int = 1
 
     class Config:
         env_file = ".env"
