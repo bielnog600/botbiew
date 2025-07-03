@@ -35,4 +35,5 @@ class ActiveTrade(BaseModel):
     signal_id: int
     pair: str
     entry_value: float
-    # O campo 'balance_before' foi removido para usar a verificação direta do resultado.
+    # FIX: Reintroduzido o campo para guardar o saldo antes da operação.
+    balance_before: float
