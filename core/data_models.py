@@ -27,12 +27,3 @@ class TradeSignal(BaseModel):
     setup_candle_high: Optional[float] = None
     setup_candle_low: Optional[float] = None
     setup_candle_close: Optional[float] = None
-
-class ActiveTrade(BaseModel):
-    """Representa uma operação ativa na plataforma."""
-    order_id: str
-    signal_id: int
-    pair: str
-    entry_value: float
-    direction: Optional[str] = None
-    entry_price: Optional[float] = None
