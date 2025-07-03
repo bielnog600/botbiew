@@ -57,6 +57,7 @@ class AsyncExnovaService:
         loop = await self._get_loop()
         status, order_id = await loop.run_in_executor(None, self.api.buy, amount, asset, direction, expiration)
         
+        # Valida se o order_id é um número, e não uma mensagem de erro.
         try:
             int(order_id)
             return str(order_id)
@@ -71,6 +72,7 @@ class AsyncExnovaService:
         """
         loop = await self._get_loop()
         try:
+            # Esta chamada é rápida, não tem lógica de espera.
             result_data = await loop.run_in_executor(None, self.api.check_win_v4, order_id)
             return result_data
         except Exception as e:
