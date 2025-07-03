@@ -131,9 +131,8 @@ class TradingBot:
             await self.logger('DEBUG', f"Esperando {wait}s pela vela de expiração...")
             await asyncio.sleep(wait)
 
-            # obtém as duas últimas velas
-# obtém candle de expiração
-            # obtém as duas últimas velas M1 (entrada + expiração)
+ 
+ # obtém as duas últimas velas M1 (entrada + expiração)
             candles = await self.exnova.get_historical_candles(signal.pair, 60, 2)
             if len(candles) < 2:
                 await self.logger('ERROR', f"[{signal.pair}] Velas insuficientes para inferir resultado.")
@@ -144,9 +143,16 @@ class TradingBot:
                 await self.logger('DEBUG', f"[{signal.pair}] entry={entry_close}, outcome={outcome_close}")
 
                 if signal.direction.upper() == 'CALL':
-                    result = 'WIN' if outcome_close > entry_close else 'LOSS'
+                    if outcome_close > entry_close:
+                        result = 'WIN'
+                    else:
+                        result = 'LOSS'
                 else:  # PUT
-                    result = 'WIN' if outcome_close < entry_close else 'LOSS'
+                    if outcome_close < entry_close:
+                        result = 'WIN'
+                    else:
+                        result = 'LOSS'
+
 
 
 
