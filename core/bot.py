@@ -133,23 +133,21 @@ class TradingBot:
 
             # obtém as duas últimas velas
 # obtém candle de expiração
+            # obtém as duas últimas velas M1 (entrada + expiração)
             candles = await self.exnova.get_historical_candles(signal.pair, 60, 2)
             if len(candles) < 2:
                 await self.logger('ERROR', f"[{signal.pair}] Velas insuficientes para inferir resultado.")
                 result = 'UNKNOWN'
             else:
                 entry_close   = candles[-2].close
-                exp_candle    = candles[-1]
-                candle_low    = exp_candle.min
-                candle_high   = exp_candle.max
-                await self.logger('DEBUG', f"[{signal.pair}] entry={entry_close}, low={candle_low}, high={candle_high}")
+                outcome_close = candles[-1].close
+                await self.logger('DEBUG', f"[{signal.pair}] entry={entry_close}, outcome={outcome_close}")
 
                 if signal.direction.upper() == 'CALL':
-        # ganhou se nem um instante a vela desceu abaixo do entry
-                    result = 'WIN' if candle_low > entry_close else 'LOSS'
-                else:  # PUT
-        # ganhou se nem um instante a vela subiu acima do entry
-                    result = 'WIN' if candle_high < entry_close else 'LOSS'
+                    result = 'WIN' if outcome_close > entry_close else 'LOSS'
+            else:  # PUT
+                result = 'WIN' if outcome_close < entry_close else 'LOSS'
+
 
 
             # grava no Supabase
