@@ -2,7 +2,7 @@
 import asyncio
 import time
 from exnovaapi.stable_api import Exnova
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 from core.data_models import Candle
 
 class AsyncExnovaService:
@@ -56,10 +56,25 @@ class AsyncExnovaService:
     async def execute_trade(self, amount: float, asset: str, direction: str, expiration: int) -> Optional[str]:
         loop = await self._get_loop()
         status, order_id = await loop.run_in_executor(None, self.api.buy, amount, asset, direction, expiration)
-        if order_id:
+        
+        try:
+            int(order_id)
             return str(order_id)
-        print(f"Falha ao executar ordem para {asset}: {order_id}", flush=True)
-        return None
+        except (ValueError, TypeError):
+            print(f"Falha ao executar ordem para {asset}: {order_id}", flush=True)
+            return None
 
-    # A função check_trade_result foi removida. A lógica de verificação
-    # será agora feita diretamente no bot, usando o preço.
+    # FIX: A função check_win_v4 que estava em falta foi restaurada.
+    async def check_win_v4(self, order_id: str) -> Optional[Tuple]:
+        """
+        Wrapper assíncrono para a função check_win_v4, que será chamada repetidamente (polling).
+        Esta função não tem lógica de espera.
+        """
+        loop = await self._get_loop()
+        try:
+            # Esta chamada é rápida, não tem lógica de espera.
+            result_data = await loop.run_in_executor(None, self.api.check_win_v4, order_id)
+            return result_data
+        except Exception as e:
+            print(f"Erro inesperado ao chamar check_win_v4 para a ordem {order_id}: {e}", flush=True)
+            return None
