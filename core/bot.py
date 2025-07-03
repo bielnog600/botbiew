@@ -1,7 +1,8 @@
+# core/bot.py
 import asyncio
 import time
 import traceback
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Dict, Optional
 
 from config import settings
@@ -16,108 +17,37 @@ class TradingBot:
         self.supabase = SupabaseService(settings.SUPABASE_URL, settings.SUPABASE_KEY)
         self.exnova = AsyncExnovaService(settings.EXNOVA_EMAIL, settings.EXNOVA_PASSWORD)
         self.is_running = True
-        self.bot_config: Dict = {}
-        self.trade_queue = asyncio.Queue()
-        self.cooldown_assets = set()
+        self.bot_config = {}
         self.martingale_state: Dict[str, Dict] = {}
-        self.current_cycle_trades: List[Dict] = []
-        self.trade_semaphore = asyncio.Semaphore(settings.MAX_CONCURRENT_TRADES)
-        self.active_assets: List[str] = []
+        self.is_trade_active = False
+        # FIX: Variável para guardar a diferença de tempo com o servidor.
+        self.time_offset = 0
 
     async def logger(self, level: str, message: str):
         print(f"[{level.upper()}] {message}", flush=True)
         await self.supabase.insert_log(level, message)
 
-    async def _backtest_strategy(self, strategy, m1_candles: List[Candle], m15_candles: List[Candle]) -> Dict:
-        wins, losses = 0, 0
-        if len(m1_candles) < 21:
-            return {'win_rate': 0, 'total_trades': 0}
-
-        for i in range(20, len(m1_candles) - 1):
-            historical_slice = m1_candles[:i+1]
-            outcome_candle = m1_candles[i+1]
-
-            resistance, support = get_m15_sr_zones(m15_candles)
-            m15_zones = {'resistance': resistance, 'support': support}
-
-            direction = strategy.analyze(historical_slice, m15_zones)
-            if not direction:
-                continue
-
-            if direction == "call" and outcome_candle.close > historical_slice[-1].close:
-                wins += 1
-            elif direction == "call":
-                losses += 1
-            elif direction == "put" and outcome_candle.close < historical_slice[-1].close:
-                wins += 1
-            else:
-                losses += 1
-
-        total = wins + losses
-        win_rate = (wins / total * 100) if total > 0 else 0
-        return {'win_rate': win_rate, 'total_trades': total}
-
-    async def _catalog_and_select_assets(self):
-        await self.logger('INFO', "Iniciando fase de catalogação de ativos...")
-        all_assets = await self.exnova.get_open_assets()
-
-        best_assets = set()
-        tasks = [self._analyze_asset_performance(asset) for asset in all_assets]
-        results = await asyncio.gather(*tasks)
-
-        for asset, strategy_name, performance in results:
-            if performance and performance['win_rate'] >= 85:
-                await self.logger(
-                    'SUCCESS',
-                    f"Ativo qualificado: {asset} com estratégia {strategy_name} ({performance['win_rate']:.2f}% de assertividade)."
-                )
-                best_assets.add(asset)
-
-        self.active_assets = list(best_assets)
-        if not self.active_assets:
-            await self.logger('WARNING', "Nenhum ativo atingiu a meta de 85% de assertividade. O bot irá aguardar.")
-        else:
-            await self.logger('INFO', f"Catalogação concluída. Ativos selecionados para operar: {self.active_assets}")
-
-    async def _analyze_asset_performance(self, asset: str):
-        clean_asset_name = asset.split('-')[0]
-
-        m1_candles_task = self.exnova.get_historical_candles(clean_asset_name, 60, 300)
-        m15_candles_task = self.exnova.get_historical_candles(clean_asset_name, 900, 20)
-        m1_candles, m15_candles = await asyncio.gather(m1_candles_task, m15_candles_task)
-
-        if len(m1_candles) < 50 or not m15_candles:
-            return asset, None, None
-
-        for strategy in STRATEGIES:
-            performance = await self._backtest_strategy(strategy, m1_candles, m15_candles)
-            await self.supabase.update_asset_performance(
-                asset=clean_asset_name,
-                strategy=strategy.name,
-                timeframe=1,
-                win_rate=performance['win_rate'],
-                total_trades=performance['total_trades']
-            )
-            return asset, strategy.name, performance
-        return asset, None, None
-
     async def run(self):
         await self.logger('INFO', 'Bot a iniciar...')
         await self.exnova.connect()
-        await self.logger('SUCCESS', "Conexão com a Exnova estabelecida.")
-
-        asyncio.create_task(self._result_checker_loop())
+        await self.logger('SUCCESS', f"Conexão com a Exnova estabelecida.")
+        
+        # FIX: Sincroniza o relógio com o servidor da corretora.
+        server_timestamp = await self.exnova.get_server_timestamp()
+        local_timestamp = int(time.time())
+        self.time_offset = server_timestamp - local_timestamp
+        await self.logger('INFO', f"Sincronização de tempo concluída. Offset: {self.time_offset}s")
 
         while self.is_running:
             try:
                 self.bot_config = await self.supabase.get_bot_config()
                 if self.bot_config.get('status') == 'RUNNING':
-                    mode = self.bot_config.get('operation_mode', 'CONSERVADOR')
-                    if mode == 'CONSERVADOR':
-                        await self._run_conservative_cycle()
+                    if not self.is_trade_active:
+                        await self.logger('INFO', "Bot livre. A iniciar ciclo de análise...")
+                        await self.trading_cycle()
                     else:
-                        await self.logger('INFO', "Bot em modo AGRESSIVO. A iniciar ciclo de negociação...")
-                        await self.trading_loop(use_all_assets=True)
+                        await self.logger('INFO', "A aguardar resultado da operação ativa...")
+                        await asyncio.sleep(10)
                 else:
                     await self.logger('INFO', 'Bot em modo PAUSADO. A aguardar...')
                     await asyncio.sleep(15)
@@ -126,187 +56,145 @@ class TradingBot:
                 traceback.print_exc()
                 await asyncio.sleep(30)
 
-    async def _run_conservative_cycle(self):
-        await self._catalog_and_select_assets()
+    async def trading_cycle(self):
+        account_type = self.bot_config.get('account_type', 'PRACTICE')
+        await self.exnova.change_balance(account_type)
 
-        if not self.active_assets:
-            await asyncio.sleep(300)
-            return
+        open_assets = await self.exnova.get_open_assets()
+        assets_to_trade = open_assets[:settings.MAX_ASSETS_TO_MONITOR]
+        
+        await self.logger('INFO', f"Ativos a serem monitorizados: {assets_to_trade}")
 
-        await self.logger('INFO', "Iniciando ciclo de negociação de 5 minutos com os melhores ativos.")
-        self.current_cycle_trades = []
-        await self.trading_loop(use_all_assets=False, duration_minutes=5)
-
-        wins = len([t for t in self.current_cycle_trades if t['result'] == 'WIN'])
-        losses = len([t for t in self.current_cycle_trades if t['result'] == 'LOSS'])
-        total = wins + losses
-        win_rate = (wins / total * 100) if total > 0 else 0
-
-        await self.logger(
-            'INFO',
-            f"Ciclo de 5 minutos concluído. Performance: {wins} WINS, {losses} LOSSES ({win_rate:.2f}%)."
-        )
-
-        if win_rate < 70:
-            await self.logger('WARNING', "Performance do ciclo abaixo da meta. A recatalogar para encontrar melhores ativos.")
-        else:
-            await self.logger('SUCCESS', "Performance do ciclo acima da meta. A continuar com os mesmos ativos.")
-            await asyncio.sleep(60)
-
-    async def trading_loop(self, use_all_assets: bool, duration_minutes: Optional[int] = None):
-        await self.exnova.change_balance(self.bot_config.get('account_type', 'PRACTICE'))
-
-        assets = self.active_assets if not use_all_assets else await self.exnova.get_open_assets()
-        assets = [a for a in assets if a not in self.cooldown_assets]
-        assets = assets[:settings.MAX_ASSETS_TO_MONITOR]
-
-        if not assets:
-            await self.logger('INFO', "Nenhum ativo disponível para negociar neste ciclo.")
-            await asyncio.sleep(60)
-            return
-
-        await self.logger('INFO', f"Ativos a serem monitorizados: {assets}")
-        tasks = [asyncio.create_task(self._process_asset_task(a)) for a in assets]
-
-        try:
-            timeout = duration_minutes * 60 if duration_minutes else 55
-            await asyncio.wait(tasks, timeout=timeout)
-        finally:
-            for t in tasks:
-                if not t.done():
-                    t.cancel()
+        for full_asset_name in assets_to_trade:
+            if self.is_trade_active:
+                break
+            await self._process_asset_task(full_asset_name)
+        
+        if not self.is_trade_active:
+            await self._wait_for_next_candle()
 
     async def _wait_for_next_candle(self):
-        now = datetime.now()
-        wait_time = (60 - now.second) + 2 if now.second > 2 else 2 - now.second
+        """Espera até o ponto de entrada da próxima vela, usando o tempo sincronizado."""
+        # Usa o tempo local + offset para simular o tempo do servidor
+        current_server_time = datetime.fromtimestamp(int(time.time()) + self.time_offset)
+        second = current_server_time.second
+        
+        # O alvo é executar a análise por volta do segundo 58, para entrar no segundo 00.
+        target_second = 58
+        
+        if second < target_second:
+            wait_time = target_second - second
+        else:
+            wait_time = (60 - second) + target_second
+        
+        await self.logger('INFO', f"A aguardar {wait_time}s para o ponto de entrada...")
         await asyncio.sleep(wait_time)
 
     async def _process_asset_task(self, full_asset_name: str):
         try:
-            await self._wait_for_next_candle()
-            clean = full_asset_name.split('-')[0]
+            clean_asset_name = full_asset_name.split('-')[0]
+            
+            m1_candles_task = self.exnova.get_historical_candles(clean_asset_name, 60, 20)
+            m15_candles_task = self.exnova.get_historical_candles(clean_asset_name, 900, 4)
+            m1_candles, m15_candles = await asyncio.gather(m1_candles_task, m15_candles_task)
+            
+            if not m1_candles or not m15_candles: return
 
-            m1_task = self.exnova.get_historical_candles(clean, 60, 20)
-            m15_task = self.exnova.get_historical_candles(clean, 900, 4)
-            m1_c, m15_c = await asyncio.gather(m1_task, m15_task)
-
-            if not m1_c or not m15_c:
-                return
-
-            resistance, support = get_m15_sr_zones(m15_c)
-            zones = {'resistance': resistance, 'support': support}
+            resistance, support = get_m15_sr_zones(m15_candles)
+            m15_zones = {'resistance': resistance, 'support': support}
 
             for strategy in STRATEGIES:
-                dir = strategy.analyze(m1_c, zones)
-                if dir:
-                    await self.logger('SUCCESS', f"[{full_asset_name}] Sinal confirmado! Direção: {dir.upper()}, Estratégia: {strategy.name}")
-                    self.cooldown_assets.add(full_asset_name)
-                    asyncio.create_task(self._remove_from_cooldown(full_asset_name, 300))
-                    last = m1_c[-1]
+                direction = strategy.analyze(m1_candles, m15_zones)
+                if direction:
+                    await self.logger('SUCCESS', f"[{full_asset_name}] Sinal confirmado! Direção: {direction.upper()}, Estratégia: {strategy.name}")
+                    
+                    last_candle = m1_candles[-1]
                     signal = TradeSignal(
-                        pair=clean,
-                        direction=dir,
+                        pair=clean_asset_name, 
+                        direction=direction, 
                         strategy=strategy.name,
-                        setup_candle_open=last.open,
-                        setup_candle_high=last.max,
-                        setup_candle_low=last.min,
-                        setup_candle_close=last.close
+                        setup_candle_open=last_candle.open,
+                        setup_candle_high=last_candle.max,
+                        setup_candle_low=last_candle.min,
+                        setup_candle_close=last_candle.close
                     )
-                    asyncio.create_task(self._execute_trade(signal, full_asset_name))
-                    break
-        except asyncio.CancelledError:
-            pass
+                    await self._execute_and_wait_for_trade(signal, full_asset_name, last_candle.close)
+                    return 
         except Exception as e:
-            await self.logger('ERROR', f"Erro ao processar ativo {full_asset_name}: {e}")
-
-    async def _remove_from_cooldown(self, asset: str, delay: int):
-        await asyncio.sleep(delay)
-        self.cooldown_assets.discard(asset)
-        await self.logger('INFO', f"[{asset}] Cooldown terminado.")
+            await self.logger('ERROR', f"Erro ao processar o ativo {full_asset_name}: {e}")
+            traceback.print_exc()
 
     def _get_entry_value(self, asset: str) -> float:
-        base = self.bot_config.get('entry_value', 1.0)
-        if not self.bot_config.get('use_martingale', False):
-            return base
-        mg = self.martingale_state.get(asset, {'level': 0, 'last_value': base})
-        if mg['level'] == 0:
-            return base
-        next_val = mg['last_value'] * self.bot_config.get('martingale_factor', 2.3)
-        return round(next_val, 2)
+        base_value = self.bot_config.get('entry_value', 1.0)
+        use_mg = self.bot_config.get('use_martingale', False)
+        if not use_mg: return base_value
+        asset_mg_state = self.martingale_state.get(asset, {'level': 0, 'last_value': base_value})
+        if asset_mg_state['level'] == 0: return base_value
+        mg_factor = self.bot_config.get('martingale_factor', 2.3)
+        next_value = asset_mg_state['last_value'] * mg_factor
+        return round(next_value, 2)
 
-    async def _execute_trade(self, signal: TradeSignal, full_asset_name: str):
-        await self.logger('INFO', f"[{signal.pair}] Sinal na fila, a aguardar por uma vaga de execução...")
-        async with self.trade_semaphore:
-            await self.logger('SUCCESS', f"[{signal.pair}] Vaga de execução obtida.")
-            try:
-                entry = self._get_entry_value(signal.pair)
-                sid = await self.supabase.insert_trade_signal(signal)
-                if not sid:
-                    await self.logger('ERROR', f"[{signal.pair}] Falha ao registrar sinal.")
-                    return
-
-                order_id = await self.exnova.execute_trade(entry, full_asset_name, signal.direction, 1)
-                if order_id:
-                    await self.logger('SUCCESS', f"[{signal.pair}] Ordem {order_id} enviada.")
-                    at = ActiveTrade(order_id=str(order_id), signal_id=sid, pair=signal.pair, entry_value=entry)
-                    await self.trade_queue.put(at)
-                else:
-                    await self.logger('ERROR', f"[{signal.pair}] Falha na execução da ordem.")
-                    await self.supabase.update_trade_result(sid, "REJEITADO")
-            except Exception as e:
-                await self.logger('ERROR', f"Exceção em _execute_trade: {e}")
-
-    async def _result_checker_loop(self):
-        while self.is_running:
-            try:
-                trade = await self.trade_queue.get()
-                asyncio.create_task(self._check_and_process_single_trade(trade))
-                self.trade_queue.task_done()
-            except Exception as e:
-                await self.logger('ERROR', f"Erro no loop de verificação: {e}")
-
-    async def _check_and_process_single_trade(self, trade: ActiveTrade):
+    async def _execute_and_wait_for_trade(self, signal: TradeSignal, full_asset_name: str, entry_price: float):
+        self.is_trade_active = True
         try:
-            # aguarda fechamento da vela de expiração
-            await asyncio.sleep((60 - datetime.now().second) + 2)
+            entry_value = self._get_entry_value(signal.pair)
+            
+            signal_id = await self.supabase.insert_trade_signal(signal)
+            if not signal_id:
+                await self.logger('ERROR', f"[{signal.pair}] Falha ao registrar sinal.")
+                self.is_trade_active = False
+                return
 
-            # busca últimas 2 velas M1
-            candles = await self.exnova.get_historical_candles(trade.pair, 60, 2)
-            entry_close = candles[-2].close
-            outcome_close = candles[-1].close
+            order_id = await self.exnova.execute_trade(entry_value, full_asset_name, signal.direction, 1)
+            if order_id:
+                await self.logger('SUCCESS', f"[{signal.pair}] Ordem {order_id} (sinal ID: {signal_id}) enviada. A aguardar resultado...")
+                
+                await asyncio.sleep(65)
 
-            # determina resultado
-            if trade.direction.upper() == "CALL":
-                result = "WIN" if outcome_close > entry_close else "LOSS"
+                await self.logger('INFO', f"[{signal.pair}] Expiração da ordem {order_id}. A verificar preço de fecho...")
+                exit_candles = await self.exnova.get_historical_candles(signal.pair, 60, 1)
+                
+                result = "UNKNOWN"
+                if exit_candles:
+                    exit_price = exit_candles[0].close
+                    if signal.direction == 'call' and exit_price > entry_price:
+                        result = "WIN"
+                    elif signal.direction == 'put' and exit_price < entry_price:
+                        result = "WIN"
+                    else:
+                        result = "LOSS"
+                
+                current_mg_level = self.martingale_state.get(signal.pair, {}).get('level', 0)
+                update_success = await self.supabase.update_trade_result(signal_id, result, current_mg_level)
+                
+                if update_success:
+                    await self.logger('SUCCESS', f"[{signal.pair}] Resultado da ordem {order_id} atualizado para {result}.")
+                else:
+                    await self.logger('ERROR', f"[{signal.pair}] FALHA CRÍTICA ao atualizar o resultado da ordem {order_id} no Supabase.")
+                
+                self._update_martingale_state(signal.pair, result, entry_value)
             else:
-                result = "WIN" if outcome_close < entry_close else "LOSS"
-
-            # registra resultado
-            self.current_cycle_trades.append({'result': result})
-            mg_level = self.martingale_state.get(trade.pair, {}).get('level', 0)
-            await self.supabase.update_trade_result(trade.signal_id, result, mg_level)
-            await self.logger('SUCCESS', f"[{trade.pair}] Resultado determinado por candle: {result}.")
-
-            # atualiza martingale
-            self._update_martingale_state(trade.pair, result, trade.entry_value)
+                await self.logger('ERROR', f"[{signal.pair}] Falha na execução da ordem na Exnova para '{full_asset_name}'.")
+                await self.supabase.update_trade_result(signal_id, "REJEITADO")
+        
         except Exception as e:
-            await self.logger('ERROR', f"Erro calculando resultado por candle: {e}")
+            await self.logger('ERROR', f"Exceção não tratada em _execute_trade para {signal.pair}: {e}")
+            traceback.print_exc()
         finally:
-            self.trade_semaphore.release()
-            await self.logger('INFO', f"[{trade.pair}] Vaga de execução libertada.")
+            self.is_trade_active = False
+            await self.logger('INFO', "Bot libertado. Pronto para a próxima análise.")
 
     def _update_martingale_state(self, asset: str, result: str, last_value: float):
-        if not self.bot_config.get('use_martingale', False):
-            return
+        if not self.bot_config.get('use_martingale', False): return
         max_levels = self.bot_config.get('martingale_levels', 2)
-        curr = self.martingale_state.get(asset, {}).get('level', 0)
+        current_level = self.martingale_state.get(asset, {}).get('level', 0)
         if result == 'WIN':
             self.martingale_state[asset] = {'level': 0, 'last_value': self.bot_config.get('entry_value', 1.0)}
-            asyncio.create_task(self.logger('INFO', f"[{asset}] Martingale resetado."))
+            asyncio.create_task(self.logger('INFO', f"[{asset}] Martingale resetado após WIN."))
         elif result == 'LOSS':
-            if curr < max_levels:
-                self.martingale_state[asset] = {'level': curr + 1, 'last_value': last_value}
-                asyncio.create_task(self.logger('WARNING', f"[{asset}] LOSS. Martingale nível {curr + 1}."))
+            if current_level < max_levels:
+                self.martingale_state[asset] = {'level': current_level + 1, 'last_value': last_value}
+                asyncio.create_task(self.logger('WARNING', f"[{asset}] LOSS. A ativar Martingale nível {current_level + 1}."))
             else:
                 self.martingale_state[asset] = {'level': 0, 'last_value': self.bot_config.get('entry_value', 1.0)}
-                asyncio.create_task(self.logger('ERROR', f"[{asset}] Limite de Martingale atingido. Reset."))
+                asyncio.create_task(self.logger('ERROR', f"[{asset}] Limite de Martingale ({max_levels}) atingido. A resetar."))
