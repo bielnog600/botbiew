@@ -17,7 +17,7 @@ class TradingBot:
         self.supabase = SupabaseService(settings.SUPABASE_URL, settings.SUPABASE_KEY)
         self.exnova = AsyncExnovaService(settings.EXNOVA_EMAIL, settings.EXNOVA_PASSWORD)
         self.is_running = True
-        self.bot_config = {}
+        self.bot_config: Dict = {}
         self.martingale_state: Dict[str, Dict] = {}
         # Novo estado para garantir que apenas uma operação é feita de cada vez.
         self.is_trade_active = False
@@ -29,8 +29,8 @@ class TradingBot:
     async def run(self):
         await self.logger('INFO', 'Bot a iniciar...')
         await self.exnova.connect()
-        await self.logger('SUCCESS', f"Conexão com a Exnova estabelecida.")
-        
+        await self.logger('SUCCESS', "Conexão com a Exnova estabelecida.")
+
         while self.is_running:
             try:
                 self.bot_config = await self.supabase.get_bot_config()
