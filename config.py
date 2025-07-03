@@ -14,9 +14,8 @@ class Settings(BaseSettings):
 
     LOG_LEVEL: str = "INFO"
     
-    # FIX: Adicionado o parâmetro que estava em falta.
     # Define o número máximo de pares que o bot irá analisar em cada ciclo.
-    MAX_ASSETS_TO_MONITOR: int = 50
+    MAX_ASSETS_TO_MONITOR: int = 15
     
     # Define o número máximo de operações abertas em simultâneo.
     MAX_CONCURRENT_TRADES: int = 1
