@@ -1,3 +1,4 @@
+# services/exnova_service.py
 import asyncio
 import time
 from exnovaapi.stable_api import Exnova
@@ -11,7 +12,7 @@ class AsyncExnovaService:
         self._loop = None
 
     async def _get_loop(self):
-        if self._loop is None:
+        if not self._loop:
             self._loop = asyncio.get_running_loop()
         return self._loop
 
@@ -30,39 +31,29 @@ class AsyncExnovaService:
         loop = await self._get_loop()
         await loop.run_in_executor(None, self.api.change_balance, balance_type)
 
-    async def get_current_balance(self) -> Optional[float]:
-        loop = await self._get_loop()
-        try:
-            balance = await loop.run_in_executor(None, self.api.get_balance)
-            return float(balance) if balance else None
-        except Exception as e:
-            print(f"Erro ao obter saldo da API: {e}", flush=True)
-            return None
-
     async def get_open_assets(self) -> List[str]:
         loop = await self._get_loop()
         open_times = await loop.run_in_executor(None, self.api.get_all_open_time)
         assets = []
         for asset_type in ['binary', 'turbo']:
             if open_times and asset_type in open_times:
-                assets.extend([
-                    asset for asset, details in open_times[asset_type].items() if details.get('open')
-                ])
+                assets += [
+                    asset for asset, details in open_times[asset_type].items()
+                    if details.get('open')
+                ]
         return list(set(assets))
 
-    async def get_historical_candles(self, asset: str, interval: int, count: int) -> List[Candle]:
+    async def get_historical_candles(
+        self, asset: str, interval: int, count: int
+    ) -> List[Candle]:
         loop = await self._get_loop()
-        candles_data = await loop.run_in_executor(
+        data = await loop.run_in_executor(
             None, self.api.get_candles, asset, interval, count, time.time()
         )
-        return [Candle(**data) for data in candles_data if data] if candles_data else []
+        return [Candle(**d) for d in data if d] if data else []
 
     async def execute_trade(
-        self,
-        amount: float,
-        asset: str,
-        direction: str,
-        expiration: int
+        self, amount: float, asset: str, direction: str, expiration: int
     ) -> Optional[str]:
         loop = await self._get_loop()
         status, order_id = await loop.run_in_executor(
@@ -75,18 +66,14 @@ class AsyncExnovaService:
             print(f"Falha ao executar ordem para {asset}: {order_id}", flush=True)
             return None
 
-    async def check_win_v4(
-        self,
-        order_id: str
-    ) -> Optional[Tuple[bool, float]]:
+    async def check_win_v4(self, order_id: str) -> Optional[Tuple[bool, float]]:
         """
-        Chamadas rápidas à API para verificar status de trade.
-        Retorna (status_bool, profit) se bem-sucedido, ou None em caso de erro.
+        Polling rápido: chama check_win_v4 e retorna (status_bool, profit),
+        ou None em caso de erro.
         """
         loop = await self._get_loop()
         try:
-            result = await loop.run_in_executor(None, self.api.check_win_v4, order_id)
-            return result
+            return await loop.run_in_executor(None, self.api.check_win_v4, order_id)
         except Exception as e:
-            print(f"Erro inesperado em check_win_v4 para ordem {order_id}: {e}", flush=True)
+            print(f"Erro inesperado em check_win_v4 para {order_id}: {e}", flush=True)
             return None
