@@ -1,6 +1,6 @@
 # main.py
 import asyncio
-import traceback # FIX: Importa o módulo traceback.
+import traceback
 from dotenv import load_dotenv
 from core.bot import TradingBot
 
@@ -16,9 +16,10 @@ async def main():
         bot.is_running = False
     except Exception as e:
         print(f"Erro fatal no bot: {e}")
-        # Esta chamada agora funcionará corretamente.
         traceback.print_exc()
 
 if __name__ == "__main__":
+    # Carrega as variáveis de ambiente de um arquivo .env se ele existir
     load_dotenv()
+    # Inicia a execução assíncrona do bot
     asyncio.run(main())
