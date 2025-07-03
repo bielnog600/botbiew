@@ -7,11 +7,8 @@ from core.data_models import Candle
 
 class AsyncExnovaService:
     def __init__(self, email: str, password: str, account_type: str = "PRACTICE"):
-        # FIX: As variáveis de instância que foram removidas por engano foram restauradas.
-        self._email = email
-        self._password = password
-        self._account_type = account_type
         self.api = Exnova(email, password)
+        self._account_type = account_type
         self._loop = None
 
     async def _get_loop(self):
@@ -23,14 +20,13 @@ class AsyncExnovaService:
         status, reason = await loop.run_in_executor(None, self.api.connect)
         if status:
             print("Conexão com a Exnova estabelecida com sucesso.", flush=True)
-            # Esta chamada agora funcionará porque self._account_type existe.
             await self.change_balance(self._account_type)
         else:
             print(f"Falha na conexão com a Exnova: {reason}", flush=True)
         return status
 
     async def change_balance(self, balance_type: str):
-        self._account_type = balance_type # Guarda o tipo de conta para a reconexão
+        self._account_type = balance_type
         loop = await self._get_loop()
         await loop.run_in_executor(None, self.api.change_balance, balance_type)
 
@@ -66,9 +62,16 @@ class AsyncExnovaService:
         return None
 
     async def check_trade_result(self, order_id: str) -> Optional[str]:
+        """
+        Verifica o resultado de uma operação usando a função 'check_win',
+        com uma lógica de espera e timeout para robustez.
+        """
         loop = await self._get_loop()
         try:
+            # Espera 65 segundos antes de verificar, garantindo que a operação de 1 min terminou.
             await asyncio.sleep(65)
+            
+            print(f"A verificar o resultado final da ordem {order_id}...", flush=True)
             api_call = loop.run_in_executor(None, self.api.check_win, order_id)
             result_data = await asyncio.wait_for(api_call, timeout=15.0) 
             
@@ -76,6 +79,7 @@ class AsyncExnovaService:
                 result_string = result_data[0]
                 if result_string == 'win': return 'WIN'
                 if result_string == 'loose': return 'LOSS'
+                # Trata outros possíveis retornos, como 'equal'
                 return result_string.upper() if result_string else "UNKNOWN"
             return "UNKNOWN"
 
