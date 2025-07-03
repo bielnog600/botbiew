@@ -34,4 +34,5 @@ class ActiveTrade(BaseModel):
     order_id: str
     signal_id: int
     pair: str
+    direction: str # A direção é necessária para determinar o resultado
     entry_value: float
