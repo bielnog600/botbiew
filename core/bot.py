@@ -49,15 +49,11 @@ class TradingBot:
                 await asyncio.sleep(settings.BOT_CONFIG_POLL_INTERVAL)
 
     async def trading_cycle(self):
-        # Ajusta tipo de conta
         await self.exnova.change_balance(self.bot_config.get('account_type', 'PRACTICE'))
-
-        # Seleciona ativos e aguarda candle de entrada
         assets = await self.exnova.get_open_assets()
         assets = assets[:settings.MAX_ASSETS_TO_MONITOR]
         await self.logger('INFO', f"Monitorando ativos: {assets}")
         await self._wait_for_next_candle()
-
         for asset in assets:
             if self.is_trade_active:
                 break
@@ -73,16 +69,13 @@ class TradingBot:
         try:
             base = full_name.split('-')[0]
             await self.logger('INFO', f"[{full_name}] Analisando setup...")
-
             m1 = self.exnova.get_historical_candles(base, 60, 20)
             m15 = self.exnova.get_historical_candles(base, 900, 4)
             m1_candles, m15_candles = await asyncio.gather(m1, m15)
             if not m1_candles or not m15_candles:
                 return
-
             resistance, support = get_m15_sr_zones(m15_candles)
             zones = {'resistance': resistance, 'support': support}
-
             for strat in STRATEGIES:
                 direction = strat.analyze(m1_candles, zones)
                 if direction:
@@ -114,61 +107,63 @@ class TradingBot:
 
     async def _execute_and_wait(self, signal: TradeSignal, full_name: str):
         self.is_trade_active = True
-        result = 'UNKNOWN'
+        result: Optional[str] = None
         try:
             entry_value = self._get_entry_value(signal.pair)
             sid = await self.supabase.insert_trade_signal(signal)
             if not sid:
                 await self.logger('ERROR', f"[{signal.pair}] Falha ao registrar sinal")
                 return
-
             order_id = await self.exnova.execute_trade(entry_value, full_name, signal.direction, 1)
             if not order_id:
                 await self.logger('ERROR', f"[{signal.pair}] Falha execução da ordem")
                 await self.supabase.update_trade_result(sid, 'REJEITADO')
                 return
-
             await self.logger('INFO', f"[{signal.pair}] Ordem {order_id} enviada")
+            # Polling oficial
             await self.logger('DEBUG', f"[{signal.pair}] Iniciando polling oficial por até 75s...")
-            await self.logger('DEBUG', f"[{signal.pair}] Polling oficial: verificando check_win_v4({order_id})")
-            await self.logger('DEBUG', f"[{signal.pair}] Oficial não respondeu, pulando para fallback por candle")
-            
-# 2) Fallback por candle
-            await self.logger('DEBUG', f"[{signal.pair}] Oficial não respondeu em tempo, iniciando fallback por candle...")
-
-# 2.1) Aguarda margem extra para o candle de expiração fechar 100%
-            extra = 5
-            now2 = datetime.now()
-            wait2 = (60 - now2.second) + extra
-            await self.logger('DEBUG', f"[{signal.pair}] Aguardando {wait2}s para candle completamente fechado...")
-            await asyncio.sleep(wait2)
-
-# 2.2) Busca 3 candles e loga tamanhos e closes
-            await self.logger('DEBUG', f"[{signal.pair}] Obtendo 3 candles para fallback...")
-            candles = await self.exnova.get_historical_candles(signal.pair, 60, 3)
-            await self.logger('DEBUG', f"[{signal.pair}] Candles obtidos (opens): {[c.open for c in candles]}")
-            await self.logger('DEBUG', f"[{signal.pair}] Candles obtidos (closes): {[c.close for c in candles]}")
-
-            if len(candles) >= 3:
-                entry_close   = candles[-3].close
-                outcome_close = candles[-2].close
-                await self.logger('DEBUG', f"[{signal.pair}] entry_close={entry_close}, outcome_close={outcome_close}")
-
-                if signal.direction.upper() == 'CALL':
-                    result = 'WIN' if outcome_close > entry_close else 'LOSS'
-                else:  # PUT
-                    result = 'WIN' if outcome_close < entry_close else 'LOSS'
-            else:
-                await self.logger('ERROR', f"[{signal.pair}] Velas insuficientes para fallback (necessário 3, obteve {len(candles)})")
-                result = 'UNKNOWN'
-
-
-            # 3) Grava resultado
+            deadline = time.time() + 75
+            while time.time() < deadline:
+                await self.logger('DEBUG', f"[{signal.pair}] Polling oficial: check_win_v4({order_id})")
+                status_data = await self.exnova.check_win_v4(order_id)
+                if status_data:
+                    status, profit = status_data
+                    if isinstance(status, bool):
+                        result = 'WIN' if status else 'LOSS'
+                    else:
+                        s = str(status).lower()
+                        result = 'WIN' if s == 'win' else 'LOSS'
+                    await self.logger('DEBUG', f"[{signal.pair}] Resultado oficial: {result} (profit={profit})")
+                    break
+                await asyncio.sleep(0.5)
+            # Fallback por candle
+            if result is None:
+                await self.logger('DEBUG', f"[{signal.pair}] Oficial não respondeu em tempo, iniciando fallback por candle...")
+                extra = 5
+                now2 = datetime.now()
+                wait2 = (60 - now2.second) + extra
+                await self.logger('DEBUG', f"[{signal.pair}] Aguardando {wait2}s para candle completamente fechado...")
+                await asyncio.sleep(wait2)
+                await self.logger('DEBUG', f"[{signal.pair}] Obtendo 3 candles para fallback...")
+                candles = await self.exnova.get_historical_candles(signal.pair, 60, 3)
+                await self.logger('DEBUG', f"[{signal.pair}] Candles opens: {[c.open for c in candles]}")
+                await self.logger('DEBUG', f"[{signal.pair}] Candles closes: {[c.close for c in candles]}")
+                if len(candles) >= 3:
+                    entry_close = candles[-3].close
+                    outcome_close = candles[-2].close
+                    await self.logger('DEBUG', f"[{signal.pair}] entry_close={entry_close}, outcome_close={outcome_close}")
+                    if signal.direction.upper() == 'CALL':
+                        result = 'WIN' if outcome_close > entry_close else 'LOSS'
+                    else:
+                        result = 'WIN' if outcome_close < entry_close else 'LOSS'
+                else:
+                    await self.logger('ERROR', f"[{signal.pair}] Velas insuficientes para fallback (esperado 3, obteve {len(candles)})")
+                    result = 'UNKNOWN'
+            # Grava resultado
             mg = self.martingale_state.get(signal.pair, {}).get('level', 0)
-            await self.supabase.update_trade_result(sid, result, mg)
+            await self.supabase.update_trade_result(sid, result or 'UNKNOWN', mg)
             await self.logger('SUCCESS', f"[{signal.pair}] Resultado: {result}")
-
-            # 4) Atualiza martingale
+            # Atualiza martingale
             if result == 'WIN':
                 self.martingale_state[signal.pair] = {'level': 0, 'last_value': entry_value}
             else:
@@ -178,7 +173,6 @@ class TradingBot:
                     self.martingale_state[signal.pair] = {'level': lvl, 'last_value': entry_value}
                 else:
                     self.martingale_state[signal.pair] = {'level': 0, 'last_value': settings.ENTRY_VALUE}
-
         except Exception as e:
             await self.logger('ERROR', f"Erro em _execute_and_wait para {signal.pair}: {e}")
             traceback.print_exc()
