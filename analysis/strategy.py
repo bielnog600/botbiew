@@ -1,64 +1,50 @@
-from abc import ABC, abstractmethod
-from typing import List, Dict, Optional
+# analysis/strategy.py
+from typing import List, Optional
 from core.data_models import Candle
 
-class Strategy(ABC):
-    """Interface para todas as estratégias de trading."""
-    name: str
+class FluxoDeVelas:
+    name = "Fluxo de Velas"
 
-    @abstractmethod
-    def analyze(
-        self,
-        m1_candles: List[Candle],
-        m15_zones: Dict[str, List[float]]
-    ) -> Optional[str]:
+    @staticmethod
+    def analyze(candles: List[Candle], zones: dict) -> Optional[str]:
         """
-        Analisa as candles de 1min e zonas de 15min,
-        retornando 'CALL', 'PUT' ou None se não houver sinal.
+        1) Detecta sequência de 3-4 velas da mesma cor;
+        2) A vela de entrada deve ter corpo "longo" (evitar dojis/spinning tops);
+        3) Se sequência de alta + vela longa verde → CALL;
+           Se sequência de baixa + vela longa vermelha → PUT;
         """
-        pass
-
-class ThreeBarMomentum(Strategy):
-    name = 'three_bar_momentum'
-
-    def analyze(
-        self,
-        m1_candles: List[Candle],
-        m15_zones: Dict[str, List[float]]
-    ) -> Optional[str]:
-        # Exemplo: se as últimas três candles forem bullish, sinal de CALL
-        if len(m1_candles) < 3:
+        # Precisamos de pelo menos 4 velas: 3 de tendência + 1 de entrada
+        if len(candles) < 4:
             return None
-        last3 = m1_candles[-3:]
-        if all(candle.is_bullish for candle in last3):
-            return 'CALL'
-        if all(candle.is_bearish for candle in last3):
-            return 'PUT'
+
+        last4 = candles[-4:]
+        # determina se são de alta (bullish) ou baixa (bearish)
+        colors = ["bullish" if c.close > c.open else "bearish" for c in last4]
+
+        # todas as 3 primeiras devem ter mesma cor
+        trend = colors[0]
+        if not all(col == trend for col in colors[:3]):
+            return None
+
+        # vela de entrada
+        entry = last4[3]
+        body_size = abs(entry.close - entry.open)
+        total_range = entry.max - entry.min
+        # exige corpo >= 60% da variação total para ser "longa"
+        if total_range == 0 or (body_size / total_range) < 0.6:
+            return None
+
+        # decide direção
+        if trend == "bullish" and entry.close > entry.open:
+            return "call"
+        if trend == "bearish" and entry.close < entry.open:
+            return "put"
+
         return None
 
-class M15ConfluenceEngulf(Strategy):
-    name = 'm15_confluence_engulf'
 
-    def analyze(
-        self,
-        m1_candles: List[Candle],
-        m15_zones: Dict[str, List[float]]
-    ) -> Optional[str]:
-        # Exemplo simples: se última candle engolfar suportes de M15
-        if not m1_candles:
-            return None
-        last = m1_candles[-1]
-        resistance = m15_zones.get('resistance', [])
-        support = m15_zones.get('support', [])
-        # Exemplo fictício de confluência
-        if last.is_bullish and last.open < support[-1] < last.close:
-            return 'CALL'
-        if last.is_bearish and last.open > resistance[-1] > last.close:
-            return 'PUT'
-        return None
-
-# Registro das estratégias disponíveis
-STRATEGIES: List[Strategy] = [
-    ThreeBarMomentum(),
-    M15ConfluenceEngulf(),
+# Em algum lugar do módulo, substitua a inclusão da antiga three_bar_momentum por:
+STRATEGIES = [
+    FluxoDeVelas(),
+    # ... outras estratégias
 ]
