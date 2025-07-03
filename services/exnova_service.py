@@ -25,12 +25,6 @@ class AsyncExnovaService:
             print(f"Falha na conexão com a Exnova: {reason}", flush=True)
         return status
 
-    async def get_server_timestamp(self) -> int:
-        """Busca o timestamp oficial do servidor da corretora."""
-        loop = await self._get_loop()
-        # A função get_server_timestamp é a nossa fonte da verdade para o tempo.
-        return await loop.run_in_executor(None, self.api.get_server_timestamp)
-
     async def change_balance(self, balance_type: str):
         self._account_type = balance_type
         loop = await self._get_loop()
@@ -56,15 +50,45 @@ class AsyncExnovaService:
 
     async def get_historical_candles(self, asset: str, interval: int, count: int) -> List[Candle]:
         loop = await self._get_loop()
-        # Passamos o tempo do servidor para a chamada de velas
-        server_time = await self.get_server_timestamp()
-        candles_data = await loop.run_in_executor(None, self.api.get_candles, asset, interval, count, server_time)
+        candles_data = await loop.run_in_executor(None, self.api.get_candles, asset, interval, count, time.time())
         return [Candle(**data) for data in candles_data if data] if candles_data else []
 
     async def execute_trade(self, amount: float, asset: str, direction: str, expiration: int) -> Optional[str]:
         loop = await self._get_loop()
         status, order_id = await loop.run_in_executor(None, self.api.buy, amount, asset, direction, expiration)
-        if order_id:
+        
+        # FIX: Valida se o order_id é um número, e não uma mensagem de erro.
+        try:
+            int(order_id)
             return str(order_id)
-        print(f"Falha ao executar ordem para {asset}: {order_id}", flush=True)
-        return None
+        except (ValueError, TypeError):
+            print(f"Falha ao executar ordem para {asset}: {order_id}", flush=True)
+            return None
+
+    async def check_trade_result(self, order_id: str) -> Optional[str]:
+        """
+        Espera a operação expirar e depois verifica o resultado usando a função 'check_win'.
+        """
+        loop = await self._get_loop()
+        try:
+            # Espera 65 segundos para garantir que a operação de 1 min terminou.
+            await asyncio.sleep(65)
+            
+            print(f"A verificar o resultado final da ordem {order_id}...", flush=True)
+            api_call = loop.run_in_executor(None, self.api.check_win, order_id)
+            result_data = await asyncio.wait_for(api_call, timeout=15.0) 
+            
+            if isinstance(result_data, tuple) and len(result_data) > 0:
+                result_string = result_data[0]
+                if result_string == 'win': return 'WIN'
+                if result_string == 'loose': return 'LOSS'
+                # Trata outros possíveis retornos, como 'equal'
+                return result_string.upper() if result_string else "UNKNOWN"
+            return "UNKNOWN"
+
+        except asyncio.TimeoutError:
+            print(f"Aviso: Timeout ao verificar a ordem {order_id}.", flush=True)
+            return "UNKNOWN"
+        except Exception as e:
+            print(f"Erro inesperado ao verificar a ordem {order_id}: {e}", flush=True)
+            return "UNKNOWN"
