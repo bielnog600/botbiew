@@ -111,7 +111,7 @@ class TradingBot:
                         setup_candle_close=last_candle.close
                     )
                     # Executa o trade e espera pela sua conclusão
-                    await self._execute_and_wait_for_trade(signal, full_asset_name, last_candle.close)
+                    await self._execute_and_wait_for_trade(signal, full_asset_name)
                     return 
         except Exception as e:
             await self.logger('ERROR', f"Erro ao processar o ativo {full_asset_name}: {e}")
@@ -127,7 +127,7 @@ class TradingBot:
         next_value = asset_mg_state['last_value'] * mg_factor
         return round(next_value, 2)
 
-    async def _execute_and_wait_for_trade(self, signal: TradeSignal, full_asset_name: str, entry_price: float):
+    async def _execute_and_wait_for_trade(self, signal: TradeSignal, full_asset_name: str):
         self.is_trade_active = True
         try:
             entry_value = self._get_entry_value(signal.pair)
@@ -142,23 +142,19 @@ class TradingBot:
             if order_id:
                 await self.logger('SUCCESS', f"[{signal.pair}] Ordem {order_id} (sinal ID: {signal_id}) enviada. A aguardar resultado...")
                 
-                await asyncio.sleep(65) # Espera a operação expirar
-
-                await self.logger('INFO', f"[{signal.pair}] Expiração da ordem {order_id}. A verificar preço de fecho...")
-                # Pega na vela mais recente para obter o preço de fecho
-                exit_candles = await self.exnova.get_historical_candles(signal.pair, 60, 1)
+                # Lógica de Polling Ativo, inspirada no seu bot original.
+                expiration_time = time.time() + 75 # Timeout de 75 segundos
+                result = None
+                while time.time() < expiration_time:
+                    status_tuple = await self.exnova.check_win_v4(order_id)
+                    if status_tuple and status_tuple[0]: # Se o status não for None
+                        status = status_tuple[0]
+                        result = "WIN" if status == 'win' else "LOSS"
+                        break
+                    await asyncio.sleep(0.5) # Pausa curta entre verificações
                 
-                result = "UNKNOWN"
-                if exit_candles:
-                    exit_price = exit_candles[0].close
-                    await self.logger('DEBUG', f"[{signal.pair}] Preço de Entrada: {entry_price}, Preço de Saída: {exit_price}")
-                    
-                    if signal.direction == 'call' and exit_price > entry_price:
-                        result = "WIN"
-                    elif signal.direction == 'put' and exit_price < entry_price:
-                        result = "WIN"
-                    else: # Inclui empate
-                        result = "LOSS"
+                if result is None:
+                    result = "UNKNOWN"
                 
                 current_mg_level = self.martingale_state.get(signal.pair, {}).get('level', 0)
                 update_success = await self.supabase.update_trade_result(signal_id, result, current_mg_level)
