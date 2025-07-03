@@ -132,40 +132,36 @@ class TradingBot:
             await self.logger('DEBUG', f"[{signal.pair}] Iniciando polling oficial por até 75s...")
             await self.logger('DEBUG', f"[{signal.pair}] Polling oficial: verificando check_win_v4({order_id})")
             await self.logger('DEBUG', f"[{signal.pair}] Oficial não respondeu, pulando para fallback por candle")
+            
+# 2) Fallback por candle
+            await self.logger('DEBUG', f"[{signal.pair}] Oficial não respondeu em tempo, iniciando fallback por candle...")
 
-            # 1) Tenta resultado oficial
-            deadline = time.time() + 75
-            while time.time() < deadline:
-                status_data = await self.exnova.check_win_v4(order_id)
-                if status_data:
-                    status, profit = status_data
-                    if isinstance(status, bool):
-                        result = 'WIN' if status else 'LOSS'
-                    else:
-                        s = str(status).lower()
-                        if s == 'win': result = 'WIN'
-                        elif s in ('loss','lose'): result = 'LOSS'
-                    await self.logger('DEBUG', f"Resultado oficial: {result} (profit={profit})")
-                    break
-                await asyncio.sleep(0.5)
+# 2.1) Aguarda margem extra para o candle de expiração fechar 100%
+            extra = 5
+            now2 = datetime.now()
+            wait2 = (60 - now2.second) + extra
+            await self.logger('DEBUG', f"[{signal.pair}] Aguardando {wait2}s para candle completamente fechado...")
+            await asyncio.sleep(wait2)
 
-            # 2) Fallback por candle
-            if result == 'UNKNOWN':
-                extra = 5
-                now2 = datetime.now()
-                wait2 = (60 - now2.second) + extra
-                await asyncio.sleep(wait2)
-                candles = await self.exnova.get_historical_candles(signal.pair, 60, 3)
-                if len(candles) >= 3:
-                    entry_close = candles[-3].close
-                    outcome_close = candles[-2].close
-                    await self.logger('DEBUG', f"entry={entry_close}, outcome={outcome_close}")
-                    if signal.direction.upper() == 'CALL':
-                        result = 'WIN' if outcome_close > entry_close else 'LOSS'
-                    else:
-                        result = 'WIN' if outcome_close < entry_close else 'LOSS'
-                else:
-                    await self.logger('ERROR', f"[{signal.pair}] Velas insuficientes para fallback")
+# 2.2) Busca 3 candles e loga tamanhos e closes
+            await self.logger('DEBUG', f"[{signal.pair}] Obtendo 3 candles para fallback...")
+            candles = await self.exnova.get_historical_candles(signal.pair, 60, 3)
+            await self.logger('DEBUG', f"[{signal.pair}] Candles obtidos (opens): {[c.open for c in candles]}")
+            await self.logger('DEBUG', f"[{signal.pair}] Candles obtidos (closes): {[c.close for c in candles]}")
+
+            if len(candles) >= 3:
+                entry_close   = candles[-3].close
+                outcome_close = candles[-2].close
+                await self.logger('DEBUG', f"[{signal.pair}] entry_close={entry_close}, outcome_close={outcome_close}")
+
+                if signal.direction.upper() == 'CALL':
+                    result = 'WIN' if outcome_close > entry_close else 'LOSS'
+                else:  # PUT
+                    result = 'WIN' if outcome_close < entry_close else 'LOSS'
+            else:
+                await self.logger('ERROR', f"[{signal.pair}] Velas insuficientes para fallback (necessário 3, obteve {len(candles)})")
+                result = 'UNKNOWN'
+
 
             # 3) Grava resultado
             mg = self.martingale_state.get(signal.pair, {}).get('level', 0)
