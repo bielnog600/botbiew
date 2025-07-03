@@ -9,7 +9,6 @@ from config import settings
 from services.exnova_service import AsyncExnovaService
 from services.supabase_service import SupabaseService
 from analysis.strategy import STRATEGIES
-from analysis.technical import get_m15_sr_zones # Importa a nova função
 from core.data_models import TradeSignal, ActiveTrade, Candle
 
 class TradingBot:
@@ -21,6 +20,7 @@ class TradingBot:
         self.trade_queue = asyncio.Queue()
         self.cooldown_assets = set()
         self.martingale_state: Dict[str, Dict] = {}
+        self.trade_semaphore = asyncio.Semaphore(settings.MAX_CONCURRENT_TRADES)
 
     async def logger(self, level: str, message: str):
         print(f"[{level.upper()}] {message}", flush=True)
@@ -77,29 +77,18 @@ class TradingBot:
             await self._wait_for_next_candle()
             
             clean_asset_name = full_asset_name.split('-')[0]
-            
-            # Busca os dados de M1 e M15 em paralelo para eficiência
-            m1_candles_task = self.exnova.get_historical_candles(clean_asset_name, 60, 20)
-            m15_candles_task = self.exnova.get_historical_candles(clean_asset_name, 900, 4)
-            
-            m1_candles, m15_candles = await asyncio.gather(m1_candles_task, m15_candles_task)
-            
-            if not m1_candles or not m15_candles:
-                return
-
-            # Calcula as zonas de S/R de M15 e passa para a estratégia
-            resistance, support = get_m15_sr_zones(m15_candles)
-            m15_zones = {'resistance': resistance, 'support': support}
+            candles = await self.exnova.get_historical_candles(clean_asset_name, 60, 100)
+            if not candles: return
 
             for strategy in STRATEGIES:
-                direction = strategy.analyze(m1_candles, m15_zones)
+                direction = strategy.analyze(candles)
                 if direction:
-                    await self.logger('SUCCESS', f"[{full_asset_name}] Sinal de CONFLUÊNCIA M15 confirmado! Direção: {direction.upper()}")
+                    await self.logger('SUCCESS', f"[{full_asset_name}] Sinal confirmado! Direção: {direction.upper()}, Estratégia: {strategy.name}")
                     
                     self.cooldown_assets.add(full_asset_name)
                     asyncio.create_task(self._remove_from_cooldown(full_asset_name, 300))
                     
-                    last_candle = m1_candles[-1]
+                    last_candle = candles[-1]
                     signal = TradeSignal(
                         pair=clean_asset_name, 
                         direction=direction, 
@@ -109,7 +98,7 @@ class TradingBot:
                         setup_candle_low=last_candle.min,
                         setup_candle_close=last_candle.close
                     )
-                    await self._execute_trade(signal, full_asset_name)
+                    asyncio.create_task(self._execute_trade(signal, full_asset_name))
                     break 
         except asyncio.CancelledError:
             pass
@@ -133,35 +122,33 @@ class TradingBot:
         return round(next_value, 2)
 
     async def _execute_trade(self, signal: TradeSignal, full_asset_name: str):
-        try:
-            entry_value = self._get_entry_value(signal.pair)
-            balance_before = await self.exnova.get_current_balance()
-            if balance_before is None:
-                await self.logger('ERROR', f"[{signal.pair}] Não foi possível obter o saldo antes da operação. A abortar.")
-                return
+        await self.logger('INFO', f"[{signal.pair}] Sinal na fila, a aguardar por uma vaga de execução...")
+        async with self.trade_semaphore:
+            await self.logger('SUCCESS', f"[{signal.pair}] Vaga de execução obtida. A processar ordem.")
+            try:
+                entry_value = self._get_entry_value(signal.pair)
+                
+                signal_id = await self.supabase.insert_trade_signal(signal)
+                if not signal_id:
+                    await self.logger('ERROR', f"[{signal.pair}] Falha ao registrar sinal.")
+                    return
 
-            signal_id = await self.supabase.insert_trade_signal(signal)
-            if not signal_id:
-                await self.logger('ERROR', f"[{signal.pair}] Falha ao registrar sinal.")
-                return
-
-            order_id = await self.exnova.execute_trade(entry_value, full_asset_name, signal.direction, 1)
-            if order_id:
-                await self.logger('SUCCESS', f"[{signal.pair}] Ordem {order_id} (sinal ID: {signal_id}) enviada.")
-                active_trade = ActiveTrade(
-                    order_id=str(order_id), 
-                    signal_id=signal_id, 
-                    pair=signal.pair, 
-                    entry_value=entry_value,
-                    balance_before=balance_before
-                )
-                await self.trade_queue.put(active_trade)
-            else:
-                await self.logger('ERROR', f"[{signal.pair}] Falha na execução da ordem na Exnova para '{full_asset_name}'.")
-                await self.supabase.update_trade_result(signal_id, "REJEITADO")
-        except Exception as e:
-            await self.logger('ERROR', f"Exceção não tratada em _execute_trade para {signal.pair}: {e}")
-            traceback.print_exc()
+                order_id = await self.exnova.execute_trade(entry_value, full_asset_name, signal.direction, 1)
+                if order_id:
+                    await self.logger('SUCCESS', f"[{signal.pair}] Ordem {order_id} (sinal ID: {signal_id}) enviada.")
+                    active_trade = ActiveTrade(
+                        order_id=str(order_id), 
+                        signal_id=signal_id, 
+                        pair=signal.pair, 
+                        entry_value=entry_value
+                    )
+                    await self.trade_queue.put(active_trade)
+                else:
+                    await self.logger('ERROR', f"[{signal.pair}] Falha na execução da ordem na Exnova para '{full_asset_name}'.")
+                    await self.supabase.update_trade_result(signal_id, "REJEITADO")
+            except Exception as e:
+                await self.logger('ERROR', f"Exceção não tratada em _execute_trade para {signal.pair}: {e}")
+                traceback.print_exc()
 
     async def _result_checker_loop(self):
         while self.is_running:
@@ -177,15 +164,11 @@ class TradingBot:
             await self.logger('INFO', f"[{trade.pair}] Operação {trade.order_id} em andamento. A aguardar expiração...")
             await asyncio.sleep(65)
 
-            await self.logger('INFO', f"[{trade.pair}] Expiração da ordem {trade.order_id}. A verificar saldo...")
-            balance_after = await self.exnova.get_current_balance()
+            await self.logger('INFO', f"[{trade.pair}] Expiração da ordem {trade.order_id}. A verificar resultado...")
+            result = await self.exnova.check_trade_result(trade.order_id)
             
-            result = "UNKNOWN"
-            if balance_after is not None:
-                if balance_after > trade.balance_before:
-                    result = "WIN"
-                else:
-                    result = "LOSS"
+            if not result:
+                result = "UNKNOWN"
             
             current_mg_level = self.martingale_state.get(trade.pair, {}).get('level', 0)
             update_success = await self.supabase.update_trade_result(trade.signal_id, result, current_mg_level)
@@ -200,6 +183,9 @@ class TradingBot:
         except Exception as e:
             await self.logger('ERROR', f"Exceção não tratada em _check_and_process_single_trade para {trade.pair}: {e}")
             traceback.print_exc()
+        finally:
+            self.trade_semaphore.release()
+            await self.logger('INFO', f"[{trade.pair}] Vaga de execução libertada.")
 
     def _update_martingale_state(self, asset: str, result: str, last_value: float):
         if not self.bot_config.get('use_martingale', False): return
