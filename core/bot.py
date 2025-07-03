@@ -9,7 +9,6 @@ from config import settings
 from services.exnova_service import AsyncExnovaService
 from services.supabase_service import SupabaseService
 from analysis.strategy import STRATEGIES
-from analysis.technical import get_m15_sr_zones # Importa a função de análise M15
 from core.data_models import TradeSignal, ActiveTrade, Candle
 
 class TradingBot:
@@ -78,30 +77,18 @@ class TradingBot:
             await self._wait_for_next_candle()
             
             clean_asset_name = full_asset_name.split('-')[0]
-            
-            # FIX: Busca os dados de M1 e M15 em paralelo para eficiência.
-            m1_candles_task = self.exnova.get_historical_candles(clean_asset_name, 60, 20)
-            m15_candles_task = self.exnova.get_historical_candles(clean_asset_name, 900, 4)
-            
-            m1_candles, m15_candles = await asyncio.gather(m1_candles_task, m15_candles_task)
-            
-            if not m1_candles or not m15_candles:
-                return
-
-            # FIX: Calcula as zonas de S/R de M15 para passar para a estratégia.
-            resistance, support = get_m15_sr_zones(m15_candles)
-            m15_zones = {'resistance': resistance, 'support': support}
+            candles = await self.exnova.get_historical_candles(clean_asset_name, 60, 100)
+            if not candles: return
 
             for strategy in STRATEGIES:
-                # FIX: Passa ambos os argumentos necessários para a análise.
-                direction = strategy.analyze(m1_candles, m15_zones)
+                direction = strategy.analyze(candles)
                 if direction:
-                    await self.logger('SUCCESS', f"[{full_asset_name}] Sinal de CONFLUÊNCIA M15 confirmado! Direção: {direction.upper()}")
+                    await self.logger('SUCCESS', f"[{full_asset_name}] Sinal confirmado! Direção: {direction.upper()}, Estratégia: {strategy.name}")
                     
                     self.cooldown_assets.add(full_asset_name)
                     asyncio.create_task(self._remove_from_cooldown(full_asset_name, 300))
                     
-                    last_candle = m1_candles[-1]
+                    last_candle = candles[-1]
                     signal = TradeSignal(
                         pair=clean_asset_name, 
                         direction=direction, 
@@ -141,11 +128,6 @@ class TradingBot:
             try:
                 entry_value = self._get_entry_value(signal.pair)
                 
-                balance_before = await self.exnova.get_current_balance()
-                if balance_before is None:
-                    await self.logger('ERROR', f"[{signal.pair}] Não foi possível obter o saldo antes da operação. A abortar.")
-                    return
-
                 signal_id = await self.supabase.insert_trade_signal(signal)
                 if not signal_id:
                     await self.logger('ERROR', f"[{signal.pair}] Falha ao registrar sinal.")
@@ -158,8 +140,7 @@ class TradingBot:
                         order_id=str(order_id), 
                         signal_id=signal_id, 
                         pair=signal.pair, 
-                        entry_value=entry_value,
-                        balance_before=balance_before
+                        entry_value=entry_value
                     )
                     await self.trade_queue.put(active_trade)
                 else:
@@ -180,18 +161,13 @@ class TradingBot:
 
     async def _check_and_process_single_trade(self, trade: ActiveTrade):
         try:
-            await self.logger('INFO', f"[{trade.pair}] Operação {trade.order_id} em andamento. A aguardar expiração...")
-            await asyncio.sleep(65)
-
-            await self.logger('INFO', f"[{trade.pair}] Expiração da ordem {trade.order_id}. A verificar saldo...")
-            balance_after = await self.exnova.get_current_balance()
+            await self.logger('INFO', f"[{trade.pair}] Operação {trade.order_id} em andamento. A verificar resultado...")
             
-            result = "UNKNOWN"
-            if balance_after is not None:
-                if balance_after > trade.balance_before:
-                    result = "WIN"
-                else:
-                    result = "LOSS"
+            # FIX: Usa a nova função de verificação direta e robusta.
+            result = await self.exnova.check_trade_result(trade.order_id)
+            
+            if not result:
+                result = "UNKNOWN"
             
             current_mg_level = self.martingale_state.get(trade.pair, {}).get('level', 0)
             update_success = await self.supabase.update_trade_result(trade.signal_id, result, current_mg_level)
