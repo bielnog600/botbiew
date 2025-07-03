@@ -19,7 +19,7 @@ class TradingBot:
         self.is_running = True
         self.bot_config = {}
         self.martingale_state: Dict[str, Dict] = {}
-        # FIX: Novo estado para garantir que apenas uma operação é feita de cada vez.
+        # Novo estado para garantir que apenas uma operação é feita de cada vez.
         self.is_trade_active = False
 
     async def logger(self, level: str, message: str):
@@ -35,7 +35,7 @@ class TradingBot:
             try:
                 self.bot_config = await self.supabase.get_bot_config()
                 if self.bot_config.get('status') == 'RUNNING':
-                    # FIX: A lógica agora verifica se já existe uma operação ativa.
+                    # A lógica agora verifica se já existe uma operação ativa.
                     if not self.is_trade_active:
                         await self.logger('INFO', "Bot livre. A iniciar ciclo de análise...")
                         await self.trading_cycle()
@@ -63,14 +63,12 @@ class TradingBot:
         # A análise agora é sequencial para encontrar a primeira melhor oportunidade.
         for full_asset_name in assets_to_trade:
             await self._process_asset_task(full_asset_name)
-            # Se uma operação for aberta, o estado mudará e o loop principal irá parar de chamar este ciclo.
             if self.is_trade_active:
                 break
         
         # Se nenhum sinal foi encontrado, espera antes do próximo ciclo de análise
         if not self.is_trade_active:
             await self._wait_for_next_candle()
-
 
     async def _wait_for_next_candle(self):
         now = datetime.now()
@@ -107,7 +105,6 @@ class TradingBot:
                     )
                     # Executa o trade e espera pela sua conclusão
                     await self._execute_and_wait_for_trade(signal, full_asset_name)
-                    # Para a análise de outros pares, pois já encontrou uma entrada.
                     return 
         except Exception as e:
             await self.logger('ERROR', f"Erro ao processar o ativo {full_asset_name}: {e}")
@@ -124,25 +121,35 @@ class TradingBot:
         return round(next_value, 2)
 
     async def _execute_and_wait_for_trade(self, signal: TradeSignal, full_asset_name: str):
-        # FIX: Define que uma operação está ativa, bloqueando novas análises.
         self.is_trade_active = True
         try:
             entry_value = self._get_entry_value(signal.pair)
             
+            balance_before = await self.exnova.get_current_balance()
+            if balance_before is None:
+                await self.logger('ERROR', f"[{signal.pair}] Não foi possível obter o saldo antes da operação. A abortar.")
+                self.is_trade_active = False
+                return
+
             signal_id = await self.supabase.insert_trade_signal(signal)
             if not signal_id:
                 await self.logger('ERROR', f"[{signal.pair}] Falha ao registrar sinal.")
-                self.is_trade_active = False # Liberta o bot
+                self.is_trade_active = False
                 return
 
             order_id = await self.exnova.execute_trade(entry_value, full_asset_name, signal.direction, 1)
             if order_id:
                 await self.logger('SUCCESS', f"[{signal.pair}] Ordem {order_id} (sinal ID: {signal_id}) enviada. A aguardar resultado...")
                 
-                # A verificação do resultado agora acontece aqui, de forma bloqueante.
-                result = await self.exnova.check_trade_result(order_id)
-                if not result: result = "UNKNOWN"
+                await asyncio.sleep(65) # Espera a operação expirar
 
+                await self.logger('INFO', f"[{signal.pair}] Expiração da ordem {order_id}. A verificar saldo...")
+                balance_after = await self.exnova.get_current_balance()
+                
+                result = "UNKNOWN"
+                if balance_after is not None:
+                    result = "WIN" if balance_after > balance_before else "LOSS"
+                
                 current_mg_level = self.martingale_state.get(signal.pair, {}).get('level', 0)
                 update_success = await self.supabase.update_trade_result(signal_id, result, current_mg_level)
                 
@@ -160,7 +167,6 @@ class TradingBot:
             await self.logger('ERROR', f"Exceção não tratada em _execute_trade para {signal.pair}: {e}")
             traceback.print_exc()
         finally:
-            # FIX: Independentemente do que aconteça, liberta o bot para procurar a próxima operação.
             self.is_trade_active = False
             await self.logger('INFO', "Bot libertado. Pronto para a próxima análise.")
 
