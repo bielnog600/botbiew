@@ -1,6 +1,6 @@
-# core/data_models.py
-from pydantic import BaseModel, Field, computed_field
+from pydantic import BaseModel, computed_field
 from typing import Optional
+
 
 class Candle(BaseModel):
     """Modelo de dados para uma vela (candle)."""
@@ -19,6 +19,7 @@ class Candle(BaseModel):
     def is_bearish(self) -> bool:
         return self.close < self.open
 
+
 class TradeSignal(BaseModel):
     """Representa um sinal de negociação gerado por uma estratégia."""
     pair: str
@@ -29,12 +30,12 @@ class TradeSignal(BaseModel):
     setup_candle_low: Optional[float] = None
     setup_candle_close: Optional[float] = None
 
+
 class ActiveTrade(BaseModel):
     """Representa uma operação ativa na plataforma."""
     order_id: str
     signal_id: int
     pair: str
     entry_value: float
-    # FIX: Campos para a verificação por preço.
-    direction: str 
-    entry_price: float
+    direction: Optional[str] = None
+    entry_price: Optional[float] = None
