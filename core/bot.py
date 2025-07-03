@@ -2,7 +2,7 @@ import asyncio
 import time
 import traceback
 from datetime import datetime
-from typing import Dict
+from typing import Dict, Optional
 
 from config import settings
 from services.exnova_service import AsyncExnovaService
@@ -30,8 +30,20 @@ class TradingBot:
         await self.exnova.connect()
         await self.logger('SUCCESS', 'Conexão com a Exnova estabelecida.')
 
+        # Saldo inicial no painel
+        saldo = await self.exnova.get_current_balance()
+        if saldo is not None:
+            await self.supabase.update_current_balance(saldo)
+            await self.logger('DEBUG', f"Saldo inicial registrado: {saldo:.2f}")
+
         while self.is_running:
             try:
+                # Atualiza saldo a cada ciclo
+                saldo = await self.exnova.get_current_balance()
+                if saldo is not None:
+                    await self.supabase.update_current_balance(saldo)
+                    await self.logger('DEBUG', f"Saldo atualizado: {saldo:.2f}")
+
                 self.bot_config = await self.supabase.get_bot_config()
                 status = self.bot_config.get('status', 'PAUSED')
                 if status == 'RUNNING':
@@ -124,8 +136,7 @@ class TradingBot:
                 return
 
             await self.logger('INFO', f"[{signal.pair}] Ordem {order_id} enviada. Aguardando expiração…")
-            # Espera expiração da vela (1 min + folga)
-            await asyncio.sleep(65)
+            await asyncio.sleep(60)  # espera fechamento de vela M1
 
             # Saldo depois da ordem
             saldo_depois = await self.exnova.get_current_balance()
@@ -133,12 +144,10 @@ class TradingBot:
             if diff > 0:
                 result = 'WIN'
                 await self.logger('SUCCESS', f"[{signal.pair}] RESULTADO: WIN — Lucro estimado: {diff:.2f}")
-                # reset martingale
                 self.martingale_state[signal.pair] = {'level': 0, 'last_value': settings.ENTRY_VALUE}
             elif diff < 0:
                 result = 'LOSS'
                 await self.logger('ERROR', f"[{signal.pair}] RESULTADO: LOSS — Prejuízo estimado: {diff:.2f}")
-                # aplica martingale
                 lvl = self.martingale_state.get(signal.pair, {}).get('level', 0) + 1
                 max_lv = self.bot_config.get('martingale_levels', settings.MARTINGALE_LEVELS)
                 if lvl <= max_lv:
@@ -152,6 +161,12 @@ class TradingBot:
             # Grava resultado no Supabase
             mg_lv = self.martingale_state.get(signal.pair, {}).get('level', 0)
             await self.supabase.update_trade_result(sid, result, mg_lv)
+
+            # Atualiza saldo pós-operação no painel
+            novo_saldo = await self.exnova.get_current_balance()
+            if novo_saldo is not None:
+                await self.supabase.update_current_balance(novo_saldo)
+                await self.logger('DEBUG', f"Saldo pós-operação registrado: {novo_saldo:.2f}")
 
         except Exception as e:
             await self.logger('ERROR', f"Erro em _execute_and_wait para {signal.pair}: {e}")
