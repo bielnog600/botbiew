@@ -61,45 +61,35 @@ class AsyncExnovaService:
         print(f"Falha ao executar ordem para {asset}: {order_id}", flush=True)
         return None
 
-    async def check_trade_result(self, order_id: str) -> Optional[str]:
+    async def check_trade_result(self, order_id: str, expiration: int = 1) -> Optional[str]:
         """
-        Faz polling na API até obter WIN ou LOSS, ou retorna None após timeout.
+        Polling contínuo até o trade expirar (expiration em minutos) + 15 s de margem.
+        Retorna 'WIN' ou 'LOSS' assim que a API indicar status=True.
+        Retorna None se estourar o prazo.
         """
         loop = await self._get_loop()
+        # calcula deadline em UNIX time
+        deadline = time.time() + expiration * 60 + 15
 
-    # aguarda expirar o 1-min trade
-        await asyncio.sleep(65)
-
-        max_attempts = 5
-        for attempt in range(1, max_attempts + 1):
-            try:
-                print(f"Tentativa {attempt}/{max_attempts} para ordem {order_id}...", flush=True)
-                api_call = loop.run_in_executor(None, self.api.check_win, order_id)
-                result_data = await asyncio.wait_for(api_call, timeout=15.0)
-            except asyncio.TimeoutError:
-                print(f"Aviso: Timeout na tentativa {attempt} para {order_id}", flush=True)
-                await asyncio.sleep(2)
-                continue
-            except Exception as e:
-                print(f"Erro na tentativa {attempt} para {order_id}: {e}", flush=True)
-                await asyncio.sleep(2)
-                continue
-
-        # extrai o status da resposta
-            if isinstance(result_data, tuple) and result_data:
-                status = str(result_data[0]).lower()
-                if status == 'win':
-                    return 'WIN'
-                if status in ('loss', 'lose'):
-                    return 'LOSS'
-                if status == 'pending':
-                    await asyncio.sleep(2)
-                    continue
-            # outro retorno final (ex: 'equal')
-                return status.upper()
+        while time.time() < deadline:
+            # chama a versão certa do check_win
+            if self._account_type.lower() == 'digital':
+                status, profit = await loop.run_in_executor(
+                    None, self.api.check_win_digital_v2, order_id
+                )
             else:
-                await asyncio.sleep(2)
+                status, profit = await loop.run_in_executor(
+                    None, self.api.check_win_v4, order_id
+                )
 
-    # esgotou as tentativas sem sucesso
+            if status:
+                # devolve WIN/LOSS com base no lucro
+                return 'WIN' if profit > 0 else 'LOSS'
+
+            # aguarda 0.5 s antes de tentar de novo
+            await asyncio.sleep(0.5)
+
+    # nunca obteve status=True antes do prazo
         return None
+
 
