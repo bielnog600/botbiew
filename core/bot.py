@@ -18,9 +18,10 @@ class TradingBot:
         self.exnova = AsyncExnovaService(settings.EXNOVA_EMAIL, settings.EXNOVA_PASSWORD)
         self.is_running = True
         self.bot_config = {}
+        self.trade_queue = asyncio.Queue()
+        self.cooldown_assets = set()
         self.martingale_state: Dict[str, Dict] = {}
-        # Novo estado para garantir que apenas uma operação é feita de cada vez.
-        self.is_trade_active = False
+        self.trade_semaphore = asyncio.Semaphore(settings.MAX_CONCURRENT_TRADES)
 
     async def logger(self, level: str, message: str):
         print(f"[{level.upper()}] {message}", flush=True)
@@ -31,17 +32,14 @@ class TradingBot:
         await self.exnova.connect()
         await self.logger('SUCCESS', f"Conexão com a Exnova estabelecida.")
         
+        asyncio.create_task(self._result_checker_loop())
+
         while self.is_running:
             try:
                 self.bot_config = await self.supabase.get_bot_config()
                 if self.bot_config.get('status') == 'RUNNING':
-                    # A lógica agora verifica se já existe uma operação ativa.
-                    if not self.is_trade_active:
-                        await self.logger('INFO', "Bot livre. A iniciar ciclo de análise...")
-                        await self.trading_cycle()
-                    else:
-                        await self.logger('INFO', "A aguardar resultado da operação ativa...")
-                        await asyncio.sleep(10) # Espera 10s antes de verificar de novo
+                    await self.logger('INFO', "Bot em modo RUNNING. A iniciar ciclo de negociação...")
+                    await self.trading_cycle()
                 else:
                     await self.logger('INFO', 'Bot em modo PAUSADO. A aguardar...')
                     await asyncio.sleep(15)
@@ -51,33 +49,55 @@ class TradingBot:
                 await asyncio.sleep(30)
 
     async def trading_cycle(self):
-        """Ciclo que analisa os ativos em busca de um único sinal."""
         account_type = self.bot_config.get('account_type', 'PRACTICE')
         await self.exnova.change_balance(account_type)
 
         open_assets = await self.exnova.get_open_assets()
-        assets_to_trade = open_assets[:settings.MAX_ASSETS_TO_MONITOR]
+        assets_to_trade = [asset for asset in open_assets if asset not in self.cooldown_assets]
+        assets_to_trade = assets_to_trade[:settings.MAX_ASSETS_TO_MONITOR]
         
         await self.logger('INFO', f"Ativos a serem monitorizados: {assets_to_trade}")
 
-        # A análise agora é sequencial para encontrar a primeira melhor oportunidade.
-        for full_asset_name in assets_to_trade:
-            await self._process_asset_task(full_asset_name)
-            if self.is_trade_active:
-                break
+        trading_tasks = [asyncio.create_task(self._process_asset_task(asset)) for asset in assets_to_trade]
         
-        # Se nenhum sinal foi encontrado, espera antes do próximo ciclo de análise
-        if not self.is_trade_active:
-            await self._wait_for_next_candle()
+        if not trading_tasks:
+            await asyncio.sleep(55)
+            return
+            
+        done, pending = await asyncio.wait(trading_tasks, timeout=55)
+        for task in pending:
+            task.cancel()
 
-    async def _wait_for_next_candle(self):
+    async def _wait_for_entry_time(self):
+        """
+        Calcula e espera o tempo necessário para sincronizar a análise para
+        os segundos finais da vela M1 atual, permitindo uma entrada precisa.
+        """
         now = datetime.now()
-        wait_time = (60 - now.second) + 2 if now.second > 2 else 2 - now.second
+        second = now.second
+        
+        # O alvo é executar a análise por volta do segundo 58, para entrar no segundo 00.
+        target_second = 58
+
+        if second < target_second:
+            wait_time = target_second - second
+        else:
+            # Se já passamos do segundo 58, esperamos até o próximo minuto.
+            wait_time = (60 - second) + target_second
+        
+        # Log para depuração do tempo de espera
+        # await self.logger('DEBUG', f"A aguardar {wait_time}s para o ponto de entrada...")
         await asyncio.sleep(wait_time)
+
 
     async def _process_asset_task(self, full_asset_name: str):
         try:
+            # FIX: A lógica de tempo agora é controlada por uma única função de sincronização.
+            await self._wait_for_entry_time()
+            
             clean_asset_name = full_asset_name.split('-')[0]
+            
+            await self.logger('INFO', f"[{full_asset_name}] Ponto de entrada atingido. A analisar vela pré-fecho...")
             
             m1_candles_task = self.exnova.get_historical_candles(clean_asset_name, 60, 20)
             m15_candles_task = self.exnova.get_historical_candles(clean_asset_name, 900, 4)
@@ -91,7 +111,10 @@ class TradingBot:
             for strategy in STRATEGIES:
                 direction = strategy.analyze(m1_candles, m15_zones)
                 if direction:
-                    await self.logger('SUCCESS', f"[{full_asset_name}] Sinal confirmado! Direção: {direction.upper()}, Estratégia: {strategy.name}")
+                    await self.logger('SUCCESS', f"[{full_asset_name}] Sinal confirmado! Direção: {direction.upper()}")
+                    
+                    self.cooldown_assets.add(full_asset_name)
+                    asyncio.create_task(self._remove_from_cooldown(full_asset_name, 300))
                     
                     last_candle = m1_candles[-1]
                     signal = TradeSignal(
@@ -103,12 +126,19 @@ class TradingBot:
                         setup_candle_low=last_candle.min,
                         setup_candle_close=last_candle.close
                     )
-                    # Executa o trade e espera pela sua conclusão
-                    await self._execute_and_wait_for_trade(signal, full_asset_name)
-                    return 
+                    # A execução é imediata para garantir a entrada na viragem do minuto.
+                    asyncio.create_task(self._execute_trade(signal, full_asset_name))
+                    break 
+        except asyncio.CancelledError:
+            pass
         except Exception as e:
             await self.logger('ERROR', f"Erro ao processar o ativo {full_asset_name}: {e}")
             traceback.print_exc()
+
+    async def _remove_from_cooldown(self, asset: str, delay: int):
+        await asyncio.sleep(delay)
+        self.cooldown_assets.discard(asset)
+        await self.logger('INFO', f"[{asset}] Cooldown terminado. O ativo voltou a ser analisado.")
 
     def _get_entry_value(self, asset: str) -> float:
         base_value = self.bot_config.get('entry_value', 1.0)
@@ -120,55 +150,69 @@ class TradingBot:
         next_value = asset_mg_state['last_value'] * mg_factor
         return round(next_value, 2)
 
-    async def _execute_and_wait_for_trade(self, signal: TradeSignal, full_asset_name: str):
-        self.is_trade_active = True
-        try:
-            entry_value = self._get_entry_value(signal.pair)
-            
-            balance_before = await self.exnova.get_current_balance()
-            if balance_before is None:
-                await self.logger('ERROR', f"[{signal.pair}] Não foi possível obter o saldo antes da operação. A abortar.")
-                self.is_trade_active = False
-                return
+    async def _execute_trade(self, signal: TradeSignal, full_asset_name: str):
+        await self.logger('INFO', f"[{signal.pair}] Sinal na fila, a aguardar por uma vaga de execução...")
+        async with self.trade_semaphore:
+            await self.logger('SUCCESS', f"[{signal.pair}] Vaga de execução obtida. A processar ordem.")
+            try:
+                entry_value = self._get_entry_value(signal.pair)
+                
+                signal_id = await self.supabase.insert_trade_signal(signal)
+                if not signal_id:
+                    await self.logger('ERROR', f"[{signal.pair}] Falha ao registrar sinal.")
+                    return
 
-            signal_id = await self.supabase.insert_trade_signal(signal)
-            if not signal_id:
-                await self.logger('ERROR', f"[{signal.pair}] Falha ao registrar sinal.")
-                self.is_trade_active = False
-                return
-
-            order_id = await self.exnova.execute_trade(entry_value, full_asset_name, signal.direction, 1)
-            if order_id:
-                await self.logger('SUCCESS', f"[{signal.pair}] Ordem {order_id} (sinal ID: {signal_id}) enviada. A aguardar resultado...")
-                
-                await asyncio.sleep(65) # Espera a operação expirar
-
-                await self.logger('INFO', f"[{signal.pair}] Expiração da ordem {order_id}. A verificar saldo...")
-                balance_after = await self.exnova.get_current_balance()
-                
-                result = "UNKNOWN"
-                if balance_after is not None:
-                    result = "WIN" if balance_after > balance_before else "LOSS"
-                
-                current_mg_level = self.martingale_state.get(signal.pair, {}).get('level', 0)
-                update_success = await self.supabase.update_trade_result(signal_id, result, current_mg_level)
-                
-                if update_success:
-                    await self.logger('SUCCESS', f"[{signal.pair}] Resultado da ordem {order_id} atualizado para {result}.")
+                order_id = await self.exnova.execute_trade(entry_value, full_asset_name, signal.direction, 1)
+                if order_id:
+                    await self.logger('SUCCESS', f"[{signal.pair}] Ordem {order_id} (sinal ID: {signal_id}) enviada.")
+                    active_trade = ActiveTrade(
+                        order_id=str(order_id), 
+                        signal_id=signal_id, 
+                        pair=signal.pair, 
+                        entry_value=entry_value
+                    )
+                    await self.trade_queue.put(active_trade)
                 else:
-                    await self.logger('ERROR', f"[{signal.pair}] FALHA CRÍTICA ao atualizar o resultado da ordem {order_id} no Supabase.")
-                
-                self._update_martingale_state(signal.pair, result, entry_value)
+                    await self.logger('ERROR', f"[{signal.pair}] Falha na execução da ordem na Exnova para '{full_asset_name}'.")
+                    await self.supabase.update_trade_result(signal_id, "REJEITADO")
+            except Exception as e:
+                await self.logger('ERROR', f"Exceção não tratada em _execute_trade para {signal.pair}: {e}")
+                traceback.print_exc()
+
+    async def _result_checker_loop(self):
+        while self.is_running:
+            try:
+                trade = await self.trade_queue.get()
+                asyncio.create_task(self._check_and_process_single_trade(trade))
+                self.trade_queue.task_done()
+            except Exception as e:
+                await self.logger('ERROR', f"Erro no loop de verificação de resultados: {e}")
+
+    async def _check_and_process_single_trade(self, trade: ActiveTrade):
+        try:
+            await self.logger('INFO', f"[{trade.pair}] Operação {trade.order_id} em andamento. A verificar resultado...")
+            
+            result = await self.exnova.check_trade_result(trade.order_id)
+            
+            if not result:
+                result = "UNKNOWN"
+            
+            current_mg_level = self.martingale_state.get(trade.pair, {}).get('level', 0)
+            update_success = await self.supabase.update_trade_result(trade.signal_id, result, current_mg_level)
+            
+            if update_success:
+                await self.logger('SUCCESS', f"[{trade.pair}] Resultado da ordem {trade.order_id} atualizado para {result}.")
             else:
-                await self.logger('ERROR', f"[{signal.pair}] Falha na execução da ordem na Exnova para '{full_asset_name}'.")
-                await self.supabase.update_trade_result(signal_id, "REJEITADO")
-        
+                await self.logger('ERROR', f"[{trade.pair}] FALHA CRÍTICA ao atualizar o resultado da ordem {trade.order_id} no Supabase.")
+            
+            self._update_martingale_state(trade.pair, result, trade.entry_value)
+
         except Exception as e:
-            await self.logger('ERROR', f"Exceção não tratada em _execute_trade para {signal.pair}: {e}")
+            await self.logger('ERROR', f"Exceção não tratada em _check_and_process_single_trade para {trade.pair}: {e}")
             traceback.print_exc()
         finally:
-            self.is_trade_active = False
-            await self.logger('INFO', "Bot libertado. Pronto para a próxima análise.")
+            self.trade_semaphore.release()
+            await self.logger('INFO', f"[{trade.pair}] Vaga de execução libertada.")
 
     def _update_martingale_state(self, asset: str, result: str, last_value: float):
         if not self.bot_config.get('use_martingale', False): return
