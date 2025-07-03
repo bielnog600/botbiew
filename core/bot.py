@@ -309,6 +309,9 @@ class TradingBot:
         except Exception as e:
         # esse except pega qualquer erro na lógica toda acima
             await self.logger('ERROR', f"Exceção em _check_and_process_single_trade: {e}")
+            # --- dentro de _check_and_process_single_trade, após o retry ---
+            await self.logger('DEBUG', f"[{trade.pair}] Raw do check_trade_result: {raw!r}")
+
 
         finally:
         # garante liberar a vaga sempre
