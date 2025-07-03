@@ -35,12 +35,13 @@ class TradingBot:
             try:
                 self.bot_config = await self.supabase.get_bot_config()
                 if self.bot_config.get('status') == 'RUNNING':
+                    # A lógica agora verifica se já existe uma operação ativa.
                     if not self.is_trade_active:
                         await self.logger('INFO', "Bot livre. A iniciar ciclo de análise...")
                         await self.trading_cycle()
                     else:
                         await self.logger('INFO', "A aguardar resultado da operação ativa...")
-                        await asyncio.sleep(5) 
+                        await asyncio.sleep(5) # Espera 5s antes de verificar de novo
                 else:
                     await self.logger('INFO', 'Bot em modo PAUSADO. A aguardar...')
                     await asyncio.sleep(15)
@@ -60,8 +61,10 @@ class TradingBot:
         await self.logger('INFO', f"Ativos a serem monitorizados: {assets_to_trade}")
 
         await self._wait_for_next_candle()
-
+        
+        # A análise agora é sequencial para encontrar a primeira melhor oportunidade.
         for full_asset_name in assets_to_trade:
+            # Se uma operação for aberta, o bot fica ocupado e para de procurar.
             if self.is_trade_active:
                 break
             await self._process_asset_task(full_asset_name)
@@ -103,6 +106,7 @@ class TradingBot:
                         setup_candle_low=last_candle.min,
                         setup_candle_close=last_candle.close
                     )
+                    # Executa o trade e espera pela sua conclusão
                     await self._execute_and_wait_for_trade(signal, full_asset_name)
                     return 
         except Exception as e:
