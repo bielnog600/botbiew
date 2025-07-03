@@ -34,6 +34,7 @@ class ActiveTrade(BaseModel):
     order_id: str
     signal_id: int
     pair: str
-    direction: str # Adicionado para saber como comparar os preços
-    entry_price: float # O preço exato da entrada
     entry_value: float
+    # FIX: Campos para a verificação por preço.
+    direction: str 
+    entry_price: float
