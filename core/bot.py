@@ -26,6 +26,7 @@ class TradingBot:
         await self.supabase.insert_log(level, message)
 
     async def run(self):
+        await self.logger('DEBUG', f"Configurado MAX_ASSETS_TO_MONITOR = {settings.MAX_ASSETS_TO_MONITOR}")
         await self.logger('INFO', 'Bot a iniciar...')
         status = await self.exnova.connect()
         if status:
