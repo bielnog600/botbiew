@@ -9,7 +9,6 @@ from config import settings
 from services.exnova_service import AsyncExnovaService
 from services.supabase_service import SupabaseService
 from analysis.strategy import STRATEGIES
-from analysis.technical import get_m15_sr_zones # Importa a função de análise M15
 from core.data_models import TradeSignal, ActiveTrade, Candle
 
 class TradingBot:
@@ -78,30 +77,18 @@ class TradingBot:
             await self._wait_for_next_candle()
             
             clean_asset_name = full_asset_name.split('-')[0]
-            
-            # FIX: Busca os dados de M1 e M15 em paralelo para eficiência.
-            m1_candles_task = self.exnova.get_historical_candles(clean_asset_name, 60, 20)
-            m15_candles_task = self.exnova.get_historical_candles(clean_asset_name, 900, 4)
-            
-            m1_candles, m15_candles = await asyncio.gather(m1_candles_task, m15_candles_task)
-            
-            if not m1_candles or not m15_candles:
-                return
-
-            # FIX: Calcula as zonas de S/R de M15 para passar para a estratégia.
-            resistance, support = get_m15_sr_zones(m15_candles)
-            m15_zones = {'resistance': resistance, 'support': support}
+            candles = await self.exnova.get_historical_candles(clean_asset_name, 60, 100)
+            if not candles: return
 
             for strategy in STRATEGIES:
-                # FIX: Passa ambos os argumentos necessários para a análise.
-                direction = strategy.analyze(m1_candles, m15_zones)
+                direction = strategy.analyze(candles)
                 if direction:
-                    await self.logger('SUCCESS', f"[{full_asset_name}] Sinal de CONFLUÊNCIA M15 confirmado! Direção: {direction.upper()}")
+                    await self.logger('SUCCESS', f"[{full_asset_name}] Sinal confirmado! Direção: {direction.upper()}, Estratégia: {strategy.name}")
                     
                     self.cooldown_assets.add(full_asset_name)
                     asyncio.create_task(self._remove_from_cooldown(full_asset_name, 300))
                     
-                    last_candle = m1_candles[-1]
+                    last_candle = candles[-1]
                     signal = TradeSignal(
                         pair=clean_asset_name, 
                         direction=direction, 
@@ -141,6 +128,7 @@ class TradingBot:
             try:
                 entry_value = self._get_entry_value(signal.pair)
                 
+                # FIX: Obtém o saldo ANTES de executar a ordem.
                 balance_before = await self.exnova.get_current_balance()
                 if balance_before is None:
                     await self.logger('ERROR', f"[{signal.pair}] Não foi possível obter o saldo antes da operação. A abortar.")
@@ -154,6 +142,8 @@ class TradingBot:
                 order_id = await self.exnova.execute_trade(entry_value, full_asset_name, signal.direction, 1)
                 if order_id:
                     await self.logger('SUCCESS', f"[{signal.pair}] Ordem {order_id} (sinal ID: {signal_id}) enviada.")
+                    
+                    # FIX: Passa o 'balance_before' ao criar o objeto ActiveTrade.
                     active_trade = ActiveTrade(
                         order_id=str(order_id), 
                         signal_id=signal_id, 
