@@ -24,7 +24,6 @@ class TradeSignal(BaseModel):
     pair: str
     direction: str
     strategy: str
-    volatility_score: Optional[float] = None
     setup_candle_open: Optional[float] = None
     setup_candle_high: Optional[float] = None
     setup_candle_low: Optional[float] = None
@@ -36,4 +35,5 @@ class ActiveTrade(BaseModel):
     signal_id: int
     pair: str
     entry_value: float
-    # O campo 'balance_before' foi removido para eliminar a lógica de verificação por saldo.
+    # Campo obrigatório para guardar o saldo antes da operação.
+    balance_before: float
