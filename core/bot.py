@@ -281,6 +281,9 @@ class TradingBot:
                 await asyncio.sleep(5)
                 raw = await self.exnova.check_trade_result(trade.order_id)
 
+
+             # --- dentro de _check_and_process_single_trade, após o retry ---
+            await self.logger('DEBUG', f"[{trade.pair}] Raw do check_trade_result: {raw!r}")
         # converte raw em WIN/LOSS/UNKNOWN
             if raw is None:
                 result = "UNKNOWN"
@@ -309,8 +312,7 @@ class TradingBot:
         except Exception as e:
         # esse except pega qualquer erro na lógica toda acima
             await self.logger('ERROR', f"Exceção em _check_and_process_single_trade: {e}")
-            # --- dentro de _check_and_process_single_trade, após o retry ---
-            await self.logger('DEBUG', f"[{trade.pair}] Raw do check_trade_result: {raw!r}")
+           
 
 
         finally:
