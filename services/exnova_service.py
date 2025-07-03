@@ -2,7 +2,7 @@
 import asyncio
 import time
 from exnovaapi.stable_api import Exnova
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 from core.data_models import Candle
 
 class AsyncExnovaService:
@@ -57,7 +57,6 @@ class AsyncExnovaService:
         loop = await self._get_loop()
         status, order_id = await loop.run_in_executor(None, self.api.buy, amount, asset, direction, expiration)
         
-        # FIX: Valida se o order_id é um número, e não uma mensagem de erro.
         try:
             int(order_id)
             return str(order_id)
@@ -65,30 +64,15 @@ class AsyncExnovaService:
             print(f"Falha ao executar ordem para {asset}: {order_id}", flush=True)
             return None
 
-    async def check_trade_result(self, order_id: str) -> Optional[str]:
+    async def check_win_v4(self, order_id: str) -> Optional[Tuple]:
         """
-        Espera a operação expirar e depois verifica o resultado usando a função 'check_win'.
+        Wrapper assíncrono para a função check_win_v4, que será chamada repetidamente.
         """
         loop = await self._get_loop()
         try:
-            # Espera 65 segundos para garantir que a operação de 1 min terminou.
-            await asyncio.sleep(65)
-            
-            print(f"A verificar o resultado final da ordem {order_id}...", flush=True)
-            api_call = loop.run_in_executor(None, self.api.check_win, order_id)
-            result_data = await asyncio.wait_for(api_call, timeout=15.0) 
-            
-            if isinstance(result_data, tuple) and len(result_data) > 0:
-                result_string = result_data[0]
-                if result_string == 'win': return 'WIN'
-                if result_string == 'loose': return 'LOSS'
-                # Trata outros possíveis retornos, como 'equal'
-                return result_string.upper() if result_string else "UNKNOWN"
-            return "UNKNOWN"
-
-        except asyncio.TimeoutError:
-            print(f"Aviso: Timeout ao verificar a ordem {order_id}.", flush=True)
-            return "UNKNOWN"
+            # Esta chamada é rápida, não tem lógica de espera.
+            result_data = await loop.run_in_executor(None, self.api.check_win_v4, order_id)
+            return result_data
         except Exception as e:
-            print(f"Erro inesperado ao verificar a ordem {order_id}: {e}", flush=True)
-            return "UNKNOWN"
+            print(f"Erro inesperado ao chamar check_win_v4 para a ordem {order_id}: {e}", flush=True)
+            return None
