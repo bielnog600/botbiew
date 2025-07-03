@@ -1,4 +1,3 @@
-# services/supabase_service.py
 import asyncio
 from supabase import create_client, Client
 from typing import Dict, Any, Optional
@@ -24,7 +23,12 @@ class SupabaseService:
         loop = await self._get_loop()
         resp = await loop.run_in_executor(
             None,
-            lambda: self._create_client().table('bot_config').select('*').eq('id', 1).single().execute()
+            lambda: self._create_client()
+                .table('bot_config')
+                .select('*')
+                .eq('id', 1)
+                .single()
+                .execute()
         )
         return resp.data or {}
 
@@ -71,19 +75,3 @@ class SupabaseService:
                 .execute()
         )
         return bool(resp.data)
-
-    async def update_asset_performance(self, asset: str, strategy: str, win_rate: float, total_trades: int):
-        loop = await self._get_loop()
-        await loop.run_in_executor(
-            None,
-            lambda: self._create_client()
-                .table('asset_performance')
-                .upsert({
-                    'asset_name': asset,
-                    'strategy_name': strategy,
-                    'win_rate': win_rate,
-                    'total_trades': total_trades,
-                    'last_cataloged_at': 'now()'
-                }, on_conflict='asset_name,strategy_name')
-                .execute()
-        )
