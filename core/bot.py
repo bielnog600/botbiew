@@ -2,7 +2,7 @@ import asyncio
 import time
 import traceback
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict
 
 from config import settings
 from services.exnova_service import AsyncExnovaService
@@ -30,19 +30,19 @@ class TradingBot:
         await self.exnova.connect()
         await self.logger('SUCCESS', 'Conexão com a Exnova estabelecida.')
 
-        # Saldo inicial no painel
-        saldo = await self.exnova.get_current_balance()
-        if saldo is not None:
-            await self.supabase.update_current_balance(saldo)
-            await self.logger('DEBUG', f"Saldo inicial registrado: {saldo:.2f}")
+        # registra saldo inicial
+        initial = await self.exnova.get_current_balance()
+        if initial is not None:
+            await self.supabase.update_current_balance(initial)
+            await self.logger('DEBUG', f"Saldo inicial registrado: {initial:.2f}")
 
         while self.is_running:
             try:
-                # Atualiza saldo a cada ciclo
-                saldo = await self.exnova.get_current_balance()
-                if saldo is not None:
-                    await self.supabase.update_current_balance(saldo)
-                    await self.logger('DEBUG', f"Saldo atualizado: {saldo:.2f}")
+                # atualiza saldo a cada ciclo
+                bal = await self.exnova.get_current_balance()
+                if bal is not None:
+                    await self.supabase.update_current_balance(bal)
+                    await self.logger('DEBUG', f"Saldo atualizado: {bal:.2f}")
 
                 self.bot_config = await self.supabase.get_bot_config()
                 status = self.bot_config.get('status', 'PAUSED')
@@ -122,13 +122,13 @@ class TradingBot:
         self.is_trade_active = True
         try:
             entry_value = self._get_entry_value(signal.pair)
-            # Saldo antes da ordem
             saldo_antes = await self.exnova.get_current_balance()
 
             sid = await self.supabase.insert_trade_signal(signal)
             if not sid:
                 await self.logger('ERROR', f"[{signal.pair}] Falha ao registrar sinal")
                 return
+
             order_id = await self.exnova.execute_trade(entry_value, full_name, signal.direction, 1)
             if not order_id:
                 await self.logger('ERROR', f"[{signal.pair}] Falha execução da ordem")
@@ -136,9 +136,8 @@ class TradingBot:
                 return
 
             await self.logger('INFO', f"[{signal.pair}] Ordem {order_id} enviada. Aguardando expiração…")
-            await asyncio.sleep(60)  # espera fechamento de vela M1
+            await asyncio.sleep(65)  # vela de 1min + 5s folga
 
-            # Saldo depois da ordem
             saldo_depois = await self.exnova.get_current_balance()
             diff = (saldo_depois or 0) - (saldo_antes or 0)
             if diff > 0:
@@ -158,15 +157,14 @@ class TradingBot:
                 result = 'DRAW'
                 await self.logger('WARNING', f"[{signal.pair}] RESULTADO: EMPATE — Sem variação no saldo.")
 
-            # Grava resultado no Supabase
             mg_lv = self.martingale_state.get(signal.pair, {}).get('level', 0)
             await self.supabase.update_trade_result(sid, result, mg_lv)
 
-            # Atualiza saldo pós-operação no painel
-            novo_saldo = await self.exnova.get_current_balance()
-            if novo_saldo is not None:
-                await self.supabase.update_current_balance(novo_saldo)
-                await self.logger('DEBUG', f"Saldo pós-operação registrado: {novo_saldo:.2f}")
+            # atualiza saldo pós-operação
+            novo = await self.exnova.get_current_balance()
+            if novo is not None:
+                await self.supabase.update_current_balance(novo)
+                await self.logger('DEBUG', f"Saldo pós-operação registrado: {novo:.2f}")
 
         except Exception as e:
             await self.logger('ERROR', f"Erro em _execute_and_wait para {signal.pair}: {e}")
