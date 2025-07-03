@@ -35,5 +35,5 @@ class ActiveTrade(BaseModel):
     signal_id: int
     pair: str
     entry_value: float
-    # Campo obrigatório para guardar o saldo antes da operação.
-    balance_before: float
+    # Os campos 'direction' e 'entry_price' foram removidos,
+    # pois a verificação por saldo foi abandonada.
