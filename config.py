@@ -18,8 +18,8 @@ class Settings(BaseSettings):
     SUPABASE_KEY: str = Field(..., env="SUPABASE_KEY")
 
     # Bot behavior settings
-    MAX_ASSETS_TO_MONITOR: int = 25
-    MAX_CONCURRENT_TRADES: int = 2
+    MAX_ASSETS_TO_MONITOR: int = 100
+    MAX_CONCURRENT_TRADES: int = 4
 
     ENTRY_VALUE: float        = Field(1.0, env="ENTRY_VALUE")
     USE_MARTINGALE: bool      = Field(False, env="USE_MARTINGALE")
