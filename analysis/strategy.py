@@ -6,52 +6,33 @@ class FluxoDeVelas:
 
     @staticmethod
     def analyze(candles: List[Candle], zones: dict) -> Optional[str]:
-        """
-        1) Detecta sequência de 3-4 velas da mesma cor;
-        2) A vela de entrada deve ter corpo "longo" (evitar dojis/spinning tops);
-        3) Se sequência de alta + vela longa verde → CALL;
-           Se sequência de baixa + vela longa vermelha → PUT;
-        """
+        # existing logic unchanged
         if len(candles) < 4:
             return None
 
         last4 = candles[-4:]
-        # identifica cores das 4 velas: bullish ou bearish
         colors = ["bullish" if c.close > c.open else "bearish" for c in last4]
-
-        # primeiras 3 devem ser da mesma cor
         trend = colors[0]
         if any(col != trend for col in colors[:3]):
             return None
 
-        # vela de entrada
         entry = last4[3]
         body_size = abs(entry.close - entry.open)
         total_range = entry.max - entry.min
-        # exige corpo >= 60% do range total
         if total_range == 0 or (body_size / total_range) < 0.6:
             return None
 
-        # decide direção
         if trend == "bullish" and entry.close > entry.open:
             return "call"
         if trend == "bearish" and entry.close < entry.open:
             return "put"
-
         return None
-
 
 class Engolfo:
     name = "Engolfo"
 
     @staticmethod
     def analyze(candles: List[Candle], zones: dict) -> Optional[str]:
-        """
-        Identifica padrões de Engolfo de Alta (CALL) e Baixa (PUT).
-        - Bullish engolfo: vela 1 bearish curta + vela 2 bullish longa que engloba o corpo da vela 1.
-        - Bearish engolfo: vela 1 bullish curta + vela 2 bearish longa que engloba o corpo da vela 1.
-        Retorna 'call' ou 'put'.
-        """
         if len(candles) < 2:
             return None
 
@@ -61,23 +42,53 @@ class Engolfo:
 
         # Bullish Engulfing
         if prev.close < prev.open and curr.close > curr.open:
-            # corpo da curr maior que corpo da prev e engloba
-            if curr_body > prev_body:
-                # curr.open abaixo de prev.close e curr.close acima de prev.open
-                if curr.open < prev.close and curr.close > prev.open:
-                    return "call"
+            if curr_body > prev_body and curr.open < prev.close and curr.close > prev.open:
+                return "call"
 
         # Bearish Engulfing
         if prev.close > prev.open and curr.close < curr.open:
-            if curr_body > prev_body:
-                if curr.open > prev.close and curr.close < prev.open:
-                    return "put"
-
+            if curr_body > prev_body and curr.open > prev.close and curr.close < prev.open:
+                return "put"
         return None
 
+class NanoTendencia:
+    name = "Nano Tendência"
 
-# Lista de estratégias usadas pelo bot
+    @staticmethod
+    def analyze(candles: List[Candle], zones: dict) -> Optional[str]:
+        # Requer pelo menos 6 candles: 5 para SMA e 3 de setup
+        if len(candles) < 6:
+            return None
+
+        # Calcula SMA5 das últimas 5 closes antes das 3 candles finais
+        sma_period = 5
+        closes = [c.close for c in candles[-(sma_period+3):-3]]
+        sma5 = sum(closes[-sma_period:]) / sma_period
+
+        # Seleciona as primeiras 2 candles do setup e a de entrada
+        c1, c2, entry = candles[-3], candles[-2], candles[-1]
+
+        def valid_candle(c: Candle) -> bool:
+            body = abs(c.close - c.open)
+            wick_top = c.max - max(c.close, c.open)
+            wick_bot = min(c.close, c.open) - c.min
+            total = c.max - c.min
+            # Corpo >=65% do range e sombras <=17.5% (1/4 do restante)
+            return total > 0 and (body/total) >= 0.65 and (wick_top/total) <= 0.175 and (wick_bot/total) <= 0.175
+
+        # Verifica corpo grande e posição em relação à SMA
+        if valid_candle(c1) and valid_candle(c2) and valid_candle(entry):
+            # duas candles abaixo SMA5 => tendência de baixa nano
+            if c1.close < sma5 and c2.close < sma5 and entry.close < sma5:
+                return "put"
+            # duas candles acima SMA5 => tendência de alta nano
+            if c1.close > sma5 and c2.close > sma5 and entry.close > sma5:
+                return "call"
+        return None
+
+# Lista de estratégias usadas pelo bot, na ordem de prioridade
 STRATEGIES = [
     FluxoDeVelas(),
     Engolfo(),
+    NanoTendencia(),
 ]
