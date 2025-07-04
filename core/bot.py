@@ -111,7 +111,7 @@ class TradingBot:
             
             # 1. Obter mais dados para indicadores mais longos
             m1, m5, m15 = await asyncio.gather(
-                self.exnova.get_historical_candles(base, 60, 100), # M1 para análise primária
+                self.exnova.get_historical_candles(base, 60, 200), # M1 para análise primária
                 self.exnova.get_historical_candles(base, 300, 50), # M5 para tendência
                 self.exnova.get_historical_candles(base, 900, 50), # M15 para S/R
             )
