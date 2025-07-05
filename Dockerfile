@@ -5,8 +5,8 @@ FROM python:3.10-slim
 WORKDIR /app
 
 # ===================================================================
-# NOVO: Instala as dependências do sistema para a biblioteca TA-Lib
-# Este passo é necessário para que o 'pip install TA-Lib' funcione.
+# ETAPA 1: Instala as dependências do sistema para a biblioteca TA-Lib
+# Incluindo 'build-essential' que contém o compilador 'gcc'.
 # ===================================================================
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
@@ -18,19 +18,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && make install \
     && cd .. \
     && rm -rf ta-lib/ ta-lib-0.4.0-src.tar.gz \
-    && apt-get remove -y build-essential wget \
-    && apt-get autoremove -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
+
 # ===================================================================
-
-# Copia o arquivo de dependências para o diretório de trabalho.
+# ETAPA 2: Instala as dependências do Python
+# Agora, o 'pip install TA-Lib' encontrará o 'gcc' e a biblioteca TA-Lib
+# que foram instalados na etapa anterior.
+# ===================================================================
 COPY requirements.txt .
-
-# Instala as dependências do Python.
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copia todo o código do projeto para o diretório de trabalho.
+# ===================================================================
+# ETAPA 3: Copia o código da sua aplicação
+# ===================================================================
 COPY . .
 
 # Comando para executar o bot quando o container iniciar.
