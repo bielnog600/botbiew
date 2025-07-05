@@ -39,8 +39,7 @@ FROM python:3.10-slim
 WORKDIR /app
 
 # Copia a biblioteca TA-Lib já compilada do estágio de construção
-COPY --from=builder /usr/lib/libta_lib.so.0 /usr/lib/
-COPY --from=builder /usr/lib/libta_lib.so.0.0.0 /usr/lib/
+COPY --from=builder /usr/lib/libta_lib.so.0* /usr/lib/
 
 # Copia os pacotes Python já instalados do estágio de construção
 COPY --from=builder /opt/venv /opt/venv
@@ -51,7 +50,7 @@ COPY . .
 # Ativa o ambiente virtual para os comandos seguintes
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Atualiza o cache de bibliotecas na imagem final
+# Atualiza o cache de bibliotecas na imagem final para que o sistema encontre a libta_lib.so.0
 RUN ldconfig
 
 # Comando para executar o bot quando o container iniciar
