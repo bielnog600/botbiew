@@ -148,7 +148,7 @@ class TradingBot:
             # --- FILTRO 1: VOLATILIDADE (ATR) ---
             atr_value = ti.calculate_atr(analysis_candles, period=14)
             # AJUSTADO: Filtro de volatilidade menos sensível
-            min_atr, max_atr = 0.00005, 0.008
+            min_atr, max_atr = 0.00005, 0.05
             if atr_value is None or not (min_atr < atr_value < max_atr):
                 await self.logger('DEBUG', f"[{base}-M{expiration_minutes}] Filtro de volatilidade: Fora dos limites (ATR={atr_value}). Ativo ignorado.")
                 return
