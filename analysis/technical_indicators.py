@@ -2,8 +2,6 @@
 
 import pandas as pd
 import pandas_ta as ta
-# CORRIGIDO: Importa as funções de vela diretamente do pandas_ta.candles com os nomes corretos
-from pandas_ta.candles import engulfing, hammer, shootingstar
 from typing import List, Dict, Optional
 
 class Candle:
@@ -67,30 +65,41 @@ def check_rsi_condition(candles: List[Candle], overbought=70, oversold=30, perio
         return 'call'
     return None
 
-# CORRIGIDO: Esta função agora usa chamadas de função diretas e importações corretas.
+# CORRIGIDO: Esta função agora usa a nossa própria lógica para identificar os padrões,
+# removendo completamente a dependência da pandas-ta para esta tarefa.
 def check_candlestick_pattern(candles: List[Candle]) -> Optional[str]:
-    """Identifica padrões de vela de reversão usando chamadas de função diretas."""
+    """Identifica padrões de vela de reversão com lógica interna."""
     if len(candles) < 2:
         return None
 
-    df = _convert_candles_to_dataframe(candles)
-    if df.empty or len(df.columns) < 4 or df.isnull().values.any():
-        return None
+    prev = candles[-2]
+    curr = candles[-1]
 
-    # Chama cada função de padrão de vela diretamente.
-    engulfing_signal = engulfing(open_=df['open'], high=df['high'], low=df['low'], close=df['close'])
-    hammer_signal = hammer(open_=df['open'], high=df['high'], low=df['low'], close=df['close'])
-    shooting_star_signal = shootingstar(open_=df['open'], high=df['high'], low=df['low'], close=df['close'])
-
-    # Verifica o último candle
-    last_engulfing = engulfing_signal.iloc[-1] if engulfing_signal is not None and not engulfing_signal.empty else 0
-    last_hammer = hammer_signal.iloc[-1] if hammer_signal is not None and not hammer_signal.empty else 0
-    last_shooting_star = shooting_star_signal.iloc[-1] if shooting_star_signal is not None and not shooting_star_signal.empty else 0
-
-    if last_engulfing == 100 or last_hammer == 100:
+    # Lógica para Engolfo de Alta (Bullish Engulfing)
+    # 1. Vela anterior é de baixa.
+    # 2. Vela atual é de alta.
+    # 3. Corpo da vela atual "engole" o corpo da vela anterior.
+    if (prev.close < prev.open and curr.close > curr.open and
+        curr.open <= prev.close and curr.close >= prev.open):
         return 'call'
-    
-    if last_engulfing == -100 or last_shooting_star == -100:
+
+    # Lógica para Engolfo de Baixa (Bearish Engulfing)
+    # 1. Vela anterior é de alta.
+    # 2. Vela atual é de baixa.
+    # 3. Corpo da vela atual "engole" o corpo da vela anterior.
+    if (prev.close > prev.open and curr.close < curr.open and
+        curr.open >= prev.close and curr.close <= prev.open):
+        return 'put'
+
+    # Lógica para Martelo (Hammer) - sinal de alta
+    body_size = abs(curr.close - curr.open)
+    lower_wick = min(curr.open, curr.close) - curr.min
+    upper_wick = curr.max - max(curr.open, curr.close)
+    if body_size > 0 and lower_wick >= 2 * body_size and upper_wick < body_size:
+        return 'call'
+
+    # Lógica para Estrela Cadente (Shooting Star) - sinal de baixa
+    if body_size > 0 and upper_wick >= 2 * body_size and lower_wick < body_size:
         return 'put'
         
     return None
