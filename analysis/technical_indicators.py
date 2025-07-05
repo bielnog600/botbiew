@@ -17,6 +17,7 @@ class Candle:
 
 # --- Funções dos Indicadores com Lógica Profissional ---
 
+
 def _convert_candles_to_dataframe(candles: List[Candle]) -> pd.DataFrame:
     """Função auxiliar para converter a lista de candles em um DataFrame do Pandas."""
     if not candles:
@@ -25,9 +26,13 @@ def _convert_candles_to_dataframe(candles: List[Candle]) -> pd.DataFrame:
     df = pd.DataFrame([vars(c) for c in candles])
     # Renomear colunas para o padrão do pandas_ta (high, low, open, close)
     df.rename(columns={'max': 'high', 'min': 'low'}, inplace=True)
+    
+    # CORRIGIDO: Removida a tentativa de acessar a coluna 'volume'
     # Garante que os tipos de dados são numéricos para os cálculos
-    for col in ['open', 'high', 'low', 'close', 'volume']:
-        df[col] = pd.to_numeric(df[col], errors='coerce')
+    for col in ['open', 'high', 'low', 'close']:
+        # Verifica se a coluna existe antes de tentar converter
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
     return df
 
 def calculate_ema(candles: List[Candle], period: int) -> Optional[float]:
