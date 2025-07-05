@@ -31,7 +31,7 @@ def calculate_ema(candles: List[Candle], period: int) -> Optional[float]:
     if len(candles) < period:
         return None
     df = _convert_candles_to_dataframe(candles)
-    if df.empty or 'close' not in df.columns: return None
+    if df.empty or 'close' not in df.columns or df['close'].isnull().any(): return None
     ema_series = ta.ema(df['close'], length=period)
     if ema_series is None or ema_series.empty:
         return None
@@ -42,7 +42,7 @@ def calculate_atr(candles: List[Candle], period: int) -> Optional[float]:
     if len(candles) < period:
         return None
     df = _convert_candles_to_dataframe(candles)
-    if df.empty or 'high' not in df.columns: return None
+    if df.empty or 'high' not in df.columns or df['high'].isnull().any(): return None
     atr_series = ta.atr(df['high'], df['low'], df['close'], length=period)
     if atr_series is None or atr_series.empty:
         return None
@@ -53,7 +53,7 @@ def check_rsi_condition(candles: List[Candle], overbought=70, oversold=30, perio
     if len(candles) < period:
         return None
     df = _convert_candles_to_dataframe(candles)
-    if df.empty or 'close' not in df.columns: return None
+    if df.empty or 'close' not in df.columns or df['close'].isnull().any(): return None
     rsi_series = ta.rsi(df['close'], length=period)
     if rsi_series is None or rsi_series.empty:
         return None
@@ -67,12 +67,12 @@ def check_rsi_condition(candles: List[Candle], overbought=70, oversold=30, perio
 
 # CORRIGIDO: Esta função agora usa a sintaxe e os NOMES DE FUNÇÃO corretos.
 def check_candlestick_pattern(candles: List[Candle]) -> Optional[str]:
-    """Identifica padrões de vela de reversão sem depender da TA-Lib."""
+    """Identifica padrões de vela de reversão usando chamadas de função diretas."""
     if len(candles) < 2:
         return None
 
     df = _convert_candles_to_dataframe(candles)
-    if df.empty or len(df.columns) < 4:
+    if df.empty or len(df.columns) < 4 or df.isnull().values.any():
         return None
 
     # Usa a sintaxe de extensão do pandas-ta com os nomes corretos das funções.
@@ -106,9 +106,11 @@ def check_price_near_sr(last_candle: Candle, zones: Dict, tolerance=0.0005) -> O
         
     price = last_candle.close
     for r in zones.get('resistance', []):
+        if r is None: continue
         if abs(price - r) / r < tolerance:
             return 'put'
     for s in zones.get('support', []):
+        if s is None: continue
         if abs(price - s) / s < tolerance:
             return 'call'
     return None
