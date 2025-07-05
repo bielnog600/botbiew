@@ -155,7 +155,7 @@ class TradingBot:
                 return
 
             # Filtro de Tendência (usando as velas de contexto de tendência)
-            trend_ema = ti.calculate_ema(trend_candles, period=5)
+            trend_ema = ti.calculate_ema(trend_candles, period=14)
             last_price = analysis_candles[-1].close
             trend = 'SIDEWAYS'
             if trend_ema and last_price > trend_ema: trend = 'UPTREND'
