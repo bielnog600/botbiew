@@ -1,25 +1,29 @@
-# Usa uma imagem base oficial do Python.
-FROM python:3.10-slim
+# ETAPA 1: Usar uma imagem base do Python mais completa que a 'slim'.
+# 'bullseye' é a versão estável do Debian na qual o python:3.10 se baseia.
+# Isso garante que os pacotes de desenvolvimento como 'libta-lib-dev' estejam disponíveis.
+FROM python:3.10-bullseye
 
 # Define o diretório de trabalho dentro do container.
 WORKDIR /app
 
-# Instala a biblioteca TA-Lib e suas ferramentas de desenvolvimento
-# a partir dos repositórios oficiais do Debian. É muito mais simples e confiável.
+# ETAPA 2: Instala a biblioteca TA-Lib e suas ferramentas de desenvolvimento
+# a partir dos repositórios oficiais do Debian.
+# Esta abordagem é mais simples e confiável do que a compilação manual.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libta-lib-dev \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Copia o arquivo de dependências
+# ETAPA 3: Copia o arquivo de dependências
 COPY requirements.txt .
 
-# Instala as dependências Python. O pip agora encontrará a TA-Lib pré-instalada no sistema.
+# ETAPA 4: Instala as dependências Python.
+# O pip agora encontrará a TA-Lib pré-instalada no sistema.
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copia o resto do código da sua aplicação
+# ETAPA 5: Copia o resto do código da sua aplicação.
 COPY . .
 
-# Comando para executar o bot quando o container iniciar
+# Comando para executar o bot quando o container iniciar.
 CMD ["python", "main.py"]
