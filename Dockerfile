@@ -1,31 +1,17 @@
+# Usa uma imagem base oficial do Python.
 FROM python:3.10-slim
 
+# Define o diretório de trabalho dentro do container.
 WORKDIR /app
 
-# Instala dependências do sistema necessárias
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-        build-essential \
-        wget \
-        curl \
-        gcc \
-        make \
-        libffi-dev \
-        libssl-dev \
-        && rm -rf /var/lib/apt/lists/*
-
-# Baixa e compila TA-Lib manualmente
-RUN wget http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz && \
-    tar -xzvf ta-lib-0.4.0-src.tar.gz && \
-    cd ta-lib && \
-    ./configure --prefix=/usr && \
-    make && make install && \
-    cd .. && rm -rf ta-lib ta-lib-0.4.0-src.tar.gz
-
-# Agora o pip encontra a lib ta-lib instalada!
+# Copia o arquivo de dependências para o diretório de trabalho.
 COPY requirements.txt .
+
+# Instala as dependências. Não precisa mais compilar nada.
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Copia todo o código do projeto para o diretório de trabalho.
 COPY . .
 
-CMD ["python", "-m", "app.main"]
+# Comando para executar o bot quando o container iniciar.
+CMD ["python", "main.py"]
