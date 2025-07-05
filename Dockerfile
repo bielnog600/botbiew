@@ -4,12 +4,18 @@ FROM python:3.10-slim
 # Define o diretório de trabalho dentro do container.
 WORKDIR /app
 
+# Copia o arquivo de dependências primeiro para aproveitar o cache do Docker
+# se o arquivo não mudar.
+COPY requirements.txt .
+
 # ===================================================================
-# ETAPA 1: Instala as dependências do sistema para a biblioteca TA-Lib
+# Executa a instalação do sistema, compilação da TA-Lib e instalação
+# das dependências Python em um ÚNICO passo para garantir a consistência.
 # ===================================================================
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     wget \
+    # Baixa e compila a TA-Lib
     && wget http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz -q -O - | tar -xzf - \
     && cd ta-lib/ \
     && ./configure --prefix=/usr \
@@ -17,23 +23,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && make install \
     && cd .. \
     && rm -rf ta-lib/ ta-lib-0.4.0-src.tar.gz \
+    # Agora, com a TA-Lib instalada, instala os pacotes Python
+    && pip install --no-cache-dir -r requirements.txt \
+    # Finalmente, remove as ferramentas de compilação para manter a imagem pequena
+    && apt-get purge -y --auto-remove build-essential wget \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# ===================================================================
-# NOVO: Define a variável de ambiente para que o sistema encontre a TA-Lib
-# ===================================================================
-ENV LD_LIBRARY_PATH /usr/lib
-
-# ===================================================================
-# ETAPA 2: Instala as dependências do Python
-# ===================================================================
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# ===================================================================
-# ETAPA 3: Copia o código da sua aplicação
-# ===================================================================
+# Copia todo o código do projeto para o diretório de trabalho.
 COPY . .
 
 # Comando para executar o bot quando o container iniciar.
