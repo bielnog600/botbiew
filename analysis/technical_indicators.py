@@ -1,9 +1,9 @@
 # analysis/technical_indicators.py
 
 import pandas as pd
-# CORRIGIDO: Importa as funções de vela diretamente do pandas_ta
-from pandas_ta import ema, atr, rsi
-from pandas_ta.candles import cdl_engulfing, cdl_hammer, cdl_shootingstar
+import pandas_ta as ta
+# CORRIGIDO: Importa as funções de vela diretamente do pandas_ta.candles com os nomes corretos
+from pandas_ta.candles import engulfing, hammer, shootingstar
 from typing import List, Dict, Optional
 
 class Candle:
@@ -34,7 +34,7 @@ def calculate_ema(candles: List[Candle], period: int) -> Optional[float]:
         return None
     df = _convert_candles_to_dataframe(candles)
     if df.empty or 'close' not in df.columns or df['close'].isnull().any(): return None
-    ema_series = ema(df['close'], length=period)
+    ema_series = ta.ema(df['close'], length=period)
     if ema_series is None or ema_series.empty:
         return None
     return ema_series.iloc[-1]
@@ -45,7 +45,7 @@ def calculate_atr(candles: List[Candle], period: int) -> Optional[float]:
         return None
     df = _convert_candles_to_dataframe(candles)
     if df.empty or 'high' not in df.columns or df['high'].isnull().any(): return None
-    atr_series = atr(df['high'], df['low'], df['close'], length=period)
+    atr_series = ta.atr(df['high'], df['low'], df['close'], length=period)
     if atr_series is None or atr_series.empty:
         return None
     return atr_series.iloc[-1]
@@ -56,7 +56,7 @@ def check_rsi_condition(candles: List[Candle], overbought=70, oversold=30, perio
         return None
     df = _convert_candles_to_dataframe(candles)
     if df.empty or 'close' not in df.columns or df['close'].isnull().any(): return None
-    rsi_series = rsi(df['close'], length=period)
+    rsi_series = ta.rsi(df['close'], length=period)
     if rsi_series is None or rsi_series.empty:
         return None
     
@@ -67,7 +67,7 @@ def check_rsi_condition(candles: List[Candle], overbought=70, oversold=30, perio
         return 'call'
     return None
 
-# CORRIGIDO: Esta função agora usa chamadas de função diretas, que é a forma mais segura.
+# CORRIGIDO: Esta função agora usa chamadas de função diretas e importações corretas.
 def check_candlestick_pattern(candles: List[Candle]) -> Optional[str]:
     """Identifica padrões de vela de reversão usando chamadas de função diretas."""
     if len(candles) < 2:
@@ -78,19 +78,19 @@ def check_candlestick_pattern(candles: List[Candle]) -> Optional[str]:
         return None
 
     # Chama cada função de padrão de vela diretamente.
-    engulfing_signal = cdl_engulfing(df['open'], df['high'], df['low'], df['close'])
-    hammer_signal = cdl_hammer(df['open'], df['high'], df['low'], df['close'])
-    shooting_star_signal = cdl_shootingstar(df['open'], df['high'], df['low'], df['close'])
+    engulfing_signal = engulfing(open_=df['open'], high=df['high'], low=df['low'], close=df['close'])
+    hammer_signal = hammer(open_=df['open'], high=df['high'], low=df['low'], close=df['close'])
+    shooting_star_signal = shootingstar(open_=df['open'], high=df['high'], low=df['low'], close=df['close'])
 
     # Verifica o último candle
-    last_engulfing = engulfing_signal.iloc[-1] if engulfing_signal is not None else 0
-    last_hammer = hammer_signal.iloc[-1] if hammer_signal is not None else 0
-    last_shooting_star = shooting_star_signal.iloc[-1] if shooting_star_signal is not None else 0
+    last_engulfing = engulfing_signal.iloc[-1] if engulfing_signal is not None and not engulfing_signal.empty else 0
+    last_hammer = hammer_signal.iloc[-1] if hammer_signal is not None and not hammer_signal.empty else 0
+    last_shooting_star = shooting_star_signal.iloc[-1] if shooting_star_signal is not None and not shooting_star_signal.empty else 0
 
-    if last_engulfing == 100 or last_hammer > 0:
+    if last_engulfing == 100 or last_hammer == 100:
         return 'call'
     
-    if last_engulfing == -100 or last_shooting_star < 0:
+    if last_engulfing == -100 or last_shooting_star == -100:
         return 'put'
         
     return None
