@@ -65,9 +65,10 @@ def check_rsi_condition(candles: List[Candle], overbought=70, oversold=30, perio
         return 'call'
     return None
 
-# CORRIGIDO: Esta função agora usa a sintaxe de extensão do pandas-ta, que é a forma correta.
+# CORRIGIDO: Esta função agora usa a sintaxe de extensão do pandas-ta
+# e chama apenas os padrões que precisamos, evitando os avisos.
 def check_candlestick_pattern(candles: List[Candle]) -> Optional[str]:
-    """Identifica padrões de vela de reversão usando a extensão .ta do pandas-ta."""
+    """Identifica padrões de vela de reversão sem depender da TA-Lib."""
     if len(candles) < 2:
         return None
 
@@ -75,14 +76,15 @@ def check_candlestick_pattern(candles: List[Candle]) -> Optional[str]:
     if df.empty or len(df.columns) < 4 or df.isnull().values.any():
         return None
 
-    # Anexa todos os padrões de vela ao DataFrame de uma só vez.
-    # O 'talib=False' força o uso da implementação interna em Python.
-    df.ta.cdl_pattern(name="all", talib=False, append=True)
+    # Anexa apenas os padrões de vela que nos interessam.
+    # Isto impede que a pandas-ta procure pela TA-Lib para outros padrões.
+    df.ta.cdl_engulfing(append=True)
+    df.ta.cdl_hammer(append=True)
+    df.ta.cdl_shootingstar(append=True)
 
     # Verifica o último candle no DataFrame modificado.
     last_candle = df.iloc[-1]
     
-    # Nomes das colunas para os padrões que nos interessam
     is_engulfing_bullish = last_candle.get('CDL_ENGULFING', 0) == 100
     is_hammer = last_candle.get('CDL_HAMMER', 0) == 100
     
