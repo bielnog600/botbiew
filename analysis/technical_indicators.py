@@ -1,7 +1,9 @@
 # analysis/technical_indicators.py
 
 import pandas as pd
-import pandas_ta as ta
+# CORRIGIDO: Importa as funções de vela diretamente do pandas_ta
+from pandas_ta import ema, atr, rsi
+from pandas_ta.candles import cdl_engulfing, cdl_hammer, cdl_shootingstar
 from typing import List, Dict, Optional
 
 class Candle:
@@ -12,6 +14,7 @@ class Candle:
         self.close = data.get('close')
 
 def _convert_candles_to_dataframe(candles: List[Candle]) -> pd.DataFrame:
+    """Função auxiliar para converter a lista de candles em um DataFrame do Pandas."""
     if not candles:
         return pd.DataFrame()
     
@@ -23,57 +26,87 @@ def _convert_candles_to_dataframe(candles: List[Candle]) -> pd.DataFrame:
             df[col] = pd.to_numeric(df[col], errors='coerce')
     return df
 
-# --- Funções dos Indicadores ---
+# --- Funções dos Indicadores (com lógica profissional) ---
 
 def calculate_ema(candles: List[Candle], period: int) -> Optional[float]:
-    if len(candles) < period: return None
+    """Calcula a Média Móvel Exponencial (EMA) usando pandas_ta."""
+    if len(candles) < period:
+        return None
     df = _convert_candles_to_dataframe(candles)
     if df.empty or 'close' not in df.columns or df['close'].isnull().any(): return None
-    return ta.ema(df['close'], length=period).iloc[-1]
+    ema_series = ema(df['close'], length=period)
+    if ema_series is None or ema_series.empty:
+        return None
+    return ema_series.iloc[-1]
 
 def calculate_atr(candles: List[Candle], period: int) -> Optional[float]:
-    if len(candles) < period: return None
+    """Calcula o Average True Range (ATR) usando pandas_ta."""
+    if len(candles) < period:
+        return None
     df = _convert_candles_to_dataframe(candles)
     if df.empty or 'high' not in df.columns or df['high'].isnull().any(): return None
-    return ta.atr(df['high'], df['low'], df['close'], length=period).iloc[-1]
+    atr_series = atr(df['high'], df['low'], df['close'], length=period)
+    if atr_series is None or atr_series.empty:
+        return None
+    return atr_series.iloc[-1]
 
 def check_rsi_condition(candles: List[Candle], overbought=70, oversold=30, period=14) -> Optional[str]:
-    if len(candles) < period: return None
+    """Verifica se o RSI está em sobrecompra ou sobrevenda usando pandas_ta."""
+    if len(candles) < period:
+        return None
     df = _convert_candles_to_dataframe(candles)
     if df.empty or 'close' not in df.columns or df['close'].isnull().any(): return None
-    rsi_value = ta.rsi(df['close'], length=period).iloc[-1]
-    if rsi_value > overbought: return 'put'
-    if rsi_value < oversold: return 'call'
+    rsi_series = rsi(df['close'], length=period)
+    if rsi_series is None or rsi_series.empty:
+        return None
+    
+    rsi_value = rsi_series.iloc[-1]
+    if rsi_value > overbought:
+        return 'put'
+    if rsi_value < oversold:
+        return 'call'
     return None
 
+# CORRIGIDO: Esta função agora usa chamadas de função diretas, que é a forma mais segura.
 def check_candlestick_pattern(candles: List[Candle]) -> Optional[str]:
-    if len(candles) < 2: return None
+    """Identifica padrões de vela de reversão usando chamadas de função diretas."""
+    if len(candles) < 2:
+        return None
+
     df = _convert_candles_to_dataframe(candles)
-    if df.empty or len(df.columns) < 4 or df.isnull().values.any(): return None
+    if df.empty or len(df.columns) < 4 or df.isnull().values.any():
+        return None
 
-    # Anexa apenas os padrões que não precisam da TA-Lib
-    df.ta.cdl_engulfing(append=True)
-    df.ta.cdl_hammer(append=True)
-    df.ta.cdl_shootingstar(append=True)
+    # Chama cada função de padrão de vela diretamente.
+    engulfing_signal = cdl_engulfing(df['open'], df['high'], df['low'], df['close'])
+    hammer_signal = cdl_hammer(df['open'], df['high'], df['low'], df['close'])
+    shooting_star_signal = cdl_shootingstar(df['open'], df['high'], df['low'], df['close'])
 
-    last_candle = df.iloc[-1]
+    # Verifica o último candle
+    last_engulfing = engulfing_signal.iloc[-1] if engulfing_signal is not None else 0
+    last_hammer = hammer_signal.iloc[-1] if hammer_signal is not None else 0
+    last_shooting_star = shooting_star_signal.iloc[-1] if shooting_star_signal is not None else 0
+
+    if last_engulfing == 100 or last_hammer > 0:
+        return 'call'
     
-    is_engulfing_bullish = last_candle.get('CDL_ENGULFING', 0) == 100
-    is_hammer = last_candle.get('CDL_HAMMER', 0) == 100
-    is_engulfing_bearish = last_candle.get('CDL_ENGULFING', 0) == -100
-    is_shooting_star = last_candle.get('CDL_SHOOTINGSTAR', 0) == -100
-
-    if is_engulfing_bullish or is_hammer: return 'call'
-    if is_engulfing_bearish or is_shooting_star: return 'put'
+    if last_engulfing == -100 or last_shooting_star < 0:
+        return 'put'
+        
     return None
 
 def check_price_near_sr(last_candle: Candle, zones: Dict, tolerance=0.0005) -> Optional[str]:
-    if last_candle is None or last_candle.close is None: return None
+    """Verifica se o preço está próximo a uma zona de S/R."""
+    if last_candle is None or last_candle.close is None:
+        return None
+        
     price = last_candle.close
     for r in zones.get('resistance', []):
         if r is None: continue
-        if abs(price - r) / r < tolerance: return 'put'
+        if abs(price - r) / r < tolerance:
+            return 'put'
     for s in zones.get('support', []):
         if s is None: continue
-        if abs(price - s) / s < tolerance: return 'call'
+        if abs(price - s) / s < tolerance:
+            return 'call'
     return None
