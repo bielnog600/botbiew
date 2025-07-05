@@ -1,25 +1,38 @@
-# Usa uma imagem base oficial do Python que contém os pacotes de desenvolvimento.
+# Usa uma imagem base oficial do Python.
+# Usamos a versão completa para garantir que todas as ferramentas estejam disponíveis.
 FROM python:3.10-bullseye
 
 # Define o diretório de trabalho dentro do container.
 WORKDIR /app
 
-# ETAPA 1: Instala as ferramentas de compilação e a biblioteca TA-Lib
-# Esta abordagem é a mais confiável pois instala o pacote pré-compilado do Debian.
+# Copia o arquivo de dependências primeiro.
+COPY requirements.txt .
+
+# ===================================================================
+# Executa a instalação do sistema, compilação da TA-Lib e instalação
+# das dependências Python em um ÚNICO passo para garantir a consistência.
+# ===================================================================
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
-    libta-lib-dev \
+    wget \
+    # Baixa e compila a TA-Lib
+    && wget http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz -q -O - | tar -xzf - \
+    && cd ta-lib/ \
+    && ./configure --prefix=/usr \
+    && make \
+    && make install \
+    && cd .. \
+    && rm -rf ta-lib/ ta-lib-0.4.0-src.tar.gz \
+    # ATUALIZA O CACHE DE BIBLIOTECAS DO SISTEMA (CRUCIAL)
+    && ldconfig \
+    # Agora, com a TA-Lib instalada E o cache atualizado, instala os pacotes Python
+    && pip install --no-cache-dir -r requirements.txt \
+    # Finalmente, remove as ferramentas de compilação para manter a imagem pequena
+    && apt-get purge -y --auto-remove build-essential wget \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# ETAPA 2: Copia o arquivo de dependências
-COPY requirements.txt .
-
-# ETAPA 3: Instala as dependências Python.
-# O pip agora encontrará a TA-Lib pré-instalada no sistema e o compilador gcc.
-RUN pip install --no-cache-dir -r requirements.txt
-
-# ETAPA 4: Copia o resto do código da sua aplicação.
+# Copia todo o código do projeto para o diretório de trabalho.
 COPY . .
 
 # Comando para executar o bot quando o container iniciar.
