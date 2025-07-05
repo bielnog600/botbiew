@@ -65,9 +65,9 @@ def check_rsi_condition(candles: List[Candle], overbought=70, oversold=30, perio
         return 'call'
     return None
 
-# CORRIGIDO: Esta função agora usa a sintaxe correta do pandas-ta.
+# CORRIGIDO: Esta função agora usa a sintaxe e os nomes de função corretos.
 def check_candlestick_pattern(candles: List[Candle]) -> Optional[str]:
-    """Identifica padrões de vela de reversão usando chamadas de função diretas."""
+    """Identifica padrões de vela de reversão sem depender da TA-Lib."""
     if len(candles) < 2:
         return None
 
@@ -75,18 +75,21 @@ def check_candlestick_pattern(candles: List[Candle]) -> Optional[str]:
     if df.empty or len(df.columns) < 4:
         return None
 
-    # Analisa padrões individualmente. Estas funções não precisam da TA-Lib.
+    # Usa a sintaxe de extensão do pandas-ta com os nomes corretos das funções.
     # O 'talib=False' força o uso da implementação interna em Python.
-    engulfing = ta.engulfing(open_=df['open'], high=df['high'], low=df['low'], close=df['close'], talib=False)
-    hammer = ta.hammer(open_=df['open'], high=df['high'], low=df['low'], close=df['close'], talib=False)
-    shooting_star = ta.shootingstar(open_=df['open'], high=df['high'], low=df['low'], close=df['close'], talib=False)
+    df.ta.cdl_engulfing(talib=False, append=True)
+    df.ta.cdl_hammer(talib=False, append=True)
+    df.ta.cdl_shootingstar(talib=False, append=True)
 
-    # Verifica o último candle
-    is_engulfing_bullish = engulfing is not None and not engulfing.empty and engulfing.iloc[-1] == 100
-    is_hammer = hammer is not None and not hammer.empty and hammer.iloc[-1] == 100
+    # Verifica o último candle no DataFrame modificado.
+    # Os nomes das colunas são padronizados pela biblioteca (ex: CDL_ENGULFING).
+    last_candle = df.iloc[-1]
     
-    is_engulfing_bearish = engulfing is not None and not engulfing.empty and engulfing.iloc[-1] == -100
-    is_shooting_star = shooting_star is not None and not shooting_star.empty and shooting_star.iloc[-1] == -100
+    is_engulfing_bullish = last_candle.get('CDL_ENGULFING', 0) == 100
+    is_hammer = last_candle.get('CDL_HAMMER', 0) == 100
+    
+    is_engulfing_bearish = last_candle.get('CDL_ENGULFING', 0) == -100
+    is_shooting_star = last_candle.get('CDL_SHOOTINGSTAR', 0) == -100
 
     if is_engulfing_bullish or is_hammer:
         return 'call'
