@@ -147,7 +147,7 @@ class TradingBot:
 
             # --- FILTROS E CONFLUÊNCIAS (a lógica interna permanece a mesma) ---
             # Filtro de Volatilidade (usando as velas de análise principal)
-            atr_value = ti.calculate_atr(analysis_candles, period=14)
+            atr_value = ti.calculate_atr(analysis_candles, period=5)
             # TODO: Você pode querer ajustar os limites de ATR para M1 e M5 separadamente
             min_atr, max_atr = 0.00001, 0.005
             if atr_value is None or not (min_atr < atr_value < max_atr):
@@ -155,7 +155,7 @@ class TradingBot:
                 return
 
             # Filtro de Tendência (usando as velas de contexto de tendência)
-            trend_ema = ti.calculate_ema(trend_candles, period=50)
+            trend_ema = ti.calculate_ema(trend_candles, period=5)
             last_price = analysis_candles[-1].close
             trend = 'SIDEWAYS'
             if trend_ema and last_price > trend_ema: trend = 'UPTREND'
