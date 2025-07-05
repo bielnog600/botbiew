@@ -6,7 +6,6 @@ WORKDIR /app
 
 # ===================================================================
 # ETAPA 1: Instala as dependências do sistema para a biblioteca TA-Lib
-# Incluindo 'build-essential' que contém o compilador 'gcc'.
 # ===================================================================
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
@@ -22,9 +21,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # ===================================================================
+# NOVO: Define a variável de ambiente para que o sistema encontre a TA-Lib
+# ===================================================================
+ENV LD_LIBRARY_PATH /usr/lib
+
+# ===================================================================
 # ETAPA 2: Instala as dependências do Python
-# Agora, o 'pip install TA-Lib' encontrará o 'gcc' e a biblioteca TA-Lib
-# que foram instalados na etapa anterior.
 # ===================================================================
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
