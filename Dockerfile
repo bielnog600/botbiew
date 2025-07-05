@@ -4,8 +4,7 @@ FROM python:3.10-slim
 # Define o diretório de trabalho dentro do container.
 WORKDIR /app
 
-# Copia o arquivo de dependências primeiro para aproveitar o cache do Docker
-# se o arquivo não mudar.
+# Copia o arquivo de dependências primeiro para aproveitar o cache do Docker.
 COPY requirements.txt .
 
 # ===================================================================
@@ -23,7 +22,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && make install \
     && cd .. \
     && rm -rf ta-lib/ ta-lib-0.4.0-src.tar.gz \
-    # Agora, com a TA-Lib instalada, instala os pacotes Python
+    # ATUALIZA O CACHE DE BIBLIOTECAS DO SISTEMA - PASSO CRUCIAL
+    && ldconfig \
+    # Agora, com a TA-Lib instalada E o cache atualizado, instala os pacotes Python
     && pip install --no-cache-dir -r requirements.txt \
     # Finalmente, remove as ferramentas de compilação para manter a imagem pequena
     && apt-get purge -y --auto-remove build-essential wget \
