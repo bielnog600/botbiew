@@ -1,54 +1,17 @@
-# ===================================================================
-# ETAPA 1: O Ambiente de Construção (Builder)
-# Usamos uma imagem completa para garantir que todas as ferramentas de compilação estejam disponíveis.
-# ===================================================================
-FROM python:3.10-bullseye as builder
-
-# Instala as dependências do sistema necessárias para compilar a TA-Lib
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    wget
-
-# Baixa, compila e instala a biblioteca C da TA-Lib
-RUN wget http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz -q -O - | tar -xzf - \
-    && cd ta-lib/ \
-    && ./configure --prefix=/usr \
-    && make \
-    && make install \
-    && cd .. \
-    && rm -rf ta-lib/ ta-lib-0.4.0-src.tar.gz
-
-# Cria um ambiente virtual para instalar as dependências Python
-RUN python -m venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
-
-# Copia e instala os pacotes Python do requirements.txt
-# O pip vai usar a TA-Lib que acabámos de compilar
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-
-# ===================================================================
-# ETAPA 2: A Imagem Final
-# Esta é a imagem leve que será realmente executada.
-# ===================================================================
+# Usa uma imagem base oficial do Python.
 FROM python:3.10-slim
 
-# Define o diretório de trabalho
+# Define o diretório de trabalho dentro do container.
 WORKDIR /app
 
-# Copia a biblioteca TA-Lib já compilada do estágio de construção
-COPY --from=builder /usr/lib/libta_lib.so.0 /usr/lib/libta_lib.so.0
-COPY --from=builder /usr/lib/libta_lib.so.0.0.0 /usr/lib/libta_lib.so.0.0.0
+# Copia o arquivo de dependências para o diretório de trabalho.
+COPY requirements.txt .
 
-# Copia os pacotes Python já instalados do estágio de construção para a imagem final
-COPY --from=builder /opt/venv /opt/venv
+# Instala as dependências. Não precisa mais compilar nada.
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Copia o resto do código da sua aplicação
+# Copia todo o código do projeto para o diretório de trabalho.
 COPY . .
 
-# Ativa o ambiente virtual para os comandos seguintes
-ENV PATH="/opt/venv/bin:$PATH"
-
-# Comando para executar o bot quando o container iniciar
+# Comando para executar o bot quando o container iniciar.
 CMD ["python", "main.py"]
