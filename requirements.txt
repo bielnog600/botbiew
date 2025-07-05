@@ -3,7 +3,6 @@
 # Dependências da aplicação principal
 pydantic
 pydantic-settings
-supabase
 python-dotenv
 
 # Dependências da biblioteca local exnovaapi
@@ -15,6 +14,7 @@ pytest
 pytest-asyncio
 
 # ... (outras dependências)
-pandas
-pandas-ta
+supabase>=2.0.0
+pandas>=2.2.0
+pandas-ta>=0.3.14b0
 numpy>=1.26.0
