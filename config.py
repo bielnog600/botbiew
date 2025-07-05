@@ -19,7 +19,7 @@ class Settings(BaseSettings):
 
     # Bot behavior settings
     MAX_ASSETS_TO_MONITOR: int = 180
-    MAX_CONCURRENT_TRADES: int = 12
+    MAX_CONCURRENT_TRADES: int = 1
 
     ENTRY_VALUE: float        = Field(1.0, env="ENTRY_VALUE")
     USE_MARTINGALE: bool      = Field(False, env="USE_MARTINGALE")
