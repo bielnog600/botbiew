@@ -36,7 +36,7 @@ class TradingBot:
         O ponto de entrada principal para o bot. Conecta-se à Exnova e entra no ciclo principal de trading.
         """
         await self.logger('DEBUG', f"Configured MAX_ASSETS_TO_MONITOR = {settings.MAX_ASSETS_TO_MONITOR}")
-        await self.logger('INFO', 'Bot a iniciar com LÓGICA DE REVERSÃO CORRIGIDA...')
+        await self.logger('INFO', 'Bot a iniciar com LÓGICA DE ENTRADA NA VELA SEGUINTE...')
         status = await self.exnova.connect()
         if status:
             await self.logger('SUCCESS', 'Conexão com a Exnova estabelecida.')
@@ -71,47 +71,63 @@ class TradingBot:
 
     async def trading_cycle(self):
         """
-        Verifica o tempo atual e decide se executa um ciclo de análise para M1, M5 ou ambos.
+        Verifica o tempo atual e decide se executa um ciclo de análise para M1 ou M5.
         """
         now = datetime.utcnow()
         
-        if now.minute % 5 == 4:
-            await self.logger('INFO', f"Iniciando ciclo de análise para M5 (Expiração de 5 min)...")
-            await self.run_analysis_for_timeframe(timeframe_seconds=300, expiration_minutes=5)
+        # A análise de M5 tem prioridade.
+        if now.minute % 5 == 0 and now.second < 5:
+             await self.run_analysis_for_timeframe(timeframe_seconds=300, expiration_minutes=5)
+        # Se não for hora de M5, faz a análise de M1.
+        elif now.second < 5:
+             await self.run_analysis_for_timeframe(timeframe_seconds=60, expiration_minutes=1)
+        else:
+            # Aguarda o próximo minuto para não sobrecarregar
+            await asyncio.sleep(1)
 
-        await self.logger('INFO', f"Iniciando ciclo de análise para M1 (Expiração de 1 min)...")
-        await self.run_analysis_for_timeframe(timeframe_seconds=60, expiration_minutes=1)
 
+    # MODIFICADO: Lógica de tempo para entrar na vela seguinte
     async def run_analysis_for_timeframe(self, timeframe_seconds: int, expiration_minutes: int):
         """
-        Executa um ciclo de análise completo para um dado timeframe.
+        Executa um ciclo de análise completo para um dado timeframe, entrando na VELA SEGUINTE.
         """
         if self.is_trade_active:
             await self.logger('INFO', f"Análise para M{expiration_minutes} pulada pois uma operação já está ativa.")
             return
 
+        now_ts = datetime.utcnow().timestamp()
+        
+        # 1. Calcular o timestamp da abertura da PRÓXIMA vela
+        # Arredonda o timestamp atual para o início do minuto atual
+        current_minute_ts = now_ts - (now_ts % 60)
+        # Calcula o timestamp de abertura da próxima vela do timeframe
+        next_candle_ts = current_minute_ts - (current_minute_ts % (expiration_minutes * 60)) + (expiration_minutes * 60)
+
+        # 2. Adicionar um buffer de 2 segundos para entrar após a abertura
+        # Isto garante que os dados da vela anterior estão disponíveis na API
+        entry_time_ts = next_candle_ts + 2
+
+        # 3. Calcular o tempo de espera
+        wait = max(entry_time_ts - now_ts, 0)
+        
+        if wait > (expiration_minutes * 60):
+            await self.logger('DEBUG', f"Ponto de análise para M{expiration_minutes} já passou. Aguardando próximo ciclo.")
+            return
+
+        await self.logger('INFO', f"Aguardando {wait:.2f}s para analisar a vela recém-fechada e entrar na próxima vela de M{expiration_minutes}...")
+        await asyncio.sleep(wait)
+
+        # O resto da lógica continua igual
         await self.exnova.change_balance(self.bot_config.get('account_type', 'PRACTICE'))
         assets = await self.exnova.get_open_assets()
         assets = assets[: settings.MAX_ASSETS_TO_MONITOR]
         await self.logger('INFO', f"[M{expiration_minutes}] Ativos para análise: {assets}")
-
-        now = datetime.utcnow()
-        next_candle_minute = (now.minute // expiration_minutes + 1) * expiration_minutes
-        target_dt = now.replace(second=0, microsecond=0) + timedelta(minutes=(next_candle_minute - now.minute))
-        target_dt -= timedelta(seconds=1.5)
-        
-        wait = max(target_dt.timestamp() - time.time(), 0)
-        await self.logger('DEBUG', f"[M{expiration_minutes}] Aguardando {wait:.2f}s até entrada otimizada...")
-        await asyncio.sleep(wait)
 
         for full in assets:
             if self.is_trade_active:
                 break
             await self._analyze_asset(full, timeframe_seconds, expiration_minutes)
 
-    # ===================================================================
-    # MÉTODO DE ANÁLISE COMPLETAMENTE REESCRITO PARA LÓGICA DE REVERSÃO
-    # ===================================================================
     async def _analyze_asset(self, full_name: str, timeframe_seconds: int, expiration_minutes: int):
         """
         Processa um ativo com uma lógica de REVERSÃO pura e corrigida.
@@ -140,9 +156,9 @@ class TradingBot:
             else:
                 return
 
-            # --- FILTRO DE VOLATILIDADE (ATR) ---
+            # --- FILTRO 1: VOLATILIDADE (ATR) ---
             atr_value = ti.calculate_atr(analysis_candles, period=14)
-            min_atr, max_atr = 0.00005, 0.05 # Intervalo menos sensível
+            min_atr, max_atr = 0.00005, 0.05 
             if atr_value is None or not (min_atr < atr_value < max_atr):
                 await self.logger('DEBUG', f"[{base}-M{expiration_minutes}] Filtro de volatilidade: Fora dos limites (ATR={atr_value}). Ativo ignorado.")
                 return
@@ -151,36 +167,26 @@ class TradingBot:
             confluences = {'call': [], 'put': []}
             zones = {'resistance': res, 'support': sup}
             
-            # 1. Sinal de Suporte/Resistência (Obrigatório)
             sr_signal = ti.check_price_near_sr(analysis_candles[-1], zones)
-            if sr_signal:
-                confluences[sr_signal].append("SR_Zone")
+            if sr_signal: confluences[sr_signal].append("SR_Zone")
 
-            # 2. Sinal de Padrão de Vela
             candle_signal = ti.check_candlestick_pattern(analysis_candles)
-            if candle_signal:
-                confluences[candle_signal].append("Candle_Pattern")
+            if candle_signal: confluences[candle_signal].append("Candle_Pattern")
             
-            # 3. Sinal de RSI
             rsi_signal = ti.check_rsi_condition(analysis_candles)
-            if rsi_signal:
-                confluences[rsi_signal].append("RSI_Condition")
+            if rsi_signal: confluences[rsi_signal].append("RSI_Condition")
             
-            # --- DECISÃO FINAL (LÓGICA DE REVERSÃO CORRIGIDA) ---
+            # --- DECISÃO FINAL (LÓGICA DE REVERSÃO) ---
             final_direction = None
-            confirmation_threshold = 2 # Exige S/R + 1 outra confluência
-
-            # Para uma COMPRA (CALL), precisamos de estar numa zona de SUPORTE e ter confirmação
+            confirmation_threshold = 2
             if 'SR_Zone' in confluences['call'] and len(confluences['call']) >= confirmation_threshold:
                 final_direction = 'call'
-                
-            # Para uma VENDA (PUT), precisamos de estar numa zona de RESISTÊNCIA e ter confirmação
             elif 'SR_Zone' in confluences['put'] and len(confluences['put']) >= confirmation_threshold:
                 final_direction = 'put'
-
+            
             if final_direction:
                 strategy_name = f"M{expiration_minutes}_Reversal_" + ', '.join(confluences[final_direction])
-                await self.logger('SUCCESS', f"[{base}-M{expiration_minutes}] SINAL DE REVERSÃO VÁLIDO! Direção: {final_direction.upper()}. Confluências: {strategy_name}")
+                await self.logger('SUCCESS', f"[{base}-M{expiration_minutes}] SINAL VÁLIDO! Direção: {final_direction.upper()}. Confluências: {strategy_name}")
                 
                 last = analysis_candles[-1]
                 signal = TradeSignal(pair=base, direction=final_direction, strategy=strategy_name,
