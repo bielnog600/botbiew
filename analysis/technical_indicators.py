@@ -65,10 +65,10 @@ def check_rsi_condition(candles: List[Candle], overbought=70, oversold=30, perio
         return 'call'
     return None
 
-# CORRIGIDO: Esta função agora usa a sintaxe de extensão do pandas-ta, que é a forma correta.
+# CORRIGIDO: Esta função agora usa a TA-Lib (se disponível) para a máxima performance.
 def check_candlestick_pattern(candles: List[Candle]) -> Optional[str]:
-    """Identifica padrões de vela de reversão usando a extensão .ta do pandas-ta."""
-    if len(candles) < 2:
+    """Identifica padrões de vela de reversão usando a TA-Lib."""
+    if len(candles) < 20: # A maioria dos padrões precisa de algum histórico
         return None
 
     df = _convert_candles_to_dataframe(candles)
@@ -76,8 +76,8 @@ def check_candlestick_pattern(candles: List[Candle]) -> Optional[str]:
         return None
 
     # Anexa todos os padrões de vela ao DataFrame de uma só vez.
-    # O 'talib=False' força o uso da implementação interna em Python.
-    df.ta.cdl_pattern(name="all", talib=False, append=True)
+    # Como a TA-Lib está instalada, isto não irá gerar avisos.
+    df.ta.cdl_pattern(name="all", append=True)
 
     # Verifica o último candle no DataFrame modificado.
     last_candle = df.iloc[-1]
