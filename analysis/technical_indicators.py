@@ -65,7 +65,7 @@ def check_rsi_condition(candles: List[Candle], overbought=70, oversold=30, perio
         return 'call'
     return None
 
-# CORRIGIDO: Esta função agora usa a sintaxe e os nomes de função corretos.
+# CORRIGIDO: Esta função agora usa a sintaxe e os NOMES DE FUNÇÃO corretos.
 def check_candlestick_pattern(candles: List[Candle]) -> Optional[str]:
     """Identifica padrões de vela de reversão sem depender da TA-Lib."""
     if len(candles) < 2:
