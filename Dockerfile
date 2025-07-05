@@ -4,9 +4,6 @@
 # ===================================================================
 FROM python:3.10-bullseye as builder
 
-# Define o diretório de trabalho
-WORKDIR /usr/src/app
-
 # Instala as dependências do sistema necessárias para compilar a TA-Lib
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
@@ -17,11 +14,18 @@ RUN wget http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz -q -O
     && cd ta-lib/ \
     && ./configure --prefix=/usr \
     && make \
-    && make install
+    && make install \
+    && cd .. \
+    && rm -rf ta-lib/ ta-lib-0.4.0-src.tar.gz
 
-# Instala as dependências Python em um local específico dentro do builder
+# Cria um ambiente virtual para instalar as dependências Python
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Copia e instala os pacotes Python do requirements.txt
+# O pip vai usar a TA-Lib que acabámos de compilar
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt --target=/usr/src/app/packages
+RUN pip install --no-cache-dir -r requirements.txt
 
 
 # ===================================================================
@@ -34,14 +38,17 @@ FROM python:3.10-slim
 WORKDIR /app
 
 # Copia a biblioteca TA-Lib já compilada do estágio de construção
-COPY --from=builder /usr/lib/libta_lib.so.0 /usr/lib/
-COPY --from=builder /usr/lib/libta_lib.so.0.0.0 /usr/lib/
+COPY --from=builder /usr/lib/libta_lib.so.0 /usr/lib/libta_lib.so.0
+COPY --from=builder /usr/lib/libta_lib.so.0.0.0 /usr/lib/libta_lib.so.0.0.0
 
-# Copia os pacotes Python já instalados do estágio de construção
-COPY --from=builder /usr/src/app/packages /usr/local/lib/python3.10/site-packages
+# Copia os pacotes Python já instalados do estágio de construção para a imagem final
+COPY --from=builder /opt/venv /opt/venv
 
 # Copia o resto do código da sua aplicação
 COPY . .
+
+# Ativa o ambiente virtual para os comandos seguintes
+ENV PATH="/opt/venv/bin:$PATH"
 
 # Comando para executar o bot quando o container iniciar
 CMD ["python", "main.py"]
