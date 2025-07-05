@@ -1,92 +1,120 @@
 # analysis/technical_indicators.py
 
-# IMPORTANTE: Você precisará instalar uma biblioteca de análise técnica.
-# Recomendo a 'pandas_ta'. Instale com: pip install pandas_ta
-# Depois, importe-a aqui:
-# import pandas_ta
+# IMPORTAÇÕES CORRETAS
+import pandas as pd
+import pandas_ta as ta
 from typing import List, Dict, Optional
 
-# Simulação de um objeto Candle para clareza
+# A classe Candle pode ser mantida, pois ajuda a estruturar os dados
 class Candle:
-    def __init__(self, open, high, low, close, volume):
-        self.open = open
-        self.max = high
-        self.min = low
-        self.close = close
-        self.volume = volume
+    def __init__(self, data):
+        # Usamos .get() para evitar erros se uma chave não existir
+        self.open = data.get('open')
+        self.max = data.get('max')
+        self.min = data.get('min')
+        self.close = data.get('close')
+        self.volume = data.get('volume')
 
-def get_close_prices(candles: List[Candle]) -> List[float]:
-    """Extrai os preços de fechamento de uma lista de candles."""
-    return [c.close for c in candles]
+# --- Funções dos Indicadores com Lógica Profissional ---
 
-# --- Funções dos Indicadores ---
+def _convert_candles_to_dataframe(candles: List[Candle]) -> pd.DataFrame:
+    """Função auxiliar para converter a lista de candles em um DataFrame do Pandas."""
+    if not candles:
+        return pd.DataFrame()
+    
+    df = pd.DataFrame([vars(c) for c in candles])
+    # Renomear colunas para o padrão do pandas_ta (high, low, open, close)
+    df.rename(columns={'max': 'high', 'min': 'low'}, inplace=True)
+    # Garante que os tipos de dados são numéricos para os cálculos
+    for col in ['open', 'high', 'low', 'close', 'volume']:
+        df[col] = pd.to_numeric(df[col], errors='coerce')
+    return df
 
 def calculate_ema(candles: List[Candle], period: int) -> Optional[float]:
     """
-    NOVO: Calcula a Média Móvel Exponencial (EMA).
-    TODO: Implemente a lógica real aqui usando pandas_ta ou outra lib.
+    CORRIGIDO: Calcula a Média Móvel Exponencial (EMA) usando pandas_ta.
     """
     if len(candles) < period:
         return None
-    # Exemplo com lógica simples (substitua por uma real):
-    close_prices = get_close_prices(candles)
-    return sum(close_prices[-period:]) / period
+    df = _convert_candles_to_dataframe(candles)
+    ema_series = ta.ema(df['close'], length=period)
+    if ema_series is None or ema_series.empty:
+        return None
+    return ema_series.iloc[-1] # Retorna o último valor da EMA
 
 def calculate_atr(candles: List[Candle], period: int) -> Optional[float]:
     """
-    NOVO: Calcula o Average True Range (ATR) para medir a volatilidade.
-    TODO: Implemente a lógica real aqui.
+    CORRIGIDO: Calcula o Average True Range (ATR) usando pandas_ta.
     """
     if len(candles) < period:
         return None
-    # Exemplo com lógica simples (substitua por uma real):
-    highs = [c.max for c in candles[-period:]]
-    lows = [c.min for c in candles[-period:]]
-    return sum(h - l for h, l in zip(highs, lows)) / period if period > 0 else 0
+    df = _convert_candles_to_dataframe(candles)
+    atr_series = ta.atr(df['high'], df['low'], df['close'], length=period)
+    if atr_series is None or atr_series.empty:
+        return None
+    return atr_series.iloc[-1] # Retorna o último valor do ATR
 
-def check_rsi_condition(candles: List[Candle], overbought=70, oversold=30) -> Optional[str]:
+def check_rsi_condition(candles: List[Candle], overbought=70, oversold=30, period=14) -> Optional[str]:
     """
-    NOVO: Verifica se o RSI está em sobrecompra ou sobrevenda.
-    TODO: Implemente a lógica real aqui.
-    Retorna 'put' para sobrecompra, 'call' para sobrevenda.
+    CORRIGIDO: Verifica se o RSI está em sobrecompra ou sobrevenda usando pandas_ta.
     """
-    # Lógica de exemplo:
-    # rsi_value = pandas_ta.rsi(close_prices, length=14).iloc[-1]
-    # if rsi_value > overbought: return 'put'
-    # if rsi_value < oversold: return 'call'
-    last_close = candles[-1].close
-    if last_close > candles[-2].close * 1.001: # Simula sobrecompra
-        return 'put'
-    if last_close < candles[-2].close * 0.999: # Simula sobrevenda
-        return 'call'
+    if len(candles) < period:
+        return None
+    df = _convert_candles_to_dataframe(candles)
+    rsi_series = ta.rsi(df['close'], length=period)
+    if rsi_series is None or rsi_series.empty:
+        return None
+    
+    rsi_value = rsi_series.iloc[-1]
+    if rsi_value > overbought:
+        return 'put' # Sobrecomprado, sinal de possível reversão para baixo
+    if rsi_value < oversold:
+        return 'call' # Sobrevendido, sinal de possível reversão para alta
     return None
 
 def check_candlestick_pattern(candles: List[Candle]) -> Optional[str]:
     """
-    NOVO: Identifica padrões de candlestick de reversão.
-    TODO: Implemente a lógica real aqui (ex: Engolfo, Martelo).
-    Retorna 'call' para padrão de reversão de alta, 'put' para baixa.
+    CORRIGIDO: Identifica padrões de candlestick de reversão usando pandas_ta.
+    Esta versão é precisa e confiável.
     """
-    last = candles[-1]
-    prev = candles[-2]
-    # Exemplo simples de Engolfo de Alta (Bullish Engulfing)
-    if last.close > prev.open and last.open < prev.close and last.close > prev.open and prev.close < prev.open:
+    if len(candles) < 20:
+        return None
+
+    df = _convert_candles_to_dataframe(candles)
+    
+    # Pedir para o pandas_ta encontrar TODOS os padrões conhecidos
+    df.ta.cdl_pattern(name="all", append=True)
+    
+    last_candle_patterns = df.iloc[-1]
+
+    # Padrões de Reversão de ALTA (Bullish) - retornam 'call'
+    if (last_candle_patterns.get('CDLENGULFING', 0) == 100 or
+        last_candle_patterns.get('CDLHAMMER', 0) == 100 or
+        last_candle_patterns.get('CDLMORNINGSTAR', 0) == 100 or
+        last_candle_patterns.get('CDLPIERCING', 0) == 100):
         return 'call'
-    # Exemplo simples de Engolfo de Baixa (Bearish Engulfing)
-    if last.open > prev.close and last.close < prev.open and last.open > prev.close and prev.close < prev.open:
+
+    # Padrões de Reversão de BAIXA (Bearish) - retornam 'put'
+    if (last_candle_patterns.get('CDLENGULFING', 0) == -100 or
+        last_candle_patterns.get('CDLSHOOTINGSTAR', 0) == -100 or
+        last_candle_patterns.get('CDLEVENINGSTAR', 0) == -100 or
+        last_candle_patterns.get('CDLDARKCLOUDCOVER', 0) == -100):
         return 'put'
+        
     return None
 
 def check_price_near_sr(last_candle: Candle, zones: Dict, tolerance=0.0005) -> Optional[str]:
     """
-    NOVO: Verifica se o preço está próximo a uma zona de S/R.
-    Retorna 'put' se perto da resistência, 'call' se perto do suporte.
+    Esta função já era baseada em lógica de preço, então pode ser mantida.
     """
+    if last_candle is None or last_candle.close is None:
+        return None
+        
     price = last_candle.close
     for r in zones.get('resistance', []):
         if abs(price - r) / r < tolerance:
-            return 'put' # Preço perto da resistência, possível reversão para baixo
+            return 'put'
     for s in zones.get('support', []):
         if abs(price - s) / s < tolerance:
-            return 'call' # Preço perto do suporte, possível reversão para alta
+            return 'call'
     return None
