@@ -149,7 +149,7 @@ class TradingBot:
             # Filtro de Volatilidade (usando as velas de análise principal)
             atr_value = ti.calculate_atr(analysis_candles, period=50)
             # TODO: Você pode querer ajustar os limites de ATR para M1 e M5 separadamente
-            min_atr, max_atr = 0.00015, 0.001
+            min_atr, max_atr = 0.00015, 0.003
             if atr_value is None or not (min_atr < atr_value < max_atr):
                 await self.logger('DEBUG', f"[{base}-M{expiration_minutes}] Filtro de volatilidade: Fora dos limites (ATR={atr_value}).")
                 return
