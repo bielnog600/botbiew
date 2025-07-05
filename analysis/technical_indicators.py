@@ -31,6 +31,7 @@ def calculate_ema(candles: List[Candle], period: int) -> Optional[float]:
     if len(candles) < period:
         return None
     df = _convert_candles_to_dataframe(candles)
+    if df.empty: return None
     ema_series = ta.ema(df['close'], length=period)
     if ema_series is None or ema_series.empty:
         return None
@@ -41,6 +42,7 @@ def calculate_atr(candles: List[Candle], period: int) -> Optional[float]:
     if len(candles) < period:
         return None
     df = _convert_candles_to_dataframe(candles)
+    if df.empty: return None
     atr_series = ta.atr(df['high'], df['low'], df['close'], length=period)
     if atr_series is None or atr_series.empty:
         return None
@@ -51,6 +53,7 @@ def check_rsi_condition(candles: List[Candle], overbought=70, oversold=30, perio
     if len(candles) < period:
         return None
     df = _convert_candles_to_dataframe(candles)
+    if df.empty: return None
     rsi_series = ta.rsi(df['close'], length=period)
     if rsi_series is None or rsi_series.empty:
         return None
@@ -62,28 +65,37 @@ def check_rsi_condition(candles: List[Candle], overbought=70, oversold=30, perio
         return 'call'
     return None
 
-# MODIFICADO: Esta função agora usa apenas os reconhecedores de padrões
-# que são 100% Python, evitando a necessidade da TA-Lib.
+# CORRIGIDO: Esta função agora usa a sintaxe correta do pandas-ta.
 def check_candlestick_pattern(candles: List[Candle]) -> Optional[str]:
-    """Identifica padrões de vela de reversão sem depender da TA-Lib."""
+    """Identifica padrões de vela de reversão usando a sintaxe correta do pandas-ta."""
     if len(candles) < 2:
         return None
 
     df = _convert_candles_to_dataframe(candles)
-    
-    # Analisa padrões individualmente. Estas funções não precisam da TA-Lib.
-    # O 'talib=False' força o uso da implementação interna em Python.
-    engulfing = ta.cdl_engulfing(df['open'], df['high'], df['low'], df['close'], talib=False)
-    hammer = ta.cdl_hammer(df['open'], df['high'], df['low'], df['close'], talib=False)
-    shooting_star = ta.cdl_shootingstar(df['open'], df['high'], df['low'], df['close'], talib=False)
+    if df.empty:
+        return None
 
-    # Verifica o último candle
-    if (engulfing is not None and not engulfing.empty and engulfing.iloc[-1] == 100) or \
-       (hammer is not None and not hammer.empty and hammer.iloc[-1] == 100):
+    # Usa a sintaxe correta do pandas-ta para anexar os indicadores ao DataFrame.
+    # O 'talib=False' força o uso da implementação interna em Python.
+    df.ta.engulfing(talib=False, append=True)
+    df.ta.hammer(talib=False, append=True)
+    df.ta.shootingstar(talib=False, append=True)
+
+    # Verifica o último candle no DataFrame modificado.
+    # Os nomes das colunas são padronizados pela biblioteca (ex: CDL_ENGULFING).
+    last_candle = df.iloc[-1]
+    
+    # Verifica se a coluna existe antes de tentar acessá-la.
+    is_engulfing_bullish = last_candle.get('CDL_ENGULFING', 0) == 100
+    is_hammer = last_candle.get('CDL_HAMMER', 0) == 100
+    
+    is_engulfing_bearish = last_candle.get('CDL_ENGULFING', 0) == -100
+    is_shooting_star = last_candle.get('CDL_SHOOTINGSTAR', 0) == -100
+
+    if is_engulfing_bullish or is_hammer:
         return 'call'
     
-    if (engulfing is not None and not engulfing.empty and engulfing.iloc[-1] == -100) or \
-       (shooting_star is not None and not shooting_star.empty and shooting_star.iloc[-1] == -100):
+    if is_engulfing_bearish or is_shooting_star:
         return 'put'
         
     return None
