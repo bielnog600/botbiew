@@ -16,3 +16,4 @@ pytest-asyncio
 
 # ... (outras dependências)
 pandas
+pandas-ta
