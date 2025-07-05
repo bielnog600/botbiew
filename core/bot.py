@@ -36,7 +36,7 @@ class TradingBot:
         O ponto de entrada principal para o bot. Conecta-se à Exnova e entra no ciclo principal de trading.
         """
         await self.logger('DEBUG', f"Configured MAX_ASSETS_TO_MONITOR = {settings.MAX_ASSETS_TO_MONITOR}")
-        await self.logger('INFO', 'Bot a iniciar com LÓGICA MULTI-TIMEFRAME (M1 & M5)...')
+        await self.logger('INFO', 'Bot a iniciar com LÓGICA DE REVERSÃO CORRIGIDA...')
         status = await self.exnova.connect()
         if status:
             await self.logger('SUCCESS', 'Conexão com a Exnova estabelecida.')
@@ -109,9 +109,12 @@ class TradingBot:
                 break
             await self._analyze_asset(full, timeframe_seconds, expiration_minutes)
 
+    # ===================================================================
+    # MÉTODO DE ANÁLISE COMPLETAMENTE REESCRITO PARA LÓGICA DE REVERSÃO
+    # ===================================================================
     async def _analyze_asset(self, full_name: str, timeframe_seconds: int, expiration_minutes: int):
         """
-        Processa um ativo com lógica de confluência para um timeframe específico.
+        Processa um ativo com uma lógica de REVERSÃO pura e corrigida.
         """
         try:
             base = full_name.split('-')[0]
@@ -120,76 +123,64 @@ class TradingBot:
             context_candles_count = 100
 
             if expiration_minutes == 1:
-                m1, m5, m15 = await asyncio.gather(
+                analysis_candles, sr_candles = await asyncio.gather(
                     self.exnova.get_historical_candles(base, 60, primary_candles_count),
-                    self.exnova.get_historical_candles(base, 300, context_candles_count),
-                    self.exnova.get_historical_candles(base, 900, context_candles_count),
+                    self.exnova.get_historical_candles(base, 900, context_candles_count), # M15 para S/R
                 )
-                if not m1 or not m5 or not m15: return
-                trend_candles = m5
-                sr_candles = m15
-                analysis_candles = m1
+                if not analysis_candles or not sr_candles: return
+                res, sup = get_m15_sr_zones(sr_candles)
             
             elif expiration_minutes == 5:
-                m5, m15, h1 = await asyncio.gather(
+                analysis_candles, sr_candles = await asyncio.gather(
                     self.exnova.get_historical_candles(base, 300, primary_candles_count),
-                    self.exnova.get_historical_candles(base, 900, context_candles_count),
-                    self.exnova.get_historical_candles(base, 3600, context_candles_count),
+                    self.exnova.get_historical_candles(base, 3600, context_candles_count), # H1 para S/R
                 )
-                if not m5 or not m15 or not h1: return
-                trend_candles = m15
-                sr_candles = h1
-                analysis_candles = m5
+                if not analysis_candles or not sr_candles: return
+                res, sup = get_h1_sr_zones(sr_candles)
             else:
                 return
 
-            # --- FILTRO 1: VOLATILIDADE (ATR) ---
+            # --- FILTRO DE VOLATILIDADE (ATR) ---
             atr_value = ti.calculate_atr(analysis_candles, period=14)
-            # AJUSTADO: Filtro de volatilidade menos sensível
-            min_atr, max_atr = 0.00005, 0.03
+            min_atr, max_atr = 0.00005, 0.05 # Intervalo menos sensível
             if atr_value is None or not (min_atr < atr_value < max_atr):
                 await self.logger('DEBUG', f"[{base}-M{expiration_minutes}] Filtro de volatilidade: Fora dos limites (ATR={atr_value}). Ativo ignorado.")
                 return
 
-            # --- FILTRO 2: TENDÊNCIA (EMA) ---
-            trend_ema = ti.calculate_ema(trend_candles, period=14)
-            last_price = analysis_candles[-1].close
-            trend = 'SIDEWAYS'
-            if trend_ema and last_price > trend_ema: trend = 'UPTREND'
-            if trend_ema and last_price < trend_ema: trend = 'DOWNTREND'
-            await self.logger('DEBUG', f"[{base}-M{expiration_minutes}] Filtro de Tendência (EMA 14): {trend}")
-
-            # --- 3. BUSCA POR CONFLUÊNCIAS ---
+            # --- BUSCA POR CONFLUÊNCIAS DE REVERSÃO ---
             confluences = {'call': [], 'put': []}
-
-            if expiration_minutes == 1:
-                res, sup = get_m15_sr_zones(sr_candles)
-            else:
-                res, sup = get_h1_sr_zones(sr_candles)
-            
             zones = {'resistance': res, 'support': sup}
+            
+            # 1. Sinal de Suporte/Resistência (Obrigatório)
             sr_signal = ti.check_price_near_sr(analysis_candles[-1], zones)
-            if sr_signal: confluences[sr_signal].append("SR_Zone")
-            
+            if sr_signal:
+                confluences[sr_signal].append("SR_Zone")
+
+            # 2. Sinal de Padrão de Vela
             candle_signal = ti.check_candlestick_pattern(analysis_candles)
-            if candle_signal: confluences[candle_signal].append("Candle_Pattern")
+            if candle_signal:
+                confluences[candle_signal].append("Candle_Pattern")
             
+            # 3. Sinal de RSI
             rsi_signal = ti.check_rsi_condition(analysis_candles)
-            if rsi_signal: confluences[rsi_signal].append("RSI_Condition")
+            if rsi_signal:
+                confluences[rsi_signal].append("RSI_Condition")
             
-            await self.logger('DEBUG', f"[{base}-M{expiration_minutes}] Confluências encontradas: CALLS={confluences['call']}, PUTS={confluences['put']}")
-            
-            # --- 4. DECISÃO FINAL ---
+            # --- DECISÃO FINAL (LÓGICA DE REVERSÃO CORRIGIDA) ---
             final_direction = None
-            confirmation_threshold = 2
-            if len(confluences['call']) >= confirmation_threshold and trend in ['UPTREND', 'SIDEWAYS']:
+            confirmation_threshold = 2 # Exige S/R + 1 outra confluência
+
+            # Para uma COMPRA (CALL), precisamos de estar numa zona de SUPORTE e ter confirmação
+            if 'SR_Zone' in confluences['call'] and len(confluences['call']) >= confirmation_threshold:
                 final_direction = 'call'
-            elif len(confluences['put']) >= confirmation_threshold and trend in ['DOWNTREND', 'SIDEWAYS']:
+                
+            # Para uma VENDA (PUT), precisamos de estar numa zona de RESISTÊNCIA e ter confirmação
+            elif 'SR_Zone' in confluences['put'] and len(confluences['put']) >= confirmation_threshold:
                 final_direction = 'put'
-            
+
             if final_direction:
-                strategy_name = f"M{expiration_minutes}_" + ', '.join(confluences[final_direction])
-                await self.logger('SUCCESS', f"[{base}-M{expiration_minutes}] SINAL VÁLIDO! Direção: {final_direction.upper()}. Confluências: {strategy_name}. Tendência: {trend}")
+                strategy_name = f"M{expiration_minutes}_Reversal_" + ', '.join(confluences[final_direction])
+                await self.logger('SUCCESS', f"[{base}-M{expiration_minutes}] SINAL DE REVERSÃO VÁLIDO! Direção: {final_direction.upper()}. Confluências: {strategy_name}")
                 
                 last = analysis_candles[-1]
                 signal = TradeSignal(pair=base, direction=final_direction, strategy=strategy_name,
