@@ -75,12 +75,10 @@ class TradingBot:
         """
         now = datetime.utcnow()
         
-        # Lógica para M5: Executa a análise no minuto anterior ao fechamento da vela de 5min
         if now.minute % 5 == 4:
             await self.logger('INFO', f"Iniciando ciclo de análise para M5 (Expiração de 5 min)...")
             await self.run_analysis_for_timeframe(timeframe_seconds=300, expiration_minutes=5)
 
-        # Lógica para M1: Executa a cada minuto
         await self.logger('INFO', f"Iniciando ciclo de análise para M1 (Expiração de 1 min)...")
         await self.run_analysis_for_timeframe(timeframe_seconds=60, expiration_minutes=1)
 
@@ -148,13 +146,12 @@ class TradingBot:
             # --- FILTRO 1: VOLATILIDADE (ATR) ---
             atr_value = ti.calculate_atr(analysis_candles, period=14)
             # AJUSTADO: Filtro de volatilidade menos sensível
-            min_atr, max_atr = 0.00005, 0.05
+            min_atr, max_atr = 0.00005, 0.03
             if atr_value is None or not (min_atr < atr_value < max_atr):
                 await self.logger('DEBUG', f"[{base}-M{expiration_minutes}] Filtro de volatilidade: Fora dos limites (ATR={atr_value}). Ativo ignorado.")
                 return
 
             # --- FILTRO 2: TENDÊNCIA (EMA) ---
-            # AJUSTADO: Período da EMA alterado para 14 para alinhar com o RSI
             trend_ema = ti.calculate_ema(trend_candles, period=14)
             last_price = analysis_candles[-1].close
             trend = 'SIDEWAYS'
