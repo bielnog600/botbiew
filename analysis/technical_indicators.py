@@ -12,6 +12,7 @@ class Candle:
         self.close = data.get('close')
 
 def _convert_candles_to_dataframe(candles: List[Candle]) -> pd.DataFrame:
+    """Função auxiliar para converter a lista de candles em um DataFrame do Pandas."""
     if not candles:
         return pd.DataFrame()
     
@@ -26,6 +27,7 @@ def _convert_candles_to_dataframe(candles: List[Candle]) -> pd.DataFrame:
 # --- Funções dos Indicadores (com lógica profissional) ---
 
 def calculate_ema(candles: List[Candle], period: int) -> Optional[float]:
+    """Calcula a Média Móvel Exponencial (EMA) usando pandas_ta."""
     if len(candles) < period:
         return None
     df = _convert_candles_to_dataframe(candles)
@@ -35,6 +37,7 @@ def calculate_ema(candles: List[Candle], period: int) -> Optional[float]:
     return ema_series.iloc[-1]
 
 def calculate_atr(candles: List[Candle], period: int) -> Optional[float]:
+    """Calcula o Average True Range (ATR) usando pandas_ta."""
     if len(candles) < period:
         return None
     df = _convert_candles_to_dataframe(candles)
@@ -44,6 +47,7 @@ def calculate_atr(candles: List[Candle], period: int) -> Optional[float]:
     return atr_series.iloc[-1]
 
 def check_rsi_condition(candles: List[Candle], overbought=70, oversold=30, period=14) -> Optional[str]:
+    """Verifica se o RSI está em sobrecompra ou sobrevenda usando pandas_ta."""
     if len(candles) < period:
         return None
     df = _convert_candles_to_dataframe(candles)
@@ -61,26 +65,31 @@ def check_rsi_condition(candles: List[Candle], overbought=70, oversold=30, perio
 # MODIFICADO: Esta função agora usa apenas os reconhecedores de padrões
 # que são 100% Python, evitando a necessidade da TA-Lib.
 def check_candlestick_pattern(candles: List[Candle]) -> Optional[str]:
+    """Identifica padrões de vela de reversão sem depender da TA-Lib."""
     if len(candles) < 2:
         return None
 
     df = _convert_candles_to_dataframe(candles)
     
     # Analisa padrões individualmente. Estas funções não precisam da TA-Lib.
-    engulfing = ta.cdl_engulfing(df['open'], df['high'], df['low'], df['close'])
-    hammer = ta.cdl_hammer(df['open'], df['high'], df['low'], df['close'])
-    shooting_star = ta.cdl_shootingstar(df['open'], df['high'], df['low'], df['close'])
+    # O 'talib=False' força o uso da implementação interna em Python.
+    engulfing = ta.cdl_engulfing(df['open'], df['high'], df['low'], df['close'], talib=False)
+    hammer = ta.cdl_hammer(df['open'], df['high'], df['low'], df['close'], talib=False)
+    shooting_star = ta.cdl_shootingstar(df['open'], df['high'], df['low'], df['close'], talib=False)
 
     # Verifica o último candle
-    if (engulfing.iloc[-1] == 100) or (hammer.iloc[-1] == 100):
+    if (engulfing is not None and not engulfing.empty and engulfing.iloc[-1] == 100) or \
+       (hammer is not None and not hammer.empty and hammer.iloc[-1] == 100):
         return 'call'
     
-    if (engulfing.iloc[-1] == -100) or (shooting_star.iloc[-1] == -100):
+    if (engulfing is not None and not engulfing.empty and engulfing.iloc[-1] == -100) or \
+       (shooting_star is not None and not shooting_star.empty and shooting_star.iloc[-1] == -100):
         return 'put'
         
     return None
 
 def check_price_near_sr(last_candle: Candle, zones: Dict, tolerance=0.0005) -> Optional[str]:
+    """Verifica se o preço está próximo a uma zona de S/R."""
     if last_candle is None or last_candle.close is None:
         return None
         
