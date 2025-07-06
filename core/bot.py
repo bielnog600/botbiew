@@ -23,6 +23,9 @@ class TradingBot:
         self.consecutive_losses: Dict[str, int] = {}
         self.blacklisted_assets: set = set()
         self.last_reset_time: datetime = datetime.utcnow()
+        
+        # NOVO: Variável para controlar a execução do ciclo de análise
+        self.last_analysis_minute = -1
 
     async def logger(self, level: str, message: str):
         ts = datetime.utcnow().isoformat()
@@ -64,15 +67,22 @@ class TradingBot:
                 traceback.print_exc()
                 await asyncio.sleep(30)
 
+    # ATUALIZADO: Lógica de ciclo corrigida para executar apenas uma vez por minuto
     async def trading_cycle(self):
         now = datetime.utcnow()
-        if now.second > 5:
+        
+        # Só executa a análise se o minuto atual for diferente do último analisado
+        if now.minute == self.last_analysis_minute:
             return
 
-        if now.minute % 5 == 0:
-            asyncio.create_task(self.run_analysis_for_timeframe(300, 5))
-        else:
-            asyncio.create_task(self.run_analysis_for_timeframe(60, 1))
+        # A análise ocorre apenas no início de cada minuto
+        if now.second < 5:
+            self.last_analysis_minute = now.minute # Marca o minuto atual como analisado
+            
+            if now.minute % 5 == 0:
+                asyncio.create_task(self.run_analysis_for_timeframe(300, 5))
+            else:
+                asyncio.create_task(self.run_analysis_for_timeframe(60, 1))
 
     async def run_analysis_for_timeframe(self, timeframe_seconds: int, expiration_minutes: int):
         await self.logger('INFO', f"Iniciando ciclo de análise para M{expiration_minutes}...")
@@ -85,8 +95,7 @@ class TradingBot:
             pair = asset_name.split('-')[0]
             stats = self.asset_performance.get(pair, {'wins': 0, 'losses': 0})
             total_trades = stats['wins'] + stats['losses']
-            if total_trades == 0:
-                return 0.5
+            if total_trades == 0: return 0.5
             return stats['wins'] / total_trades
 
         prioritized_assets = sorted(available_assets, key=get_asset_score, reverse=True)
@@ -163,7 +172,6 @@ class TradingBot:
         if state['level'] == 0: return base
         return round(state['last_value'] * self.bot_config.get('martingale_factor', 2.3), 2)
 
-    # ATUALIZADO: Adicionada verificação de ordem
     async def _execute_and_wait(self, signal: TradeSignal, full_name: str, expiration_minutes: int):
         try:
             bal_before = await self.exnova.get_current_balance()
@@ -175,15 +183,14 @@ class TradingBot:
 
             order_id = await self.exnova.execute_trade(entry_value, full_name, signal.direction.lower(), expiration_minutes)
             
-            # VERIFICAÇÃO CRUCIAL: Confirma se a ordem foi realmente aberta.
             if not order_id:
-                await self.logger('ERROR', f"Falha ao executar a ordem para {full_name}. A corretora pode ter rejeitado a entrada. Nenhuma operação foi aberta.")
-                self.is_trade_active = False # Libera o bloqueio imediatamente
-                return # Aborta o resto da função
+                await self.logger('ERROR', f"Falha ao executar a ordem para {full_name}. A corretora pode ter rejeitado a entrada.")
+                self.is_trade_active = False
+                return
 
             await self.logger('INFO', f"Ordem {order_id} enviada com sucesso. Valor: {entry_value}. Exp: {expiration_minutes} min. Aguardando...")
             
-            await asyncio.sleep(expiration_minutes * 60 + 10)
+            await asyncio.sleep(expiration_minutes * 60 + 50)
 
             bal_after = await self.exnova.get_current_balance()
             
@@ -193,7 +200,6 @@ class TradingBot:
                 result = 'WIN' if delta > 0 else 'LOSS' if delta < 0 else 'DRAW'
             await self.logger('SUCCESS' if result == 'WIN' else 'ERROR', f"Resultado: {result}. ΔSaldo = {delta:.2f}")
 
-            # --- Lógica de Gestão de Performance ---
             pair = signal.pair
             self.asset_performance.setdefault(pair, {'wins': 0, 'losses': 0})
             self.consecutive_losses.setdefault(pair, 0)
