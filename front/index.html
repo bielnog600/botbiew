@@ -41,13 +41,14 @@
 <body>
     <div id="root"></div>
     <script type="text/babel">
-        const { useState, useEffect, useCallback, Fragment, useRef, useMemo } = React;
+        const { useState, useEffect, useCallback, Fragment, useRef } = React;
         const { createClient } = supabase;
 
         const SUPABASE_URL = 'https://ioduahwknfsktujthfyc.supabase.co';
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlvZHVhaHdrbmZza3R1anRoZnljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEzMDc0NDcsImV4cCI6MjA2Njg4MzQ0N30.96f8wZO6SvABKFMWjIiw1pSugAB4Isldj7yxLcLJRSE';
         const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+        // --- COMPONENTES (sem alterações) ---
         function LoginPage({ onLogin }) {
             const [email, setEmail] = useState('');
             const [password, setPassword] = useState('');
@@ -70,7 +71,7 @@
                         <div className="text-center">
                             <i className="fas fa-robot text-4xl text-green-400 mb-2"></i>
                             <h2 className="text-3xl font-bold text-white">Admin Login</h2>
-                             <p className="text-gray-400">MAROMBIEW BOT</p>
+                            <p className="text-gray-400">MAROMBIEW BOT</p>
                         </div>
                         <form className="space-y-6" onSubmit={handleLogin}>
                             <div className="space-y-4">
@@ -84,19 +85,16 @@
                 </div>
             );
         }
-
         function CandleStick({ open, high, low, close }) {
             if (!open || !high || !low || !close) return <div className="w-10 h-24 flex items-center justify-center text-xs text-gray-500">Sem dados</div>;
             const isBullish = close > open;
             const color = isBullish ? 'var(--accent-win)' : 'var(--accent-loss)';
             const range = high - low;
             if (range === 0) return null;
-
             const bodyTop = isBullish ? close : open;
             const bodyBottom = isBullish ? open : close;
             const bodyHeight = Math.max(((bodyTop - bodyBottom) / range) * 100, 1);
             const topWickHeight = ((high - bodyTop) / range) * 100;
-
             return (
                 <div className="w-10 h-24 flex flex-col items-center justify-center" title={`O:${open} H:${high} L:${low} C:${close}`}>
                     <div className="w-0.5 h-full bg-gray-600 relative">
@@ -106,10 +104,8 @@
                 </div>
             );
         }
-
         function Scoreboard({ scores }) {
             const assertividade = scores.wins + scores.losses > 0 ? (scores.wins / (scores.wins + scores.losses) * 100).toFixed(0) : 0;
-
             return (
                 <div className="glass-card p-4 rounded-xl mb-6">
                     <div className="grid grid-cols-4 divide-x divide-gray-700 text-center">
@@ -121,22 +117,17 @@
                 </div>
             );
         }
-
         function SignalCard({ signal }) {
             const ResultBadge = ({ result }) => {
-                if (!result) {
-                    return <div className="text-center"><p className="text-sm text-gray-400">RESULTADO</p><p className="text-2xl font-bold text-yellow-400 animate-pulse">...</p></div>;
-                }
+                if (!result) return <div className="text-center"><p className="text-sm text-gray-400">RESULTADO</p><p className="text-2xl font-bold text-yellow-400 animate-pulse">...</p></div>;
                 let color, icon, text;
                 switch (result.toUpperCase()) {
                     case 'WIN': color = 'text-green-400'; icon = 'fa-check-circle'; text = 'WIN'; break;
                     case 'LOSS': color = 'text-red-400'; icon = 'fa-times-circle'; text = 'LOSS'; break;
-                    case 'REJEITADO': color = 'text-yellow-400'; icon = 'fa-ban'; text = 'REJEITADO'; break;
                     default: color = 'text-gray-500'; icon = 'fa-question-circle'; text = result; break;
                 }
                 return <div className="text-center"><p className="text-sm text-gray-400">RESULTADO</p><p className={`text-2xl font-bold ${color}`}><i className={`fas ${icon} mr-2`}></i>{text}</p></div>;
             };
-
             return (
                 <div className="glass-card rounded-xl p-4 flex items-center space-x-4">
                     <div className="w-16 flex-shrink-0"><CandleStick open={signal.setup_candle_open} high={signal.setup_candle_high} low={signal.setup_candle_low} close={signal.setup_candle_close} /></div>
@@ -146,12 +137,11 @@
             );
         }
 
+        // --- VIEWS (com alterações) ---
         function HomeView() {
             const [signals, setSignals] = useState([]);
             const [scores, setScores] = useState({ wins: 0, losses: 0, gales: 0 });
             const [error, setError] = useState(null);
-            const [nextAnalysisTime, setNextAnalysisTime] = useState('');
-            const [timeOffset, setTimeOffset] = useState(0);
 
             const fetchAllData = useCallback(async () => {
                 const { data: signalsData, error: signalsError } = await supabaseClient
@@ -168,50 +158,15 @@
             }, []);
 
             useEffect(() => {
-                const syncTime = async () => {
-                    const { data, error } = await supabaseClient.rpc('get_server_timestamp');
-                    if (data) {
-                        const serverTime = new Date(data).getTime();
-                        const localTime = new Date().getTime();
-                        setTimeOffset(serverTime - localTime);
-                    } else {
-                        console.error("Falha ao sincronizar tempo com o servidor:", error);
-                    }
-                };
-                syncTime();
                 fetchAllData();
                 const intervalId = setInterval(fetchAllData, 5000);
-                
                 return () => clearInterval(intervalId);
             }, [fetchAllData]);
-
-            useEffect(() => {
-                const timer = setInterval(() => {
-                    const now = new Date(new Date().getTime() + timeOffset);
-                    const seconds = now.getSeconds();
-                    const targetSecond = 5;
-                    
-                    let wait;
-                    if (seconds < targetSecond) {
-                        wait = targetSecond - seconds;
-                    } else {
-                        wait = (60 - seconds) + targetSecond;
-                    }
-                    
-                    setNextAnalysisTime(wait > 0 ? `${wait}s` : 'Analisando...');
-                }, 1000);
-
-                return () => clearInterval(timer);
-            }, [timeOffset]);
 
             return (
                 <div className="space-y-6">
                     <h1 className="text-3xl font-bold text-white">Home</h1>
                     <Scoreboard scores={scores} />
-                    <div className="glass-card p-4 rounded-xl text-center">
-                        <h2 className="text-lg font-bold mb-2">Análise ao Vivo</h2>
-                        <p className="text-gray-400">Próxima análise de mercado em: <span className="font-bold text-white text-xl">{nextAnalysisTime}</span></p>
-                    </div>
                     <div className="space-y-4">
                         <h2 className="text-lg font-bold">Histórico de Sinais Recentes</h2>
                         {error && <p className="text-red-400">{error}</p>}
@@ -235,9 +190,7 @@
 
             useEffect(() => {
                 fetchConfig();
-                const intervalId = setInterval(fetchConfig, 5000);
-                return () => clearInterval(intervalId);
-            }, [fetchConfig]);
+            }, []);
 
             const handleUpdate = (key, value) => {
                 setConfig(prev => ({ ...prev, [key]: value }));
@@ -245,42 +198,14 @@
             
             const handleSave = async () => {
                 setSaving(true);
-                const { status, entry_value, account_type, use_martingale, martingale_levels, martingale_factor, operation_mode } = config;
+                // ATUALIZADO: Inclui os novos campos de stop_win e stop_loss
+                const { status, entry_value, account_type, use_martingale, martingale_levels, martingale_factor, stop_win, stop_loss } = config;
                 const { error } = await supabaseClient.from('bot_config').update({
-                    status, entry_value, account_type, use_martingale, martingale_levels, martingale_factor, operation_mode
+                    status, entry_value, account_type, use_martingale, martingale_levels, martingale_factor, stop_win, stop_loss
                 }).eq('id', 1);
 
                 if (error) alert("Falha ao guardar: " + error.message);
                 else alert("Configurações guardadas com sucesso!");
-                setSaving(false);
-            };
-
-            const handleResetAndRestart = async () => {
-                if (!confirm("Tem a certeza que quer ZERAR O PLACAR e REINICIAR O BOT? Esta ação não pode ser desfeita.")) {
-                    return;
-                }
-                setSaving(true);
-                try {
-                    const { error: rpcError } = await supabaseClient.rpc('reset_bot_data');
-                    if (rpcError) throw rpcError;
-                    
-                    const { error: updateError } = await supabaseClient.from('bot_config')
-                        .update({ restart_requested_at: new Date().toISOString() })
-                        .eq('id', 1);
-                    if (updateError) throw updateError;
-
-                    alert("Placar zerado e pedido de reinício enviado! O bot irá reiniciar em breve.");
-
-                    setTimeout(async () => {
-                        await supabaseClient.from('bot_config')
-                            .update({ restart_requested_at: null })
-                            .eq('id', 1);
-                        console.log("Sinalizador de reinício limpo.");
-                    }, 3000);
-
-                } catch (error) {
-                    alert("Falha ao reiniciar: " + error.message);
-                }
                 setSaving(false);
             };
 
@@ -300,46 +225,34 @@
                                     <button onClick={() => handleUpdate('status', config.status === 'RUNNING' ? 'PAUSED' : 'RUNNING')} className={`btn ${config.status === 'RUNNING' ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'} px-5 py-2 rounded-md text-white`}><i className={`fas ${config.status === 'RUNNING' ? 'fa-pause' : 'fa-play'} mr-2`}></i>{config.status === 'RUNNING' ? 'Pausar' : 'Iniciar'}</button>
                                 </div>
                             </div>
-                            
+                            {/* NOVO: Secção de Gerenciamento de Risco */}
                             <div className="glass-card p-6 rounded-xl">
-                                <h2 className="text-xl font-bold mb-4">Banca</h2>
-                                <div className="bg-gray-900 p-4 rounded-lg text-center">
-                                    <p className="text-sm text-gray-400">Saldo da Conta {config.account_type}</p>
-                                    <p className="text-4xl font-bold text-green-400 mt-2">
-                                        {config.current_balance ? `$${Number(config.current_balance).toFixed(2)}` : 'Aguardando...'}
-                                    </p>
+                                <h2 className="text-xl font-bold mb-4">Gerenciamento de Risco Diário</h2>
+                                <p className="text-sm text-gray-400 mb-4">O bot irá pausar automaticamente ao atingir uma das metas. Defina como 0 para desativar.</p>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <div>
+                                        <label className="block mb-1 text-gray-400">Stop Win (Nº de Vitórias)</label>
+                                        <input type="number" step="1" min="0" value={config.stop_win || 0} onChange={e => handleUpdate('stop_win', parseInt(e.target.value))} className="form-input w-full p-2 rounded-md" />
+                                    </div>
+                                    <div>
+                                        <label className="block mb-1 text-gray-400">Stop Loss (Nº de Derrotas)</label>
+                                        <input type="number" step="1" min="0" value={config.stop_loss || 0} onChange={e => handleUpdate('stop_loss', parseInt(e.target.value))} className="form-input w-full p-2 rounded-md" />
+                                    </div>
                                 </div>
                             </div>
                         </div>
-
-                        <div className="space-y-8">
-                             <div className="glass-card p-6 rounded-xl space-y-6">
-                                <h2 className="text-xl font-bold">Perfil de Risco</h2>
-                                <div className="flex rounded-lg border border-gray-700"><div className="w-1/2"><input type="radio" id="mode-conservative" name="op-mode" value="CONSERVADOR" checked={config.operation_mode === 'CONSERVADOR'} onChange={e => handleUpdate('operation_mode', e.target.value)} className="hidden" /><label htmlFor="mode-conservative" className="radio-label flex flex-col items-center justify-center p-4 rounded-l-lg cursor-pointer text-center"><i className="fas fa-shield-alt text-2xl mb-2"></i><span className="font-bold">Conservador</span></label></div><div className="w-1/2"><input type="radio" id="mode-aggressive" name="op-mode" value="AGRESSIVO" checked={config.operation_mode === 'AGRESSIVO'} onChange={e => handleUpdate('operation_mode', e.target.value)} className="hidden" /><label htmlFor="mode-aggressive" className="radio-label flex flex-col items-center justify-center p-4 rounded-r-lg cursor-pointer text-center"><i className="fas fa-rocket text-2xl mb-2"></i><span className="font-bold">Agressivo</span></label></div></div>
+                        <div className="glass-card p-6 rounded-xl space-y-6">
+                            <h2 className="text-xl font-bold">Parâmetros de Negociação</h2>
+                            <div className="grid grid-cols-1 gap-6">
+                                <div><label className="block mb-1 text-gray-400">Tipo de Conta</label><select value={config.account_type} onChange={e => handleUpdate('account_type', e.target.value)} className="form-input w-full p-2 rounded-md"><option value="PRACTICE">Prática</option><option value="REAL">Real</option></select></div>
+                                <div><label className="block mb-1 text-gray-400">Valor de Entrada Padrão ($)</label><input type="number" step="0.01" value={config.entry_value} onChange={e => handleUpdate('entry_value', parseFloat(e.target.value))} className="form-input w-full p-2 rounded-md" /></div>
                             </div>
-                        </div>
-                    </div>
-
-                    <div className="glass-card p-6 rounded-xl space-y-6">
-                        <h2 className="text-xl font-bold">Parâmetros de Negociação</h2>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div><label className="block mb-1 text-gray-400">Tipo de Conta</label><select value={config.account_type} onChange={e => handleUpdate('account_type', e.target.value)} className="form-input w-full p-2 rounded-md"><option value="PRACTICE">Prática</option><option value="REAL">Real</option></select></div>
-                            <div><label className="block mb-1 text-gray-400">Valor de Entrada Padrão ($)</label><input type="number" step="0.01" value={config.entry_value} onChange={e => handleUpdate('entry_value', parseFloat(e.target.value))} className="form-input w-full p-2 rounded-md" /></div>
                         </div>
                     </div>
 
                     <div className="glass-card p-6 rounded-xl space-y-6">
                         <div className="flex items-center justify-between"><h2 className="text-xl font-bold">Gestão de Martingale</h2><div className="flex items-center"><input className="hidden" type="checkbox" id="martingale-toggle" checked={config.use_martingale} onChange={() => handleUpdate('use_martingale', !config.use_martingale)} /><label htmlFor="martingale-toggle" className="flex items-center cursor-pointer"><div className="relative"><div className="toggle-bg block bg-gray-600 w-14 h-8 rounded-full"></div></div><div className="ml-3 text-white font-medium">{config.use_martingale ? 'Ativado' : 'Desativado'}</div></label></div></div>
                         {config.use_martingale && (<div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t border-gray-700"><div><label className="block mb-1 text-gray-400">Níveis de Martingale</label><input type="number" step="1" value={config.martingale_levels} onChange={e => handleUpdate('martingale_levels', parseInt(e.target.value))} className="form-input w-full p-2 rounded-md" /></div><div><label className="block mb-1 text-gray-400">Fator de Multiplicação</label><input type="number" step="0.1" value={config.martingale_factor} onChange={e => handleUpdate('martingale_factor', parseFloat(e.target.value))} className="form-input w-full p-2 rounded-md" /></div></div>)}
-                    </div>
-
-                    <div className="glass-card p-6 rounded-xl">
-                        <h2 className="text-xl font-bold mb-2 text-red-400">Zona de Perigo</h2>
-                        <p className="text-sm text-gray-400 mb-4">Esta ação irá apagar todo o histórico de sinais e reiniciar o processo do bot no servidor.</p>
-                        <button onClick={handleResetAndRestart} className="btn bg-red-600 hover:bg-red-700 w-full py-3 rounded-lg text-white" disabled={saving}>
-                            <i className="fas fa-sync-alt mr-2"></i>
-                            {saving ? 'A reiniciar...' : 'Reiniciar Bot & Zerar Placar'}
-                        </button>
                     </div>
 
                     <button onClick={handleSave} className="btn bg-green-600 hover:bg-green-700 w-full py-3 rounded-lg mt-8 text-lg text-white" disabled={saving}><i className="fas fa-save mr-2"></i>{saving ? 'A guardar...' : 'Guardar Todas as Alterações'}</button>
@@ -373,8 +286,8 @@
             }, [logs]);
 
             const LogLine = ({ log }) => {
-                const colors = { SUCCESS: 'text-accent-win', ERROR: 'text-accent-loss', INFO: 'text-accent-info', WARNING: 'text-accent-warning' };
-                const icons = { SUCCESS: 'fa-check-circle', ERROR: 'fa-times-circle', INFO: 'fa-info-circle', WARNING: 'fa-exclamation-triangle' };
+                const colors = { SUCCESS: 'text-accent-win', ERROR: 'text-accent-loss', INFO: 'text-accent-info', WARNING: 'text-accent-warning', CRITICAL: 'bg-red-800 text-white p-1 rounded' };
+                const icons = { SUCCESS: 'fa-check-circle', ERROR: 'fa-times-circle', INFO: 'fa-info-circle', WARNING: 'fa-exclamation-triangle', CRITICAL: 'fa-skull-crossbones' };
                 return (
                     <div className="flex items-start">
                         <span className="text-gray-500 mr-3">{new Date(log.created_at).toLocaleTimeString()}</span>
@@ -399,7 +312,7 @@
             const handleLogout = async () => { await supabaseClient.auth.signOut(); };
 
             const NavLink = ({ viewName, icon, text }) => (
-                <a href="#" onClick={() => setView(viewName)} className={`flex items-center justify-center md:justify-start space-x-3 px-4 py-3 rounded-lg text-sm font-semibold transition-colors ${view === viewName ? 'nav-link-active' : 'hover:bg-gray-700'}`}>
+                <a href="#" onClick={(e) => {e.preventDefault(); setView(viewName);}} className={`flex items-center justify-center md:justify-start space-x-3 px-4 py-3 rounded-lg text-sm font-semibold transition-colors ${view === viewName ? 'nav-link-active' : 'hover:bg-gray-700'}`}>
                     <i className={`fa-solid ${icon} text-lg w-6 text-center`}></i>
                     <span className="hidden md:inline">{text}</span>
                 </a>
@@ -415,8 +328,8 @@
             };
 
             return (
-                <div className="flex flex-col md:flex-row h-screen max-h-screen bg-gray-900 overflow-hidden">
-                    <aside className="desktop-nav w-64 bg-gray-800 text-white flex-col p-4 border-r border-gray-700">
+                <div className="flex flex-col md:flex-row h-screen max-h-screen bg-bg-dark overflow-hidden">
+                    <aside className="desktop-nav w-64 bg-bg-medium text-white flex-col p-4 border-r border-border-color">
                         <div className="h-16 flex items-center px-2 text-xl font-bold"><i className="fas fa-robot text-green-400 mr-3"></i> MAROMBIEW</div>
                         <nav className="flex-1 space-y-2">
                             <NavLink viewName="home" icon="fa-home" text="Home" />
@@ -426,10 +339,10 @@
                         <div className="p-2"><button onClick={handleLogout} className="w-full flex items-center space-x-3 px-4 py-3 rounded-lg text-sm font-semibold hover:bg-red-500/80"><i className="fa-solid fa-right-from-bracket text-lg w-6 text-center"></i><span>Sair</span></button></div>
                     </aside>
                     <main className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-8">{renderView()}</main>
-                    <nav className="mobile-nav w-full bg-gray-800 border-t border-gray-700 justify-around">
-                         <a href="#" onClick={() => setView('home')} className={`flex-1 flex flex-col items-center py-2 text-xs ${view === 'home' ? 'text-green-400' : 'text-gray-400'}`}><i className="fa-solid fa-home text-xl mb-1"></i>Home</a>
-                         <a href="#" onClick={() => setView('settings')} className={`flex-1 flex flex-col items-center py-2 text-xs ${view === 'settings' ? 'text-green-400' : 'text-gray-400'}`}><i className="fa-solid fa-sliders text-xl mb-1"></i>Config</a>
-                         <a href="#" onClick={() => setView('logs')} className={`flex-1 flex flex-col items-center py-2 text-xs ${view === 'logs' ? 'text-green-400' : 'text-gray-400'}`}><i className="fa-solid fa-terminal text-xl mb-1"></i>Logs</a>
+                    <nav className="mobile-nav w-full bg-bg-medium border-t border-border-color justify-around">
+                         <a href="#" onClick={(e) => {e.preventDefault(); setView('home');}} className={`flex-1 flex flex-col items-center py-2 text-xs ${view === 'home' ? 'text-green-400' : 'text-gray-400'}`}><i className="fa-solid fa-home text-xl mb-1"></i>Home</a>
+                         <a href="#" onClick={(e) => {e.preventDefault(); setView('settings');}} className={`flex-1 flex flex-col items-center py-2 text-xs ${view === 'settings' ? 'text-green-400' : 'text-gray-400'}`}><i className="fa-solid fa-sliders text-xl mb-1"></i>Config</a>
+                         <a href="#" onClick={(e) => {e.preventDefault(); setView('logs');}} className={`flex-1 flex flex-col items-center py-2 text-xs ${view === 'logs' ? 'text-green-400' : 'text-gray-400'}`}><i className="fa-solid fa-terminal text-xl mb-1"></i>Logs</a>
                          <a href="#" onClick={handleLogout} className="flex-1 flex flex-col items-center py-2 text-xs text-gray-400"><i className="fa-solid fa-right-from-bracket text-xl mb-1"></i>Sair</a>
                     </nav>
                 </div>
