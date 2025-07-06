@@ -48,7 +48,6 @@
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlvZHVhaHdrbmZza3R1anRoZnljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEzMDc0NDcsImV4cCI6MjA2Njg4MzQ0N30.96f8wZO6SvABKFMWjIiw1pSugAB4Isldj7yxLcLJRSE';
         const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-        // --- COMPONENTES (sem alterações) ---
         function LoginPage({ onLogin }) {
             const [email, setEmail] = useState('');
             const [password, setPassword] = useState('');
@@ -85,16 +84,19 @@
                 </div>
             );
         }
+
         function CandleStick({ open, high, low, close }) {
             if (!open || !high || !low || !close) return <div className="w-10 h-24 flex items-center justify-center text-xs text-gray-500">Sem dados</div>;
             const isBullish = close > open;
             const color = isBullish ? 'var(--accent-win)' : 'var(--accent-loss)';
             const range = high - low;
             if (range === 0) return null;
+
             const bodyTop = isBullish ? close : open;
             const bodyBottom = isBullish ? open : close;
             const bodyHeight = Math.max(((bodyTop - bodyBottom) / range) * 100, 1);
             const topWickHeight = ((high - bodyTop) / range) * 100;
+
             return (
                 <div className="w-10 h-24 flex flex-col items-center justify-center" title={`O:${open} H:${high} L:${low} C:${close}`}>
                     <div className="w-0.5 h-full bg-gray-600 relative">
@@ -104,8 +106,10 @@
                 </div>
             );
         }
+
         function Scoreboard({ scores }) {
             const assertividade = scores.wins + scores.losses > 0 ? (scores.wins / (scores.wins + scores.losses) * 100).toFixed(0) : 0;
+
             return (
                 <div className="glass-card p-4 rounded-xl mb-6">
                     <div className="grid grid-cols-4 divide-x divide-gray-700 text-center">
@@ -117,9 +121,12 @@
                 </div>
             );
         }
+
         function SignalCard({ signal }) {
             const ResultBadge = ({ result }) => {
-                if (!result) return <div className="text-center"><p className="text-sm text-gray-400">RESULTADO</p><p className="text-2xl font-bold text-yellow-400 animate-pulse">...</p></div>;
+                if (!result) {
+                    return <div className="text-center"><p className="text-sm text-gray-400">RESULTADO</p><p className="text-2xl font-bold text-yellow-400 animate-pulse">...</p></div>;
+                }
                 let color, icon, text;
                 switch (result.toUpperCase()) {
                     case 'WIN': color = 'text-green-400'; icon = 'fa-check-circle'; text = 'WIN'; break;
@@ -128,6 +135,7 @@
                 }
                 return <div className="text-center"><p className="text-sm text-gray-400">RESULTADO</p><p className={`text-2xl font-bold ${color}`}><i className={`fas ${icon} mr-2`}></i>{text}</p></div>;
             };
+
             return (
                 <div className="glass-card rounded-xl p-4 flex items-center space-x-4">
                     <div className="w-16 flex-shrink-0"><CandleStick open={signal.setup_candle_open} high={signal.setup_candle_high} low={signal.setup_candle_low} close={signal.setup_candle_close} /></div>
@@ -136,26 +144,67 @@
                 </div>
             );
         }
+        
+        function BalanceInfo({ balance, initialBalance }) {
+            const profit = balance - initialBalance;
+            const profitColor = profit >= 0 ? 'text-green-400' : 'text-red-400';
+            const profitIcon = profit >= 0 ? 'fa-arrow-trend-up' : 'fa-arrow-trend-down';
+            
+            return (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="glass-card p-4 rounded-xl text-center">
+                        <p className="text-sm text-gray-400">SALDO ATUAL</p>
+                        <p className="text-3xl font-bold text-white mt-1">${Number(balance).toFixed(2)}</p>
+                    </div>
+                    <div className="glass-card p-4 rounded-xl text-center">
+                        <p className="text-sm text-gray-400">LUCRO/PREJUÍZO DO DIA</p>
+                        <p className={`text-3xl font-bold mt-1 ${profitColor}`}>
+                            <i className={`fas ${profitIcon} mr-2`}></i>
+                            {profit >= 0 ? '+' : ''}${profit.toFixed(2)}
+                        </p>
+                    </div>
+                </div>
+            );
+        }
 
-        // --- VIEWS (com alterações) ---
         function HomeView() {
             const [signals, setSignals] = useState([]);
             const [scores, setScores] = useState({ wins: 0, losses: 0, gales: 0 });
+            const [balanceInfo, setBalanceInfo] = useState({ current: 0, initial: 0 });
             const [error, setError] = useState(null);
+            const [isResetting, setIsResetting] = useState(false);
 
             const fetchAllData = useCallback(async () => {
                 const { data: signalsData, error: signalsError } = await supabaseClient
                     .from('trade_signals').select('*').order('created_at', { ascending: false }).limit(20);
-                
                 if (signalsError) setError("Não foi possível carregar os sinais.");
                 else setSignals(signalsData);
 
                 const { count: wins } = await supabaseClient.from('trade_signals').select('id', { count: 'exact', head: true }).eq('result', 'WIN');
                 const { count: losses } = await supabaseClient.from('trade_signals').select('id', { count: 'exact', head: true }).eq('result', 'LOSS');
                 const { count: gales } = await supabaseClient.from('trade_signals').select('id', { count: 'exact', head: true }).eq('result', 'LOSS').gt('martingale_level', 0);
-
                 setScores({ wins, losses, gales });
+
+                const { data: configData } = await supabaseClient.from('bot_config').select('current_balance, daily_initial_balance').eq('id', 1).single();
+                if (configData) {
+                    setBalanceInfo({ current: configData.current_balance || 0, initial: configData.daily_initial_balance || 0 });
+                }
             }, []);
+            
+            const handleResetScores = async () => {
+                if (!confirm("Tem a certeza que quer ZERAR O PLACAR? Isto irá apagar o histórico de hoje e definir um novo saldo inicial.")) {
+                    return;
+                }
+                setIsResetting(true);
+                const { error } = await supabaseClient.rpc('reset_daily_stats');
+                if (error) {
+                    alert("Erro ao zerar o placar: " + error.message);
+                } else {
+                    alert("Placar zerado com sucesso! A página será atualizada.");
+                    await fetchAllData();
+                }
+                setIsResetting(false);
+            };
 
             useEffect(() => {
                 fetchAllData();
@@ -165,12 +214,19 @@
 
             return (
                 <div className="space-y-6">
-                    <h1 className="text-3xl font-bold text-white">Home</h1>
+                    <div className="flex justify-between items-center">
+                        <h1 className="text-3xl font-bold text-white">Home</h1>
+                        <button onClick={handleResetScores} className="btn bg-yellow-600 hover:bg-yellow-700 px-4 py-2 rounded-lg text-white text-sm" disabled={isResetting}>
+                            <i className="fas fa-undo mr-2"></i>
+                            {isResetting ? 'Aguarde...' : 'Zerar Placar do Dia'}
+                        </button>
+                    </div>
+                    <BalanceInfo balance={balanceInfo.current} initialBalance={balanceInfo.initial} />
                     <Scoreboard scores={scores} />
                     <div className="space-y-4">
                         <h2 className="text-lg font-bold">Histórico de Sinais Recentes</h2>
                         {error && <p className="text-red-400">{error}</p>}
-                        {signals.map(signal => <SignalCard key={signal.id} signal={signal} />)}
+                        {signals.length > 0 ? signals.map(signal => <SignalCard key={signal.id} signal={signal} />) : <p className="text-gray-500 text-center py-8">Nenhum sinal registado para hoje.</p>}
                     </div>
                 </div>
             );
@@ -184,13 +240,17 @@
             const fetchConfig = useCallback(async () => {
                 const { data, error } = await supabaseClient.from('bot_config').select('*').eq('id', 1).single();
                 if (data) setConfig(data);
-                else alert("Erro ao carregar configuração: " + error?.message);
-                if(loading) setLoading(false);
-            }, [loading]);
+                else {
+                    // Adiciona valores padrão se não existirem
+                    const defaultConfig = { stop_win: 0, stop_loss: 0 };
+                    setConfig(defaultConfig);
+                }
+                setLoading(false);
+            }, []);
 
             useEffect(() => {
                 fetchConfig();
-            }, []);
+            }, [fetchConfig]);
 
             const handleUpdate = (key, value) => {
                 setConfig(prev => ({ ...prev, [key]: value }));
@@ -198,7 +258,6 @@
             
             const handleSave = async () => {
                 setSaving(true);
-                // ATUALIZADO: Inclui os novos campos de stop_win e stop_loss
                 const { status, entry_value, account_type, use_martingale, martingale_levels, martingale_factor, stop_win, stop_loss } = config;
                 const { error } = await supabaseClient.from('bot_config').update({
                     status, entry_value, account_type, use_martingale, martingale_levels, martingale_factor, stop_win, stop_loss
@@ -225,7 +284,6 @@
                                     <button onClick={() => handleUpdate('status', config.status === 'RUNNING' ? 'PAUSED' : 'RUNNING')} className={`btn ${config.status === 'RUNNING' ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'} px-5 py-2 rounded-md text-white`}><i className={`fas ${config.status === 'RUNNING' ? 'fa-pause' : 'fa-play'} mr-2`}></i>{config.status === 'RUNNING' ? 'Pausar' : 'Iniciar'}</button>
                                 </div>
                             </div>
-                            {/* NOVO: Secção de Gerenciamento de Risco */}
                             <div className="glass-card p-6 rounded-xl">
                                 <h2 className="text-xl font-bold mb-4">Gerenciamento de Risco Diário</h2>
                                 <p className="text-sm text-gray-400 mb-4">O bot irá pausar automaticamente ao atingir uma das metas. Defina como 0 para desativar.</p>
@@ -244,15 +302,15 @@
                         <div className="glass-card p-6 rounded-xl space-y-6">
                             <h2 className="text-xl font-bold">Parâmetros de Negociação</h2>
                             <div className="grid grid-cols-1 gap-6">
-                                <div><label className="block mb-1 text-gray-400">Tipo de Conta</label><select value={config.account_type} onChange={e => handleUpdate('account_type', e.target.value)} className="form-input w-full p-2 rounded-md"><option value="PRACTICE">Prática</option><option value="REAL">Real</option></select></div>
-                                <div><label className="block mb-1 text-gray-400">Valor de Entrada Padrão ($)</label><input type="number" step="0.01" value={config.entry_value} onChange={e => handleUpdate('entry_value', parseFloat(e.target.value))} className="form-input w-full p-2 rounded-md" /></div>
+                                <div><label className="block mb-1 text-gray-400">Tipo de Conta</label><select value={config.account_type || 'PRACTICE'} onChange={e => handleUpdate('account_type', e.target.value)} className="form-input w-full p-2 rounded-md"><option value="PRACTICE">Prática</option><option value="REAL">Real</option></select></div>
+                                <div><label className="block mb-1 text-gray-400">Valor de Entrada Padrão ($)</label><input type="number" step="0.01" value={config.entry_value || 1} onChange={e => handleUpdate('entry_value', parseFloat(e.target.value))} className="form-input w-full p-2 rounded-md" /></div>
                             </div>
                         </div>
                     </div>
 
                     <div className="glass-card p-6 rounded-xl space-y-6">
-                        <div className="flex items-center justify-between"><h2 className="text-xl font-bold">Gestão de Martingale</h2><div className="flex items-center"><input className="hidden" type="checkbox" id="martingale-toggle" checked={config.use_martingale} onChange={() => handleUpdate('use_martingale', !config.use_martingale)} /><label htmlFor="martingale-toggle" className="flex items-center cursor-pointer"><div className="relative"><div className="toggle-bg block bg-gray-600 w-14 h-8 rounded-full"></div></div><div className="ml-3 text-white font-medium">{config.use_martingale ? 'Ativado' : 'Desativado'}</div></label></div></div>
-                        {config.use_martingale && (<div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t border-gray-700"><div><label className="block mb-1 text-gray-400">Níveis de Martingale</label><input type="number" step="1" value={config.martingale_levels} onChange={e => handleUpdate('martingale_levels', parseInt(e.target.value))} className="form-input w-full p-2 rounded-md" /></div><div><label className="block mb-1 text-gray-400">Fator de Multiplicação</label><input type="number" step="0.1" value={config.martingale_factor} onChange={e => handleUpdate('martingale_factor', parseFloat(e.target.value))} className="form-input w-full p-2 rounded-md" /></div></div>)}
+                        <div className="flex items-center justify-between"><h2 className="text-xl font-bold">Gestão de Martingale</h2><div className="flex items-center"><input className="hidden" type="checkbox" id="martingale-toggle" checked={config.use_martingale || false} onChange={() => handleUpdate('use_martingale', !config.use_martingale)} /><label htmlFor="martingale-toggle" className="flex items-center cursor-pointer"><div className="relative"><div className="toggle-bg block bg-gray-600 w-14 h-8 rounded-full"></div></div><div className="ml-3 text-white font-medium">{config.use_martingale ? 'Ativado' : 'Desativado'}</div></label></div></div>
+                        {config.use_martingale && (<div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t border-gray-700"><div><label className="block mb-1 text-gray-400">Níveis de Martingale</label><input type="number" step="1" value={config.martingale_levels || 2} onChange={e => handleUpdate('martingale_levels', parseInt(e.target.value))} className="form-input w-full p-2 rounded-md" /></div><div><label className="block mb-1 text-gray-400">Fator de Multiplicação</label><input type="number" step="0.1" value={config.martingale_factor || 2.3} onChange={e => handleUpdate('martingale_factor', parseFloat(e.target.value))} className="form-input w-full p-2 rounded-md" /></div></div>)}
                     </div>
 
                     <button onClick={handleSave} className="btn bg-green-600 hover:bg-green-700 w-full py-3 rounded-lg mt-8 text-lg text-white" disabled={saving}><i className="fas fa-save mr-2"></i>{saving ? 'A guardar...' : 'Guardar Todas as Alterações'}</button>
