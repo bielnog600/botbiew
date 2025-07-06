@@ -41,24 +41,22 @@ class TradingBot:
         self.daily_wins = 0
         self.daily_losses = 0
         
-        # Ao zerar, também redefine o saldo inicial do dia
         bal = await self.exnova.get_current_balance()
         if bal is not None:
             await self.supabase.update_config({'daily_initial_balance': bal, 'current_balance': bal})
         
         await self.logger('SUCCESS', "Estatísticas e saldo diário zerados. A iniciar novo ciclo.")
 
-    # ATUALIZADO: Lógica de inicialização do saldo
     async def run(self):
         await self.logger('INFO', 'Bot a iniciar com GESTÃO DE RISCO ADAPTATIVA...')
         await self.exnova.connect()
 
-        # Lógica de inicialização do saldo
         config = await self.supabase.get_bot_config()
         if config.get('daily_initial_balance', 0) == 0:
             await self.logger('INFO', "Primeira execução do dia. A definir o saldo inicial...")
             initial_balance = await self.exnova.get_current_balance()
             if initial_balance is not None:
+                # CORRIGIDO: Usa o novo método update_config
                 await self.supabase.update_config({
                     'daily_initial_balance': initial_balance,
                     'current_balance': initial_balance
@@ -254,11 +252,11 @@ class TradingBot:
 
             if stop_win > 0 and self.daily_wins >= stop_win:
                 await self.logger('SUCCESS', f"META DE STOP WIN ({stop_win}) ATINGIDA! A pausar o bot.")
-                await self.supabase.from_('bot_config').update({'status': 'PAUSED'}).eq('id', 1)
+                await self.supabase.update_config({'status': 'PAUSED'})
             
             if stop_loss > 0 and self.daily_losses >= stop_loss:
                 await self.logger('ERROR', f"META DE STOP LOSS ({stop_loss}) ATINGIDA! A pausar o bot.")
-                await self.supabase.from_('bot_config').update({'status': 'PAUSED'}).eq('id', 1)
+                await self.supabase.update_config({'status': 'PAUSED'})
 
             if self.bot_config.get('use_martingale', False):
                 if result == 'WIN': self.martingale_state[signal.pair] = {'level': 0, 'last_value': entry_value}
