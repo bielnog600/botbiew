@@ -56,7 +56,6 @@ class TradingBot:
             await self.logger('INFO', "Primeira execução do dia. A definir o saldo inicial...")
             initial_balance = await self.exnova.get_current_balance()
             if initial_balance is not None:
-                # CORRIGIDO: Usa o novo método update_config
                 await self.supabase.update_config({
                     'daily_initial_balance': initial_balance,
                     'current_balance': initial_balance
