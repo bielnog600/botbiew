@@ -125,7 +125,7 @@ class TradingBot:
 
             # ADICIONADO: O filtro de volatilidade que estava em falta.
             atr_value = ti.calculate_atr(analysis_candles, period=14)
-            min_atr, max_atr = 0.00005, 0.05000  # Configuração Equilibrada (pode ajustar)
+            min_atr, max_atr = 0.00008, 0.01500  # Configuração Equilibrada (pode ajustar)
             if atr_value is None or not (min_atr < atr_value < max_atr):
                 await self.logger('DEBUG', f"[{base}-M{expiration_minutes}] Filtro de volatilidade: Fora dos limites (ATR={atr_value}). Ativo ignorado.")
                 return
