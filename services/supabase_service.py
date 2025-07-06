@@ -9,18 +9,17 @@ class SupabaseService:
     async def get_bot_config(self) -> Dict:
         """Busca a configuração atual do bot."""
         try:
-            # CORRIGIDO: Removido 'await' e '.execute()'
+            # CORRIGIDO: A sintaxe da biblioteca mudou.
             response = self.client.from_('bot_config').select('*').eq('id', 1).single().execute()
             return response.data if response.data else {}
         except Exception as e:
             print(f"Erro ao buscar config: {e}")
             return {}
 
-    # NOVO: Função que estava em falta
     async def update_config(self, data: Dict) -> bool:
         """Atualiza campos específicos na configuração do bot."""
         try:
-            # CORRIGIDO: Removido 'await' e '.execute()'
+            # CORRIGIDO: A sintaxe da biblioteca mudou.
             self.client.from_('bot_config').update(data).eq('id', 1).execute()
             return True
         except Exception as e:
@@ -34,7 +33,7 @@ class SupabaseService:
     async def insert_log(self, level: str, message: str):
         """Insere uma nova linha de log."""
         try:
-            # CORRIGIDO: Removido 'await' e '.execute()'
+            # CORRIGIDO: A sintaxe da biblioteca mudou.
             self.client.from_('bot_logs').insert({'level': level, 'message': message}).execute()
         except Exception as e:
             print(f"Erro ao inserir log: {e}")
@@ -42,7 +41,7 @@ class SupabaseService:
     async def insert_trade_signal(self, signal: TradeSignal) -> Optional[int]:
         """Insere um novo sinal de trade e retorna o seu ID."""
         try:
-            # CORRIGIDO: Removido 'await' e '.execute()'
+            # CORRIGIDO: A sintaxe da biblioteca mudou.
             response = self.client.from_('trade_signals').insert(signal.dict()).execute()
             if response.data:
                 return response.data[0]['id']
@@ -54,11 +53,10 @@ class SupabaseService:
     async def update_trade_result(self, signal_id: int, result: str, martingale_level: int):
         """Atualiza o resultado de um sinal de trade."""
         try:
-            # CORRIGIDO: Removido 'await' e '.execute()'
+            # CORRIGIDO: A sintaxe da biblioteca mudou.
             self.client.from_('trade_signals').update({
                 'result': result,
                 'martingale_level': martingale_level
             }).eq('id', signal_id).execute()
         except Exception as e:
             print(f"Erro ao atualizar resultado do sinal: {e}")
-
