@@ -20,17 +20,36 @@ class TradingBot:
         self.martingale_state: Dict[str, Dict] = {}
         self.is_trade_active = False
 
+        # NOVO: Dicionários para gestão de performance e risco
+        self.asset_performance: Dict[str, Dict[str, int]] = {} # e.g. {'EURUSD': {'wins': 2, 'losses': 1}}
+        self.consecutive_losses: Dict[str, int] = {} # e.g. {'EURUSD': 2}
+        self.blacklisted_assets: set = set()
+        self.last_reset_time: datetime = datetime.utcnow()
+
     async def logger(self, level: str, message: str):
         ts = datetime.utcnow().isoformat()
         print(f"[{ts}] [{level.upper()}] {message}", flush=True)
         await self.supabase.insert_log(level, message)
 
+    # NOVO: Método para zerar as estatísticas a cada hora
+    async def _hourly_cycle_reset(self):
+        await self.logger('INFO', "CICLO HORÁRIO CONCLUÍDO. A zerar estatísticas e a recatalogar todos os ativos.")
+        self.asset_performance.clear()
+        self.consecutive_losses.clear()
+        self.blacklisted_assets.clear()
+        self.last_reset_time = datetime.utcnow()
+        await self.logger('SUCCESS', "Estatísticas zeradas. A iniciar novo ciclo de 1 hora.")
+
     async def run(self):
-        await self.logger('INFO', 'Bot a iniciar com LÓGICA DE EXECUÇÃO PROFISSIONAL...')
+        await self.logger('INFO', 'Bot a iniciar com GESTÃO DE RISCO ADAPTATIVA...')
         await self.exnova.connect()
         
         while self.is_running:
             try:
+                # NOVO: Verificação do ciclo horário
+                if (datetime.utcnow() - self.last_reset_time).total_seconds() >= 3600:
+                    await self._hourly_cycle_reset()
+
                 self.bot_config = await self.supabase.get_bot_config()
                 status = self.bot_config.get('status', 'PAUSED')
 
@@ -42,7 +61,7 @@ class TradingBot:
                     elif self.is_trade_active:
                          await self.logger('INFO', "Operação em andamento. Aguardando resultado...")
                 
-                await asyncio.sleep(1) # Verifica o status a cada segundo
+                await asyncio.sleep(1)
 
             except Exception as e:
                 await self.logger('ERROR', f"Loop principal falhou: {e}")
@@ -59,12 +78,29 @@ class TradingBot:
         else:
             asyncio.create_task(self.run_analysis_for_timeframe(60, 1))
 
+    # ATUALIZADO: Agora filtra e prioriza os ativos
     async def run_analysis_for_timeframe(self, timeframe_seconds: int, expiration_minutes: int):
         await self.logger('INFO', f"Iniciando ciclo de análise para M{expiration_minutes}...")
         await self.exnova.change_balance(self.bot_config.get('account_type', 'PRACTICE'))
         assets = await self.exnova.get_open_assets()
         
-        tasks = [self._analyze_asset(asset, timeframe_seconds, expiration_minutes) for asset in assets[:settings.MAX_ASSETS_TO_MONITOR]]
+        # 1. Filtra os ativos na lista negra
+        available_assets = [asset for asset in assets if asset.split('-')[0] not in self.blacklisted_assets]
+
+        # 2. Ordena os ativos com base na assertividade (melhores primeiro)
+        def get_asset_score(asset_name):
+            pair = asset_name.split('-')[0]
+            stats = self.asset_performance.get(pair)
+            if not stats or (stats['wins'] + stats['losses'] == 0):
+                return 0.5 # Pontuação neutra para novos ativos
+            return stats['wins'] / (stats['wins'] + stats['losses'])
+
+        prioritized_assets = sorted(available_assets, key=get_asset_score, reverse=True)
+        
+        asset_names = [a.split('-')[0] for a in prioritized_assets[:5]]
+        await self.logger('INFO', f"[M{expiration_minutes}] Ativos Priorizados: {asset_names}")
+        
+        tasks = [self._analyze_asset(asset, timeframe_seconds, expiration_minutes) for asset in prioritized_assets[:settings.MAX_ASSETS_TO_MONITOR]]
         await asyncio.gather(*tasks)
 
     async def _analyze_asset(self, full_name: str, timeframe_seconds: int, expiration_minutes: int):
@@ -89,13 +125,6 @@ class TradingBot:
             else:
                 return
 
-            # ADICIONADO: O filtro de volatilidade que estava em falta.
-            atr_value = ti.calculate_atr(analysis_candles, period=14)
-            min_atr, max_atr = 0.00001, 0.15000  # Configuração Equilibrada (pode ajustar)
-            if atr_value is None or not (min_atr < atr_value < max_atr):
-                await self.logger('DEBUG', f"[{base}-M{expiration_minutes}] Filtro de volatilidade: Fora dos limites (ATR={atr_value}). Ativo ignorado.")
-                return
-
             signal_candle = analysis_candles[-2]
             
             confluences = {'call': [], 'put': []}
@@ -114,7 +143,6 @@ class TradingBot:
             
             if final_direction:
                 if not ti.validate_reversal_candle(signal_candle, final_direction):
-                    await self.logger('DEBUG', f"Sinal em {base} rejeitado devido a pavio/corpo fraco.")
                     return
 
                 if self.is_trade_active: return
@@ -141,6 +169,7 @@ class TradingBot:
         if state['level'] == 0: return base
         return round(state['last_value'] * self.bot_config.get('martingale_factor', 2.3), 2)
 
+    # ATUALIZADO: Agora gere o estado de performance dos ativos
     async def _execute_and_wait(self, signal: TradeSignal, full_name: str, expiration_minutes: int):
         try:
             bal_before = await self.exnova.get_current_balance()
@@ -153,7 +182,7 @@ class TradingBot:
             order_id = await self.exnova.execute_trade(entry_value, full_name, signal.direction.lower(), expiration_minutes)
             await self.logger('INFO', f"Ordem {order_id} enviada. Valor: {entry_value}. Exp: {expiration_minutes} min. Aguardando...")
             
-            await asyncio.sleep(expiration_minutes * 60 + 45)
+            await asyncio.sleep(expiration_minutes * 60 + 10)
 
             bal_after = await self.exnova.get_current_balance()
             
@@ -162,6 +191,27 @@ class TradingBot:
                 delta = bal_after - bal_before
                 result = 'WIN' if delta > 0 else 'LOSS' if delta < 0 else 'DRAW'
             await self.logger('SUCCESS' if result == 'WIN' else 'ERROR', f"Resultado: {result}. ΔSaldo = {delta:.2f}")
+
+            # --- Lógica de Gestão de Performance ---
+            pair = signal.pair
+            self.asset_performance.setdefault(pair, {'wins': 0, 'losses': 0})
+            self.consecutive_losses.setdefault(pair, 0)
+
+            if result == 'WIN':
+                self.asset_performance[pair]['wins'] += 1
+                self.consecutive_losses[pair] = 0
+                if pair in self.blacklisted_assets:
+                    self.blacklisted_assets.remove(pair)
+                    await self.logger('INFO', f"O par {pair} foi redimido e REMOVIDO da lista negra.")
+            
+            elif result == 'LOSS':
+                self.asset_performance[pair]['losses'] += 1
+                self.consecutive_losses[pair] += 1
+                await self.logger('WARNING', f"O par {pair} está com {self.consecutive_losses[pair]} derrota(s) consecutiva(s).")
+                
+                if self.consecutive_losses[pair] >= 2:
+                    self.blacklisted_assets.add(pair)
+                    await self.logger('ERROR', f"O par {pair} atingiu 2 derrotas consecutivas e foi COLOCADO na lista negra.")
 
             mg_lv = self.martingale_state.get(signal.pair, {}).get('level', 0)
             await self.supabase.update_trade_result(sid, result, mg_lv)
