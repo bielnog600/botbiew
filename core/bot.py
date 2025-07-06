@@ -24,6 +24,10 @@ class TradingBot:
         self.blacklisted_assets: set = set()
         self.last_reset_time: datetime = datetime.utcnow()
         self.last_analysis_minute = -1
+        
+        # NOVO: Contadores para Stop Win/Loss diário
+        self.daily_wins = 0
+        self.daily_losses = 0
 
     async def logger(self, level: str, message: str):
         ts = datetime.utcnow().isoformat()
@@ -36,7 +40,10 @@ class TradingBot:
         self.consecutive_losses.clear()
         self.blacklisted_assets.clear()
         self.last_reset_time = datetime.utcnow()
-        await self.logger('SUCCESS', "Estatísticas zeradas. A iniciar novo ciclo de 1 hora.")
+        # NOVO: Zera também os contadores diários
+        self.daily_wins = 0
+        self.daily_losses = 0
+        await self.logger('SUCCESS', "Estatísticas zeradas. A iniciar novo ciclo.")
 
     async def run(self):
         await self.logger('INFO', 'Bot a iniciar com GESTÃO DE RISCO ADAPTATIVA...')
@@ -79,6 +86,7 @@ class TradingBot:
                 asyncio.create_task(self.run_analysis_for_timeframe(60, 1))
 
     async def run_analysis_for_timeframe(self, timeframe_seconds: int, expiration_minutes: int):
+        # ... (sem alterações neste método)
         await self.logger('INFO', f"Iniciando ciclo de análise para M{expiration_minutes}...")
         await self.exnova.change_balance(self.bot_config.get('account_type', 'PRACTICE'))
         assets = await self.exnova.get_open_assets()
@@ -101,6 +109,7 @@ class TradingBot:
         await asyncio.gather(*tasks)
 
     async def _analyze_asset(self, full_name: str, timeframe_seconds: int, expiration_minutes: int):
+        # ... (sem alterações neste método)
         try:
             if self.is_trade_active: return
             base = full_name.split('-')[0]
@@ -165,33 +174,29 @@ class TradingBot:
             traceback.print_exc()
 
     def _get_entry_value(self, asset: str) -> float:
+        # ... (sem alterações neste método)
         base = self.bot_config.get('entry_value', settings.ENTRY_VALUE)
         if not self.bot_config.get('use_martingale', False): return base
         state = self.martingale_state.get(asset, {'level': 0, 'last_value': base})
         if state['level'] == 0: return base
         return round(state['last_value'] * self.bot_config.get('martingale_factor', 2.3), 2)
 
-    # ATUALIZADO: Lógica de execução corrigida para evitar "operações fantasma"
     async def _execute_and_wait(self, signal: TradeSignal, full_name: str, expiration_minutes: int):
         try:
             bal_before = await self.exnova.get_current_balance()
             entry_value = self._get_entry_value(signal.pair)
 
-            # 1. TENTA EXECUTAR A ORDEM NA CORRETORA PRIMEIRO
             order_id = await self.exnova.execute_trade(entry_value, full_name, signal.direction.lower(), expiration_minutes)
             
-            # 2. VERIFICA SE A ORDEM FOI REALMENTE ABERTA
             if not order_id:
                 await self.logger('ERROR', f"Falha ao executar a ordem para {full_name}. A corretora pode ter rejeitado a entrada.")
-                self.is_trade_active = False # Libera o bloqueio imediatamente
-                return # Aborta o resto da função
+                self.is_trade_active = False
+                return
 
-            # 3. SÓ SE A ORDEM FOI ABERTA, REGISTA NO SUPABASE
             await self.logger('INFO', f"Ordem {order_id} enviada com sucesso. Valor: {entry_value}. Exp: {expiration_minutes} min. Aguardando...")
             sid = await self.supabase.insert_trade_signal(signal)
             if not sid:
                 await self.logger('CRITICAL', f"ORDEM {order_id} ABERTA NA CORRETORA MAS FALHOU AO REGISTAR NO SUPABASE!")
-                # A operação continua, mas não poderemos atualizar o resultado no painel
             
             await asyncio.sleep(expiration_minutes * 60 + 45)
 
@@ -203,19 +208,19 @@ class TradingBot:
                 result = 'WIN' if delta > 0 else 'LOSS' if delta < 0 else 'DRAW'
             await self.logger('SUCCESS' if result == 'WIN' else 'ERROR', f"Resultado: {result}. ΔSaldo = {delta:.2f}")
 
-            # Atualiza o resultado no Supabase se tivermos um ID
             if sid:
                 mg_lv = self.martingale_state.get(signal.pair, {}).get('level', 0)
                 await self.supabase.update_trade_result(sid, result, mg_lv)
             
             await self.supabase.update_current_balance(bal_after or 0.0)
 
-            # --- Lógica de Gestão de Performance ---
+            # --- Lógica de Gestão de Performance e Risco ---
             pair = signal.pair
             self.asset_performance.setdefault(pair, {'wins': 0, 'losses': 0})
             self.consecutive_losses.setdefault(pair, 0)
 
             if result == 'WIN':
+                self.daily_wins += 1 # NOVO
                 self.asset_performance[pair]['wins'] += 1
                 self.consecutive_losses[pair] = 0
                 if pair in self.blacklisted_assets:
@@ -223,6 +228,7 @@ class TradingBot:
                     await self.logger('INFO', f"O par {pair} foi redimido e REMOVIDO da lista negra.")
             
             elif result == 'LOSS':
+                self.daily_losses += 1 # NOVO
                 self.asset_performance[pair]['losses'] += 1
                 self.consecutive_losses[pair] += 1
                 await self.logger('WARNING', f"O par {pair} está com {self.consecutive_losses[pair]} derrota(s) consecutiva(s).")
@@ -230,6 +236,18 @@ class TradingBot:
                 if self.consecutive_losses[pair] >= 2:
                     self.blacklisted_assets.add(pair)
                     await self.logger('ERROR', f"O par {pair} atingiu 2 derrotas consecutivas e foi COLOCADO na lista negra.")
+
+            # NOVO: Verifica as metas de Stop Win e Stop Loss
+            stop_win = self.bot_config.get('stop_win', 0)
+            stop_loss = self.bot_config.get('stop_loss', 0)
+
+            if stop_win > 0 and self.daily_wins >= stop_win:
+                await self.logger('SUCCESS', f"META DE STOP WIN ({stop_win}) ATINGIDA! A pausar o bot.")
+                await self.supabase.from_('bot_config').update({'status': 'PAUSED'}).eq('id', 1)
+            
+            if stop_loss > 0 and self.daily_losses >= stop_loss:
+                await self.logger('ERROR', f"META DE STOP LOSS ({stop_loss}) ATINGIDA! A pausar o bot.")
+                await self.supabase.from_('bot_config').update({'status': 'PAUSED'}).eq('id', 1)
 
             if self.bot_config.get('use_martingale', False):
                 if result == 'WIN': self.martingale_state[signal.pair] = {'level': 0, 'last_value': entry_value}
