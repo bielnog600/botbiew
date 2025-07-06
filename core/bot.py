@@ -24,8 +24,6 @@ class TradingBot:
         self.blacklisted_assets: set = set()
         self.last_reset_time: datetime = datetime.utcnow()
         self.last_analysis_minute = -1
-        
-        # NOVO: Contadores para Stop Win/Loss diário
         self.daily_wins = 0
         self.daily_losses = 0
 
@@ -40,15 +38,33 @@ class TradingBot:
         self.consecutive_losses.clear()
         self.blacklisted_assets.clear()
         self.last_reset_time = datetime.utcnow()
-        # NOVO: Zera também os contadores diários
         self.daily_wins = 0
         self.daily_losses = 0
-        await self.logger('SUCCESS', "Estatísticas zeradas. A iniciar novo ciclo.")
+        
+        # Ao zerar, também redefine o saldo inicial do dia
+        bal = await self.exnova.get_current_balance()
+        if bal is not None:
+            await self.supabase.update_config({'daily_initial_balance': bal, 'current_balance': bal})
+        
+        await self.logger('SUCCESS', "Estatísticas e saldo diário zerados. A iniciar novo ciclo.")
 
+    # ATUALIZADO: Lógica de inicialização do saldo
     async def run(self):
         await self.logger('INFO', 'Bot a iniciar com GESTÃO DE RISCO ADAPTATIVA...')
         await self.exnova.connect()
-        
+
+        # Lógica de inicialização do saldo
+        config = await self.supabase.get_bot_config()
+        if config.get('daily_initial_balance', 0) == 0:
+            await self.logger('INFO', "Primeira execução do dia. A definir o saldo inicial...")
+            initial_balance = await self.exnova.get_current_balance()
+            if initial_balance is not None:
+                await self.supabase.update_config({
+                    'daily_initial_balance': initial_balance,
+                    'current_balance': initial_balance
+                })
+                await self.logger('SUCCESS', f"Saldo inicial do dia definido para: ${initial_balance:.2f}")
+
         while self.is_running:
             try:
                 if (datetime.utcnow() - self.last_reset_time).total_seconds() >= 3600:
@@ -86,7 +102,6 @@ class TradingBot:
                 asyncio.create_task(self.run_analysis_for_timeframe(60, 1))
 
     async def run_analysis_for_timeframe(self, timeframe_seconds: int, expiration_minutes: int):
-        # ... (sem alterações neste método)
         await self.logger('INFO', f"Iniciando ciclo de análise para M{expiration_minutes}...")
         await self.exnova.change_balance(self.bot_config.get('account_type', 'PRACTICE'))
         assets = await self.exnova.get_open_assets()
@@ -109,7 +124,6 @@ class TradingBot:
         await asyncio.gather(*tasks)
 
     async def _analyze_asset(self, full_name: str, timeframe_seconds: int, expiration_minutes: int):
-        # ... (sem alterações neste método)
         try:
             if self.is_trade_active: return
             base = full_name.split('-')[0]
@@ -174,7 +188,6 @@ class TradingBot:
             traceback.print_exc()
 
     def _get_entry_value(self, asset: str) -> float:
-        # ... (sem alterações neste método)
         base = self.bot_config.get('entry_value', settings.ENTRY_VALUE)
         if not self.bot_config.get('use_martingale', False): return base
         state = self.martingale_state.get(asset, {'level': 0, 'last_value': base})
@@ -214,13 +227,12 @@ class TradingBot:
             
             await self.supabase.update_current_balance(bal_after or 0.0)
 
-            # --- Lógica de Gestão de Performance e Risco ---
             pair = signal.pair
             self.asset_performance.setdefault(pair, {'wins': 0, 'losses': 0})
             self.consecutive_losses.setdefault(pair, 0)
 
             if result == 'WIN':
-                self.daily_wins += 1 # NOVO
+                self.daily_wins += 1
                 self.asset_performance[pair]['wins'] += 1
                 self.consecutive_losses[pair] = 0
                 if pair in self.blacklisted_assets:
@@ -228,7 +240,7 @@ class TradingBot:
                     await self.logger('INFO', f"O par {pair} foi redimido e REMOVIDO da lista negra.")
             
             elif result == 'LOSS':
-                self.daily_losses += 1 # NOVO
+                self.daily_losses += 1
                 self.asset_performance[pair]['losses'] += 1
                 self.consecutive_losses[pair] += 1
                 await self.logger('WARNING', f"O par {pair} está com {self.consecutive_losses[pair]} derrota(s) consecutiva(s).")
@@ -237,7 +249,6 @@ class TradingBot:
                     self.blacklisted_assets.add(pair)
                     await self.logger('ERROR', f"O par {pair} atingiu 2 derrotas consecutivas e foi COLOCADO na lista negra.")
 
-            # NOVO: Verifica as metas de Stop Win e Stop Loss
             stop_win = self.bot_config.get('stop_win', 0)
             stop_loss = self.bot_config.get('stop_loss', 0)
 
