@@ -23,8 +23,6 @@ class TradingBot:
         self.consecutive_losses: Dict[str, int] = {}
         self.blacklisted_assets: set = set()
         self.last_reset_time: datetime = datetime.utcnow()
-        
-        # NOVO: Variável para controlar a execução do ciclo de análise
         self.last_analysis_minute = -1
 
     async def logger(self, level: str, message: str):
@@ -67,17 +65,14 @@ class TradingBot:
                 traceback.print_exc()
                 await asyncio.sleep(30)
 
-    # ATUALIZADO: Lógica de ciclo corrigida para executar apenas uma vez por minuto
     async def trading_cycle(self):
         now = datetime.utcnow()
         
-        # Só executa a análise se o minuto atual for diferente do último analisado
         if now.minute == self.last_analysis_minute:
             return
 
-        # A análise ocorre apenas no início de cada minuto
         if now.second < 5:
-            self.last_analysis_minute = now.minute # Marca o minuto atual como analisado
+            self.last_analysis_minute = now.minute
             
             if now.minute % 5 == 0:
                 asyncio.create_task(self.run_analysis_for_timeframe(300, 5))
@@ -126,6 +121,13 @@ class TradingBot:
                 if not analysis_candles or not sr_candles: return
                 res, sup = get_h1_sr_zones(sr_candles)
             else:
+                return
+
+            # ADICIONADO: O filtro de volatilidade que estava em falta.
+            atr_value = ti.calculate_atr(analysis_candles, period=14)
+            min_atr, max_atr = 0.00005, 0.05000  # Configuração Equilibrada (pode ajustar)
+            if atr_value is None or not (min_atr < atr_value < max_atr):
+                await self.logger('DEBUG', f"[{base}-M{expiration_minutes}] Filtro de volatilidade: Fora dos limites (ATR={atr_value}). Ativo ignorado.")
                 return
 
             signal_candle = analysis_candles[-2]
@@ -190,7 +192,7 @@ class TradingBot:
 
             await self.logger('INFO', f"Ordem {order_id} enviada com sucesso. Valor: {entry_value}. Exp: {expiration_minutes} min. Aguardando...")
             
-            await asyncio.sleep(expiration_minutes * 60 + 50)
+            await asyncio.sleep(expiration_minutes * 60 + 40)
 
             bal_after = await self.exnova.get_current_balance()
             
