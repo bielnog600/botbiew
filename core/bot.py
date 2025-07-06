@@ -19,10 +19,8 @@ class TradingBot:
         self.bot_config: Dict = {}
         self.martingale_state: Dict[str, Dict] = {}
         self.is_trade_active = False
-
-        # NOVO: Dicionários para gestão de performance e risco
-        self.asset_performance: Dict[str, Dict[str, int]] = {} # e.g. {'EURUSD': {'wins': 2, 'losses': 1}}
-        self.consecutive_losses: Dict[str, int] = {} # e.g. {'EURUSD': 2}
+        self.asset_performance: Dict[str, Dict[str, int]] = {}
+        self.consecutive_losses: Dict[str, int] = {}
         self.blacklisted_assets: set = set()
         self.last_reset_time: datetime = datetime.utcnow()
 
@@ -31,7 +29,6 @@ class TradingBot:
         print(f"[{ts}] [{level.upper()}] {message}", flush=True)
         await self.supabase.insert_log(level, message)
 
-    # NOVO: Método para zerar as estatísticas a cada hora
     async def _hourly_cycle_reset(self):
         await self.logger('INFO', "CICLO HORÁRIO CONCLUÍDO. A zerar estatísticas e a recatalogar todos os ativos.")
         self.asset_performance.clear()
@@ -46,7 +43,6 @@ class TradingBot:
         
         while self.is_running:
             try:
-                # NOVO: Verificação do ciclo horário
                 if (datetime.utcnow() - self.last_reset_time).total_seconds() >= 3600:
                     await self._hourly_cycle_reset()
 
@@ -78,22 +74,20 @@ class TradingBot:
         else:
             asyncio.create_task(self.run_analysis_for_timeframe(60, 1))
 
-    # ATUALIZADO: Agora filtra e prioriza os ativos
     async def run_analysis_for_timeframe(self, timeframe_seconds: int, expiration_minutes: int):
         await self.logger('INFO', f"Iniciando ciclo de análise para M{expiration_minutes}...")
         await self.exnova.change_balance(self.bot_config.get('account_type', 'PRACTICE'))
         assets = await self.exnova.get_open_assets()
         
-        # 1. Filtra os ativos na lista negra
         available_assets = [asset for asset in assets if asset.split('-')[0] not in self.blacklisted_assets]
 
-        # 2. Ordena os ativos com base na assertividade (melhores primeiro)
         def get_asset_score(asset_name):
             pair = asset_name.split('-')[0]
-            stats = self.asset_performance.get(pair)
-            if not stats or (stats['wins'] + stats['losses'] == 0):
-                return 0.5 # Pontuação neutra para novos ativos
-            return stats['wins'] / (stats['wins'] + stats['losses'])
+            stats = self.asset_performance.get(pair, {'wins': 0, 'losses': 0})
+            total_trades = stats['wins'] + stats['losses']
+            if total_trades == 0:
+                return 0.5
+            return stats['wins'] / total_trades
 
         prioritized_assets = sorted(available_assets, key=get_asset_score, reverse=True)
         
@@ -169,7 +163,7 @@ class TradingBot:
         if state['level'] == 0: return base
         return round(state['last_value'] * self.bot_config.get('martingale_factor', 2.3), 2)
 
-    # ATUALIZADO: Agora gere o estado de performance dos ativos
+    # ATUALIZADO: Adicionada verificação de ordem
     async def _execute_and_wait(self, signal: TradeSignal, full_name: str, expiration_minutes: int):
         try:
             bal_before = await self.exnova.get_current_balance()
@@ -180,9 +174,16 @@ class TradingBot:
                 return
 
             order_id = await self.exnova.execute_trade(entry_value, full_name, signal.direction.lower(), expiration_minutes)
-            await self.logger('INFO', f"Ordem {order_id} enviada. Valor: {entry_value}. Exp: {expiration_minutes} min. Aguardando...")
             
-            await asyncio.sleep(expiration_minutes * 60 + 45)
+            # VERIFICAÇÃO CRUCIAL: Confirma se a ordem foi realmente aberta.
+            if not order_id:
+                await self.logger('ERROR', f"Falha ao executar a ordem para {full_name}. A corretora pode ter rejeitado a entrada. Nenhuma operação foi aberta.")
+                self.is_trade_active = False # Libera o bloqueio imediatamente
+                return # Aborta o resto da função
+
+            await self.logger('INFO', f"Ordem {order_id} enviada com sucesso. Valor: {entry_value}. Exp: {expiration_minutes} min. Aguardando...")
+            
+            await asyncio.sleep(expiration_minutes * 60 + 10)
 
             bal_after = await self.exnova.get_current_balance()
             
