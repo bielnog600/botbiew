@@ -18,6 +18,7 @@
             --accent-primary-hover: #2ea043; --accent-red: #da3633; --accent-loss: #f87171;
             --accent-win: #4ade80; --accent-info: #58a6ff; --accent-warning: #e3b341;
         }
+        html { scroll-behavior: smooth; }
         body { background-color: var(--bg-dark); color: var(--text-primary); font-family: 'Poppins', sans-serif; }
         .glass-card { background: rgba(22, 27, 34, 0.8); backdrop-filter: blur(12px); border: 1px solid var(--border-color); }
         .form-input { background-color: var(--bg-dark); border: 1px solid var(--border-color); color: var(--text-primary); transition: all 0.2s; }
@@ -31,11 +32,7 @@
         input:checked + .toggle-bg:after { transform: translateX(100%); }
         input:checked + .toggle-bg { background-color: var(--accent-primary); }
         .radio-label { transition: all 0.2s; }
-        input[type="radio"]:checked + .radio-label {
-            background-color: var(--accent-primary);
-            color: white;
-            border-color: var(--accent-primary);
-        }
+        input[type="radio"]:checked + .radio-label { background-color: var(--accent-primary); color: white; border-color: var(--accent-primary); }
     </style>
 </head>
 <body>
@@ -48,7 +45,6 @@
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlvZHVhaHdrbmZza3R1anRoZnljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEzMDc0NDcsImV4cCI6MjA2Njg4MzQ0N30.96f8wZO6SvABKFMWjIiw1pSugAB4Isldj7yxLcLJRSE';
         const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-        // --- COMPONENTES (sem alterações) ---
         function LoginPage({ onLogin }) {
             const [email, setEmail] = useState('');
             const [password, setPassword] = useState('');
@@ -157,7 +153,6 @@
             );
         }
 
-        // --- VIEWS ---
         function HomeView() {
             const [signals, setSignals] = useState([]);
             const [scores, setScores] = useState({ wins: 0, losses: 0, gales: 0 });
@@ -227,7 +222,7 @@
             const [config, setConfig] = useState(null);
             const [loading, setLoading] = useState(true);
             const [saving, setSaving] = useState(false);
-            const [statusSaving, setStatusSaving] = useState(false); // NOVO: Estado para o botão de status
+            const [statusSaving, setStatusSaving] = useState(false);
 
             const fetchConfig = useCallback(async () => {
                 const { data, error } = await supabaseClient.from('bot_config').select('*').eq('id', 1).single();
@@ -247,7 +242,6 @@
                 setConfig(prev => ({ ...prev, [key]: value }));
             };
             
-            // ATUALIZADO: Ação imediata para o botão de status
             const handleStatusToggle = async () => {
                 if (!config || statusSaving) return;
                 setStatusSaving(true);
@@ -258,7 +252,6 @@
                 if (error) {
                     alert("Falha ao alterar o estado: " + error.message);
                 } else {
-                    // Atualiza o estado local apenas se a operação for bem-sucedida
                     handleUpdate('status', newStatus);
                 }
                 setStatusSaving(false);
@@ -266,7 +259,6 @@
             
             const handleSave = async () => {
                 setSaving(true);
-                // ATUALIZADO: Não inclui mais o 'status'
                 const { entry_value, account_type, use_martingale, martingale_levels, martingale_factor, stop_win, stop_loss } = config;
                 const { error } = await supabaseClient.from('bot_config').update({
                     entry_value, account_type, use_martingale, martingale_levels, martingale_factor, stop_win, stop_loss
@@ -290,7 +282,6 @@
                                 <h2 className="text-xl font-bold mb-4">Controlo Geral</h2>
                                 <div className="flex items-center justify-between bg-gray-900 p-4 rounded-lg">
                                     <div className="flex items-center"><i className={`fas fa-circle mr-3 ${config.status === 'RUNNING' ? 'text-green-500 animate-pulse' : 'text-gray-500'}`}></i><div><span className="font-semibold">Estado do Bot</span><p className={`font-bold ${config.status === 'RUNNING' ? 'text-green-400' : 'text-amber-400'}`}>{config.status}</p></div></div>
-                                    {/* ATUALIZADO: Botão agora chama handleStatusToggle */}
                                     <button onClick={handleStatusToggle} className={`btn ${config.status === 'RUNNING' ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'} px-5 py-2 rounded-md text-white`} disabled={statusSaving}>
                                         <i className={`fas ${statusSaving ? 'fa-spinner fa-spin' : (config.status === 'RUNNING' ? 'fa-pause' : 'fa-play')} mr-2`}></i>
                                         {statusSaving ? 'Aguarde...' : (config.status === 'RUNNING' ? 'Pausar' : 'Iniciar')}
@@ -330,9 +321,67 @@
                 </div>
             );
         }
-
+        
         function LogsView() {
-            // ... (código inalterado)
+            const [logs, setLogs] = useState([]);
+            const endOfLogsRef = useRef(null);
+
+            const scrollToBottom = () => {
+                endOfLogsRef.current?.scrollIntoView({ behavior: "smooth" });
+            };
+
+            useEffect(() => {
+                const fetchInitialLogs = async () => {
+                    console.log("A buscar logs iniciais...");
+                    const { data, error } = await supabaseClient.from('bot_logs').select('*').order('created_at', { ascending: false }).limit(100);
+                    if (error) {
+                        console.error("Erro ao buscar logs iniciais:", error);
+                    } else if (data) {
+                        console.log(`Encontrados ${data.length} logs iniciais.`);
+                        setLogs(data.reverse());
+                    }
+                };
+                fetchInitialLogs();
+
+                const channel = supabaseClient.channel('bot_logs_realtime')
+                    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'bot_logs' }, payload => {
+                        console.log('Novo log recebido em tempo real!', payload.new);
+                        setLogs(current => [...current, payload.new]);
+                    }).subscribe((status, err) => {
+                        console.log(`Estado da subscrição em tempo real: ${status}`);
+                        if (err) {
+                            console.error('Erro na subscrição:', err);
+                        }
+                    });
+                
+                return () => supabaseClient.removeChannel(channel);
+            }, []);
+
+            useEffect(() => {
+                scrollToBottom();
+            }, [logs]);
+
+            const LogLine = ({ log }) => {
+                const colors = { SUCCESS: 'text-accent-win', ERROR: 'text-accent-loss', INFO: 'text-accent-info', WARNING: 'text-accent-warning', CRITICAL: 'bg-red-800 text-white p-1 rounded' };
+                const icons = { SUCCESS: 'fa-check-circle', ERROR: 'fa-times-circle', INFO: 'fa-info-circle', WARNING: 'fa-exclamation-triangle', CRITICAL: 'fa-skull-crossbones' };
+                return (
+                    <div className="flex items-start">
+                        <span className="text-gray-500 mr-3">{new Date(log.created_at).toLocaleTimeString()}</span>
+                        <i className={`fas ${icons[log.level] || 'fa-question-circle'} ${colors[log.level] || 'text-gray-400'} mt-1 mr-2`}></i>
+                        <p className="flex-1">{log.message}</p>
+                    </div>
+                );
+            };
+
+            return (
+                <div>
+                    <h1 className="text-3xl font-bold text-white mb-6">Logs em Tempo Real</h1>
+                    <div className="glass-card font-mono text-sm p-4 rounded-xl h-[70vh] overflow-y-auto space-y-2">
+                        {logs.length > 0 ? logs.map(log => <LogLine key={log.id} log={log} />) : <p className="text-gray-400 text-center py-8">A aguardar logs...</p>}
+                        <div ref={endOfLogsRef} />
+                    </div>
+                </div>
+            );
         }
 
         function AdminDashboard() {
