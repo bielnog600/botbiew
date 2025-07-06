@@ -149,7 +149,7 @@ class TradingBot:
             order_id = await self.exnova.execute_trade(entry_value, full_name, signal.direction.lower(), expiration_minutes)
             await self.logger('INFO', f"Ordem {order_id} enviada. Valor: {entry_value}. Exp: {expiration_minutes} min. Aguardando...")
             
-            await asyncio.sleep(expiration_minutes * 60 + 20)
+            await asyncio.sleep(expiration_minutes * 60 + 60)
 
             bal_after = await self.exnova.get_current_balance()
             
