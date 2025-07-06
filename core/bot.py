@@ -67,7 +67,6 @@ class TradingBot:
 
     async def trading_cycle(self):
         now = datetime.utcnow()
-        
         if now.minute == self.last_analysis_minute:
             return
 
@@ -123,11 +122,9 @@ class TradingBot:
             else:
                 return
 
-            # ADICIONADO: O filtro de volatilidade que estava em falta.
             atr_value = ti.calculate_atr(analysis_candles, period=14)
-            min_atr, max_atr = 0.00008, 0.01500  # Configuração Equilibrada (pode ajustar)
+            min_atr, max_atr = 0.00008, 0.01500
             if atr_value is None or not (min_atr < atr_value < max_atr):
-                await self.logger('DEBUG', f"[{base}-M{expiration_minutes}] Filtro de volatilidade: Fora dos limites (ATR={atr_value}). Ativo ignorado.")
                 return
 
             signal_candle = analysis_candles[-2]
@@ -174,25 +171,29 @@ class TradingBot:
         if state['level'] == 0: return base
         return round(state['last_value'] * self.bot_config.get('martingale_factor', 2.3), 2)
 
+    # ATUALIZADO: Lógica de execução corrigida para evitar "operações fantasma"
     async def _execute_and_wait(self, signal: TradeSignal, full_name: str, expiration_minutes: int):
         try:
             bal_before = await self.exnova.get_current_balance()
             entry_value = self._get_entry_value(signal.pair)
-            sid = await self.supabase.insert_trade_signal(signal)
-            if not sid:
-                self.is_trade_active = False
-                return
 
+            # 1. TENTA EXECUTAR A ORDEM NA CORRETORA PRIMEIRO
             order_id = await self.exnova.execute_trade(entry_value, full_name, signal.direction.lower(), expiration_minutes)
             
+            # 2. VERIFICA SE A ORDEM FOI REALMENTE ABERTA
             if not order_id:
                 await self.logger('ERROR', f"Falha ao executar a ordem para {full_name}. A corretora pode ter rejeitado a entrada.")
-                self.is_trade_active = False
-                return
+                self.is_trade_active = False # Libera o bloqueio imediatamente
+                return # Aborta o resto da função
 
+            # 3. SÓ SE A ORDEM FOI ABERTA, REGISTA NO SUPABASE
             await self.logger('INFO', f"Ordem {order_id} enviada com sucesso. Valor: {entry_value}. Exp: {expiration_minutes} min. Aguardando...")
+            sid = await self.supabase.insert_trade_signal(signal)
+            if not sid:
+                await self.logger('CRITICAL', f"ORDEM {order_id} ABERTA NA CORRETORA MAS FALHOU AO REGISTAR NO SUPABASE!")
+                # A operação continua, mas não poderemos atualizar o resultado no painel
             
-            await asyncio.sleep(expiration_minutes * 60 + 40)
+            await asyncio.sleep(expiration_minutes * 60 + 45)
 
             bal_after = await self.exnova.get_current_balance()
             
@@ -202,6 +203,14 @@ class TradingBot:
                 result = 'WIN' if delta > 0 else 'LOSS' if delta < 0 else 'DRAW'
             await self.logger('SUCCESS' if result == 'WIN' else 'ERROR', f"Resultado: {result}. ΔSaldo = {delta:.2f}")
 
+            # Atualiza o resultado no Supabase se tivermos um ID
+            if sid:
+                mg_lv = self.martingale_state.get(signal.pair, {}).get('level', 0)
+                await self.supabase.update_trade_result(sid, result, mg_lv)
+            
+            await self.supabase.update_current_balance(bal_after or 0.0)
+
+            # --- Lógica de Gestão de Performance ---
             pair = signal.pair
             self.asset_performance.setdefault(pair, {'wins': 0, 'losses': 0})
             self.consecutive_losses.setdefault(pair, 0)
@@ -221,10 +230,6 @@ class TradingBot:
                 if self.consecutive_losses[pair] >= 2:
                     self.blacklisted_assets.add(pair)
                     await self.logger('ERROR', f"O par {pair} atingiu 2 derrotas consecutivas e foi COLOCADO na lista negra.")
-
-            mg_lv = self.martingale_state.get(signal.pair, {}).get('level', 0)
-            await self.supabase.update_trade_result(sid, result, mg_lv)
-            await self.supabase.update_current_balance(bal_after or 0.0)
 
             if self.bot_config.get('use_martingale', False):
                 if result == 'WIN': self.martingale_state[signal.pair] = {'level': 0, 'last_value': entry_value}
