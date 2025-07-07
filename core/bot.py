@@ -98,7 +98,6 @@ class TradingBot:
             else:
                 asyncio.create_task(self.run_analysis_for_timeframe(60, 1))
 
-    # ATUALIZADO: A análise agora é sequencial para evitar race conditions
     async def run_analysis_for_timeframe(self, timeframe_seconds: int, expiration_minutes: int):
         await self.logger('INFO', f"Iniciando ciclo de análise para M{expiration_minutes}...")
         await self.exnova.change_balance(self.bot_config.get('account_type', 'PRACTICE'))
@@ -118,10 +117,9 @@ class TradingBot:
         asset_names = [a.split('-')[0] for a in prioritized_assets[:5]]
         await self.logger('INFO', f"[M{expiration_minutes}] Ativos Priorizados: {asset_names}")
         
-        # Itera sequencialmente em vez de usar asyncio.gather
         for asset in prioritized_assets[:settings.MAX_ASSETS_TO_MONITOR]:
             if self.is_trade_active:
-                break # Se uma trade foi aberta por uma análise anterior, para o ciclo
+                break
             await self._analyze_asset(asset, timeframe_seconds, expiration_minutes)
 
     async def _analyze_asset(self, full_name: str, timeframe_seconds: int, expiration_minutes: int):
@@ -216,17 +214,21 @@ class TradingBot:
 
             bal_after = await self.exnova.get_current_balance()
             
-            if bal_before is None or bal_after is None: result = 'UNKNOWN'
-            else:
+            # --- CORRIGIDO: Lógica de log e resultado mais robusta ---
+            result = 'UNKNOWN'
+            if bal_before is not None and bal_after is not None:
                 delta = bal_after - bal_before
                 result = 'WIN' if delta > 0 else 'LOSS' if delta < 0 else 'DRAW'
-            await self.logger('SUCCESS' if result == 'WIN' else 'ERROR', f"Resultado: {result}. ΔSaldo = {delta:.2f}")
+                await self.logger('SUCCESS' if result == 'WIN' else 'ERROR', f"Resultado: {result}. ΔSaldo = {delta:.2f}")
+            else:
+                await self.logger('WARNING', f"Resultado da operação desconhecido para {full_name}. Não foi possível obter o saldo.")
 
             if sid:
                 mg_lv = self.martingale_state.get(signal.pair, {}).get('level', 0)
                 await self.supabase.update_trade_result(sid, result, mg_lv)
             
-            await self.supabase.update_current_balance(bal_after or 0.0)
+            if bal_after is not None:
+                await self.supabase.update_current_balance(bal_after)
 
             pair = signal.pair
             self.asset_performance.setdefault(pair, {'wins': 0, 'losses': 0})
