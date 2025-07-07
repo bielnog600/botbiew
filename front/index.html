@@ -228,7 +228,7 @@
                 const { data, error } = await supabaseClient.from('bot_config').select('*').eq('id', 1).single();
                 if (data) setConfig(data);
                 else {
-                    const defaultConfig = { stop_win: 0, stop_loss: 0 };
+                    const defaultConfig = { stop_win: 0, stop_loss: 0, volatility_profile: 'EQUILIBRADO' };
                     setConfig(defaultConfig);
                 }
                 setLoading(false);
@@ -246,22 +246,17 @@
                 if (!config || statusSaving) return;
                 setStatusSaving(true);
                 const newStatus = config.status === 'RUNNING' ? 'PAUSED' : 'RUNNING';
-                
                 const { error } = await supabaseClient.from('bot_config').update({ status: newStatus }).eq('id', 1);
-
-                if (error) {
-                    alert("Falha ao alterar o estado: " + error.message);
-                } else {
-                    handleUpdate('status', newStatus);
-                }
+                if (error) alert("Falha ao alterar o estado: " + error.message);
+                else handleUpdate('status', newStatus);
                 setStatusSaving(false);
             };
             
             const handleSave = async () => {
                 setSaving(true);
-                const { entry_value, account_type, use_martingale, martingale_levels, martingale_factor, stop_win, stop_loss } = config;
+                const { entry_value, account_type, use_martingale, martingale_levels, martingale_factor, stop_win, stop_loss, volatility_profile } = config;
                 const { error } = await supabaseClient.from('bot_config').update({
-                    entry_value, account_type, use_martingale, martingale_levels, martingale_factor, stop_win, stop_loss
+                    entry_value, account_type, use_martingale, martingale_levels, martingale_factor, stop_win, stop_loss, volatility_profile
                 }).eq('id', 1);
 
                 if (error) alert("Falha ao guardar: " + error.message);
@@ -271,6 +266,16 @@
 
             if (loading) return <div className="p-6"><p>A carregar configurações...</p></div>;
             if (!config) return <div className="p-6"><p>Não foi possível carregar a configuração.</p></div>;
+
+            const VolatilityButton = ({ id, value, icon, text }) => (
+                <Fragment>
+                    <input type="radio" id={id} name="vol-mode" value={value} checked={config.volatility_profile === value} onChange={e => handleUpdate('volatility_profile', e.target.value)} className="hidden" />
+                    <label htmlFor={id} className="radio-label flex flex-col items-center justify-center p-3 rounded-lg cursor-pointer text-center border border-gray-700">
+                        <i className={`fas ${icon} text-xl mb-1`}></i>
+                        <span className="font-bold text-xs">{text}</span>
+                    </label>
+                </Fragment>
+            );
 
             return (
                 <div className="space-y-8">
@@ -289,8 +294,20 @@
                                 </div>
                             </div>
                             <div className="glass-card p-6 rounded-xl">
+                                <h2 className="text-xl font-bold mb-4">Filtro de Volatilidade (ATR)</h2>
+                                <div className="grid grid-cols-3 gap-2">
+                                    <VolatilityButton id="vol-ultra-conservative" value="ULTRA_CONSERVADOR" icon="fa-umbrella-beach" text="Ultra Conservador" />
+                                    <VolatilityButton id="vol-conservative" value="CONSERVADOR" icon="fa-shield-alt" text="Conservador" />
+                                    <VolatilityButton id="vol-balanced" value="EQUILIBRADO" icon="fa-balance-scale" text="Equilibrado" />
+                                    <VolatilityButton id="vol-aggressive" value="AGRESSIVO" icon="fa-rocket" text="Agressivo" />
+                                    <VolatilityButton id="vol-ultra-aggressive" value="ULTRA_AGRESSIVO" icon="fa-meteor" text="Ultra Agressivo" />
+                                    <VolatilityButton id="vol-off" value="DESATIVADO" icon="fa-power-off" text="Desativado" />
+                                </div>
+                            </div>
+                        </div>
+                        <div className="space-y-8">
+                             <div className="glass-card p-6 rounded-xl">
                                 <h2 className="text-xl font-bold mb-4">Gerenciamento de Risco Diário</h2>
-                                <p className="text-sm text-gray-400 mb-4">O bot irá pausar automaticamente ao atingir uma das metas. Defina como 0 para desativar.</p>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                     <div>
                                         <label className="block mb-1 text-gray-400">Stop Win (Nº de Vitórias)</label>
@@ -302,12 +319,12 @@
                                     </div>
                                 </div>
                             </div>
-                        </div>
-                        <div className="glass-card p-6 rounded-xl space-y-6">
-                            <h2 className="text-xl font-bold">Parâmetros de Negociação</h2>
-                            <div className="grid grid-cols-1 gap-6">
-                                <div><label className="block mb-1 text-gray-400">Tipo de Conta</label><select value={config.account_type || 'PRACTICE'} onChange={e => handleUpdate('account_type', e.target.value)} className="form-input w-full p-2 rounded-md"><option value="PRACTICE">Prática</option><option value="REAL">Real</option></select></div>
-                                <div><label className="block mb-1 text-gray-400">Valor de Entrada Padrão ($)</label><input type="number" step="0.01" value={config.entry_value || 1} onChange={e => handleUpdate('entry_value', parseFloat(e.target.value))} className="form-input w-full p-2 rounded-md" /></div>
+                            <div className="glass-card p-6 rounded-xl space-y-6">
+                                <h2 className="text-xl font-bold">Parâmetros de Negociação</h2>
+                                <div className="grid grid-cols-1 gap-6">
+                                    <div><label className="block mb-1 text-gray-400">Tipo de Conta</label><select value={config.account_type || 'PRACTICE'} onChange={e => handleUpdate('account_type', e.target.value)} className="form-input w-full p-2 rounded-md"><option value="PRACTICE">Prática</option><option value="REAL">Real</option></select></div>
+                                    <div><label className="block mb-1 text-gray-400">Valor de Entrada Padrão ($)</label><input type="number" step="0.01" value={config.entry_value || 1} onChange={e => handleUpdate('entry_value', parseFloat(e.target.value))} className="form-input w-full p-2 rounded-md" /></div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -332,26 +349,17 @@
 
             useEffect(() => {
                 const fetchInitialLogs = async () => {
-                    console.log("A buscar logs iniciais...");
                     const { data, error } = await supabaseClient.from('bot_logs').select('*').order('created_at', { ascending: false }).limit(100);
-                    if (error) {
-                        console.error("Erro ao buscar logs iniciais:", error);
-                    } else if (data) {
-                        console.log(`Encontrados ${data.length} logs iniciais.`);
-                        setLogs(data.reverse());
-                    }
+                    if (error) console.error("Erro ao buscar logs iniciais:", error);
+                    else if (data) setLogs(data.reverse());
                 };
                 fetchInitialLogs();
 
                 const channel = supabaseClient.channel('bot_logs_realtime')
                     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'bot_logs' }, payload => {
-                        console.log('Novo log recebido em tempo real!', payload.new);
                         setLogs(current => [...current, payload.new]);
                     }).subscribe((status, err) => {
-                        console.log(`Estado da subscrição em tempo real: ${status}`);
-                        if (err) {
-                            console.error('Erro na subscrição:', err);
-                        }
+                        if (err) console.error('Erro na subscrição:', err);
                     });
                 
                 return () => supabaseClient.removeChannel(channel);
