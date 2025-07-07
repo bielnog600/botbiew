@@ -48,7 +48,7 @@ class TradingBot:
         await self.logger('SUCCESS', "Estatísticas e saldo diário zerados. A iniciar novo ciclo.")
 
     async def run(self):
-        await self.logger('INFO', 'Bot a iniciar com GESTÃO DE RISCO ADAPTATIVA...')
+        await self.logger('INFO', 'Bot a iniciar com LÓGICA DE EXECUÇÃO PROFISSIONAL...')
         await self.exnova.connect()
 
         config = await self.supabase.get_bot_config()
@@ -85,21 +85,26 @@ class TradingBot:
                 traceback.print_exc()
                 await asyncio.sleep(30)
 
+    # ATUALIZADO: A lógica de tempo agora inicia a análise nos últimos 10 segundos do minuto.
     async def trading_cycle(self):
         now = datetime.utcnow()
-        if now.minute == self.last_analysis_minute:
-            return
 
-        if now.second < 5:
-            self.last_analysis_minute = now.minute
-            
-            if now.minute % 5 == 0:
-                asyncio.create_task(self.run_analysis_for_timeframe(300, 5))
-            else:
-                asyncio.create_task(self.run_analysis_for_timeframe(60, 1))
+        # A janela de análise começa aos 50 segundos de cada minuto.
+        if now.second >= 50:
+            # Garante que a análise para este minuto só é executada uma vez.
+            if now.minute != self.last_analysis_minute:
+                self.last_analysis_minute = now.minute
+                
+                # A análise de M5 ocorre quando a vela de 5min está a fechar (ex: 10:04:50, 10:09:50)
+                if (now.minute + 1) % 5 == 0:
+                    await self.logger('INFO', f"Janela de análise M5 aberta para a vela que fecha às {now.hour}:{now.minute + 1 if now.minute < 59 else '00'}...")
+                    await self.run_analysis_for_timeframe(300, 5)
+                # A análise de M1 ocorre nos outros minutos.
+                else:
+                    await self.logger('INFO', f"Janela de análise M1 aberta para a vela que fecha às {now.hour}:{now.minute + 1 if now.minute < 59 else '00'}...")
+                    await self.run_analysis_for_timeframe(60, 1)
 
     async def run_analysis_for_timeframe(self, timeframe_seconds: int, expiration_minutes: int):
-        await self.logger('INFO', f"Iniciando ciclo de análise para M{expiration_minutes}...")
         await self.exnova.change_balance(self.bot_config.get('account_type', 'PRACTICE'))
         assets = await self.exnova.get_open_assets()
         
@@ -122,58 +127,37 @@ class TradingBot:
                 break
             await self._analyze_asset(asset, timeframe_seconds, expiration_minutes)
 
+    # ATUALIZADO: Adiciona a espera para a entrada precisa no início da próxima vela.
     async def _analyze_asset(self, full_name: str, timeframe_seconds: int, expiration_minutes: int):
         try:
             if self.is_trade_active: return
             base = full_name.split('-')[0]
             
+            # A lógica de busca de candles permanece a mesma
             if expiration_minutes == 1:
-                analysis_candles, sr_candles = await asyncio.gather(
-                    self.exnova.get_historical_candles(base, 60, 200),
-                    self.exnova.get_historical_candles(base, 900, 100),
-                )
+                analysis_candles, sr_candles = await asyncio.gather(self.exnova.get_historical_candles(base, 60, 200), self.exnova.get_historical_candles(base, 900, 100))
                 if not analysis_candles or not sr_candles: return
                 res, sup = get_m15_sr_zones(sr_candles)
             elif expiration_minutes == 5:
-                analysis_candles, sr_candles = await asyncio.gather(
-                    self.exnova.get_historical_candles(base, 300, 200),
-                    self.exnova.get_historical_candles(base, 3600, 100),
-                )
+                analysis_candles, sr_candles = await asyncio.gather(self.exnova.get_historical_candles(base, 300, 200), self.exnova.get_historical_candles(base, 3600, 100))
                 if not analysis_candles or not sr_candles: return
                 res, sup = get_h1_sr_zones(sr_candles)
             else:
                 return
 
-            # --- FILTRO 1: VOLATILIDADE (ATR) DINÂMICO ---
             atr_value = ti.calculate_atr(analysis_candles, period=14)
-            volatility_profile = self.bot_config.get('volatility_profile', 'EQUILIBRADO')
-            
-            # ATUALIZADO: Adicionadas todas as opções de volatilidade
-            atr_limits = {
-                'ULTRA_CONSERVADOR': (0.00015, 0.00500),
-                'CONSERVADOR':       (0.00008, 0.01500),
-                'EQUILIBRADO':       (0.00005, 0.05000),
-                'AGRESSIVO':         (0.00001, 0.15000),
-                'ULTRA_AGRESSIVO':   (0.00001, 0.50000),
-            }
-            # O perfil 'DESATIVADO' não estará no dicionário, então o filtro será pulado
-            if volatility_profile != 'DESATIVADO':
-                min_atr, max_atr = atr_limits.get(volatility_profile, (0.00005, 0.05000)) # Padrão é EQUILIBRADO
-                if atr_value is None or not (min_atr < atr_value < max_atr):
-                    await self.logger('DEBUG', f"[{base}-M{expiration_minutes}] Filtro de volatilidade ({volatility_profile}): Fora dos limites (ATR={atr_value}). Ativo ignorado.")
-                    return
+            min_atr, max_atr = 0.00008, 0.01500
+            if atr_value is None or not (min_atr < atr_value < max_atr):
+                return
 
-            signal_candle = analysis_candles[-2]
+            signal_candle = analysis_candles[-1] # A análise agora é na vela que está a fechar
             
             confluences = {'call': [], 'put': []}
             zones = {'resistance': res, 'support': sup}
             
-            if (sr_signal := ti.check_price_near_sr(signal_candle, zones)):
-                confluences[sr_signal].append("SR_Zone")
-            if (candle_signal := ti.check_candlestick_pattern(analysis_candles)):
-                confluences[candle_signal].append("Candle_Pattern")
-            if (rsi_signal := ti.check_rsi_condition(analysis_candles)):
-                confluences[rsi_signal].append("RSI_Condition")
+            if (sr_signal := ti.check_price_near_sr(signal_candle, zones)): confluences[sr_signal].append("SR_Zone")
+            if (candle_signal := ti.check_candlestick_pattern(analysis_candles)): confluences[candle_signal].append("Candle_Pattern")
+            if (rsi_signal := ti.check_rsi_condition(analysis_candles)): confluences[rsi_signal].append("RSI_Condition")
             
             final_direction = None
             if len(confluences['call']) >= 2: final_direction = 'call'
@@ -186,8 +170,15 @@ class TradingBot:
                 if self.is_trade_active: return
                 self.is_trade_active = True
 
+                # --- LÓGICA DE TIMING PRECISO ---
+                now = datetime.utcnow()
+                wait_seconds = (60 - now.second - 1) + (1 - now.microsecond / 1000000) + 0.2 # Buffer de 0.2s
+                await self.logger('INFO', f"Sinal encontrado em {base}. Aguardando {wait_seconds:.2f}s para entrada precisa.")
+                await asyncio.sleep(wait_seconds)
+                # --- FIM DA LÓGICA DE TIMING ---
+
                 strategy_name = f"M{expiration_minutes}_" + ', '.join(confluences[final_direction])
-                await self.logger('SUCCESS', f"SINAL VÁLIDO! Dir: {final_direction.upper()}. Conf: {strategy_name}")
+                await self.logger('SUCCESS', f"EXECUTANDO SINAL! Dir: {final_direction.upper()}. Conf: {strategy_name}")
                 
                 signal = TradeSignal(pair=base, direction=final_direction, strategy=strategy_name,
                                      setup_candle_open=signal_candle.open, setup_candle_high=signal_candle.max,
