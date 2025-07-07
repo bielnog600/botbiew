@@ -85,17 +85,23 @@ class TradingBot:
 
     async def trading_cycle(self):
         now = datetime.utcnow()
-        if now.minute == self.last_analysis_minute: return
-
-        if now.second < 5:
-            self.last_analysis_minute = now.minute
-            if now.minute % 5 == 0:
-                asyncio.create_task(self.run_analysis_for_timeframe(300, 5))
-            else:
-                asyncio.create_task(self.run_analysis_for_timeframe(60, 1))
+        
+        # A janela de análise começa aos 50 segundos de cada minuto.
+        if now.second >= 50:
+            # Garante que a análise para este minuto só é executada uma vez.
+            if now.minute != self.last_analysis_minute:
+                self.last_analysis_minute = now.minute
+                
+                # A análise de M5 ocorre quando a vela de 5min está a fechar
+                if (now.minute + 1) % 5 == 0:
+                    await self.logger('INFO', f"Janela de análise M5 aberta...")
+                    await self.run_analysis_for_timeframe(300, 5)
+                # A análise de M1 ocorre nos outros minutos.
+                else:
+                    await self.logger('INFO', f"Janela de análise M1 aberta...")
+                    await self.run_analysis_for_timeframe(60, 1)
 
     async def run_analysis_for_timeframe(self, timeframe_seconds: int, expiration_minutes: int):
-        await self.logger('INFO', f"Iniciando ciclo de análise para M{expiration_minutes}...")
         await self.exnova.change_balance(self.bot_config.get('account_type', 'PRACTICE'))
         assets = await self.exnova.get_open_assets()
         
@@ -109,9 +115,6 @@ class TradingBot:
             return stats['wins'] / total_trades
 
         prioritized_assets = sorted(available_assets, key=get_asset_score, reverse=True)
-        
-        asset_names = [a.split('-')[0] for a in prioritized_assets[:5]]
-        await self.logger('INFO', f"[M{expiration_minutes}] Ativos Priorizados: {asset_names}")
         
         for asset in prioritized_assets[:settings.MAX_ASSETS_TO_MONITOR]:
             if self.is_trade_active:
@@ -131,66 +134,54 @@ class TradingBot:
                 analysis_candles, sr_candles = await asyncio.gather(self.exnova.get_historical_candles(base, 300, 200), self.exnova.get_historical_candles(base, 3600, 100))
                 if not analysis_candles or not sr_candles: return
                 res, sup = get_h1_sr_zones(sr_candles)
-            else:
-                return
+            else: return
 
-            # --- FILTRO 1: VOLATILIDADE (ATR) DINÂMICO ---
-            atr_value = ti.calculate_atr(analysis_candles, period=14)
+            # --- FILTRO DE VOLATILIDADE DINÂMICO ---
             volatility_profile = self.bot_config.get('volatility_profile', 'EQUILIBRADO')
-            
-            atr_limits = {
-                'ULTRA_CONSERVADOR': (0.00015, 0.00500),
-                'CONSERVADOR':       (0.00008, 0.01500),
-                'EQUILIBRADO':       (0.00005, 0.05000),
-                'AGRESSIVO':         (0.00001, 0.15000),
-                'ULTRA_AGRESSIVO':   (0.00001, 0.50000),
-            }
-            
+            atr_limits = {'ULTRA_CONSERVADOR': (0.00015, 0.00500), 'CONSERVADOR': (0.00008, 0.01500), 'EQUILIBRADO': (0.00005, 0.05000), 'AGRESSIVO': (0.00001, 0.15000), 'ULTRA_AGRESSIVO': (0.00001, 0.50000)}
             if volatility_profile != 'DESATIVADO':
                 min_atr, max_atr = atr_limits.get(volatility_profile, (0.00005, 0.05000))
+                atr_value = ti.calculate_atr(analysis_candles, period=14)
                 if atr_value is None or not (min_atr < atr_value < max_atr):
-                    await self.logger('DEBUG', f"[{base}-M{expiration_minutes}] Filtro de volatilidade ({volatility_profile}): Fora dos limites (ATR={atr_value}). Ativo ignorado.")
                     return
 
-            signal_candle = analysis_candles[-2]
+            signal_candle = analysis_candles[-1] # Analisa a vela que está a fechar
             
             final_direction = None
             confluences = []
-            
-            if expiration_minutes == 1:
-                call_confs = []
-                put_confs = []
-                zones = {'resistance': res, 'support': sup}
-                if ti.check_price_near_sr(signal_candle, zones) == 'call': call_confs.append("SR_Zone")
-                if ti.check_candlestick_pattern(analysis_candles) == 'call': call_confs.append("Candle_Pattern")
-                if ti.check_rsi_condition(analysis_candles) == 'call': call_confs.append("RSI_Condition")
-                
-                if ti.check_price_near_sr(signal_candle, zones) == 'put': put_confs.append("SR_Zone")
-                if ti.check_candlestick_pattern(analysis_candles) == 'put': put_confs.append("Candle_Pattern")
-                if ti.check_rsi_condition(analysis_candles) == 'put': put_confs.append("RSI_Condition")
+            zones = {'resistance': res, 'support': sup}
 
-                if len(call_confs) >= 2:
-                    final_direction = 'call'
-                    confluences = call_confs
-                elif len(put_confs) >= 2:
-                    final_direction = 'put'
-                    confluences = put_confs
+            if expiration_minutes == 1:
+                sr_signal_type = ti.check_price_near_sr(signal_candle, zones)
+                if sr_signal_type == 'call':
+                    confluences.append("SR_Zone")
+                    if ti.check_candlestick_pattern(analysis_candles) == 'call': confluences.append("Candle_Pattern")
+                    if ti.check_rsi_condition(analysis_candles) == 'call': confluences.append("RSI_Condition")
+                    if len(confluences) >= 2: final_direction = 'call'
+                elif sr_signal_type == 'put':
+                    confluences.append("SR_Zone")
+                    if ti.check_candlestick_pattern(analysis_candles) == 'put': confluences.append("Candle_Pattern")
+                    if ti.check_rsi_condition(analysis_candles) == 'put': confluences.append("RSI_Condition")
+                    if len(confluences) >= 2: final_direction = 'put'
             
             elif expiration_minutes == 5:
-                m5_signal = ti.check_m5_price_action(analysis_candles, {'resistance': res, 'support': sup})
+                m5_signal = ti.check_m5_price_action(analysis_candles, zones)
                 if m5_signal:
                     final_direction = m5_signal['direction']
                     confluences = m5_signal['confluences']
 
             if final_direction:
-                if not ti.validate_reversal_candle(signal_candle, final_direction):
-                    return
-
+                if not ti.validate_reversal_candle(signal_candle, final_direction): return
                 if self.is_trade_active: return
                 self.is_trade_active = True
 
+                now = datetime.utcnow()
+                wait_seconds = (60 - now.second - 1) + (1 - now.microsecond / 1000000) + 0.2
+                await self.logger('INFO', f"Sinal encontrado em {base}. Aguardando {wait_seconds:.2f}s para entrada precisa.")
+                await asyncio.sleep(wait_seconds)
+
                 strategy_name = f"M{expiration_minutes}_" + ', '.join(confluences)
-                await self.logger('SUCCESS', f"SINAL VÁLIDO! Dir: {final_direction.upper()}. Conf: {strategy_name}")
+                await self.logger('SUCCESS', f"EXECUTANDO SINAL! Dir: {final_direction.upper()}. Conf: {strategy_name}")
                 
                 signal = TradeSignal(pair=base, direction=final_direction, strategy=strategy_name,
                                      setup_candle_open=signal_candle.open, setup_candle_high=signal_candle.max,
@@ -218,14 +209,14 @@ class TradingBot:
             order_id = await self.exnova.execute_trade(entry_value, full_name, signal.direction.lower(), expiration_minutes)
             
             if not order_id:
-                await self.logger('ERROR', f"Falha ao executar a ordem para {full_name}.")
+                await self.logger('ERROR', f"Falha ao executar a ordem para {full_name}. A corretora pode ter rejeitado a entrada.")
                 self.is_trade_active = False
                 return
 
-            await self.logger('INFO', f"Ordem {order_id} enviada com sucesso. Valor: {entry_value}. Exp: {expiration_minutes} min.")
+            await self.logger('INFO', f"Ordem {order_id} enviada com sucesso. Valor: {entry_value}. Exp: {expiration_minutes} min. Aguardando...")
             sid = await self.supabase.insert_trade_signal(signal)
             
-            await asyncio.sleep(expiration_minutes * 60 + 35)
+            await asyncio.sleep(expiration_minutes * 60 + 45)
 
             bal_after = await self.exnova.get_current_balance()
             
