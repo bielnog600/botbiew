@@ -122,6 +122,7 @@ class TradingBot:
                 break
             await self._analyze_asset(asset, timeframe_seconds, expiration_minutes)
 
+    # ATUALIZADO: A lógica do filtro de volatilidade agora é dinâmica
     async def _analyze_asset(self, full_name: str, timeframe_seconds: int, expiration_minutes: int):
         try:
             if self.is_trade_active: return
@@ -144,10 +145,21 @@ class TradingBot:
             else:
                 return
 
+            # --- FILTRO 1: VOLATILIDADE (ATR) DINÂMICO ---
             atr_value = ti.calculate_atr(analysis_candles, period=14)
-            min_atr, max_atr = 0.00008, 0.01500
-            if atr_value is None or not (min_atr < atr_value < max_atr):
-                return
+            volatility_profile = self.bot_config.get('volatility_profile', 'EQUILIBRADO')
+            
+            atr_limits = {
+                'CONSERVADOR': (0.00008, 0.01500),
+                'EQUILIBRADO': (0.00005, 0.05000),
+                'AGRESSIVO':   (0.00001, 0.15000),
+            }
+            min_atr, max_atr = atr_limits.get(volatility_profile, (0.00008, 0.02500))
+
+            if volatility_profile != 'DESATIVADO':
+                if atr_value is None or not (min_atr < atr_value < max_atr):
+                    await self.logger('DEBUG', f"[{base}-M{expiration_minutes}] Filtro de volatilidade ({volatility_profile}): Fora dos limites (ATR={atr_value}). Ativo ignorado.")
+                    return
 
             signal_candle = analysis_candles[-2]
             
@@ -214,14 +226,11 @@ class TradingBot:
 
             bal_after = await self.exnova.get_current_balance()
             
-            # --- CORRIGIDO: Lógica de log e resultado mais robusta ---
-            result = 'UNKNOWN'
-            if bal_before is not None and bal_after is not None:
+            if bal_before is None or bal_after is None: result = 'UNKNOWN'
+            else:
                 delta = bal_after - bal_before
                 result = 'WIN' if delta > 0 else 'LOSS' if delta < 0 else 'DRAW'
-                await self.logger('SUCCESS' if result == 'WIN' else 'ERROR', f"Resultado: {result}. ΔSaldo = {delta:.2f}")
-            else:
-                await self.logger('WARNING', f"Resultado da operação desconhecido para {full_name}. Não foi possível obter o saldo.")
+            await self.logger('SUCCESS' if result == 'WIN' else 'ERROR', f"Resultado: {result}. ΔSaldo = {delta:.2f}")
 
             if sid:
                 mg_lv = self.martingale_state.get(signal.pair, {}).get('level', 0)
