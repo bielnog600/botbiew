@@ -196,7 +196,7 @@ class TradingBot:
                                      setup_candle_open=signal_candle.open, setup_candle_high=signal_candle.max,
                                      setup_candle_low=signal_candle.min, setup_candle_close=signal_candle.close)
                 
-                trade_expiration = 4 if expiration_minutes == 5 else expiration_minutes
+                trade_expiration = 5 if expiration_minutes == 5 else expiration_minutes
                 await self._execute_and_wait(signal, full_name, trade_expiration)
 
         except Exception as e:
