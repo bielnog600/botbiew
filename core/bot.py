@@ -26,6 +26,7 @@ class TradingBot:
         self.last_analysis_minute = -1
         self.daily_wins = 0
         self.daily_losses = 0
+        self.last_daily_reset_date = None
 
     async def logger(self, level: str, message: str):
         ts = datetime.utcnow().isoformat()
@@ -33,37 +34,34 @@ class TradingBot:
         await self.supabase.insert_log(level, message)
 
     async def _hourly_cycle_reset(self):
-        await self.logger('INFO', "CICLO HORÁRIO CONCLUÍDO. A zerar estatísticas e a recatalogar todos os ativos.")
+        await self.logger('INFO', "CICLO HORÁRIO CONCLUÍDO. A zerar performance de ativos e lista negra.")
         self.asset_performance.clear()
         self.consecutive_losses.clear()
         self.blacklisted_assets.clear()
         self.last_reset_time = datetime.utcnow()
-        self.daily_wins = 0
-        self.daily_losses = 0
+        await self.logger('SUCCESS', "Estatísticas de ativos zeradas.")
         
-        bal = await self.exnova.get_current_balance()
-        if bal is not None:
-            await self.supabase.update_config({'daily_initial_balance': bal, 'current_balance': bal})
-        
-        await self.logger('SUCCESS', "Estatísticas e saldo diário zerados. A iniciar novo ciclo.")
+    async def _daily_reset_if_needed(self):
+        """Verifica se um novo dia começou (baseado em UTC) e zera as metas diárias."""
+        current_date_utc = datetime.utcnow().date()
+        if self.last_daily_reset_date != current_date_utc:
+            await self.logger('INFO', f"NOVO DIA DETETADO ({current_date_utc}). A zerar metas de Stop Win/Loss e saldo diário.")
+            self.daily_wins = 0
+            self.daily_losses = 0
+            self.last_daily_reset_date = current_date_utc
+            
+            bal = await self.exnova.get_current_balance()
+            if bal is not None:
+                await self.supabase.update_config({'daily_initial_balance': bal, 'current_balance': bal})
 
     async def run(self):
         await self.logger('INFO', 'Bot a iniciar com GESTÃO DE RISCO ADAPTATIVA...')
         await self.exnova.connect()
-
-        config = await self.supabase.get_bot_config()
-        if config.get('daily_initial_balance', 0) == 0:
-            await self.logger('INFO', "Primeira execução do dia. A definir o saldo inicial...")
-            initial_balance = await self.exnova.get_current_balance()
-            if initial_balance is not None:
-                await self.supabase.update_config({
-                    'daily_initial_balance': initial_balance,
-                    'current_balance': initial_balance
-                })
-                await self.logger('SUCCESS', f"Saldo inicial do dia definido para: ${initial_balance:.2f}")
+        await self._daily_reset_if_needed()
 
         while self.is_running:
             try:
+                await self._daily_reset_if_needed()
                 if (datetime.utcnow() - self.last_reset_time).total_seconds() >= 3600:
                     await self._hourly_cycle_reset()
 
@@ -87,21 +85,17 @@ class TradingBot:
 
     async def trading_cycle(self):
         now = datetime.utcnow()
-        if now.minute == self.last_analysis_minute:
-            return
+        if now.minute == self.last_analysis_minute: return
 
-        if now.second >= 50:
-            if now.minute != self.last_analysis_minute:
-                self.last_analysis_minute = now.minute
-                
-                if (now.minute + 1) % 5 == 0:
-                    await self.logger('INFO', f"Janela de análise M5 aberta...")
-                    await self.run_analysis_for_timeframe(300, 5)
-                else:
-                    await self.logger('INFO', f"Janela de análise M1 aberta...")
-                    await self.run_analysis_for_timeframe(60, 1)
+        if now.second < 5:
+            self.last_analysis_minute = now.minute
+            if now.minute % 5 == 0:
+                asyncio.create_task(self.run_analysis_for_timeframe(300, 5))
+            else:
+                asyncio.create_task(self.run_analysis_for_timeframe(60, 1))
 
     async def run_analysis_for_timeframe(self, timeframe_seconds: int, expiration_minutes: int):
+        await self.logger('INFO', f"Iniciando ciclo de análise para M{expiration_minutes}...")
         await self.exnova.change_balance(self.bot_config.get('account_type', 'PRACTICE'))
         assets = await self.exnova.get_open_assets()
         
@@ -124,7 +118,6 @@ class TradingBot:
                 break
             await self._analyze_asset(asset, timeframe_seconds, expiration_minutes)
 
-    # ATUALIZADO: Lógica de análise completamente reescrita para ser mais segura
     async def _analyze_asset(self, full_name: str, timeframe_seconds: int, expiration_minutes: int):
         try:
             if self.is_trade_active: return
@@ -141,35 +134,53 @@ class TradingBot:
             else:
                 return
 
+            # --- FILTRO 1: VOLATILIDADE (ATR) DINÂMICO ---
             atr_value = ti.calculate_atr(analysis_candles, period=14)
             volatility_profile = self.bot_config.get('volatility_profile', 'EQUILIBRADO')
-            atr_limits = {'ULTRA_CONSERVADOR': (0.00015, 0.00500), 'CONSERVADOR': (0.00008, 0.01500), 'EQUILIBRADO': (0.00005, 0.05000), 'AGRESSIVO': (0.00001, 0.15000), 'ULTRA_AGRESSIVO': (0.00001, 0.50000)}
+            
+            atr_limits = {
+                'ULTRA_CONSERVADOR': (0.00015, 0.00500),
+                'CONSERVADOR':       (0.00008, 0.01500),
+                'EQUILIBRADO':       (0.00005, 0.05000),
+                'AGRESSIVO':         (0.00001, 0.15000),
+                'ULTRA_AGRESSIVO':   (0.00001, 0.50000),
+            }
+            
             if volatility_profile != 'DESATIVADO':
                 min_atr, max_atr = atr_limits.get(volatility_profile, (0.00005, 0.05000))
-                if atr_value is None or not (min_atr < atr_value < max_atr): return
+                if atr_value is None or not (min_atr < atr_value < max_atr):
+                    await self.logger('DEBUG', f"[{base}-M{expiration_minutes}] Filtro de volatilidade ({volatility_profile}): Fora dos limites (ATR={atr_value}). Ativo ignorado.")
+                    return
 
-            signal_candle = analysis_candles[-1]
+            signal_candle = analysis_candles[-2]
             
-            # --- LÓGICA DE REVERSÃO ANCORADA ---
             final_direction = None
             confluences = []
             
-            # 1. Verifica se está numa zona de Suporte
-            sr_signal = ti.check_price_near_sr(signal_candle, {'support': sup})
-            if sr_signal == 'call':
-                confluences.append("SR_Zone_Support")
-                if ti.check_rsi_condition(analysis_candles) == 'call': confluences.append("RSI_Oversold")
-                if ti.check_candlestick_pattern(analysis_candles) == 'call': confluences.append("Bullish_Pattern")
-                if len(confluences) >= 2: final_direction = 'call'
+            if expiration_minutes == 1:
+                call_confs = []
+                put_confs = []
+                zones = {'resistance': res, 'support': sup}
+                if ti.check_price_near_sr(signal_candle, zones) == 'call': call_confs.append("SR_Zone")
+                if ti.check_candlestick_pattern(analysis_candles) == 'call': call_confs.append("Candle_Pattern")
+                if ti.check_rsi_condition(analysis_candles) == 'call': call_confs.append("RSI_Condition")
+                
+                if ti.check_price_near_sr(signal_candle, zones) == 'put': put_confs.append("SR_Zone")
+                if ti.check_candlestick_pattern(analysis_candles) == 'put': put_confs.append("Candle_Pattern")
+                if ti.check_rsi_condition(analysis_candles) == 'put': put_confs.append("RSI_Condition")
 
-            # 2. Se não for um sinal de compra, verifica se está numa zona de Resistência
-            if not final_direction:
-                sr_signal = ti.check_price_near_sr(signal_candle, {'resistance': res})
-                if sr_signal == 'put':
-                    confluences = ["SR_Zone_Resistance"] # Zera as confluências de call
-                    if ti.check_rsi_condition(analysis_candles) == 'put': confluences.append("RSI_Overbought")
-                    if ti.check_candlestick_pattern(analysis_candles) == 'put': confluences.append("Bearish_Pattern")
-                    if len(confluences) >= 2: final_direction = 'put'
+                if len(call_confs) >= 2:
+                    final_direction = 'call'
+                    confluences = call_confs
+                elif len(put_confs) >= 2:
+                    final_direction = 'put'
+                    confluences = put_confs
+            
+            elif expiration_minutes == 5:
+                m5_signal = ti.check_m5_price_action(analysis_candles, {'resistance': res, 'support': sup})
+                if m5_signal:
+                    final_direction = m5_signal['direction']
+                    confluences = m5_signal['confluences']
 
             if final_direction:
                 if not ti.validate_reversal_candle(signal_candle, final_direction):
@@ -178,13 +189,8 @@ class TradingBot:
                 if self.is_trade_active: return
                 self.is_trade_active = True
 
-                now = datetime.utcnow()
-                wait_seconds = (60 - now.second - 1) + (1 - now.microsecond / 1000000) + 0.2
-                await self.logger('INFO', f"Sinal encontrado em {base}. Aguardando {wait_seconds:.2f}s para entrada precisa.")
-                await asyncio.sleep(wait_seconds)
-
                 strategy_name = f"M{expiration_minutes}_" + ', '.join(confluences)
-                await self.logger('SUCCESS', f"EXECUTANDO SINAL! Dir: {final_direction.upper()}. Conf: {strategy_name}")
+                await self.logger('SUCCESS', f"SINAL VÁLIDO! Dir: {final_direction.upper()}. Conf: {strategy_name}")
                 
                 signal = TradeSignal(pair=base, direction=final_direction, strategy=strategy_name,
                                      setup_candle_open=signal_candle.open, setup_candle_high=signal_candle.max,
@@ -212,14 +218,12 @@ class TradingBot:
             order_id = await self.exnova.execute_trade(entry_value, full_name, signal.direction.lower(), expiration_minutes)
             
             if not order_id:
-                await self.logger('ERROR', f"Falha ao executar a ordem para {full_name}. A corretora pode ter rejeitado a entrada.")
+                await self.logger('ERROR', f"Falha ao executar a ordem para {full_name}.")
                 self.is_trade_active = False
                 return
 
-            await self.logger('INFO', f"Ordem {order_id} enviada com sucesso. Valor: {entry_value}. Exp: {expiration_minutes} min. Aguardando...")
+            await self.logger('INFO', f"Ordem {order_id} enviada com sucesso. Valor: {entry_value}. Exp: {expiration_minutes} min.")
             sid = await self.supabase.insert_trade_signal(signal)
-            if not sid:
-                await self.logger('CRITICAL', f"ORDEM {order_id} ABERTA NA CORRETORA MAS FALHOU AO REGISTAR NO SUPABASE!")
             
             await asyncio.sleep(expiration_minutes * 60 + 35)
 
@@ -249,26 +253,20 @@ class TradingBot:
                 if pair in self.blacklisted_assets:
                     self.blacklisted_assets.remove(pair)
                     await self.logger('INFO', f"O par {pair} foi redimido e REMOVIDO da lista negra.")
-            
             elif result == 'LOSS':
                 self.daily_losses += 1
                 self.asset_performance[pair]['losses'] += 1
                 self.consecutive_losses[pair] += 1
-                await self.logger('WARNING', f"O par {pair} está com {self.consecutive_losses[pair]} derrota(s) consecutiva(s).")
-                
                 if self.consecutive_losses[pair] >= 2:
                     self.blacklisted_assets.add(pair)
                     await self.logger('ERROR', f"O par {pair} atingiu 2 derrotas consecutivas e foi COLOCADO na lista negra.")
 
             stop_win = self.bot_config.get('stop_win', 0)
             stop_loss = self.bot_config.get('stop_loss', 0)
-
-            if stop_win > 0 and self.daily_wins >= stop_win:
-                await self.logger('SUCCESS', f"META DE STOP WIN ({stop_win}) ATINGIDA! A pausar o bot.")
-                await self.supabase.update_config({'status': 'PAUSED'})
-            
-            if stop_loss > 0 and self.daily_losses >= stop_loss:
-                await self.logger('ERROR', f"META DE STOP LOSS ({stop_loss}) ATINGIDA! A pausar o bot.")
+            if (stop_win > 0 and self.daily_wins >= stop_win) or \
+               (stop_loss > 0 and self.daily_losses >= stop_loss):
+                msg = f"META DE STOP WIN ({self.daily_wins}/{stop_win}) ATINGIDA!" if self.daily_wins >= stop_win else f"META DE STOP LOSS ({self.daily_losses}/{stop_loss}) ATINGIDA!"
+                await self.logger('SUCCESS' if result == 'WIN' else 'ERROR', f"{msg} A pausar o bot.")
                 await self.supabase.update_config({'status': 'PAUSED'})
 
             if self.bot_config.get('use_martingale', False):
