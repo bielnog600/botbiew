@@ -87,7 +87,10 @@ class TradingBot:
 
     async def trading_cycle(self):
         now = datetime.utcnow()
-        if now.second >= 55:
+        if now.minute == self.last_analysis_minute:
+            return
+
+        if now.second >= 50:
             if now.minute != self.last_analysis_minute:
                 self.last_analysis_minute = now.minute
                 
@@ -121,6 +124,7 @@ class TradingBot:
                 break
             await self._analyze_asset(asset, timeframe_seconds, expiration_minutes)
 
+    # ATUALIZADO: Lógica de análise completamente reescrita para ser mais segura
     async def _analyze_asset(self, full_name: str, timeframe_seconds: int, expiration_minutes: int):
         try:
             if self.is_trade_active: return
@@ -137,40 +141,36 @@ class TradingBot:
             else:
                 return
 
-            # --- FILTRO 1: VOLATILIDADE (ATR) DINÂMICO ---
             atr_value = ti.calculate_atr(analysis_candles, period=14)
             volatility_profile = self.bot_config.get('volatility_profile', 'EQUILIBRADO')
-            
-            atr_limits = {
-                'ULTRA_CONSERVADOR': (0.00015, 0.00500),
-                'CONSERVADOR':       (0.00008, 0.01500),
-                'EQUILIBRADO':       (0.00005, 0.05000),
-                'AGRESSIVO':         (0.00001, 0.15000),
-                'ULTRA_AGRESSIVO':   (0.00001, 0.50000),
-            }
-            
+            atr_limits = {'ULTRA_CONSERVADOR': (0.00015, 0.00500), 'CONSERVADOR': (0.00008, 0.01500), 'EQUILIBRADO': (0.00005, 0.05000), 'AGRESSIVO': (0.00001, 0.15000), 'ULTRA_AGRESSIVO': (0.00001, 0.50000)}
             if volatility_profile != 'DESATIVADO':
                 min_atr, max_atr = atr_limits.get(volatility_profile, (0.00005, 0.05000))
-                if atr_value is None or not (min_atr < atr_value < max_atr):
-                    await self.logger('DEBUG', f"[{base}-M{expiration_minutes}] Filtro de volatilidade ({volatility_profile}): Fora dos limites (ATR={atr_value}). Ativo ignorado.")
-                    return
+                if atr_value is None or not (min_atr < atr_value < max_atr): return
 
             signal_candle = analysis_candles[-1]
             
-            confluences = {'call': [], 'put': []}
-            zones = {'resistance': res, 'support': sup}
-            
-            if (sr_signal := ti.check_price_near_sr(signal_candle, zones)):
-                confluences[sr_signal].append("SR_Zone")
-            if (candle_signal := ti.check_candlestick_pattern(analysis_candles)):
-                confluences[candle_signal].append("Candle_Pattern")
-            if (rsi_signal := ti.check_rsi_condition(analysis_candles)):
-                confluences[rsi_signal].append("RSI_Condition")
-            
+            # --- LÓGICA DE REVERSÃO ANCORADA ---
             final_direction = None
-            if len(confluences['call']) >= 2: final_direction = 'call'
-            elif len(confluences['put']) >= 2: final_direction = 'put'
+            confluences = []
             
+            # 1. Verifica se está numa zona de Suporte
+            sr_signal = ti.check_price_near_sr(signal_candle, {'support': sup})
+            if sr_signal == 'call':
+                confluences.append("SR_Zone_Support")
+                if ti.check_rsi_condition(analysis_candles) == 'call': confluences.append("RSI_Oversold")
+                if ti.check_candlestick_pattern(analysis_candles) == 'call': confluences.append("Bullish_Pattern")
+                if len(confluences) >= 2: final_direction = 'call'
+
+            # 2. Se não for um sinal de compra, verifica se está numa zona de Resistência
+            if not final_direction:
+                sr_signal = ti.check_price_near_sr(signal_candle, {'resistance': res})
+                if sr_signal == 'put':
+                    confluences = ["SR_Zone_Resistance"] # Zera as confluências de call
+                    if ti.check_rsi_condition(analysis_candles) == 'put': confluences.append("RSI_Overbought")
+                    if ti.check_candlestick_pattern(analysis_candles) == 'put': confluences.append("Bearish_Pattern")
+                    if len(confluences) >= 2: final_direction = 'put'
+
             if final_direction:
                 if not ti.validate_reversal_candle(signal_candle, final_direction):
                     return
@@ -183,7 +183,7 @@ class TradingBot:
                 await self.logger('INFO', f"Sinal encontrado em {base}. Aguardando {wait_seconds:.2f}s para entrada precisa.")
                 await asyncio.sleep(wait_seconds)
 
-                strategy_name = f"M{expiration_minutes}_" + ', '.join(confluences[final_direction])
+                strategy_name = f"M{expiration_minutes}_" + ', '.join(confluences)
                 await self.logger('SUCCESS', f"EXECUTANDO SINAL! Dir: {final_direction.upper()}. Conf: {strategy_name}")
                 
                 signal = TradeSignal(pair=base, direction=final_direction, strategy=strategy_name,
@@ -221,7 +221,7 @@ class TradingBot:
             if not sid:
                 await self.logger('CRITICAL', f"ORDEM {order_id} ABERTA NA CORRETORA MAS FALHOU AO REGISTAR NO SUPABASE!")
             
-            await asyncio.sleep(expiration_minutes * 60 + 45)
+            await asyncio.sleep(expiration_minutes * 60 + 35)
 
             bal_after = await self.exnova.get_current_balance()
             
