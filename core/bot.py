@@ -120,17 +120,16 @@ class TradingBot:
             await self._analyze_asset(asset, timeframe_seconds, expiration_minutes)
 
     async def _analyze_asset(self, full_name: str, timeframe_seconds: int, expiration_minutes: int):
-        # ... (lógica de análise inalterada) ...
         try:
             if self.is_trade_active: return
             base = full_name.split('-')[0]
             
             if expiration_minutes == 1:
-                analysis_candles, sr_candles = await asyncio.gather(self.exnova.get_historical_candles(base, 60, 200), self.exnova.get_historical_candles(base, 900, 100))
+                analysis_candles, sr_candles = await asyncio.gather(self.exnova.get_historical_candles(base, 60, 500), self.exnova.get_historical_candles(base, 900, 100))
                 if not analysis_candles or not sr_candles: return
                 res, sup = get_m15_sr_zones(sr_candles)
             elif expiration_minutes == 5:
-                analysis_candles, sr_candles = await asyncio.gather(self.exnova.get_historical_candles(base, 300, 200), self.exnova.get_historical_candles(base, 3600, 100))
+                analysis_candles, sr_candles = await asyncio.gather(self.exnova.get_historical_candles(base, 300, 500), self.exnova.get_historical_candles(base, 3600, 100))
                 if not analysis_candles or not sr_candles: return
                 res, sup = get_h1_sr_zones(sr_candles)
             else: return
@@ -177,13 +176,13 @@ class TradingBot:
             if final_direction:
                 if not ti.validate_reversal_candle(signal_candle, final_direction): return
                 if self.is_trade_active: return
-                self.is_trade_active = True
-
+                
                 now = datetime.utcnow()
                 wait_seconds = (60 - now.second - 1) + (1 - now.microsecond / 1000000) + 0.2
                 await self.logger('INFO', f"Sinal encontrado em {base}. Aguardando {wait_seconds:.2f}s para entrada precisa.")
                 await asyncio.sleep(wait_seconds)
 
+                self.is_trade_active = True
                 strategy_name = f"M{expiration_minutes}_" + ', '.join(confluences)
                 await self.logger('SUCCESS', f"EXECUTANDO SINAL! Dir: {final_direction.upper()}. Conf: {strategy_name}")
                 
@@ -198,14 +197,22 @@ class TradingBot:
             await self.logger('ERROR', f"Erro em _analyze_asset({full_name}, M{expiration_minutes}): {e}")
             traceback.print_exc()
 
+    # ATUALIZADO: Adicionada lógica de timing para o Martingale
     async def _execute_martingale_trade(self):
         trade_info = self.pending_martingale_trade
         if not trade_info: return
 
         self.pending_martingale_trade = None
-        self.is_trade_active = True
-
+        
+        now = datetime.utcnow()
+        next_minute_ts = (now.timestamp() // 60 + 1) * 60
+        wait_seconds = next_minute_ts - now.timestamp() + 0.2
+        
         current_level = self.martingale_state.get(trade_info['pair'], {}).get('level', 1)
+        await self.logger('WARNING', f"MARTINGALE NÍVEL {current_level} PREPARADO para {trade_info['pair']}. Aguardando {wait_seconds:.2f}s para entrada na próxima vela.")
+        await asyncio.sleep(wait_seconds)
+
+        self.is_trade_active = True
         strategy_name = f"M{trade_info['expiration_minutes']}_Martingale_{current_level}"
         
         signal = TradeSignal(
@@ -214,19 +221,18 @@ class TradingBot:
             strategy=strategy_name
         )
         
-        await self.logger('WARNING', f"EXECUTANDO MARTINGALE NÍVEL {current_level} para {trade_info['pair']}...")
+        await self.logger('SUCCESS', f"EXECUTANDO MARTINGALE! Dir: {signal.direction.upper()}.")
         
         trade_expiration = 4 if trade_info['expiration_minutes'] == 5 else trade_info['expiration_minutes']
         await self._execute_and_wait(signal, trade_info['full_name'], trade_expiration)
 
-    # CORRIGIDO: Lógica de cálculo do Martingale mais robusta
-    def _get_entry_value(self, asset: str) -> float:
+    def _get_entry_value(self, asset: str, is_martingale: bool = False) -> float:
         base_value = self.bot_config.get('entry_value', 1.0)
         if not self.bot_config.get('use_martingale', False):
             return base_value
             
         mg_level = self.martingale_state.get(asset, {}).get('level', 0)
-        if mg_level == 0:
+        if mg_level == 0 and not is_martingale:
             return base_value
         
         factor = self.bot_config.get('martingale_factor', 2.3)
@@ -235,17 +241,15 @@ class TradingBot:
 
     async def _execute_and_wait(self, signal: TradeSignal, full_name: str, expiration_minutes: int):
         try:
-            bal_before = await self.exnova.get_current_balance()
-            # CORRIGIDO: A chamada agora está correta, sem argumentos inesperados
-            entry_value = self._get_entry_value(signal.pair)
+            is_martingale_trade = signal.strategy.startswith("M") and "Martingale" in signal.strategy
+            entry_value = self._get_entry_value(signal.pair, is_martingale=is_martingale_trade)
 
             order_id = await self.exnova.execute_trade(entry_value, full_name, signal.direction.lower(), expiration_minutes)
             
             if not order_id:
                 await self.logger('ERROR', f"Falha ao executar a ordem para {full_name}. A corretora pode ter rejeitado a entrada.")
+                if is_martingale_trade: self.martingale_state[signal.pair] = {'level': 0}
                 self.is_trade_active = False
-                if signal.strategy.startswith("M_Martingale"):
-                    self.martingale_state[signal.pair] = {'level': 0}
                 return
 
             await self.logger('INFO', f"Ordem {order_id} enviada com sucesso. Valor: {entry_value}. Exp: {expiration_minutes} min. Aguardando...")
@@ -255,8 +259,9 @@ class TradingBot:
 
             bal_after = await self.exnova.get_current_balance()
             
-            if bal_before is None or bal_after is None: result = 'UNKNOWN'
+            if bal_after is None: result = 'UNKNOWN'
             else:
+                bal_before = await self.exnova.get_current_balance() # Re-fetch para ter certeza
                 delta = bal_after - bal_before
                 result = 'WIN' if delta > 0 else 'LOSS' if delta < 0 else 'DRAW'
             await self.logger('SUCCESS' if result == 'WIN' else 'ERROR', f"Resultado: {result}. ΔSaldo = {delta:.2f}" if result != 'UNKNOWN' else f"Resultado: {result}")
@@ -280,7 +285,6 @@ class TradingBot:
                 if pair in self.blacklisted_assets:
                     self.blacklisted_assets.remove(pair)
                     await self.logger('INFO', f"O par {pair} foi redimido e REMOVIDO da lista negra.")
-            
             elif result == 'LOSS':
                 self.daily_losses += 1
                 self.asset_performance[pair]['losses'] += 1
