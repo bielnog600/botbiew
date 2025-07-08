@@ -255,7 +255,7 @@ class TradingBot:
             await self.logger('INFO', f"Ordem {order_id} enviada com sucesso. Valor: {entry_value}. Exp: {expiration_minutes} min. Aguardando...")
             sid = await self.supabase.insert_trade_signal(signal)
             
-            await asyncio.sleep(expiration_minutes * 60 + 15)
+            await asyncio.sleep(expiration_minutes * 60 + 5)
 
             bal_after = await self.exnova.get_current_balance()
             
