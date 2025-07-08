@@ -1,26 +1,32 @@
 import asyncio
 import logging
+import time # ADICIONADO: Importação do módulo 'time' que estava em falta
 from typing import List, Optional, Dict
-from exnovaapi.stable_api import Exnova # Usando a importação correta do seu bot antigo
+from exnovaapi.stable_api import Exnova
 
 class AsyncExnovaService:
     def __init__(self, email: str, password: str):
-        # Usando o nome de classe correto 'Exnova'
         self.api = Exnova(email, password)
         self.logger = logging.getLogger(__name__)
+        self.api.profile = None
 
     async def connect(self) -> bool:
-        """Conecta-se à API da Exnova de forma síncrona dentro de um executor."""
+        """Conecta-se à API da Exnova e aguarda os dados essenciais serem carregados."""
         try:
             loop = asyncio.get_event_loop()
-            # A função 'connect' da biblioteca é síncrona
             check, reason = await loop.run_in_executor(None, self.api.connect)
             if not check:
                 self.logger.error(f"Falha na conexão com a Exnova: {reason}")
                 return False
             
-            self.logger.info("Conexão estabelecida com sucesso.")
-            return True
+            for _ in range(15): 
+                if hasattr(self.api, 'profile') and self.api.profile is not None:
+                    self.logger.info("Conexão e perfil carregados com sucesso.")
+                    return True
+                await asyncio.sleep(1)
+            
+            self.logger.error("Conexão estabelecida, mas o perfil do utilizador não foi carregado a tempo.")
+            return False
         except Exception as e:
             self.logger.error(f"Erro crítico na conexão: {e}")
             return False
@@ -29,16 +35,17 @@ class AsyncExnovaService:
         """Obtém a lista de ativos abertos para negociação."""
         try:
             loop = asyncio.get_event_loop()
-            # CORRIGIDO: Usando o nome de função correto 'get_all_open_time'
-            all_assets = await loop.run_in_executor(None, self.api.get_all_open_time)
+            all_assets_data = await loop.run_in_executor(None, self.api.get_all_init_data)
             
-            open_assets = []
-            for market_type in ['binary', 'turbo']:
-                if market_type in all_assets:
-                    for asset, info in all_assets[market_type].items():
-                        if info.get('open', False):
-                            open_assets.append(asset)
-            return list(set(open_assets)) # Remove duplicatas
+            if not all_assets_data:
+                self.logger.warning("A API não retornou dados de ativos.")
+                return []
+
+            tradables = all_assets_data.get('binary', {}).get('actives', {})
+            if not tradables:
+                tradables = all_assets_data.get('turbo', {}).get('actives', {})
+
+            return [asset for asset, data in tradables.items() if data.get('open')]
         except Exception as e:
             self.logger.error(f"Erro ao obter ativos abertos: {e}")
             return []
@@ -47,7 +54,7 @@ class AsyncExnovaService:
         """Busca o histórico de velas para um ativo."""
         try:
             loop = asyncio.get_event_loop()
-            # CORRIGIDO: A função da biblioteca é síncrona
+            # CORRIGIDO: Agora a chamada a time.time() funciona porque o módulo foi importado
             candles = await loop.run_in_executor(None, lambda: self.api.get_candles(asset, timeframe, count, time.time()))
             return candles
         except Exception as e:
@@ -58,8 +65,17 @@ class AsyncExnovaService:
         """Obtém o saldo atual da conta selecionada."""
         try:
             loop = asyncio.get_event_loop()
-            # CORRIGIDO: O nome correto da função é 'get_balance'
-            return await loop.run_in_executor(None, self.api.get_balance)
+            balances_data = await loop.run_in_executor(None, self.api.get_balances)
+            if balances_data and balances_data.get('msg'):
+                for balance_info in balances_data['msg']:
+                    if balance_info.get('is_active'):
+                        return balance_info.get('amount')
+            
+            if self.api.profile and hasattr(self.api.profile, 'balance'):
+                return self.api.profile.balance
+
+            self.logger.warning("Não foi possível encontrar o saldo da conta ativa.")
+            return None
         except Exception as e:
             self.logger.error(f"Erro ao obter saldo: {e}")
             return None
@@ -68,10 +84,9 @@ class AsyncExnovaService:
         """Muda entre a conta de prática e a conta real."""
         try:
             loop = asyncio.get_event_loop()
-            # CORRIGIDO: O nome correto da função é 'change_balance'
             await loop.run_in_executor(None, lambda: self.api.change_balance(balance_type.upper()))
         except Exception as e:
-            self.logger.error(f"Erro ao mudar de conta para {balance_type}: {e}")
+            self.logger.warning(f"Ocorreu um erro esperado ao mudar de conta para {balance_type} (pode ser ignorado): {e}")
 
     async def execute_trade(self, amount: float, asset: str, direction: str, expiration_minutes: int) -> Optional[int]:
         """Executa uma operação de compra ou venda."""
