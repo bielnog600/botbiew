@@ -17,7 +17,6 @@ class AsyncExnovaService:
                 self.logger.error(f"Falha na conexão com a Exnova: {reason}")
                 return False
             
-            # Aguarda o perfil ser carregado, que contém o saldo
             for _ in range(10): 
                 if hasattr(self.api, 'profile') and self.api.profile is not None:
                     self.logger.info("Conexão e perfil carregados com sucesso.")
@@ -26,14 +25,6 @@ class AsyncExnovaService:
             
             self.logger.error("Conexão estabelecida, mas o perfil do utilizador não foi carregado a tempo.")
             return False
-        except AttributeError as e:
-            self.logger.error(f"Erro de Atributo na conexão: {e}. Isto indica um nome de método incorreto na biblioteca.")
-            self.logger.error("--- MÉTODOS DISPONÍVEIS NO OBJETO API ---")
-            for attr in dir(self.api):
-                if not attr.startswith('_'):
-                    self.logger.error(f" - {attr}")
-            self.logger.error("-----------------------------------------")
-            return False
         except Exception as e:
             self.logger.error(f"Erro crítico na conexão: {e}")
             return False
@@ -41,11 +32,11 @@ class AsyncExnovaService:
     async def get_open_assets(self) -> List[str]:
         """Obtém a lista de ativos abertos para negociação."""
         try:
-            loop = asyncio.get_event_loop()
-            # Tenta o nome mais comum para esta função
-            all_assets = await loop.run_in_executor(None, self.api.get_all_init_data)
-            tradables = all_assets.get('binary', {}).get('actives', {})
-            return [asset for asset, data in tradables.items() if data.get('open')]
+            # CORRIGIDO: A biblioteca provavelmente armazena os ativos na propriedade 'actives' após a conexão.
+            if hasattr(self.api, 'actives'):
+                return [asset for asset, data in self.api.actives.items() if data.get('open')]
+            self.logger.warning("Não foi possível encontrar a lista de ativos 'actives'.")
+            return []
         except Exception as e:
             self.logger.error(f"Erro ao obter ativos abertos: {e}")
             return []
@@ -74,8 +65,10 @@ class AsyncExnovaService:
         """Muda entre a conta de prática e a conta real."""
         try:
             loop = asyncio.get_event_loop()
-            # Tenta o nome mais comum para esta função
-            await loop.run_in_executor(None, lambda: self.api.change_balance(balance_type.upper()))
+            # CORRIGIDO: O nome da função é provavelmente 'set_active_account'
+            await loop.run_in_executor(None, lambda: self.api.set_active_account(balance_type.upper()))
+        except AttributeError:
+            self.logger.error("Erro: O método 'set_active_account' não foi encontrado. Verifique a biblioteca 'exnovaapi'.")
         except Exception as e:
             self.logger.error(f"Erro ao mudar de conta para {balance_type}: {e}")
 
