@@ -2,13 +2,13 @@ import asyncio
 import logging
 from typing import List, Optional, Dict
 
-# ATUALIZADO: Usando um estilo de importação mais explícito para evitar conflitos
+# Usando um estilo de importação mais explícito para evitar conflitos
 import exnovaapi.api as exnova_api_module
 
 class AsyncExnovaService:
     def __init__(self, email: str, password: str):
-        # ATUALIZADO: Usa o módulo importado para instanciar a classe
-        self.api = exnova_api_module.ExnovaAPI(email, password)
+        # CORRIGIDO: O nome da classe é 'Exnovaapi' com 'a' minúsculo.
+        self.api = exnova_api_module.Exnovaapi(email, password)
         self.logger = logging.getLogger(__name__)
 
     async def connect(self) -> bool:
