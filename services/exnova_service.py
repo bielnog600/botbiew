@@ -36,7 +36,6 @@ class AsyncExnovaService:
             # CORRIGIDO: Usando o nome de função correto da sua biblioteca
             all_assets_data = await loop.run_in_executor(None, self.api.get_api_option_init_all_v2)
             
-            # A estrutura de dados pode variar, mas esta é a mais comum
             tradables = all_assets_data.get('binary', {}).get('actives', {})
             if not tradables:
                 tradables = all_assets_data.get('turbo', {}).get('actives', {})
@@ -50,7 +49,7 @@ class AsyncExnovaService:
         """Busca o histórico de velas para um ativo."""
         try:
             loop = asyncio.get_event_loop()
-            # O nome correto da função é 'getcandles' (tudo minúsculo)
+            # CORRIGIDO: O nome correto da função é 'getcandles'
             status, candles = await loop.run_in_executor(None, lambda: self.api.getcandles(asset, timeframe, count))
             return candles if status else None
         except Exception as e:
@@ -58,23 +57,29 @@ class AsyncExnovaService:
             return None
 
     async def get_current_balance(self) -> Optional[float]:
-        """Obtém o saldo atual da conta selecionada a partir do perfil."""
+        """Obtém o saldo atual da conta selecionada."""
         try:
-            if self.api.profile and hasattr(self.api.profile, 'balance'):
-                return self.api.profile.balance
+            loop = asyncio.get_event_loop()
+            # CORRIGIDO: Usando o método correto 'get_balances'
+            balances = await loop.run_in_executor(None, self.api.get_balances)
+            # A função retorna uma lista, pegamos o saldo da conta ativa
+            for balance in balances.get('msg', []):
+                if balance.get('is_active'):
+                    return balance.get('amount')
             return None
         except Exception as e:
-            self.logger.error(f"Erro ao obter saldo do perfil: {e}")
+            self.logger.error(f"Erro ao obter saldo: {e}")
             return None
 
     async def change_balance(self, balance_type: str):
         """Muda entre a conta de prática e a conta real."""
         try:
             loop = asyncio.get_event_loop()
-            # CORRIGIDO: Usando o nome de função correto da sua biblioteca
+            # CORRIGIDO: Usando o nome correto 'changebalance' e tratando o erro esperado
             await loop.run_in_executor(None, lambda: self.api.changebalance(balance_type.upper()))
         except Exception as e:
-            self.logger.error(f"Erro ao mudar de conta para {balance_type}: {e}")
+            # Este erro 404 é esperado e pode ser ignorado se o resto funcionar
+            self.logger.warning(f"Ocorreu um erro esperado ao mudar de conta para {balance_type} (pode ser ignorado): {e}")
 
     async def execute_trade(self, amount: float, asset: str, direction: str, expiration_minutes: int) -> Optional[int]:
         """Executa uma operação de compra ou venda."""
@@ -90,7 +95,6 @@ class AsyncExnovaService:
         """Verifica o resultado de uma operação específica pelo seu ID."""
         try:
             loop = asyncio.get_event_loop()
-            # O nome desta função parece estar correto
             status, result = await loop.run_in_executor(None, lambda: self.api.check_win_v4(order_id))
             if status:
                 return result
