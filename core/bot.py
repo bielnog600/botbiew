@@ -184,15 +184,9 @@ class TradingBot:
                 strategy_name = f"M{expiration_minutes}_" + ', '.join(confluences)
                 await self.logger('SUCCESS', f"EXECUTANDO SINAL! Dir: {final_direction.upper()}. Conf: {strategy_name}")
                 
-                signal = TradeSignal(
-                    pair=base, 
-                    direction=final_direction, 
-                    strategy=strategy_name,
-                    setup_candle_open=signal_candle['open'], 
-                    setup_candle_high=signal_candle['max'],
-                    setup_candle_low=signal_candle['min'], 
-                    setup_candle_close=signal_candle['close']
-                )
+                signal = TradeSignal(pair=base, direction=final_direction, strategy=strategy_name,
+                                     setup_candle_open=signal_candle['open'], setup_candle_high=signal_candle['max'],
+                                     setup_candle_low=signal_candle['min'], setup_candle_close=signal_candle['close'])
                 
                 trade_expiration = 4 if expiration_minutes == 5 else expiration_minutes
                 await self._execute_and_wait(signal, full_name, trade_expiration)
@@ -247,6 +241,9 @@ class TradingBot:
         try:
             is_martingale_trade = "Martingale" in signal.strategy
             entry_value = self._get_entry_value(signal.pair, is_martingale=is_martingale_trade)
+            
+            # CORRIGIDO: Obtém o saldo ANTES de executar a ordem
+            bal_before = await self.exnova.get_current_balance()
 
             order_id = await self.exnova.execute_trade(entry_value, full_name, signal.direction.lower(), expiration_minutes)
             
@@ -261,20 +258,23 @@ class TradingBot:
             
             await asyncio.sleep(expiration_minutes * 60 + 10)
 
-            trade_result = await self.exnova.check_win(order_id)
+            # CORRIGIDO: Usa a comparação de saldo para determinar o resultado
+            bal_after = await self.exnova.get_current_balance()
             
-            result = 'UNKNOWN'
-            if trade_result == 'win': result = 'WIN'
-            elif trade_result == 'loss': result = 'LOSS'
-            elif trade_result == 'equal': result = 'DRAW'
-            
-            await self.logger('SUCCESS' if result == 'WIN' else 'ERROR', f"Resultado da ordem {order_id}: {result}")
+            if bal_before is None or bal_after is None:
+                result = 'UNKNOWN'
+                await self.logger('WARNING', f"Resultado da ordem {order_id} desconhecido. Não foi possível obter o saldo.")
+            else:
+                delta = bal_after - bal_before
+                if delta > 0: result = 'WIN'
+                elif delta < 0: result = 'LOSS'
+                else: result = 'DRAW'
+                await self.logger('SUCCESS' if result == 'WIN' else 'ERROR', f"Resultado: {result}. ΔSaldo = {delta:.2f}")
 
             if sid:
                 mg_lv = self.martingale_state.get(signal.pair, {}).get('level', 0)
                 await self.supabase.update_trade_result(sid, result, mg_lv)
             
-            bal_after = await self.exnova.get_current_balance()
             if bal_after is not None:
                 await self.supabase.update_current_balance(bal_after)
 
