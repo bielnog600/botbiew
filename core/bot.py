@@ -42,7 +42,6 @@ class TradingBot:
         await self.logger('SUCCESS', "Estatísticas de ativos zeradas.")
         
     async def _daily_reset_if_needed(self):
-        """Verifica se um novo dia começou (baseado em UTC) e zera as metas diárias."""
         current_date_utc = datetime.utcnow().date()
         if self.last_daily_reset_date != current_date_utc:
             await self.logger('INFO', f"NOVO DIA DETETADO ({current_date_utc}). A zerar metas de Stop Win/Loss e saldo diário.")
@@ -87,9 +86,9 @@ class TradingBot:
         now = datetime.utcnow()
         
         # A janela de análise começa aos 50 segundos de cada minuto.
-        if now.second >= 55:
+        if now.second >= 50:
             # Garante que a análise para este minuto só é executada uma vez.
-            if now.minute != self.last_analysis_minute:trade_expiration
+            if now.minute != self.last_analysis_minute:
                 self.last_analysis_minute = now.minute
                 
                 # A análise de M5 ocorre quando a vela de 5min está a fechar
@@ -136,49 +135,34 @@ class TradingBot:
                 res, sup = get_h1_sr_zones(sr_candles)
             else: return
 
-# --- FILTRO 1: VOLATILIDADE (ATR) DINÂMICO ---
             volatility_profile = self.bot_config.get('volatility_profile', 'EQUILIBRADO')
-            
-            atr_limits = {
-                'ULTRA_CONSERVADOR': (0.00015, 0.00500),
-                'CONSERVADOR':       (0.00008, 0.01500),
-                'EQUILIBRADO':       (0.00005, 0.05000),
-                'AGRESSIVO':         (0.00001, 0.15000),
-                'ULTRA_AGRESSIVO':   (0.00001, 0.50000),
-            }
-            
+            atr_limits = {'ULTRA_CONSERVADOR': (0.00015, 0.00500), 'CONSERVADOR': (0.00008, 0.01500), 'EQUILIBRADO': (0.00005, 0.05000), 'AGRESSIVO': (0.00001, 0.15000), 'ULTRA_AGRESSIVO': (0.00001, 0.50000)}
             if volatility_profile != 'DESATIVADO':
-                min_atr, max_atr = atr_limits.get(volatility_profile, (0.00005, 0.05000)) # Padrão é EQUILIBRADO
+                min_atr, max_atr = atr_limits.get(volatility_profile, (0.00005, 0.05000))
                 atr_value = ti.calculate_atr(analysis_candles, period=14)
                 if atr_value is None or not (min_atr < atr_value < max_atr):
-                    await self.logger('DEBUG', f"[{base}-M{expiration_minutes}] Filtro de volatilidade ({volatility_profile}): Fora dos limites (ATR={atr_value}). Ativo ignorado.")
                     return
 
-            signal_candle = analysis_candles[-1] # Analisa a vela que está a fechar
+            signal_candle = analysis_candles[-1]
             
             final_direction = None
             confluences = []
             zones = {'resistance': res, 'support': sup}
 
-            if expiration_minutes == 1:
-                sr_signal_type = ti.check_price_near_sr(signal_candle, zones)
-                if sr_signal_type == 'call':
-                    confluences.append("SR_Zone")
-                    if ti.check_candlestick_pattern(analysis_candles) == 'call': confluences.append("Candle_Pattern")
-                    if ti.check_rsi_condition(analysis_candles) == 'call': confluences.append("RSI_Condition")
-                    if len(confluences) >= 2: final_direction = 'call'
-                elif sr_signal_type == 'put':
-                    confluences.append("SR_Zone")
-                    if ti.check_candlestick_pattern(analysis_candles) == 'put': confluences.append("Candle_Pattern")
-                    if ti.check_rsi_condition(analysis_candles) == 'put': confluences.append("RSI_Condition")
-                    if len(confluences) >= 2: final_direction = 'put'
+            sr_signal_type = ti.check_price_near_sr(signal_candle, zones)
             
-            elif expiration_minutes == 5:
-                m5_signal = ti.check_m5_price_action(analysis_candles, zones)
-                if m5_signal:
-                    final_direction = m5_signal['direction']
-                    confluences = m5_signal['confluences']
+            if sr_signal_type == 'call':
+                confluences.append("SR_Zone")
+                if ti.check_candlestick_pattern(analysis_candles) == 'call': confluences.append("Candle_Pattern")
+                if ti.check_rsi_condition(analysis_candles) == 'call': confluences.append("RSI_Condition")
+                if len(confluences) >= 2: final_direction = 'call'
 
+            elif sr_signal_type == 'put':
+                confluences.append("SR_Zone")
+                if ti.check_candlestick_pattern(analysis_candles) == 'put': confluences.append("Candle_Pattern")
+                if ti.check_rsi_condition(analysis_candles) == 'put': confluences.append("RSI_Condition")
+                if len(confluences) >= 2: final_direction = 'put'
+            
             if final_direction:
                 if not ti.validate_reversal_candle(signal_candle, final_direction): return
                 if self.is_trade_active: return
@@ -225,7 +209,7 @@ class TradingBot:
             await self.logger('INFO', f"Ordem {order_id} enviada com sucesso. Valor: {entry_value}. Exp: {expiration_minutes} min. Aguardando...")
             sid = await self.supabase.insert_trade_signal(signal)
             
-            await asyncio.sleep(expiration_minutes * 60 + 25)
+            await asyncio.sleep(expiration_minutes * 60 + 20)
 
             bal_after = await self.exnova.get_current_balance()
             
