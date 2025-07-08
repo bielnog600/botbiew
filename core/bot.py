@@ -130,12 +130,23 @@ class TradingBot:
                 res, sup = get_h1_sr_zones(sr_candles)
             else: return
 
+            # --- FILTRO 1: VOLATILIDADE (ATR) DINÂMICO ---
             volatility_profile = self.bot_config.get('volatility_profile', 'EQUILIBRADO')
-            atr_limits = {'ULTRA_CONSERVADOR': (0.00015, 0.00500), 'CONSERVADOR': (0.00008, 0.01500), 'EQUILIBRADO': (0.00005, 0.05000), 'AGRESSIVO': (0.00001, 0.15000), 'ULTRA_AGRESSIVO': (0.00001, 0.50000)}
+            
+            atr_limits = {
+                'ULTRA_CONSERVADOR': (0.00015, 0.00500),
+                'CONSERVADOR':       (0.00008, 0.01500),
+                'EQUILIBRADO':       (0.00005, 0.05000),
+                'AGRESSIVO':         (0.00001, 0.15000),
+                'ULTRA_AGRESSIVO':   (0.00001, 0.50000),
+            }
+            
             if volatility_profile != 'DESATIVADO':
-                min_atr, max_atr = atr_limits.get(volatility_profile, (0.00005, 0.05000))
+                min_atr, max_atr = atr_limits.get(volatility_profile, (0.00005, 0.05000)) # Padrão é EQUILIBRADO
                 atr_value = ti.calculate_atr(analysis_candles, period=14)
-                if atr_value is None or not (min_atr < atr_value < max_atr): return
+                if atr_value is None or not (min_atr < atr_value < max_atr):
+                    await self.logger('DEBUG', f"[{base}-M{expiration_minutes}] Filtro de volatilidade ({volatility_profile}): Fora dos limites (ATR={atr_value}). Ativo ignorado.")
+                    return
 
             signal_candle = analysis_candles[-1]
             
