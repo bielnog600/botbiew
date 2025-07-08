@@ -10,7 +10,7 @@ class AsyncExnovaService:
         self.api.profile = None # Inicializa o perfil como None
 
     async def connect(self) -> bool:
-        """Conecta-se à API da Exnova e aguarda os dados essenciais serem carregados."""
+        """Conecta-se à API da Exnova e aguarda o perfil ser carregado."""
         try:
             loop = asyncio.get_event_loop()
             check, reason = await loop.run_in_executor(None, self.api.connect)
@@ -65,13 +65,18 @@ class AsyncExnovaService:
     async def get_current_balance(self) -> Optional[float]:
         """Obtém o saldo atual da conta selecionada."""
         try:
+            # A forma mais fiável é usar o método get_balances
             loop = asyncio.get_event_loop()
-            # CORRIGIDO: Usando o método correto 'get_balances'
             balances_data = await loop.run_in_executor(None, self.api.get_balances)
             if balances_data and balances_data.get('msg'):
                 for balance_info in balances_data['msg']:
                     if balance_info.get('is_active'):
                         return balance_info.get('amount')
+            
+            # Fallback para o objeto profile, se existir
+            if self.api.profile and hasattr(self.api.profile, 'balance'):
+                return self.api.profile.balance
+
             self.logger.warning("Não foi possível encontrar o saldo da conta ativa.")
             return None
         except Exception as e:
