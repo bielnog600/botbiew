@@ -125,32 +125,21 @@ class TradingBot:
             base = full_name.split('-')[0]
             
             if expiration_minutes == 1:
-                analysis_candles, sr_candles = await asyncio.gather(self.exnova.get_historical_candles(base, 60, 500), self.exnova.get_historical_candles(base, 900, 100))
+                analysis_candles, sr_candles = await asyncio.gather(self.exnova.get_historical_candles(base, 60, 200), self.exnova.get_historical_candles(base, 900, 100))
                 if not analysis_candles or not sr_candles: return
                 res, sup = get_m15_sr_zones(sr_candles)
             elif expiration_minutes == 5:
-                analysis_candles, sr_candles = await asyncio.gather(self.exnova.get_historical_candles(base, 300, 500), self.exnova.get_historical_candles(base, 3600, 100))
+                analysis_candles, sr_candles = await asyncio.gather(self.exnova.get_historical_candles(base, 300, 200), self.exnova.get_historical_candles(base, 3600, 100))
                 if not analysis_candles or not sr_candles: return
                 res, sup = get_h1_sr_zones(sr_candles)
             else: return
 
-            # --- FILTRO 1: VOLATILIDADE (ATR) DINÂMICO ---
             volatility_profile = self.bot_config.get('volatility_profile', 'EQUILIBRADO')
-            
-            atr_limits = {
-                'ULTRA_CONSERVADOR': (0.00015, 0.00500),
-                'CONSERVADOR':       (0.00008, 0.01500),
-                'EQUILIBRADO':       (0.00005, 0.05000),
-                'AGRESSIVO':         (0.00001, 0.15000),
-                'ULTRA_AGRESSIVO':   (0.00001, 0.50000),
-            }
-            
+            atr_limits = {'ULTRA_CONSERVADOR': (0.00015, 0.00500), 'CONSERVADOR': (0.00008, 0.01500), 'EQUILIBRADO': (0.00005, 0.05000), 'AGRESSIVO': (0.00001, 0.15000), 'ULTRA_AGRESSIVO': (0.00001, 0.50000)}
             if volatility_profile != 'DESATIVADO':
-                min_atr, max_atr = atr_limits.get(volatility_profile, (0.00005, 0.05000)) # Padrão é EQUILIBRADO
+                min_atr, max_atr = atr_limits.get(volatility_profile, (0.00005, 0.05000))
                 atr_value = ti.calculate_atr(analysis_candles, period=14)
-                if atr_value is None or not (min_atr < atr_value < max_atr):
-                    await self.logger('DEBUG', f"[{base}-M{expiration_minutes}] Filtro de volatilidade ({volatility_profile}): Fora dos limites (ATR={atr_value}). Ativo ignorado.")
-                    return
+                if atr_value is None or not (min_atr < atr_value < max_atr): return
 
             signal_candle = analysis_candles[-1]
             
@@ -159,24 +148,33 @@ class TradingBot:
             zones = {'resistance': res, 'support': sup}
             confirmation_threshold = self.bot_config.get('confirmation_threshold') or 2
 
-            sr_signal_type = ti.check_price_near_sr(signal_candle, zones)
+            if expiration_minutes == 1:
+                sr_signal_type = ti.check_price_near_sr(signal_candle, zones)
+                if sr_signal_type == 'call':
+                    confluences.append("SR_Zone")
+                    if ti.check_candlestick_pattern(analysis_candles) == 'call': confluences.append("Candle_Pattern")
+                    if ti.check_rsi_condition(analysis_candles) == 'call': confluences.append("RSI_Condition")
+                    if len(confluences) >= confirmation_threshold: final_direction = 'call'
+                elif sr_signal_type == 'put':
+                    confluences.append("SR_Zone")
+                    if ti.check_candlestick_pattern(analysis_candles) == 'put': confluences.append("Candle_Pattern")
+                    if ti.check_rsi_condition(analysis_candles) == 'put': confluences.append("RSI_Condition")
+                    if len(confluences) >= confirmation_threshold: final_direction = 'put'
             
-            if sr_signal_type == 'call':
-                confluences.append("SR_Zone")
-                if ti.check_candlestick_pattern(analysis_candles) == 'call': confluences.append("Candle_Pattern")
-                if ti.check_rsi_condition(analysis_candles) == 'call': confluences.append("RSI_Condition")
-                if len(confluences) >= confirmation_threshold: final_direction = 'call'
-
-            elif sr_signal_type == 'put':
-                confluences.append("SR_Zone")
-                if ti.check_candlestick_pattern(analysis_candles) == 'put': confluences.append("Candle_Pattern")
-                if ti.check_rsi_condition(analysis_candles) == 'put': confluences.append("RSI_Condition")
-                if len(confluences) >= confirmation_threshold: final_direction = 'put'
+            elif expiration_minutes == 5:
+                m5_signal = ti.check_m5_price_action(analysis_candles, zones)
+                if m5_signal:
+                    temp_confluences = m5_signal['confluences']
+                    if ti.check_rsi_condition(analysis_candles) == m5_signal['direction']:
+                        temp_confluences.append("RSI_Condition")
+                    if len(temp_confluences) >= confirmation_threshold:
+                        final_direction = m5_signal['direction']
+                        confluences = temp_confluences
             
             if final_direction:
                 if not ti.validate_reversal_candle(signal_candle, final_direction): return
                 if self.is_trade_active: return
-                
+
                 now = datetime.utcnow()
                 wait_seconds = (60 - now.second - 1) + (1 - now.microsecond / 1000000) + 0.2
                 await self.logger('INFO', f"Sinal encontrado em {base}. Aguardando {wait_seconds:.2f}s para entrada precisa.")
@@ -197,7 +195,6 @@ class TradingBot:
             await self.logger('ERROR', f"Erro em _analyze_asset({full_name}, M{expiration_minutes}): {e}")
             traceback.print_exc()
 
-    # ATUALIZADO: Adicionada lógica de timing para o Martingale
     async def _execute_martingale_trade(self):
         trade_info = self.pending_martingale_trade
         if not trade_info: return
@@ -232,16 +229,19 @@ class TradingBot:
             return base_value
             
         mg_level = self.martingale_state.get(asset, {}).get('level', 0)
-        if mg_level == 0 and not is_martingale:
+        
+        # Se não for uma entrada de martingale, usa o valor base
+        if not is_martingale and mg_level == 0:
             return base_value
         
         factor = self.bot_config.get('martingale_factor', 2.3)
+        # O valor do martingale é calculado com base no nível atual
         mg_value = base_value * (factor ** mg_level)
         return round(mg_value, 2)
 
     async def _execute_and_wait(self, signal: TradeSignal, full_name: str, expiration_minutes: int):
         try:
-            is_martingale_trade = signal.strategy.startswith("M") and "Martingale" in signal.strategy
+            is_martingale_trade = "Martingale" in signal.strategy
             entry_value = self._get_entry_value(signal.pair, is_martingale=is_martingale_trade)
 
             order_id = await self.exnova.execute_trade(entry_value, full_name, signal.direction.lower(), expiration_minutes)
@@ -255,21 +255,22 @@ class TradingBot:
             await self.logger('INFO', f"Ordem {order_id} enviada com sucesso. Valor: {entry_value}. Exp: {expiration_minutes} min. Aguardando...")
             sid = await self.supabase.insert_trade_signal(signal)
             
-            await asyncio.sleep(expiration_minutes * 60 + 5)
+            await asyncio.sleep(expiration_minutes * 60 + 45)
 
-            bal_after = await self.exnova.get_current_balance()
+            trade_result = await self.exnova.check_win(order_id)
             
-            if bal_after is None: result = 'UNKNOWN'
-            else:
-                bal_before = await self.exnova.get_current_balance() # Re-fetch para ter certeza
-                delta = bal_after - bal_before
-                result = 'WIN' if delta > 0 else 'LOSS' if delta < 0 else 'DRAW'
-            await self.logger('SUCCESS' if result == 'WIN' else 'ERROR', f"Resultado: {result}. ΔSaldo = {delta:.2f}" if result != 'UNKNOWN' else f"Resultado: {result}")
+            result = 'UNKNOWN'
+            if trade_result == 'win': result = 'WIN'
+            elif trade_result == 'loss': result = 'LOSS'
+            elif trade_result == 'equal': result = 'DRAW'
+            
+            await self.logger('SUCCESS' if result == 'WIN' else 'ERROR', f"Resultado da ordem {order_id}: {result}")
 
             if sid:
                 mg_lv = self.martingale_state.get(signal.pair, {}).get('level', 0)
                 await self.supabase.update_trade_result(sid, result, mg_lv)
             
+            bal_after = await self.exnova.get_current_balance()
             if bal_after is not None:
                 await self.supabase.update_current_balance(bal_after)
 
