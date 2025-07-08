@@ -18,6 +18,7 @@ class AsyncExnovaService:
                 self.logger.error(f"Falha na conexão com a Exnova: {reason}")
                 return False
             
+            # Aguarda o perfil ser carregado, que contém o saldo
             for _ in range(10): 
                 if hasattr(self.api, 'profile') and self.api.profile is not None:
                     self.logger.info("Conexão e perfil carregados com sucesso.")
@@ -43,6 +44,14 @@ class AsyncExnovaService:
             all_assets = await loop.run_in_executor(None, self.api.get_all_init_data)
             tradables = all_assets.get('binary', {}).get('actives', {})
             return [asset for asset, data in tradables.items() if data.get('open')]
+        except AttributeError:
+            self.logger.error("Erro de Atributo ao obter ativos: O método 'get_all_init_data' não foi encontrado.")
+            self.logger.error("--- MÉTODOS DISPONÍVEIS NO OBJETO API ---")
+            for attr in dir(self.api):
+                if not attr.startswith('_'):
+                    self.logger.error(f" - {attr}")
+            self.logger.error("-----------------------------------------")
+            return []
         except Exception as e:
             self.logger.error(f"Erro ao obter ativos abertos: {e}")
             return []
@@ -74,7 +83,12 @@ class AsyncExnovaService:
             # CORRIGIDO: Tentando o nome de método mais comum 'change_balance'
             await loop.run_in_executor(None, lambda: self.api.change_balance(balance_type.upper()))
         except AttributeError:
-            self.logger.error("Erro: O método para mudar de conta não foi encontrado. Verifique os métodos disponíveis nos logs.")
+            self.logger.error("Erro de Atributo ao mudar de conta: O método 'change_balance' não foi encontrado.")
+            self.logger.error("--- MÉTODOS DISPONÍVEIS NO OBJETO API ---")
+            for attr in dir(self.api):
+                if not attr.startswith('_'):
+                    self.logger.error(f" - {attr}")
+            self.logger.error("-----------------------------------------")
         except Exception as e:
             self.logger.error(f"Erro ao mudar de conta para {balance_type}: {e}")
 
