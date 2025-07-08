@@ -1,4 +1,4 @@
-# analysis/technical_indicators.py
+# Arquivo: analysis/technical_indicators.py
 
 import pandas as pd
 import pandas_ta as ta
@@ -49,27 +49,82 @@ def validate_reversal_candle(candle: Candle, direction: str) -> bool:
     body_size = abs(candle.close - candle.open)
     total_range = candle.max - candle.min
     if total_range == 0: return False
-    if (body_size / total_range) < 0.7:
+    if (body_size / total_range) < 0.5:
         return False
     upper_wick = candle.max - max(candle.open, candle.close)
     lower_wick = min(candle.open, candle.close) - candle.min
-    if direction == 'call' and upper_wick > (0.5 * body_size): return False
-    if direction == 'put' and lower_wick > (0.5 * body_size): return False
+    if direction == 'call' and upper_wick > body_size: return False
+    if direction == 'put' and lower_wick > body_size: return False
     return True
 
+# ATUALIZADO: Função com um vocabulário de padrões de vela muito maior.
 def check_candlestick_pattern(candles: List[Candle]) -> Optional[str]:
-    if len(candles) < 3: return None
-    c1, c2 = candles[-3], candles[-2]
-    if c1.close < c1.open and c2.close > c2.open and c2.open <= c1.close and c2.close >= c1.open:
+    """Identifica um conjunto expandido de padrões de vela de reversão com lógica interna."""
+    if len(candles) < 3:
+        return None
+
+    c1, c2, c3 = candles[-3], candles[-2], candles[-1] # c3 é a vela que acabou de fechar
+
+    # --- Padrões de 3 Velas ---
+    # Estrela da Manhã (Morning Star) - Sinal de CALL
+    if (c1.close < c1.open and abs(c1.close - c1.open) > 0 and # 1. Vela forte de baixa
+        abs(c2.close - c2.open) < abs(c1.close - c1.open) and # 2. Vela pequena (indecisão)
+        c3.close > c3.open and c3.close > (c1.open + c1.close) / 2): # 3. Vela de alta que recupera >50% da primeira
         return 'call'
-    if c1.close > c1.open and c2.close < c2.open and c2.open >= c1.close and c2.close <= c1.open:
+
+    # Estrela da Noite (Evening Star) - Sinal de PUT
+    if (c1.close > c1.open and abs(c1.close - c1.open) > 0 and # 1. Vela forte de alta
+        abs(c2.close - c2.open) < abs(c1.close - c1.open) and # 2. Vela pequena (indecisão)
+        c3.close < c3.open and c3.close < (c1.open + c1.close) / 2): # 3. Vela de baixa que recupera >50% da primeira
         return 'put'
-    body = abs(c2.close - c2.open)
+
+    # --- Padrões de 2 Velas (usa c2 e c3) ---
+    # Engolfo de Alta (Bullish Engulfing)
+    if c2.close < c2.open and c3.close > c3.open and c3.open <= c2.close and c3.close >= c2.open:
+        return 'call'
+
+    # Engolfo de Baixa (Bearish Engulfing)
+    if c2.close > c2.open and c3.close < c3.open and c3.open >= c2.close and c3.close <= c2.open:
+        return 'put'
+        
+    # Piercing Line - Sinal de CALL
+    if (c2.close < c2.open and c3.close > c3.open and 
+        c3.open < c2.close and c3.close > (c2.open + c2.close) / 2):
+        return 'call'
+
+    # Dark Cloud Cover - Sinal de PUT
+    if (c2.close > c2.open and c3.close < c3.open and
+        c3.open > c2.close and c3.close < (c2.open + c2.close) / 2):
+        return 'put'
+
+    # Tweezer Bottom (Pinça de Fundo) - Sinal de CALL
+    if c2.close < c2.open and c3.close > c3.open and abs(c2.min - c3.min) < (c2.max - c2.min) * 0.05: # Mínimas quase idênticas
+        return 'call'
+
+    # Tweezer Top (Pinça de Topo) - Sinal de PUT
+    if c2.close > c2.open and c3.close < c3.open and abs(c2.max - c3.max) < (c2.max - c2.min) * 0.05: # Máximas quase idênticas
+        return 'put'
+
+    # --- Padrões de 1 Vela (usa c3) ---
+    body = abs(c3.close - c3.open)
     if body > 0:
-        lower_wick = min(c2.open, c2.close) - c2.min
-        upper_wick = c2.max - max(c2.open, c2.close)
-        if lower_wick >= 2 * body and upper_wick < body: return 'call'
-        if upper_wick >= 2 * body and lower_wick < body: return 'put'
+        lower_wick = min(c3.open, c3.close) - c3.min
+        upper_wick = c3.max - max(c3.open, c3.close)
+        
+        # Martelo (Hammer) - Sinal de CALL
+        if lower_wick >= 2 * body and upper_wick < body:
+            return 'call'
+
+        # Estrela Cadente (Shooting Star) - Sinal de PUT
+        if upper_wick >= 2 * body and lower_wick < body:
+            return 'put'
+            
+    # Doji (após uma tendência)
+    total_range = c3.max - c3.min
+    if total_range > 0 and (body / total_range) < 0.1:
+        if c2.close < c2.open: return 'call' # Doji após vela de baixa
+        if c2.close > c2.open: return 'put'  # Doji após vela de alta
+
     return None
 
 def check_price_near_sr(last_candle: Candle, zones: Dict, tolerance=0.0005) -> Optional[str]:
@@ -83,34 +138,23 @@ def check_price_near_sr(last_candle: Candle, zones: Dict, tolerance=0.0005) -> O
         if abs(price - s) / s < tolerance: return 'call'
     return None
 
-# NOVO: Estratégia específica para M5 baseada em Price Action
 def check_m5_price_action(candles: List[Candle], zones: Dict) -> Optional[Dict]:
-    """
-    Analisa a vela anterior em busca de um sinal de Pinbar (pavio longo)
-    próximo a uma zona de Suporte ou Resistência.
-    """
-    if len(candles) < 2:
-        return None
-
-    signal_candle = candles[-2] # A vela que acabou de fechar
-
-    # 1. Analisa para um sinal de COMPRA (CALL) em Suporte
+    if len(candles) < 2: return None
+    signal_candle = candles[-2]
+    
     is_near_support = check_price_near_sr(signal_candle, {'support': zones.get('support', [])}) == 'call'
     if is_near_support:
         body_size = abs(signal_candle.close - signal_candle.open)
         if body_size > 0:
             lower_wick = min(signal_candle.open, signal_candle.close) - signal_candle.min
-            # Condição: Pavio inferior é pelo menos 1.5x o tamanho do corpo
             if lower_wick >= 1.5 * body_size:
                 return {'direction': 'call', 'confluences': ['SR_Zone_Support', 'Pinbar_Bullish']}
 
-    # 2. Analisa para um sinal de VENDA (PUT) em Resistência
     is_near_resistance = check_price_near_sr(signal_candle, {'resistance': zones.get('resistance', [])}) == 'put'
     if is_near_resistance:
         body_size = abs(signal_candle.close - signal_candle.open)
         if body_size > 0:
             upper_wick = signal_candle.max - max(signal_candle.open, signal_candle.close)
-            # Condição: Pavio superior é pelo menos 1.5x o tamanho do corpo
             if upper_wick >= 1.5 * body_size:
                 return {'direction': 'put', 'confluences': ['SR_Zone_Resistance', 'Pinbar_Bearish']}
             
