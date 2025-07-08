@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import traceback
 from typing import List, Optional, Dict
 from exnovaapi.api import Exnovaapi
 
@@ -27,16 +28,21 @@ class AsyncExnovaService:
             return False
         except Exception as e:
             self.logger.error(f"Erro crítico na conexão: {e}")
+            self.logger.error("--- MÉTODOS DISPONÍVEIS NO OBJETO API ---")
+            for attr in dir(self.api):
+                if not attr.startswith('_'):
+                    self.logger.error(f" - {attr}")
+            self.logger.error("-----------------------------------------")
             return False
 
     async def get_open_assets(self) -> List[str]:
         """Obtém a lista de ativos abertos para negociação."""
         try:
-            # CORRIGIDO: A biblioteca provavelmente armazena os ativos na propriedade 'actives' após a conexão.
-            if hasattr(self.api, 'actives'):
-                return [asset for asset, data in self.api.actives.items() if data.get('open')]
-            self.logger.warning("Não foi possível encontrar a lista de ativos 'actives'.")
-            return []
+            loop = asyncio.get_event_loop()
+            # CORRIGIDO: Tentando o método mais comum 'get_all_init_data'
+            all_assets = await loop.run_in_executor(None, self.api.get_all_init_data)
+            tradables = all_assets.get('binary', {}).get('actives', {})
+            return [asset for asset, data in tradables.items() if data.get('open')]
         except Exception as e:
             self.logger.error(f"Erro ao obter ativos abertos: {e}")
             return []
@@ -65,10 +71,10 @@ class AsyncExnovaService:
         """Muda entre a conta de prática e a conta real."""
         try:
             loop = asyncio.get_event_loop()
-            # CORRIGIDO: O nome da função é provavelmente 'set_active_account'
-            await loop.run_in_executor(None, lambda: self.api.set_active_account(balance_type.upper()))
+            # CORRIGIDO: Tentando o nome de método mais comum 'change_balance'
+            await loop.run_in_executor(None, lambda: self.api.change_balance(balance_type.upper()))
         except AttributeError:
-            self.logger.error("Erro: O método 'set_active_account' não foi encontrado. Verifique a biblioteca 'exnovaapi'.")
+            self.logger.error("Erro: O método para mudar de conta não foi encontrado. Verifique os métodos disponíveis nos logs.")
         except Exception as e:
             self.logger.error(f"Erro ao mudar de conta para {balance_type}: {e}")
 
