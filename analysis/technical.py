@@ -47,7 +47,7 @@ def get_m15_sr_zones(m15_candles: List[Candle]) -> Tuple[List[float], List[float
     Altere o 'window_size' para ajustar a sensibilidade.
     Valores recomendados: 3 a 7
     """
-    return _find_sr_levels(m15_candles, window_size=3)
+    return _find_sr_levels(m15_candles, window_size=7)
 
 def get_h1_sr_zones(h1_candles: List[Candle]) -> Tuple[List[float], List[float]]:
     """
