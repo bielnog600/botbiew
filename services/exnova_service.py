@@ -10,7 +10,7 @@ class AsyncExnovaService:
         self.api.profile = None # Inicializa o perfil como None
 
     async def connect(self) -> bool:
-        """Conecta-se à API da Exnova e aguarda o perfil ser carregado."""
+        """Conecta-se à API da Exnova e aguarda os dados essenciais serem carregados."""
         try:
             loop = asyncio.get_event_loop()
             check, reason = await loop.run_in_executor(None, self.api.connect)
@@ -35,7 +35,7 @@ class AsyncExnovaService:
         """Obtém a lista de ativos abertos para negociação."""
         try:
             loop = asyncio.get_event_loop()
-            # CORRIGIDO: Usando o nome de função correto da sua biblioteca
+            # CORRIGIDO: Usando o nome de função correto da sua biblioteca: get_api_option_init_all_v2
             all_assets_data = await loop.run_in_executor(None, self.api.get_api_option_init_all_v2)
             
             if not all_assets_data:
@@ -55,7 +55,7 @@ class AsyncExnovaService:
         """Busca o histórico de velas para um ativo."""
         try:
             loop = asyncio.get_event_loop()
-            # CORRIGIDO: O nome correto da função é 'getcandles'
+            # CORRIGIDO: O nome correto da função é 'getcandles' (tudo minúsculo)
             status, candles = await loop.run_in_executor(None, lambda: self.api.getcandles(asset, timeframe, count))
             return candles if status else None
         except Exception as e:
@@ -65,8 +65,8 @@ class AsyncExnovaService:
     async def get_current_balance(self) -> Optional[float]:
         """Obtém o saldo atual da conta selecionada."""
         try:
-            # A forma mais fiável é usar o método get_balances
             loop = asyncio.get_event_loop()
+            # CORRIGIDO: Usando o método correto 'get_balances'
             balances_data = await loop.run_in_executor(None, self.api.get_balances)
             if balances_data and balances_data.get('msg'):
                 for balance_info in balances_data['msg']:
