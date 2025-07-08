@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import traceback
 from typing import List, Optional, Dict
 from exnovaapi.api import Exnovaapi
 
@@ -18,7 +17,6 @@ class AsyncExnovaService:
                 self.logger.error(f"Falha na conexão com a Exnova: {reason}")
                 return False
             
-            # Aguarda o perfil ser carregado, que contém o saldo
             for _ in range(10): 
                 if hasattr(self.api, 'profile') and self.api.profile is not None:
                     self.logger.info("Conexão e perfil carregados com sucesso.")
@@ -29,29 +27,21 @@ class AsyncExnovaService:
             return False
         except Exception as e:
             self.logger.error(f"Erro crítico na conexão: {e}")
-            self.logger.error("--- MÉTODOS DISPONÍVEIS NO OBJETO API ---")
-            for attr in dir(self.api):
-                if not attr.startswith('_'):
-                    self.logger.error(f" - {attr}")
-            self.logger.error("-----------------------------------------")
             return False
 
     async def get_open_assets(self) -> List[str]:
         """Obtém a lista de ativos abertos para negociação."""
         try:
             loop = asyncio.get_event_loop()
-            # CORRIGIDO: Tentando o método mais comum 'get_all_init_data'
-            all_assets = await loop.run_in_executor(None, self.api.get_all_init_data)
-            tradables = all_assets.get('binary', {}).get('actives', {})
+            # CORRIGIDO: Usando o nome de função correto da sua biblioteca
+            all_assets_data = await loop.run_in_executor(None, self.api.get_api_option_init_all_v2)
+            
+            # A estrutura de dados pode variar, mas esta é a mais comum
+            tradables = all_assets_data.get('binary', {}).get('actives', {})
+            if not tradables:
+                tradables = all_assets_data.get('turbo', {}).get('actives', {})
+
             return [asset for asset, data in tradables.items() if data.get('open')]
-        except AttributeError:
-            self.logger.error("Erro de Atributo ao obter ativos: O método 'get_all_init_data' não foi encontrado.")
-            self.logger.error("--- MÉTODOS DISPONÍVEIS NO OBJETO API ---")
-            for attr in dir(self.api):
-                if not attr.startswith('_'):
-                    self.logger.error(f" - {attr}")
-            self.logger.error("-----------------------------------------")
-            return []
         except Exception as e:
             self.logger.error(f"Erro ao obter ativos abertos: {e}")
             return []
@@ -60,7 +50,8 @@ class AsyncExnovaService:
         """Busca o histórico de velas para um ativo."""
         try:
             loop = asyncio.get_event_loop()
-            status, candles = await loop.run_in_executor(None, lambda: self.api.get_candles(asset, timeframe, count))
+            # O nome correto da função é 'getcandles' (tudo minúsculo)
+            status, candles = await loop.run_in_executor(None, lambda: self.api.getcandles(asset, timeframe, count))
             return candles if status else None
         except Exception as e:
             self.logger.error(f"Erro ao obter velas para {asset}: {e}")
@@ -80,15 +71,8 @@ class AsyncExnovaService:
         """Muda entre a conta de prática e a conta real."""
         try:
             loop = asyncio.get_event_loop()
-            # CORRIGIDO: Tentando o nome de método mais comum 'change_balance'
-            await loop.run_in_executor(None, lambda: self.api.change_balance(balance_type.upper()))
-        except AttributeError:
-            self.logger.error("Erro de Atributo ao mudar de conta: O método 'change_balance' não foi encontrado.")
-            self.logger.error("--- MÉTODOS DISPONÍVEIS NO OBJETO API ---")
-            for attr in dir(self.api):
-                if not attr.startswith('_'):
-                    self.logger.error(f" - {attr}")
-            self.logger.error("-----------------------------------------")
+            # CORRIGIDO: Usando o nome de função correto da sua biblioteca
+            await loop.run_in_executor(None, lambda: self.api.changebalance(balance_type.upper()))
         except Exception as e:
             self.logger.error(f"Erro ao mudar de conta para {balance_type}: {e}")
 
@@ -106,6 +90,7 @@ class AsyncExnovaService:
         """Verifica o resultado de uma operação específica pelo seu ID."""
         try:
             loop = asyncio.get_event_loop()
+            # O nome desta função parece estar correto
             status, result = await loop.run_in_executor(None, lambda: self.api.check_win_v4(order_id))
             if status:
                 return result
