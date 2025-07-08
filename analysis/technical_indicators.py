@@ -49,12 +49,12 @@ def validate_reversal_candle(candle: Candle, direction: str) -> bool:
     body_size = abs(candle.close - candle.open)
     total_range = candle.max - candle.min
     if total_range == 0: return False
-    if (body_size / total_range) < 0.5:
+    if (body_size / total_range) < 0.7:
         return False
     upper_wick = candle.max - max(candle.open, candle.close)
     lower_wick = min(candle.open, candle.close) - candle.min
-    if direction == 'call' and upper_wick > body_size: return False
-    if direction == 'put' and lower_wick > body_size: return False
+    if direction == 'call' and upper_wick > (0.5 * body_size): return False
+    if direction == 'put' and lower_wick > (0.5 * body_size): return False
     return True
 
 def check_candlestick_pattern(candles: List[Candle]) -> Optional[str]:
