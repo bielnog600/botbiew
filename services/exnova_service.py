@@ -18,13 +18,21 @@ class AsyncExnovaService:
                 return False
             
             # Aguarda o perfil ser carregado, que contém o saldo
-            for _ in range(10): # Tenta por até 10 segundos
+            for _ in range(10): 
                 if hasattr(self.api, 'profile') and self.api.profile is not None:
                     self.logger.info("Conexão e perfil carregados com sucesso.")
                     return True
                 await asyncio.sleep(1)
             
             self.logger.error("Conexão estabelecida, mas o perfil do utilizador não foi carregado a tempo.")
+            return False
+        except AttributeError as e:
+            self.logger.error(f"Erro de Atributo na conexão: {e}. Isto indica um nome de método incorreto na biblioteca.")
+            self.logger.error("--- MÉTODOS DISPONÍVEIS NO OBJETO API ---")
+            for attr in dir(self.api):
+                if not attr.startswith('_'):
+                    self.logger.error(f" - {attr}")
+            self.logger.error("-----------------------------------------")
             return False
         except Exception as e:
             self.logger.error(f"Erro crítico na conexão: {e}")
@@ -34,8 +42,10 @@ class AsyncExnovaService:
         """Obtém a lista de ativos abertos para negociação."""
         try:
             loop = asyncio.get_event_loop()
-            all_assets = await loop.run_in_executor(None, self.api.get_all_open_time)
-            return [asset for asset, data in all_assets.items() if data.get('open')]
+            # Tenta o nome mais comum para esta função
+            all_assets = await loop.run_in_executor(None, self.api.get_all_init_data)
+            tradables = all_assets.get('binary', {}).get('actives', {})
+            return [asset for asset, data in tradables.items() if data.get('open')]
         except Exception as e:
             self.logger.error(f"Erro ao obter ativos abertos: {e}")
             return []
@@ -53,12 +63,9 @@ class AsyncExnovaService:
     async def get_current_balance(self) -> Optional[float]:
         """Obtém o saldo atual da conta selecionada a partir do perfil."""
         try:
-            # CORRIGIDO: O saldo está dentro do objeto 'profile'
             if self.api.profile and hasattr(self.api.profile, 'balance'):
                 return self.api.profile.balance
-            else:
-                self.logger.warning("Tentando obter saldo, mas o perfil não está disponível.")
-                return None
+            return None
         except Exception as e:
             self.logger.error(f"Erro ao obter saldo do perfil: {e}")
             return None
@@ -67,6 +74,7 @@ class AsyncExnovaService:
         """Muda entre a conta de prática e a conta real."""
         try:
             loop = asyncio.get_event_loop()
+            # Tenta o nome mais comum para esta função
             await loop.run_in_executor(None, lambda: self.api.change_balance(balance_type.upper()))
         except Exception as e:
             self.logger.error(f"Erro ao mudar de conta para {balance_type}: {e}")
@@ -87,7 +95,6 @@ class AsyncExnovaService:
             loop = asyncio.get_event_loop()
             status, result = await loop.run_in_executor(None, lambda: self.api.check_win_v4(order_id))
             if status:
-                self.logger.info(f"Resultado da ordem {order_id} obtido: {result}")
                 return result
             return None
         except Exception as e:
