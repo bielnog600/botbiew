@@ -184,9 +184,15 @@ class TradingBot:
                 strategy_name = f"M{expiration_minutes}_" + ', '.join(confluences)
                 await self.logger('SUCCESS', f"EXECUTANDO SINAL! Dir: {final_direction.upper()}. Conf: {strategy_name}")
                 
-                signal = TradeSignal(pair=base, direction=final_direction, strategy=strategy_name,
-                                     setup_candle_open=signal_candle.open, setup_candle_high=signal_candle.max,
-                                     setup_candle_low=signal_candle.min, setup_candle_close=signal_candle.close)
+                signal = TradeSignal(
+                    pair=base, 
+                    direction=final_direction, 
+                    strategy=strategy_name,
+                    setup_candle_open=signal_candle['open'], 
+                    setup_candle_high=signal_candle['max'],
+                    setup_candle_low=signal_candle['min'], 
+                    setup_candle_close=signal_candle['close']
+                )
                 
                 trade_expiration = 4 if expiration_minutes == 5 else expiration_minutes
                 await self._execute_and_wait(signal, full_name, trade_expiration)
@@ -230,12 +236,10 @@ class TradingBot:
             
         mg_level = self.martingale_state.get(asset, {}).get('level', 0)
         
-        # Se não for uma entrada de martingale, usa o valor base
         if not is_martingale and mg_level == 0:
             return base_value
         
         factor = self.bot_config.get('martingale_factor', 2.3)
-        # O valor do martingale é calculado com base no nível atual
         mg_value = base_value * (factor ** mg_level)
         return round(mg_value, 2)
 
