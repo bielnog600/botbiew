@@ -130,6 +130,8 @@ class TradingBot:
                 res, sup = get_h1_sr_zones(sr_candles)
             else: return
 
+
+
             # --- FILTRO 1: VOLATILIDADE (ATR) DINÂMICO ---
             volatility_profile = self.bot_config.get('volatility_profile', 'EQUILIBRADO')
             
@@ -153,39 +155,22 @@ class TradingBot:
             final_direction = None
             confluences = []
             zones = {'resistance': res, 'support': sup}
-            
-            # ATUALIZADO: Lê o nível de confirmação do painel
-            confirmation_threshold = self.bot_config.get('confirmation_threshold', 2)
+            confirmation_threshold = self.bot_config.get('confirmation_threshold') or 2
 
-            # Lógica de Análise para M1
-            if expiration_minutes == 1:
-                sr_signal_type = ti.check_price_near_sr(signal_candle, zones)
-                if sr_signal_type == 'call':
-                    call_confs = ["SR_Zone"]
-                    if ti.check_candlestick_pattern(analysis_candles) == 'call': call_confs.append("Candle_Pattern")
-                    if ti.check_rsi_condition(analysis_candles) == 'call': call_confs.append("RSI_Condition")
-                    if len(call_confs) >= confirmation_threshold:
-                        final_direction = 'call'
-                        confluences = call_confs
-                elif sr_signal_type == 'put':
-                    put_confs = ["SR_Zone"]
-                    if ti.check_candlestick_pattern(analysis_candles) == 'put': put_confs.append("Candle_Pattern")
-                    if ti.check_rsi_condition(analysis_candles) == 'put': put_confs.append("RSI_Condition")
-                    if len(put_confs) >= confirmation_threshold:
-                        final_direction = 'put'
-                        confluences = put_confs
+            # CORRIGIDO: Lógica de Reversão Ancorada
+            sr_signal_type = ti.check_price_near_sr(signal_candle, zones)
             
-            # Lógica de Análise para M5
-            elif expiration_minutes == 5:
-                m5_signal = ti.check_m5_price_action(analysis_candles, zones)
-                if m5_signal:
-                    temp_confluences = m5_signal['confluences']
-                    if ti.check_rsi_condition(analysis_candles) == m5_signal['direction']:
-                        temp_confluences.append("RSI_Condition")
-                    
-                    if len(temp_confluences) >= confirmation_threshold:
-                        final_direction = m5_signal['direction']
-                        confluences = temp_confluences
+            if sr_signal_type == 'call':
+                confluences.append("SR_Zone")
+                if ti.check_candlestick_pattern(analysis_candles) == 'call': confluences.append("Candle_Pattern")
+                if ti.check_rsi_condition(analysis_candles) == 'call': confluences.append("RSI_Condition")
+                if len(confluences) >= confirmation_threshold: final_direction = 'call'
+
+            elif sr_signal_type == 'put':
+                confluences.append("SR_Zone")
+                if ti.check_candlestick_pattern(analysis_candles) == 'put': confluences.append("Candle_Pattern")
+                if ti.check_rsi_condition(analysis_candles) == 'put': confluences.append("RSI_Condition")
+                if len(confluences) >= confirmation_threshold: final_direction = 'put'
             
             if final_direction:
                 if not ti.validate_reversal_candle(signal_candle, final_direction): return
@@ -233,7 +218,7 @@ class TradingBot:
             await self.logger('INFO', f"Ordem {order_id} enviada com sucesso. Valor: {entry_value}. Exp: {expiration_minutes} min. Aguardando...")
             sid = await self.supabase.insert_trade_signal(signal)
             
-            await asyncio.sleep(expiration_minutes * 60 + 15)
+            await asyncio.sleep(expiration_minutes * 60 + 45)
 
             bal_after = await self.exnova.get_current_balance()
             
