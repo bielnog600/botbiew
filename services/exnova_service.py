@@ -1,32 +1,34 @@
 import asyncio
 import logging
 from typing import List, Optional, Dict
-from exnovaapi.api import Exnovaapi # Corrigido para o nome de classe correto
+from exnovaapi.api import Exnovaapi
 
 class AsyncExnovaService:
     def __init__(self, email: str, password: str):
         self.api = Exnovaapi(email, password)
         self.logger = logging.getLogger(__name__)
 
-    # As funções agora são 'wrappers' que executam o código síncrono da biblioteca
-    # em uma thread separada para não bloquear o bot.
-
     async def connect(self) -> bool:
         """Conecta-se à API da Exnova."""
         try:
-            # A conexão é síncrona
             loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, self.api.connect)
-            return self.api.check_connect()
+            # CORRIGIDO: O nome correto da função é 'connect'
+            check, reason = await loop.run_in_executor(None, self.api.connect)
+            if check:
+                self.logger.info("Conexão com a Exnova estabelecida com sucesso.")
+                return True
+            else:
+                self.logger.error(f"Falha na conexão com a Exnova: {reason}")
+                return False
         except Exception as e:
-            self.logger.error(f"Falha na conexão com a Exnova: {e}")
+            self.logger.error(f"Erro crítico na conexão: {e}")
             return False
 
     async def get_open_assets(self) -> List[str]:
         """Obtém a lista de ativos abertos para negociação."""
         try:
             loop = asyncio.get_event_loop()
-            # O nome correto da função é provavelmente 'get_all_open_time'
+            # CORRIGIDO: O nome correto da função é 'get_all_open_time'
             all_assets = await loop.run_in_executor(None, self.api.get_all_open_time)
             return [asset for asset, data in all_assets.items() if data.get('open')]
         except Exception as e:
@@ -47,8 +49,9 @@ class AsyncExnovaService:
     async def get_current_balance(self) -> Optional[float]:
         """Obtém o saldo atual da conta selecionada."""
         try:
-            # O saldo é uma propriedade, não uma função
-            return self.api.balance
+            loop = asyncio.get_event_loop()
+            # CORRIGIDO: O nome correto da função é 'get_balance'
+            return await loop.run_in_executor(None, self.api.get_balance)
         except Exception as e:
             self.logger.error(f"Erro ao obter saldo: {e}")
             return None
