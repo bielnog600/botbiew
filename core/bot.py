@@ -2,7 +2,7 @@ import asyncio
 import time
 import traceback
 from datetime import datetime, timedelta
-from typing import Dict
+from typing import Dict, Optional
 
 from config import settings
 from services.exnova_service import AsyncExnovaService
@@ -27,6 +27,8 @@ class TradingBot:
         self.daily_wins = 0
         self.daily_losses = 0
         self.last_daily_reset_date = None
+        # NOVO: Guarda a informação para a próxima entrada de Martingale
+        self.pending_martingale_trade: Optional[Dict] = None
 
     async def logger(self, level: str, message: str):
         ts = datetime.utcnow().isoformat()
@@ -67,13 +69,17 @@ class TradingBot:
                 self.bot_config = await self.supabase.get_bot_config()
                 status = self.bot_config.get('status', 'PAUSED')
 
-                if status == 'RUNNING' and not self.is_trade_active:
-                    await self.trading_cycle()
-                else:
-                    if status != 'RUNNING':
-                        await self.logger('INFO', "Bot PAUSADO. Aguardando status 'RUNNING'.")
-                    elif self.is_trade_active:
-                         await self.logger('INFO', "Operação em andamento. Aguardando resultado...")
+                # ATUALIZADO: O bot agora tem uma nova prioridade máxima
+                if status == 'RUNNING':
+                    if self.pending_martingale_trade and not self.is_trade_active:
+                        await self._execute_martingale_trade()
+                    elif not self.is_trade_active:
+                        await self.trading_cycle()
+                
+                if status != 'RUNNING':
+                    await self.logger('INFO', "Bot PAUSADO. Aguardando status 'RUNNING'.")
+                elif self.is_trade_active:
+                    await self.logger('INFO', "Operação em andamento. Aguardando resultado...")
                 
                 await asyncio.sleep(1)
 
@@ -116,21 +122,20 @@ class TradingBot:
             await self._analyze_asset(asset, timeframe_seconds, expiration_minutes)
 
     async def _analyze_asset(self, full_name: str, timeframe_seconds: int, expiration_minutes: int):
+        # ... (lógica de análise inalterada) ...
         try:
             if self.is_trade_active: return
             base = full_name.split('-')[0]
             
             if expiration_minutes == 1:
-                analysis_candles, sr_candles = await asyncio.gather(self.exnova.get_historical_candles(base, 60, 200), self.exnova.get_historical_candles(base, 900, 100))
+                analysis_candles, sr_candles = await asyncio.gather(self.exnova.get_historical_candles(base, 60, 500), self.exnova.get_historical_candles(base, 900, 100))
                 if not analysis_candles or not sr_candles: return
                 res, sup = get_m15_sr_zones(sr_candles)
             elif expiration_minutes == 5:
-                analysis_candles, sr_candles = await asyncio.gather(self.exnova.get_historical_candles(base, 300, 200), self.exnova.get_historical_candles(base, 3600, 100))
+                analysis_candles, sr_candles = await asyncio.gather(self.exnova.get_historical_candles(base, 300, 500), self.exnova.get_historical_candles(base, 3600, 100))
                 if not analysis_candles or not sr_candles: return
                 res, sup = get_h1_sr_zones(sr_candles)
             else: return
-
-
 
             # --- FILTRO 1: VOLATILIDADE (ATR) DINÂMICO ---
             volatility_profile = self.bot_config.get('volatility_profile', 'EQUILIBRADO')
@@ -157,7 +162,6 @@ class TradingBot:
             zones = {'resistance': res, 'support': sup}
             confirmation_threshold = self.bot_config.get('confirmation_threshold') or 2
 
-            # CORRIGIDO: Lógica de Reversão Ancorada
             sr_signal_type = ti.check_price_near_sr(signal_candle, zones)
             
             if sr_signal_type == 'call':
@@ -196,23 +200,56 @@ class TradingBot:
             await self.logger('ERROR', f"Erro em _analyze_asset({full_name}, M{expiration_minutes}): {e}")
             traceback.print_exc()
 
-    def _get_entry_value(self, asset: str) -> float:
-        base = self.bot_config.get('entry_value', settings.ENTRY_VALUE)
-        if not self.bot_config.get('use_martingale', False): return base
-        state = self.martingale_state.get(asset, {'level': 0, 'last_value': base})
-        if state['level'] == 0: return base
-        return round(state['last_value'] * self.bot_config.get('martingale_factor', 2.3), 2)
+    # NOVO: Método para executar a entrada de Martingale
+    async def _execute_martingale_trade(self):
+        """Executa uma operação de Martingale pendente imediatamente."""
+        trade_info = self.pending_martingale_trade
+        if not trade_info: return
 
+        self.pending_martingale_trade = None # Consome a operação pendente
+        self.is_trade_active = True # Bloqueia novas análises
+
+        current_level = self.martingale_state.get(trade_info['pair'], {}).get('level', 1)
+        strategy_name = f"M{trade_info['expiration_minutes']}_Martingale_{current_level}"
+        
+        signal = TradeSignal(
+            pair=trade_info['pair'], 
+            direction=trade_info['direction'], 
+            strategy=strategy_name
+        )
+        
+        await self.logger('WARNING', f"EXECUTANDO MARTINGALE NÍVEL {current_level} para {trade_info['pair']}...")
+        
+        trade_expiration = 4 if trade_info['expiration_minutes'] == 5 else trade_info['expiration_minutes']
+        await self._execute_and_wait(signal, trade_info['full_name'], trade_expiration)
+
+    def _get_entry_value(self, asset: str) -> float:
+        base_value = self.bot_config.get('entry_value', 1.0)
+        if not self.bot_config.get('use_martingale', False):
+            return base_value
+            
+        mg_level = self.martingale_state.get(asset, {}).get('level', 0)
+        if mg_level == 0:
+            return base_value
+        
+        factor = self.bot_config.get('martingale_factor', 2.3)
+        mg_value = base_value * (factor ** mg_level)
+        return round(mg_value, 2)
+
+    # ATUALIZADO: Agora prepara a próxima entrada de Martingale em caso de LOSS
     async def _execute_and_wait(self, signal: TradeSignal, full_name: str, expiration_minutes: int):
         try:
             bal_before = await self.exnova.get_current_balance()
-            entry_value = self._get_entry_value(signal.pair)
+            entry_value = self._get_entry_value(signal.pair, is_martingale=(signal.strategy.startswith("M_Martingale")))
 
             order_id = await self.exnova.execute_trade(entry_value, full_name, signal.direction.lower(), expiration_minutes)
             
             if not order_id:
                 await self.logger('ERROR', f"Falha ao executar a ordem para {full_name}. A corretora pode ter rejeitado a entrada.")
                 self.is_trade_active = False
+                # Se a entrada de Martingale falhar, zera o estado para evitar um loop
+                if signal.strategy.startswith("M_Martingale"):
+                    self.martingale_state[signal.pair] = {'level': 0}
                 return
 
             await self.logger('INFO', f"Ordem {order_id} enviada com sucesso. Valor: {entry_value}. Exp: {expiration_minutes} min. Aguardando...")
@@ -243,9 +280,11 @@ class TradingBot:
                 self.daily_wins += 1
                 self.asset_performance[pair]['wins'] += 1
                 self.consecutive_losses[pair] = 0
+                self.martingale_state[pair] = {'level': 0} # Zera o Martingale no WIN
                 if pair in self.blacklisted_assets:
                     self.blacklisted_assets.remove(pair)
                     await self.logger('INFO', f"O par {pair} foi redimido e REMOVIDO da lista negra.")
+            
             elif result == 'LOSS':
                 self.daily_losses += 1
                 self.asset_performance[pair]['losses'] += 1
@@ -254,22 +293,33 @@ class TradingBot:
                     self.blacklisted_assets.add(pair)
                     await self.logger('ERROR', f"O par {pair} atingiu 2 derrotas consecutivas e foi COLOCADO na lista negra.")
 
+                # LÓGICA DE MARTINGALE
+                if self.bot_config.get('use_martingale', False):
+                    current_level = self.martingale_state.get(pair, {}).get('level', 0)
+                    max_levels = self.bot_config.get('martingale_levels', 2)
+                    if current_level < max_levels:
+                        self.martingale_state[pair] = {'level': current_level + 1}
+                        self.pending_martingale_trade = {
+                            "full_name": full_name,
+                            "direction": signal.direction,
+                            "expiration_minutes": expiration_minutes,
+                            "pair": pair
+                        }
+                        await self.logger('WARNING', f"MARTINGALE NÍVEL {current_level + 1} PREPARADO para {pair}.")
+                    else:
+                        self.martingale_state[pair] = {'level': 0}
+                        await self.logger('ERROR', f"Nível máximo de Martingale atingido para {pair}. Ciclo de Martingale encerrado.")
+            
             stop_win = self.bot_config.get('stop_win') or 0
             stop_loss = self.bot_config.get('stop_loss') or 0
-            
             if (stop_win > 0 and self.daily_wins >= stop_win) or \
                (stop_loss > 0 and self.daily_losses >= stop_loss):
                 msg = f"META DE STOP WIN ({self.daily_wins}/{stop_win}) ATINGIDA!" if self.daily_wins >= stop_win else f"META DE STOP LOSS ({self.daily_losses}/{stop_loss}) ATINGIDA!"
                 await self.logger('SUCCESS' if result == 'WIN' else 'ERROR', f"{msg} A pausar o bot.")
                 await self.supabase.update_config({'status': 'PAUSED'})
 
-            if self.bot_config.get('use_martingale', False):
-                if result == 'WIN': self.martingale_state[signal.pair] = {'level': 0, 'last_value': entry_value}
-                elif result == 'LOSS':
-                    lvl = mg_lv + 1
-                    max_lv = self.bot_config.get('martingale_levels', 2)
-                    if lvl <= max_lv: self.martingale_state[signal.pair] = {'level': lvl, 'last_value': entry_value}
-                    else: self.martingale_state[signal.pair] = {'level': 0, 'last_value': self.bot_config.get('entry_value', entry_value)}
         finally:
-            self.is_trade_active = False
-            await self.logger('INFO', 'Ciclo de operação concluído. Pronto para nova análise.')
+            # Só libera o bot se não houver um Martingale pendente
+            if not self.pending_martingale_trade:
+                self.is_trade_active = False
+                await self.logger('INFO', 'Ciclo de operação concluído. Pronto para nova análise.')
