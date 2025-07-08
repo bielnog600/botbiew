@@ -9,7 +9,7 @@ class AsyncExnovaService:
         self.logger = logging.getLogger(__name__)
 
     async def connect(self) -> bool:
-        """Conecta-se à API da Exnova e aguarda o perfil ser carregado."""
+        """Conecta-se à API da Exnova e aguarda os dados essenciais serem carregados."""
         try:
             loop = asyncio.get_event_loop()
             check, reason = await loop.run_in_executor(None, self.api.connect)
@@ -17,13 +17,19 @@ class AsyncExnovaService:
                 self.logger.error(f"Falha na conexão com a Exnova: {reason}")
                 return False
             
-            for _ in range(10): 
-                if hasattr(self.api, 'profile') and self.api.profile is not None:
-                    self.logger.info("Conexão e perfil carregados com sucesso.")
+            # Aguarda o perfil e os ativos serem carregados
+            for _ in range(15): # Tenta por até 15 segundos
+                # CORRIGIDO: Usa o método correto get_balances e verifica se a resposta não é vazia
+                balances_data = await loop.run_in_executor(None, self.api.get_balances)
+                # CORRIGIDO: Usa o método correto para obter os ativos
+                assets_data = await loop.run_in_executor(None, self.api.get_api_option_init_all_v2)
+                
+                if balances_data and balances_data.get('msg') and assets_data:
+                    self.logger.info("Conexão e dados iniciais carregados com sucesso.")
                     return True
                 await asyncio.sleep(1)
             
-            self.logger.error("Conexão estabelecida, mas o perfil do utilizador não foi carregado a tempo.")
+            self.logger.error("Conexão estabelecida, mas os dados do utilizador (saldo/ativos) não foram carregados a tempo.")
             return False
         except Exception as e:
             self.logger.error(f"Erro crítico na conexão: {e}")
@@ -33,7 +39,6 @@ class AsyncExnovaService:
         """Obtém a lista de ativos abertos para negociação."""
         try:
             loop = asyncio.get_event_loop()
-            # CORRIGIDO: Usando o nome de função correto da sua biblioteca
             all_assets_data = await loop.run_in_executor(None, self.api.get_api_option_init_all_v2)
             
             tradables = all_assets_data.get('binary', {}).get('actives', {})
@@ -49,7 +54,6 @@ class AsyncExnovaService:
         """Busca o histórico de velas para um ativo."""
         try:
             loop = asyncio.get_event_loop()
-            # CORRIGIDO: O nome correto da função é 'getcandles'
             status, candles = await loop.run_in_executor(None, lambda: self.api.getcandles(asset, timeframe, count))
             return candles if status else None
         except Exception as e:
@@ -60,9 +64,7 @@ class AsyncExnovaService:
         """Obtém o saldo atual da conta selecionada."""
         try:
             loop = asyncio.get_event_loop()
-            # CORRIGIDO: Usando o método correto 'get_balances'
             balances = await loop.run_in_executor(None, self.api.get_balances)
-            # A função retorna uma lista, pegamos o saldo da conta ativa
             for balance in balances.get('msg', []):
                 if balance.get('is_active'):
                     return balance.get('amount')
@@ -75,10 +77,8 @@ class AsyncExnovaService:
         """Muda entre a conta de prática e a conta real."""
         try:
             loop = asyncio.get_event_loop()
-            # CORRIGIDO: Usando o nome correto 'changebalance' e tratando o erro esperado
             await loop.run_in_executor(None, lambda: self.api.changebalance(balance_type.upper()))
         except Exception as e:
-            # Este erro 404 é esperado e pode ser ignorado se o resto funcionar
             self.logger.warning(f"Ocorreu um erro esperado ao mudar de conta para {balance_type} (pode ser ignorado): {e}")
 
     async def execute_trade(self, amount: float, asset: str, direction: str, expiration_minutes: int) -> Optional[int]:
