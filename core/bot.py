@@ -57,6 +57,13 @@ class TradingBot:
     async def run(self):
         await self.logger('INFO', 'Bot a iniciar com GESTÃO DE RISCO ADAPTATIVA...')
         await self.exnova.connect()
+        
+        # CORRIGIDO: Muda de conta apenas uma vez, no início.
+        self.bot_config = await self.supabase.get_bot_config()
+        account_type = self.bot_config.get('account_type', 'PRACTICE')
+        await self.exnova.change_balance(account_type)
+        await self.logger('INFO', f"Conta definida para: {account_type}")
+
         await self._daily_reset_if_needed()
 
         while self.is_running:
@@ -100,7 +107,7 @@ class TradingBot:
                     await self.run_analysis_for_timeframe(60, 1)
 
     async def run_analysis_for_timeframe(self, timeframe_seconds: int, expiration_minutes: int):
-        await self.exnova.change_balance(self.bot_config.get('account_type', 'PRACTICE'))
+        # CORRIGIDO: A mudança de conta foi removida daqui para estabilizar a conexão.
         assets = await self.exnova.get_open_assets()
         
         available_assets = [asset for asset in assets if asset.split('-')[0] not in self.blacklisted_assets]
@@ -125,11 +132,11 @@ class TradingBot:
             base = full_name.split('-')[0]
             
             if expiration_minutes == 1:
-                analysis_candles, sr_candles = await asyncio.gather(self.exnova.get_historical_candles(base, 60, 240), self.exnova.get_historical_candles(base, 900, 100))
+                analysis_candles, sr_candles = await asyncio.gather(self.exnova.get_historical_candles(base, 60, 200), self.exnova.get_historical_candles(base, 900, 100))
                 if not analysis_candles or not sr_candles: return
                 res, sup = get_m15_sr_zones(sr_candles)
             elif expiration_minutes == 5:
-                analysis_candles, sr_candles = await asyncio.gather(self.exnova.get_historical_candles(base, 300, 240), self.exnova.get_historical_candles(base, 3600, 100))
+                analysis_candles, sr_candles = await asyncio.gather(self.exnova.get_historical_candles(base, 300, 200), self.exnova.get_historical_candles(base, 3600, 100))
                 if not analysis_candles or not sr_candles: return
                 res, sup = get_h1_sr_zones(sr_candles)
             else: return
@@ -159,28 +166,19 @@ class TradingBot:
             zones = {'resistance': res, 'support': sup}
             confirmation_threshold = self.bot_config.get('confirmation_threshold') or 2
 
-            if expiration_minutes == 1:
-                sr_signal_type = ti.check_price_near_sr(signal_candle, zones)
-                if sr_signal_type == 'call':
-                    confluences.append("SR_Zone")
-                    if ti.check_candlestick_pattern(analysis_candles) == 'call': confluences.append("Candle_Pattern")
-                    if ti.check_rsi_condition(analysis_candles) == 'call': confluences.append("RSI_Condition")
-                    if len(confluences) >= confirmation_threshold: final_direction = 'call'
-                elif sr_signal_type == 'put':
-                    confluences.append("SR_Zone")
-                    if ti.check_candlestick_pattern(analysis_candles) == 'put': confluences.append("Candle_Pattern")
-                    if ti.check_rsi_condition(analysis_candles) == 'put': confluences.append("RSI_Condition")
-                    if len(confluences) >= confirmation_threshold: final_direction = 'put'
+            sr_signal_type = ti.check_price_near_sr(signal_candle, zones)
             
-            elif expiration_minutes == 5:
-                m5_signal = ti.check_m5_price_action(analysis_candles, zones)
-                if m5_signal:
-                    temp_confluences = m5_signal['confluences']
-                    if ti.check_rsi_condition(analysis_candles) == m5_signal['direction']:
-                        temp_confluences.append("RSI_Condition")
-                    if len(temp_confluences) >= confirmation_threshold:
-                        final_direction = m5_signal['direction']
-                        confluences = temp_confluences
+            if sr_signal_type == 'call':
+                confluences.append("SR_Zone")
+                if ti.check_candlestick_pattern(analysis_candles) == 'call': confluences.append("Candle_Pattern")
+                if ti.check_rsi_condition(analysis_candles) == 'call': confluences.append("RSI_Condition")
+                if len(confluences) >= confirmation_threshold: final_direction = 'call'
+
+            elif sr_signal_type == 'put':
+                confluences.append("SR_Zone")
+                if ti.check_candlestick_pattern(analysis_candles) == 'put': confluences.append("Candle_Pattern")
+                if ti.check_rsi_condition(analysis_candles) == 'put': confluences.append("RSI_Condition")
+                if len(confluences) >= confirmation_threshold: final_direction = 'put'
             
             if final_direction:
                 if not ti.validate_reversal_candle(signal_candle, final_direction): return
@@ -252,9 +250,6 @@ class TradingBot:
         try:
             is_martingale_trade = "Martingale" in signal.strategy
             entry_value = self._get_entry_value(signal.pair, is_martingale=is_martingale_trade)
-            
-            # CORRIGIDO: Obtém o saldo ANTES de executar a ordem
-            bal_before = await self.exnova.get_current_balance()
 
             order_id = await self.exnova.execute_trade(entry_value, full_name, signal.direction.lower(), expiration_minutes)
             
@@ -269,23 +264,20 @@ class TradingBot:
             
             await asyncio.sleep(expiration_minutes * 60 + 5)
 
-            # CORRIGIDO: Usa a comparação de saldo para determinar o resultado
-            bal_after = await self.exnova.get_current_balance()
+            trade_result = await self.exnova.check_win(order_id)
             
-            if bal_before is None or bal_after is None:
-                result = 'UNKNOWN'
-                await self.logger('WARNING', f"Resultado da ordem {order_id} desconhecido. Não foi possível obter o saldo.")
-            else:
-                delta = bal_after - bal_before
-                if delta > 0: result = 'WIN'
-                elif delta < 0: result = 'LOSS'
-                else: result = 'DRAW'
-                await self.logger('SUCCESS' if result == 'WIN' else 'ERROR', f"Resultado: {result}. ΔSaldo = {delta:.2f}")
+            result = 'UNKNOWN'
+            if trade_result == 'win': result = 'WIN'
+            elif trade_result == 'loss': result = 'LOSS'
+            elif trade_result == 'equal': result = 'DRAW'
+            
+            await self.logger('SUCCESS' if result == 'WIN' else 'ERROR', f"Resultado da ordem {order_id}: {result}")
 
             if sid:
                 mg_lv = self.martingale_state.get(signal.pair, {}).get('level', 0)
                 await self.supabase.update_trade_result(sid, result, mg_lv)
             
+            bal_after = await self.exnova.get_current_balance()
             if bal_after is not None:
                 await self.supabase.update_current_balance(bal_after)
 
