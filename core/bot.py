@@ -57,12 +57,6 @@ class TradingBot:
     async def run(self):
         await self.logger('INFO', 'Bot a iniciar com GESTÃO DE RISCO ADAPTATIVA...')
         await self.exnova.connect()
-        
-        config = await self.supabase.get_bot_config()
-        account_type = config.get('account_type', 'PRACTICE')
-        await self.exnova.change_balance(account_type)
-        await self.logger('INFO', f"Conta definida para: {account_type}")
-
         await self._daily_reset_if_needed()
 
         while self.is_running:
@@ -106,6 +100,7 @@ class TradingBot:
                     await self.run_analysis_for_timeframe(60, 1)
 
     async def run_analysis_for_timeframe(self, timeframe_seconds: int, expiration_minutes: int):
+        await self.exnova.change_balance(self.bot_config.get('account_type', 'PRACTICE'))
         assets = await self.exnova.get_open_assets()
         
         available_assets = [asset for asset in assets if asset.split('-')[0] not in self.blacklisted_assets]
@@ -139,23 +134,12 @@ class TradingBot:
                 res, sup = get_h1_sr_zones(sr_candles)
             else: return
 
-# --- FILTRO 1: VOLATILIDADE (ATR) DINÂMICO ---
             volatility_profile = self.bot_config.get('volatility_profile', 'EQUILIBRADO')
-            
-            atr_limits = {
-                'ULTRA_CONSERVADOR': (0.00015, 0.00500),
-                'CONSERVADOR':       (0.00008, 0.01500),
-                'EQUILIBRADO':       (0.00005, 0.05000),
-                'AGRESSIVO':         (0.00001, 0.15000),
-                'ULTRA_AGRESSIVO':   (0.00001, 0.50000),
-            }
-            
+            atr_limits = {'ULTRA_CONSERVADOR': (0.00015, 0.00500), 'CONSERVADOR': (0.00008, 0.01500), 'EQUILIBRADO': (0.00005, 0.05000), 'AGRESSIVO': (0.00001, 0.15000), 'ULTRA_AGRESSIVO': (0.00001, 0.50000)}
             if volatility_profile != 'DESATIVADO':
-                min_atr, max_atr = atr_limits.get(volatility_profile, (0.00005, 0.05000)) # Padrão é EQUILIBRADO
+                min_atr, max_atr = atr_limits.get(volatility_profile, (0.00005, 0.05000))
                 atr_value = ti.calculate_atr(analysis_candles, period=14)
-                if atr_value is None or not (min_atr < atr_value < max_atr):
-                    await self.logger('DEBUG', f"[{base}-M{expiration_minutes}] Filtro de volatilidade ({volatility_profile}): Fora dos limites (ATR={atr_value}). Ativo ignorado.")
-                    return
+                if atr_value is None or not (min_atr < atr_value < max_atr): return
 
             signal_candle = analysis_candles[-1]
             
@@ -200,9 +184,15 @@ class TradingBot:
                 strategy_name = f"M{expiration_minutes}_" + ', '.join(confluences)
                 await self.logger('SUCCESS', f"EXECUTANDO SINAL! Dir: {final_direction.upper()}. Conf: {strategy_name}")
                 
-                signal = TradeSignal(pair=base, direction=final_direction, strategy=strategy_name,
-                                     setup_candle_open=signal_candle['open'], setup_candle_high=signal_candle['max'],
-                                     setup_candle_low=signal_candle['min'], setup_candle_close=signal_candle['close'])
+                signal = TradeSignal(
+                    pair=base, 
+                    direction=final_direction, 
+                    strategy=strategy_name,
+                    setup_candle_open=signal_candle['open'], 
+                    setup_candle_high=signal_candle['max'],
+                    setup_candle_low=signal_candle['min'], 
+                    setup_candle_close=signal_candle['close']
+                )
                 
                 trade_expiration = 4 if expiration_minutes == 5 else expiration_minutes
                 await self._execute_and_wait(signal, full_name, trade_expiration)
@@ -269,7 +259,7 @@ class TradingBot:
             await self.logger('INFO', f"Ordem {order_id} enviada com sucesso. Valor: {entry_value}. Exp: {expiration_minutes} min. Aguardando...")
             sid = await self.supabase.insert_trade_signal(signal)
             
-            await asyncio.sleep(expiration_minutes * 60 + 10)
+            await asyncio.sleep(expiration_minutes * 60 + 45)
 
             result = await self.exnova.check_win(order_id) or 'UNKNOWN'
             await self.logger('SUCCESS' if result == 'WIN' else 'ERROR', f"Resultado da ordem {order_id}: {result}")
