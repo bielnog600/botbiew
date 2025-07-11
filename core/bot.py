@@ -243,10 +243,13 @@ class TradingBot:
         mg_value = base_value * (factor ** mg_level)
         return round(mg_value, 2)
 
+    # ATUALIZADO: Lógica de verificação de resultado agora usa a comparação de saldo
     async def _execute_and_wait(self, signal: TradeSignal, full_name: str, expiration_minutes: int):
         try:
             is_martingale_trade = "Martingale" in signal.strategy
             entry_value = self._get_entry_value(signal.pair, is_martingale=is_martingale_trade)
+            
+            bal_before = await self.exnova.get_current_balance()
 
             order_id = await self.exnova.execute_trade(entry_value, full_name, signal.direction.lower(), expiration_minutes)
             
@@ -261,14 +264,22 @@ class TradingBot:
             
             await asyncio.sleep(expiration_minutes * 60 + 10)
 
-            result = await self.exnova.check_win(order_id) or 'UNKNOWN'
-            await self.logger('SUCCESS' if result == 'WIN' else 'ERROR', f"Resultado da ordem {order_id}: {result}")
+            bal_after = await self.exnova.get_current_balance()
+            
+            if bal_before is None or bal_after is None:
+                result = 'UNKNOWN'
+                await self.logger('WARNING', f"Resultado da ordem {order_id} desconhecido. Não foi possível obter o saldo.")
+            else:
+                delta = bal_after - bal_before
+                if delta > 0: result = 'WIN'
+                elif delta < 0: result = 'LOSS'
+                else: result = 'DRAW'
+                await self.logger('SUCCESS' if result == 'WIN' else 'ERROR', f"Resultado: {result}. ΔSaldo = {delta:.2f}")
 
             if sid:
                 mg_lv = self.martingale_state.get(signal.pair, {}).get('level', 0)
                 await self.supabase.update_trade_result(sid, result, mg_lv)
             
-            bal_after = await self.exnova.get_current_balance()
             if bal_after is not None:
                 await self.supabase.update_current_balance(bal_after)
 
