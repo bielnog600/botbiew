@@ -2,14 +2,13 @@ import asyncio
 import logging
 import time
 from typing import List, Optional, Dict
-
-# Importa a classe correta, como no seu bot antigo
 from exnovaapi.stable_api import Exnova
 
 class AsyncExnovaService:
     def __init__(self, email: str, password: str):
         self.api = Exnova(email, password)
         self.logger = logging.getLogger(__name__)
+        self.api.profile = None
 
     async def _run_sync(self, func, *args, **kwargs):
         """Executa uma função síncrona da biblioteca em uma thread separada."""
@@ -53,11 +52,19 @@ class AsyncExnovaService:
             self.logger.error(f"Erro ao obter ativos abertos: {e}")
             return []
 
+    # CORRIGIDO: A função agora lida com a resposta da API de forma segura.
     async def get_historical_candles(self, asset: str, timeframe: int, count: int) -> Optional[List[Dict]]:
         """Busca o histórico de velas para um ativo."""
         try:
-            _, candles = await self._run_sync(self.api.get_candles, asset, timeframe, count, time.time())
-            return candles
+            # A função da API retorna apenas a lista de velas ou None.
+            candles_data = await self._run_sync(self.api.get_candles, asset, timeframe, count, time.time())
+            
+            # Verifica se o resultado é uma lista (o formato esperado)
+            if isinstance(candles_data, list):
+                return candles_data
+            else:
+                self.logger.warning(f"Resposta inesperada ao obter velas para {asset}. Recebido: {type(candles_data)}")
+                return None
         except Exception as e:
             self.logger.error(f"Erro ao obter velas para {asset}: {e}")
             return None
@@ -90,12 +97,15 @@ class AsyncExnovaService:
         """Verifica o resultado de uma operação específica pelo seu ID."""
         try:
             profit_or_loss = await self._run_sync(self.api.check_win_v3, order_id)
+            
             if profit_or_loss is None:
                 self.logger.warning(f"Não foi possível obter o resultado para a ordem {order_id}.")
                 return None
+
             if profit_or_loss > 0: return 'WIN'
             elif profit_or_loss < 0: return 'LOSS'
             else: return 'DRAW'
+                
         except Exception as e:
             self.logger.error(f"Erro ao verificar o resultado da ordem {order_id}: {e}")
             return None
