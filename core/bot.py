@@ -58,9 +58,8 @@ class TradingBot:
         await self.logger('INFO', 'Bot a iniciar com GESTÃO DE RISCO ADAPTATIVA...')
         await self.exnova.connect()
         
-        # CORRIGIDO: Muda de conta apenas uma vez, no início.
-        self.bot_config = await self.supabase.get_bot_config()
-        account_type = self.bot_config.get('account_type', 'PRACTICE')
+        config = await self.supabase.get_bot_config()
+        account_type = config.get('account_type', 'PRACTICE')
         await self.exnova.change_balance(account_type)
         await self.logger('INFO', f"Conta definida para: {account_type}")
 
@@ -107,7 +106,6 @@ class TradingBot:
                     await self.run_analysis_for_timeframe(60, 1)
 
     async def run_analysis_for_timeframe(self, timeframe_seconds: int, expiration_minutes: int):
-        # CORRIGIDO: A mudança de conta foi removida daqui para estabilizar a conexão.
         assets = await self.exnova.get_open_assets()
         
         available_assets = [asset for asset in assets if asset.split('-')[0] not in self.blacklisted_assets]
@@ -166,19 +164,28 @@ class TradingBot:
             zones = {'resistance': res, 'support': sup}
             confirmation_threshold = self.bot_config.get('confirmation_threshold') or 2
 
-            sr_signal_type = ti.check_price_near_sr(signal_candle, zones)
+            if expiration_minutes == 1:
+                sr_signal_type = ti.check_price_near_sr(signal_candle, zones)
+                if sr_signal_type == 'call':
+                    confluences.append("SR_Zone")
+                    if ti.check_candlestick_pattern(analysis_candles) == 'call': confluences.append("Candle_Pattern")
+                    if ti.check_rsi_condition(analysis_candles) == 'call': confluences.append("RSI_Condition")
+                    if len(confluences) >= confirmation_threshold: final_direction = 'call'
+                elif sr_signal_type == 'put':
+                    confluences.append("SR_Zone")
+                    if ti.check_candlestick_pattern(analysis_candles) == 'put': confluences.append("Candle_Pattern")
+                    if ti.check_rsi_condition(analysis_candles) == 'put': confluences.append("RSI_Condition")
+                    if len(confluences) >= confirmation_threshold: final_direction = 'put'
             
-            if sr_signal_type == 'call':
-                confluences.append("SR_Zone")
-                if ti.check_candlestick_pattern(analysis_candles) == 'call': confluences.append("Candle_Pattern")
-                if ti.check_rsi_condition(analysis_candles) == 'call': confluences.append("RSI_Condition")
-                if len(confluences) >= confirmation_threshold: final_direction = 'call'
-
-            elif sr_signal_type == 'put':
-                confluences.append("SR_Zone")
-                if ti.check_candlestick_pattern(analysis_candles) == 'put': confluences.append("Candle_Pattern")
-                if ti.check_rsi_condition(analysis_candles) == 'put': confluences.append("RSI_Condition")
-                if len(confluences) >= confirmation_threshold: final_direction = 'put'
+            elif expiration_minutes == 5:
+                m5_signal = ti.check_m5_price_action(analysis_candles, zones)
+                if m5_signal:
+                    temp_confluences = m5_signal['confluences']
+                    if ti.check_rsi_condition(analysis_candles) == m5_signal['direction']:
+                        temp_confluences.append("RSI_Condition")
+                    if len(temp_confluences) >= confirmation_threshold:
+                        final_direction = m5_signal['direction']
+                        confluences = temp_confluences
             
             if final_direction:
                 if not ti.validate_reversal_candle(signal_candle, final_direction): return
@@ -264,13 +271,7 @@ class TradingBot:
             
             await asyncio.sleep(expiration_minutes * 60 + 5)
 
-            trade_result = await self.exnova.check_win(order_id)
-            
-            result = 'UNKNOWN'
-            if trade_result == 'win': result = 'WIN'
-            elif trade_result == 'loss': result = 'LOSS'
-            elif trade_result == 'equal': result = 'DRAW'
-            
+            result = await self.exnova.check_win(order_id) or 'UNKNOWN'
             await self.logger('SUCCESS' if result == 'WIN' else 'ERROR', f"Resultado da ordem {order_id}: {result}")
 
             if sid:
