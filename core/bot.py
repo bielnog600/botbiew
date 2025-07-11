@@ -269,7 +269,7 @@ class TradingBot:
             await self.logger('INFO', f"Ordem {order_id} enviada com sucesso. Valor: {entry_value}. Exp: {expiration_minutes} min. Aguardando...")
             sid = await self.supabase.insert_trade_signal(signal)
             
-            await asyncio.sleep(expiration_minutes * 60 + 5)
+            await asyncio.sleep(expiration_minutes * 60 + 10)
 
             result = await self.exnova.check_win(order_id) or 'UNKNOWN'
             await self.logger('SUCCESS' if result == 'WIN' else 'ERROR', f"Resultado da ordem {order_id}: {result}")
