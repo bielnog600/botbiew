@@ -7,18 +7,19 @@ class SupabaseService:
     def __init__(self, url: str, key: str):
         self.client: Client = create_client(url, key)
 
-    async def _execute_sync(self, func, *args, **kwargs):
+    async def _execute_sync(self, func, *args):
         """
         Executa uma função síncrona (como as da biblioteca do Supabase)
         em uma thread separada para não bloquear o loop de eventos principal.
         """
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, lambda: func(*args, **kwargs).execute())
+        return await loop.run_in_executor(None, func, *args)
 
     async def get_bot_config(self) -> Dict:
         """Busca a configuração atual do bot de forma não-bloqueante."""
         try:
-            response = await self._execute_sync(self.client.from_('bot_config').select('*').eq('id', 1).single)
+            query = self.client.from_('bot_config').select('*').eq('id', 1).single()
+            response = await self._execute_sync(query.execute)
             return response.data if response.data else {}
         except Exception as e:
             print(f"Erro ao buscar config: {e}")
@@ -27,7 +28,8 @@ class SupabaseService:
     async def update_config(self, data: Dict) -> bool:
         """Atualiza campos específicos na configuração do bot de forma não-bloqueante."""
         try:
-            await self._execute_sync(self.client.from_('bot_config').update(data).eq('id', 1))
+            query = self.client.from_('bot_config').update(data).eq('id', 1)
+            await self._execute_sync(query.execute)
             return True
         except Exception as e:
             print(f"Erro ao atualizar config: {e}")
@@ -40,14 +42,17 @@ class SupabaseService:
     async def insert_log(self, level: str, message: str):
         """Insere uma nova linha de log de forma não-bloqueante."""
         try:
-            await self._execute_sync(self.client.from_('bot_logs').insert, [{'level': level, 'message': message}])
+            log_data = {'level': level, 'message': message}
+            query = self.client.from_('bot_logs').insert(log_data)
+            await self._execute_sync(query.execute)
         except Exception as e:
             print(f"Erro ao inserir log: {e}")
 
     async def insert_trade_signal(self, signal: TradeSignal) -> Optional[int]:
         """Insere um novo sinal de trade e retorna o seu ID de forma não-bloqueante."""
         try:
-            response = await self._execute_sync(self.client.from_('trade_signals').insert, signal.dict())
+            query = self.client.from_('trade_signals').insert(signal.dict())
+            response = await self._execute_sync(query.execute)
             if response.data:
                 return response.data[0]['id']
             return None
@@ -59,6 +64,7 @@ class SupabaseService:
         """Atualiza o resultado de um sinal de trade de forma não-bloqueante."""
         try:
             update_data = {'result': result, 'martingale_level': martingale_level}
-            await self._execute_sync(self.client.from_('trade_signals').update(update_data).eq('id', signal_id))
+            query = self.client.from_('trade_signals').update(update_data).eq('id', signal_id)
+            await self._execute_sync(query.execute)
         except Exception as e:
             print(f"Erro ao atualizar resultado do sinal: {e}")
