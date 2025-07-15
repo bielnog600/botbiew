@@ -2,20 +2,23 @@ import asyncio
 import logging
 import time
 from typing import List, Optional, Dict
+
+# Importa a classe correta, como no seu bot antigo
 from exnovaapi.stable_api import Exnova
 
 class AsyncExnovaService:
     def __init__(self, email: str, password: str):
         self.api = Exnova(email, password)
         self.logger = logging.getLogger(__name__)
-        self.connection_lock = asyncio.Lock()
+        self.api.profile = None # Inicializa o perfil como None
+        self.connection_lock = asyncio.Lock() # Garante que apenas uma chamada à API é feita de cada vez
         self.is_connected = False
 
     async def _run_sync(self, func, *args, **kwargs):
-        """Executa uma função síncrona em uma thread separada, garantindo a conexão."""
+        """Executa uma função síncrona da biblioteca de forma segura."""
         async with self.connection_lock:
+            # Se a conexão caiu, tenta reconectar antes de cada ação
             if not self.is_connected:
-                # Se não estiver conectado, tenta reconectar
                 self.logger.warning("Conexão perdida. A tentar reconectar...")
                 if not await self.connect():
                     self.logger.error("Falha na reconexão. A abortar a operação.")
@@ -25,9 +28,8 @@ class AsyncExnovaService:
                 loop = asyncio.get_running_loop()
                 return await loop.run_in_executor(None, lambda: func(*args, **kwargs))
             except Exception as e:
-                # Se ocorrer um erro de conexão aqui, marca como desconectado para a próxima tentativa
                 self.logger.error(f"Erro durante a execução da API: {e}. A marcar para reconexão.")
-                self.is_connected = False
+                self.is_connected = False # Marca a conexão como perdida
                 return None
 
     async def connect(self) -> bool:
@@ -40,8 +42,10 @@ class AsyncExnovaService:
                 self.is_connected = False
                 return False
             
+            # Chama explicitamente a função para carregar o perfil
             await loop.run_in_executor(None, self.api.get_profile_ansyc)
             
+            # Aguarda o perfil ser carregado
             for _ in range(15): 
                 if hasattr(self.api, 'profile') and self.api.profile is not None:
                     self.logger.info("Conexão e perfil carregados com sucesso.")
@@ -72,7 +76,9 @@ class AsyncExnovaService:
 
     async def get_historical_candles(self, asset: str, timeframe: int, count: int) -> Optional[List[Dict]]:
         """Busca o histórico de velas para um ativo."""
-        return await self._run_sync(self.api.get_candles, asset, timeframe, count, time.time())
+        response = await self._run_sync(self.api.get_candles, asset, timeframe, count, time.time())
+        # A biblioteca retorna a lista de velas diretamente se for bem-sucedida
+        return response if isinstance(response, list) else None
 
     async def get_current_balance(self) -> Optional[float]:
         """Obtém o saldo atual da conta selecionada."""
@@ -85,7 +91,7 @@ class AsyncExnovaService:
     async def execute_trade(self, amount: float, asset: str, direction: str, expiration_minutes: int) -> Optional[int]:
         """Executa uma operação de compra ou venda."""
         response = await self._run_sync(self.api.buy, amount, asset, direction, expiration_minutes)
-        if response:
+        if response and isinstance(response, tuple) and len(response) == 2:
             status, order_id = response
             return order_id if status else None
         return None
