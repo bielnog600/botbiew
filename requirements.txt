@@ -1,7 +1,4 @@
-# requirements.txt - Versão Final e Corrigida
-
-# Biblioteca principal para a API da Exnova/IQ Option (A CORREÇÃO)
-iqoptionapi
+# requirements.txt - Configurado para a biblioteca local exnovaapi
 
 # Dependências da aplicação principal
 pydantic
@@ -9,11 +6,15 @@ pydantic-settings
 python-dotenv
 supabase>=2.0.0
 
+# Dependências necessárias para a pasta local exnovaapi
+requests
+websocket-client
+
 # Dependências de análise técnica
 pandas==2.2.2
 pandas-ta==0.3.14b0
 numpy==1.26.4
 
-# Dependências de teste (opcional para produção, mas bom manter)
+# Dependências de teste (opcional para produção)
 pytest
 pytest-asyncio
