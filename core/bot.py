@@ -1,12 +1,12 @@
 import asyncio
 import time
 import traceback
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, Optional
 from threading import Thread
 
 from config import settings
-from services.exnova_service import ExnovaService
+from services.exnova_service import ExnovaService # Importa a classe síncrona
 from services.supabase_service import SupabaseService
 from analysis.technical import get_m15_sr_zones, get_h1_sr_zones
 from analysis import technical_indicators as ti
@@ -34,14 +34,12 @@ class TradingBot:
     def _run_async(self, coro):
         """Executa uma corotina a partir de uma thread síncrona."""
         if self.main_loop and self.main_loop.is_running():
-            return asyncio.run_coroutine_threadsafe(coro, self.main_loop)
-        return None
+            asyncio.run_coroutine_threadsafe(coro, self.main_loop)
 
     def logger(self, level: str, message: str):
         ts = datetime.utcnow().isoformat()
         print(f"[{ts}] [{level.upper()}] {message}", flush=True)
         if self.supabase:
-            # Não bloquear a thread para logs
             self._run_async(self.supabase.insert_log(level, message))
 
     def _hourly_cycle_reset(self):
@@ -71,10 +69,7 @@ class TradingBot:
             self.is_running = False
             return
         
-        # Await a primeira configuração
-        future = self._run_async(self.supabase.get_bot_config())
-        self.bot_config = future.result()
-        
+        self.bot_config = asyncio.run_coroutine_threadsafe(self.supabase.get_bot_config(), self.main_loop).result()
         account_type = self.bot_config.get('account_type', 'PRACTICE')
         self.exnova.change_balance(account_type)
         self.logger('INFO', f"Conta definida para: {account_type}")
@@ -87,17 +82,13 @@ class TradingBot:
                 if (datetime.utcnow() - self.last_reset_time).total_seconds() >= 3600:
                     self._hourly_cycle_reset()
 
-                # Await a configuração em cada ciclo
-                future = self._run_async(self.supabase.get_bot_config())
-                self.bot_config = future.result()
+                self.bot_config = asyncio.run_coroutine_threadsafe(self.supabase.get_bot_config(), self.main_loop).result()
                 status = self.bot_config.get('status', 'PAUSED')
 
                 if status == 'RUNNING':
                     if self.pending_martingale_trade and not self.is_trade_active:
                         self._execute_martingale_trade()
                     elif not self.is_trade_active:
-                        # --- LOG DE DEPURAÇÃO ---
-                        self.logger('DEBUG', "A entrar no ciclo de análise (trading_cycle)...")
                         self.trading_cycle()
                 
                 if status != 'RUNNING':
@@ -105,7 +96,7 @@ class TradingBot:
                 elif self.is_trade_active:
                     self.logger('INFO', "Operação em andamento. Aguardando resultado...")
                 
-                time.sleep(1) # Loop principal corre a cada 1 segundo
+                time.sleep(1)
 
             except Exception as e:
                 self.logger('ERROR', f"Loop principal falhou: {e}")
@@ -125,16 +116,9 @@ class TradingBot:
 
     def trading_cycle(self):
         now = datetime.utcnow()
-        # --- LOG DE DEPURAÇÃO ---
-        self.logger('DEBUG', f"A verificar janela de tempo. Segundos atuais: {now.second}")
-
-        # --- AJUSTE: Aumentar a janela de tempo para 15 segundos para evitar perdê-la ---
-        if now.second >= 45: # Começa a análise aos 45 segundos
+        if now.second >= 50:
             if now.minute != self.last_analysis_minute:
                 self.last_analysis_minute = now.minute
-                
-                # --- LOG DE DEPURAÇÃO ---
-                self.logger('INFO', "Janela de tempo ATIVADA. A iniciar análise...")
                 
                 if (now.minute + 1) % 5 == 0:
                     self.logger('INFO', f"Janela de análise M5 aberta...")
@@ -142,26 +126,9 @@ class TradingBot:
                 else:
                     self.logger('INFO', f"Janela de análise M1 aberta...")
                     self.run_analysis_for_timeframe(60, 1)
-            else:
-                # --- LOG DE DEPURAÇÃO ---
-                self.logger('DEBUG', "Análise para este minuto já foi executada.")
-        else:
-            # --- LOG DE DEPURAÇÃO ---
-            self.logger('DEBUG', "A aguardar pela janela de tempo correta (segundo >= 45).")
-
 
     def run_analysis_for_timeframe(self, timeframe_seconds: int, expiration_minutes: int):
-        # --- LOG DE DEPURAÇÃO ---
-        self.logger('INFO', "A obter a lista de ativos abertos...")
         assets = self.exnova.get_open_assets()
-        
-        if not assets:
-            # --- LOG DE DEPURAÇÃO ---
-            self.logger('WARNING', "Nenhum ativo aberto encontrado para negociação. A aguardar pelo próximo ciclo.")
-            return
-
-        # --- LOG DE DEPURAÇÃO ---
-        self.logger('INFO', f"Encontrados {len(assets)} ativos. A filtrar e priorizar...")
         available_assets = [asset for asset in assets if asset.split('-')[0] not in self.blacklisted_assets]
 
         def get_asset_score(asset_name):
@@ -173,15 +140,9 @@ class TradingBot:
 
         prioritized_assets = sorted(available_assets, key=get_asset_score, reverse=True)
         
-        # --- LOG DE DEPURAÇÃO ---
-        self.logger('INFO', f"A analisar os {settings.MAX_ASSETS_TO_MONITOR} melhores ativos: {[asset.split('-')[0] for asset in prioritized_assets[:settings.MAX_ASSETS_TO_MONITOR]]}")
-
         for asset in prioritized_assets[:settings.MAX_ASSETS_TO_MONITOR]:
             if self.is_trade_active:
-                self.logger('INFO', "Operação tornou-se ativa. A parar a análise de novos ativos.")
                 break
-            # --- LOG DE DEPURAÇÃO ---
-            self.logger('INFO', f"A analisar o ativo: {asset} para M{expiration_minutes}")
             self._analyze_asset(asset, timeframe_seconds, expiration_minutes)
 
     def _analyze_asset(self, full_name: str, timeframe_seconds: int, expiration_minutes: int):
@@ -189,48 +150,44 @@ class TradingBot:
             if self.is_trade_active: return
             base = full_name.split('-')[0]
             
-            # --- LOG DE DEPURAÇÃO ---
-            self.logger('DEBUG', f"A obter velas para {base}...")
             if expiration_minutes == 1:
                 analysis_candles = self.exnova.get_historical_candles(base, 60, 200)
                 sr_candles = self.exnova.get_historical_candles(base, 900, 100)
-            else: # M5
+                if not analysis_candles or not sr_candles: return
+                res, sup = get_m15_sr_zones(sr_candles)
+            elif expiration_minutes == 5:
                 analysis_candles = self.exnova.get_historical_candles(base, 300, 200)
                 sr_candles = self.exnova.get_historical_candles(base, 3600, 100)
+                if not analysis_candles or not sr_candles: return
+                res, sup = get_h1_sr_zones(sr_candles)
+            else: return
 
-            if not analysis_candles or not sr_candles:
-                # --- LOG DE DEPURAÇÃO ---
-                self.logger('WARNING', f"Não foi possível obter velas para {base}. A saltar este ativo.")
-                return
-            
-            # --- LOG DE DEPURAÇÃO ---
-            self.logger('DEBUG', f"Velas obtidas para {base}. A iniciar análise técnica...")
-
-            # ... (o resto da sua lógica de análise permanece igual)
             volatility_profile = self.bot_config.get('volatility_profile', 'EQUILIBRADO')
             atr_limits = {'ULTRA_CONSERVADOR': (0.00015, 0.00500), 'CONSERVADOR': (0.00008, 0.01500), 'EQUILIBRADO': (0.00005, 0.05000), 'AGRESSIVO': (0.00001, 0.15000), 'ULTRA_AGRESSIVO': (0.00001, 0.50000)}
             if volatility_profile != 'DESATIVADO':
                 min_atr, max_atr = atr_limits.get(volatility_profile, (0.00005, 0.05000))
                 atr_value = ti.calculate_atr(analysis_candles, period=14)
-                if atr_value is None or not (min_atr < atr_value < max_atr): 
-                    self.logger('DEBUG', f"{base} fora do perfil de volatilidade (ATR: {atr_value}). A saltar.")
-                    return
+                if atr_value is None or not (min_atr < atr_value < max_atr): return
 
             signal_candle = analysis_candles[-1]
             
             final_direction = None
             confluences = []
-            zones = {'resistance': get_h1_sr_zones(sr_candles)[0] if expiration_minutes == 5 else get_m15_sr_zones(sr_candles)[0], 
-                     'support': get_h1_sr_zones(sr_candles)[1] if expiration_minutes == 5 else get_m15_sr_zones(sr_candles)[1]}
+            zones = {'resistance': res, 'support': sup}
             confirmation_threshold = self.bot_config.get('confirmation_threshold') or 2
 
             if expiration_minutes == 1:
                 sr_signal_type = ti.check_price_near_sr(signal_candle, zones)
-                if sr_signal_type:
+                if sr_signal_type == 'call':
                     confluences.append("SR_Zone")
-                    if ti.check_candlestick_pattern(analysis_candles) == sr_signal_type: confluences.append("Candle_Pattern")
-                    if ti.check_rsi_condition(analysis_candles) == sr_signal_type: confluences.append("RSI_Condition")
-                    if len(confluences) >= confirmation_threshold: final_direction = sr_signal_type
+                    if ti.check_candlestick_pattern(analysis_candles) == 'call': confluences.append("Candle_Pattern")
+                    if ti.check_rsi_condition(analysis_candles) == 'call': confluences.append("RSI_Condition")
+                    if len(confluences) >= confirmation_threshold: final_direction = 'call'
+                elif sr_signal_type == 'put':
+                    confluences.append("SR_Zone")
+                    if ti.check_candlestick_pattern(analysis_candles) == 'put': confluences.append("Candle_Pattern")
+                    if ti.check_rsi_condition(analysis_candles) == 'put': confluences.append("RSI_Condition")
+                    if len(confluences) >= confirmation_threshold: final_direction = 'put'
             
             elif expiration_minutes == 5:
                 m5_signal = ti.check_m5_price_action(analysis_candles, zones)
@@ -243,20 +200,17 @@ class TradingBot:
                         confluences = temp_confluences
             
             if final_direction:
-                self.logger('SUCCESS', f"SINAL ENCONTRADO para {base}! Direção: {final_direction.upper()}, Confluências: {confluences}")
-                if not ti.validate_reversal_candle(signal_candle, final_direction): 
-                    self.logger('WARNING', f"Sinal em {base} invalidado pela vela de reversão. A cancelar.")
-                    return
+                if not ti.validate_reversal_candle(signal_candle, final_direction): return
                 if self.is_trade_active: return
 
                 now = datetime.utcnow()
                 wait_seconds = (60 - now.second - 1) + (1 - now.microsecond / 1000000) + 0.2
-                self.logger('INFO', f"Sinal confirmado em {base}. Aguardando {wait_seconds:.2f}s para entrada precisa.")
+                self.logger('INFO', f"Sinal encontrado em {base}. Aguardando {wait_seconds:.2f}s para entrada precisa.")
                 time.sleep(wait_seconds)
 
                 self.is_trade_active = True
                 strategy_name = f"M{expiration_minutes}_" + ', '.join(confluences)
-                self.logger('SUCCESS', f"EXECUTANDO SINAL! Ativo: {base}, Dir: {final_direction.upper()}. Conf: {strategy_name}")
+                self.logger('SUCCESS', f"EXECUTANDO SINAL! Dir: {final_direction.upper()}. Conf: {strategy_name}")
                 
                 signal = TradeSignal(
                     pair=base, 
@@ -275,8 +229,6 @@ class TradingBot:
             self.logger('ERROR', f"Erro em _analyze_asset({full_name}, M{expiration_minutes}): {e}")
             traceback.print_exc()
 
-    # O resto dos seus métodos (_execute_martingale_trade, _get_entry_value, _execute_and_wait)
-    # permanecem os mesmos. Pode colar o resto do seu ficheiro original aqui.
     def _execute_martingale_trade(self):
         trade_info = self.pending_martingale_trade
         if not trade_info: return
@@ -334,14 +286,15 @@ class TradingBot:
 
             self.logger('INFO', f"Ordem {order_id} enviada com sucesso. Valor: {entry_value}. Exp: {expiration_minutes} min. Aguardando...")
             
-            sid_future = self._run_async(self.supabase.insert_trade_signal(signal))
+            # A inserção do sinal no Supabase agora é feita de forma assíncrona
+            sid_future = asyncio.run_coroutine_threadsafe(self.supabase.insert_trade_signal(signal), self.main_loop)
             
             time.sleep(expiration_minutes * 60 + 10)
 
             result = self.exnova.check_win(order_id) or 'UNKNOWN'
             self.logger('SUCCESS' if result == 'WIN' else 'ERROR', f"Resultado da ordem {order_id}: {result}")
 
-            sid = sid_future.result() if sid_future else None
+            sid = sid_future.result() # Espera pelo resultado da inserção
             if sid:
                 mg_lv = self.martingale_state.get(signal.pair, {}).get('level', 0)
                 self._run_async(self.supabase.update_trade_result(sid, result, mg_lv))
@@ -396,4 +349,3 @@ class TradingBot:
             if not self.pending_martingale_trade:
                 self.is_trade_active = False
                 self.logger('INFO', 'Ciclo de operação concluído. Pronto para nova análise.')
-
