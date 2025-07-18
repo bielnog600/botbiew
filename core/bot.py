@@ -293,7 +293,7 @@ class TradingBot:
             self.logger('SUCCESS' if result == 'WIN' else 'ERROR', f"Resultado da ordem {order_id}: {result}")
 
             sid_future = asyncio.run_coroutine_threadsafe(self.supabase.insert_trade_signal(signal), self.main_loop)
-            sid = sid_future.result() # Espera pelo resultado
+            sid = sid_future.result()
             if sid:
                 mg_lv = self.martingale_state.get(signal.pair, {}).get('level', 0)
                 self._run_async(self.supabase.update_trade_result(sid, result, mg_lv))
