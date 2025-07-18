@@ -17,8 +17,10 @@ class ExnovaService:
                 self.logger.error(f"Falha na conexão com a Exnova: {reason}")
                 return False
             
-            self.api.get_profile_ansyc()
-            
+            profile_data = self.api.profile
+            if profile_data is None:
+                self.api.get_profile_ansyc()
+                
             max_wait_time = 60  # Espera até 60 segundos pelo perfil
             start_time = time.time()
             
