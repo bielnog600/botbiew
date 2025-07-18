@@ -7,34 +7,54 @@ class ExnovaService:
     def __init__(self, email: str, password: str):
         self.api = Exnova(email, password)
         self.logger = logging.getLogger(__name__)
+        self.api.profile = None
+
+    def load_profile(self) -> bool:
+        """
+        Carrega o perfil do utilizador de forma síncrona e segura, como sugerido.
+        """
+        try:
+            self.api.profile = None
+            self.api.get_profile_ansyc() # Envia a requisição para obter o perfil
+
+            start_time = time.time()
+            timeout = 15  # segundos
+
+            while self.api.profile is None:
+                if time.time() - start_time > timeout:
+                    self.logger.error("Timeout ao carregar o perfil do utilizador.")
+                    return False
+                time.sleep(0.1)
+
+            # Verifica se o perfil veio corretamente
+            if "msg" not in self.api.profile or not self.api.profile["msg"]:
+                self.logger.error("Perfil do utilizador carregado, mas vazio ou inválido.")
+                return False
+            
+            return True
+        except Exception as e:
+            self.logger.error(f"Erro ao carregar perfil: {e}")
+            return False
 
     def connect(self) -> bool:
-        """Conecta-se à API da Exnova e aguarda o perfil ser carregado."""
+        """Conecta-se à API da Exnova e usa o novo método para carregar o perfil."""
         try:
             check, reason = self.api.connect()
             if not check:
                 self.logger.error(f"Falha na conexão com a Exnova: {reason}")
                 return False
             
-            self.api.get_profile()
-
-            timeout = 30
-            start_time = time.time()
-            while self.api.profile is None:
-                if time.time() - start_time > timeout:
-                    self.logger.error("Conexão estabelecida, mas o perfil do utilizador não foi carregado a tempo.")
-                    return False
-                self.logger.info("Aguardando carregamento do perfil...")
-                time.sleep(1)
-
-            self.logger.info("Conexão e perfil carregados com sucesso.")
-            return True
+            # Usa o novo método robusto para carregar o perfil
+            if self.load_profile():
+                self.logger.info("Conexão e perfil carregados com sucesso.")
+                return True
+            else:
+                return False
         except Exception as e:
             self.logger.error(f"Erro crítico na conexão: {e}")
             return False
 
     def get_open_assets(self) -> List[str]:
-        """Obtém a lista de ativos abertos para negociação."""
         try:
             all_assets = self.api.get_all_open_time()
             open_assets = []
@@ -49,7 +69,6 @@ class ExnovaService:
             return []
 
     def get_historical_candles(self, asset: str, timeframe: int, count: int) -> Optional[List[Dict]]:
-        """Busca o histórico de velas para um ativo."""
         try:
             return self.api.get_candles(asset, timeframe, count, time.time())
         except Exception as e:
@@ -57,7 +76,6 @@ class ExnovaService:
             return None
 
     def get_current_balance(self) -> Optional[float]:
-        """Obtém o saldo atual da conta selecionada."""
         try:
             return self.api.get_balance()
         except Exception as e:
@@ -65,14 +83,12 @@ class ExnovaService:
             return None
 
     def change_balance(self, balance_type: str):
-        """Muda entre a conta de prática e a conta real."""
         try:
             self.api.change_balance(balance_type.upper())
         except Exception as e:
-            self.logger.warning(f"Ocorreu um erro ao mudar de conta para {balance_type}: {e}")
+            self.logger.warning(f"Ocorreu um erro esperado ao mudar de conta para {balance_type} (pode ser ignorado): {e}")
 
     def execute_trade(self, amount: float, asset: str, direction: str, expiration_minutes: int) -> Optional[int]:
-        """Executa uma operação de compra ou venda."""
         try:
             status, order_id = self.api.buy(amount, asset, direction, expiration_minutes)
             return order_id if status else None
@@ -81,21 +97,14 @@ class ExnovaService:
             return None
 
     def check_win(self, order_id: int) -> Optional[str]:
-        """Verifica o resultado de uma operação específica pelo seu ID."""
         try:
-            result = self.api.check_win_v3(order_id)
-            if result is None:
-                self.logger.warning(f"Não foi possível obter o resultado da ordem {order_id}.")
+            profit_or_loss = self.api.check_win_v3(order_id)[1]
+            if profit_or_loss is None:
+                self.logger.warning(f"Não foi possível obter o resultado para a ordem {order_id}.")
                 return None
-            win_status, profit = result
-            if win_status == 'win':
-                return 'WIN'
-            elif win_status == 'loose':
-                return 'LOSS'
-            elif win_status == 'equal':
-                return 'DRAW'
-            else:
-                return None
+            if profit_or_loss > 0: return 'WIN'
+            elif profit_or_loss < 0: return 'LOSS'
+            else: return 'DRAW'
         except Exception as e:
             self.logger.error(f"Erro ao verificar o resultado da ordem {order_id}: {e}")
             return None
