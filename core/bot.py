@@ -34,7 +34,8 @@ class TradingBot:
     def _run_async(self, coro):
         """Executa uma corotina a partir de uma thread síncrona."""
         if self.main_loop and self.main_loop.is_running():
-            asyncio.run_coroutine_threadsafe(coro, self.main_loop)
+            return asyncio.run_coroutine_threadsafe(coro, self.main_loop)
+        return None
 
     def logger(self, level: str, message: str):
         ts = datetime.utcnow().isoformat()
@@ -69,7 +70,7 @@ class TradingBot:
             self.is_running = False
             return
         
-        self.bot_config = asyncio.run_coroutine_threadsafe(self.supabase.get_bot_config(), self.main_loop).result()
+        self.bot_config = self._run_async(self.supabase.get_bot_config()).result()
         account_type = self.bot_config.get('account_type', 'PRACTICE')
         self.exnova.change_balance(account_type)
         self.logger('INFO', f"Conta definida para: {account_type}")
@@ -82,7 +83,7 @@ class TradingBot:
                 if (datetime.utcnow() - self.last_reset_time).total_seconds() >= 3600:
                     self._hourly_cycle_reset()
 
-                self.bot_config = asyncio.run_coroutine_threadsafe(self.supabase.get_bot_config(), self.main_loop).result()
+                self.bot_config = self._run_async(self.supabase.get_bot_config()).result()
                 status = self.bot_config.get('status', 'PAUSED')
 
                 if status == 'RUNNING':
@@ -286,15 +287,14 @@ class TradingBot:
 
             self.logger('INFO', f"Ordem {order_id} enviada com sucesso. Valor: {entry_value}. Exp: {expiration_minutes} min. Aguardando...")
             
-            # A inserção do sinal no Supabase agora é feita de forma assíncrona
-            sid_future = asyncio.run_coroutine_threadsafe(self.supabase.insert_trade_signal(signal), self.main_loop)
+            sid_future = self._run_async(self.supabase.insert_trade_signal(signal))
             
             time.sleep(expiration_minutes * 60 + 10)
 
             result = self.exnova.check_win(order_id) or 'UNKNOWN'
             self.logger('SUCCESS' if result == 'WIN' else 'ERROR', f"Resultado da ordem {order_id}: {result}")
 
-            sid = sid_future.result() # Espera pelo resultado da inserção
+            sid = sid_future.result() if sid_future else None
             if sid:
                 mg_lv = self.martingale_state.get(signal.pair, {}).get('level', 0)
                 self._run_async(self.supabase.update_trade_result(sid, result, mg_lv))
