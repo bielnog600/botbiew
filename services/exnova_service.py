@@ -141,5 +141,3 @@ class ExnovaService:
         except Exception as e:
             self.logger.error(f"Ocorreu um erro ao verificar o resultado para a ordem {order_id}: {e}", exc_info=True)
             return None
-```
-O código foi revertido. No entanto, lembre-se que se a Exnova atualizou a sua API, esta versão pode voltar a apresentar os mesmos problemas de ligação que vimos anteriormente. Se isso acontecer, a solução recomendada continua a ser usar uma biblioteca pública e atualiza
