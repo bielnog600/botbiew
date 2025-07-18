@@ -6,7 +6,7 @@ from typing import Dict, Optional
 from threading import Thread
 
 from config import settings
-from services.exnova_service import ExnovaService # Importa a classe síncrona
+from services.exnova_service import ExnovaService # Importa a classe síncrona correta
 from services.supabase_service import SupabaseService
 from analysis.technical import get_m15_sr_zones, get_h1_sr_zones
 from analysis import technical_indicators as ti
@@ -63,7 +63,7 @@ class TradingBot:
                 self._run_async(self.supabase.update_config({'daily_initial_balance': bal, 'current_balance': bal}))
 
     def trading_loop_sync(self):
-        """O novo coração síncrono do bot."""
+        """O novo coração síncrono do bot, que corre numa thread separada."""
         self.logger('INFO', 'Bot a iniciar com GESTÃO DE RISCO ADAPTATIVA...')
         if not self.exnova.connect():
             self.is_running = False
@@ -108,11 +108,9 @@ class TradingBot:
         self.supabase = SupabaseService(settings.SUPABASE_URL, settings.SUPABASE_KEY)
         self.main_loop = asyncio.get_running_loop()
         
-        # Inicia o loop de trading síncrono em uma nova thread
         trading_thread = Thread(target=self.trading_loop_sync, daemon=True)
         trading_thread.start()
         
-        # Mantém o loop asyncio a funcionar para o Supabase
         while self.is_running and trading_thread.is_alive():
             await asyncio.sleep(1)
 
