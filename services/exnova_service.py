@@ -1,27 +1,23 @@
 import logging
 import time
 from typing import List, Optional, Dict
-# --- MUDANÇA IMPORTANTE: A usar a biblioteca iqoptionapi ---
-from iqoptionapi.stable_api import IQ_Option
+# --- Importa a classe correta da biblioteca oficial ---
+from iqoptionapi.api import IQOptionAPI
 
 class ExnovaService:
     def __init__(self, email: str, password: str):
         self.logger = logging.getLogger(__name__)
-        self.logger.info("A inicializar o serviço com a biblioteca IQOptionAPI.")
-        # --- A API agora é uma instância de IQ_Option ---
-        self.api = IQ_Option(email, password)
-        # O perfil será preenchido pela própria biblioteca durante a ligação.
+        self.logger.info("A inicializar o serviço com a biblioteca IQOptionAPI oficial.")
+        # --- A API agora é uma instância de IQOptionAPI ---
+        self.api = IQOptionAPI(email, password)
         self.api.profile = None
 
     def connect(self) -> bool:
         """
-        Conecta-se usando a biblioteca iqoptionapi, que é mais estável.
-        Esta biblioteca lida com o carregamento do perfil de forma mais fiável.
+        Conecta-se usando a biblioteca oficial iqoptionapi.
         """
         self.logger.info("A tentar ligar à Exnova/IQOption API...")
         try:
-            # O método connect() desta biblioteca é bloqueante e trata de tudo.
-            # Retorna (True, None) em caso de sucesso ou (False, 'razão') em caso de falha.
             check, reason = self.api.connect()
             
             if not check:
@@ -41,7 +37,6 @@ class ExnovaService:
         """Obtém a lista de ativos abertos para negociação."""
         self.logger.debug("A obter ativos abertos...")
         try:
-            # O método é o mesmo da biblioteca anterior.
             all_assets = self.api.get_all_open_time()
             open_assets = []
             for market_type in ['binary', 'turbo']:
@@ -57,17 +52,15 @@ class ExnovaService:
             return []
 
     def get_historical_candles(self, asset: str, timeframe: int, count: int) -> Optional[List[Dict]]:
-        """Busca o histórico de velas para um ativo."""
+        """Busca o histórico de velas para um ativo usando o método padrão."""
         self.logger.debug(f"A obter {count} velas para {asset} com timeframe de {timeframe}s.")
         try:
-            # O método get_candles é padrão e funciona da mesma forma.
             end_time = time.time()
-            self.api.start_candles_stream(asset, timeframe, count)
-            candles = self.api.get_realtime_candles(asset, timeframe)
-            self.api.stop_candles_stream(asset, timeframe)
-            # A biblioteca retorna um dicionário de velas, precisamos convertê-lo para uma lista
-            candles_list = [candles[key] for key in sorted(candles.keys())]
-            return candles_list[-count:] # Garantir que retornamos o número certo de velas
+            candles = self.api.get_candles(asset, timeframe, count, end_time)
+            if not candles:
+                self.logger.warning(f"Não foram retornados dados de velas para {asset}.")
+                return None
+            return candles
         except Exception as e:
             self.logger.error(f"Erro ao obter velas para {asset}: {e}", exc_info=True)
             return None
@@ -75,7 +68,6 @@ class ExnovaService:
     def get_current_balance(self) -> Optional[float]:
         """Obtém o saldo atual da conta selecionada."""
         try:
-            # O método é o mesmo.
             return self.api.get_balance()
         except Exception as e:
             self.logger.error(f"Erro ao obter saldo: {e}", exc_info=True)
@@ -85,7 +77,6 @@ class ExnovaService:
         """Muda entre a conta de PRÁTICA e a REAL."""
         self.logger.info(f"A mudar de conta para: {balance_type.upper()}")
         try:
-            # O método é o mesmo.
             self.api.change_balance(balance_type.upper())
             self.logger.info(f"Conta mudada com sucesso para {balance_type.upper()}.")
         except Exception as e:
@@ -95,7 +86,6 @@ class ExnovaService:
         """Executa uma operação de compra ou venda."""
         self.logger.info(f"A executar operação: {direction.upper()} {amount} em {asset} por {expiration_minutes} min.")
         try:
-            # O método buy é padrão.
             status, order_id = self.api.buy(amount, asset, direction.lower(), expiration_minutes)
             if status:
                 self.logger.info(f"Operação executada com sucesso. ID da Ordem: {order_id}")
@@ -111,8 +101,6 @@ class ExnovaService:
         """Verifica o resultado de uma operação específica pelo seu ID."""
         self.logger.info(f"A verificar resultado para a Ordem ID: {order_id}...")
         try:
-            # Usamos check_win_v4, que é mais comum nesta biblioteca.
-            # Ele retorna (lucro > 0, lucro < 0 ou 0)
             profit_or_loss = self.api.check_win_v4(order_id)
             
             if profit_or_loss is None:
