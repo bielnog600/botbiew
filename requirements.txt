@@ -1,7 +1,7 @@
-# requirements.txt - Versão Final
+# requirements.txt - Versão Final e Corrigida
 
 # Biblioteca principal para a API da Exnova/IQ Option (A CORREÇÃO)
-iqoptionapi
+iqoptionapi>=6.8
 
 # Dependências da aplicação principal
 pydantic
