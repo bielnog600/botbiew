@@ -1,7 +1,8 @@
 # requirements.txt - Versão Final e Corrigida
 
 # Biblioteca principal para a API da Exnova/IQ Option (A CORREÇÃO)
-iqoptionapi>=6.8
+# Removemos a restrição de versão para resolver o erro de 'No matching distribution'
+iqoptionapi
 
 # Dependências da aplicação principal
 pydantic
