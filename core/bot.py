@@ -285,15 +285,16 @@ class TradingBot:
                 return
 
             self.logger('INFO', f"Ordem {order_id} enviada com sucesso. Valor: {entry_value}. Exp: {expiration_minutes} min. Aguardando...")
-            self._run_async(self.supabase.insert_trade_signal(signal))
+            
+            # A inserção do sinal no Supabase agora é feita de forma assíncrona
+            sid_future = asyncio.run_coroutine_threadsafe(self.supabase.insert_trade_signal(signal), self.main_loop)
             
             time.sleep(expiration_minutes * 60 + 10)
 
             result = self.exnova.check_win(order_id) or 'UNKNOWN'
             self.logger('SUCCESS' if result == 'WIN' else 'ERROR', f"Resultado da ordem {order_id}: {result}")
 
-            sid_future = asyncio.run_coroutine_threadsafe(self.supabase.insert_trade_signal(signal), self.main_loop)
-            sid = sid_future.result()
+            sid = sid_future.result() # Espera pelo resultado da inserção
             if sid:
                 mg_lv = self.martingale_state.get(signal.pair, {}).get('level', 0)
                 self._run_async(self.supabase.update_trade_result(sid, result, mg_lv))
