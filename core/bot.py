@@ -6,7 +6,7 @@ from typing import Dict, Optional
 from threading import Thread
 
 from config import settings
-from services.exnova_service import ExnovaService # Importa a classe síncrona correta
+from services.exnova_service import ExnovaService # Importa a classe síncrona
 from services.supabase_service import SupabaseService
 from analysis.technical import get_m15_sr_zones, get_h1_sr_zones
 from analysis import technical_indicators as ti
@@ -33,7 +33,7 @@ class TradingBot:
 
     def _run_async(self, coro):
         """Executa uma corotina a partir de uma thread síncrona."""
-        if self.main_loop:
+        if self.main_loop and self.main_loop.is_running():
             asyncio.run_coroutine_threadsafe(coro, self.main_loop)
 
     def logger(self, level: str, message: str):
