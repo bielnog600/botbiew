@@ -17,18 +17,12 @@ class ExnovaService:
                 self.logger.error(f"Falha na conexão com a Exnova: {reason}")
                 return False
             
-            profile_data = self.api.profile
-            if profile_data is None:
-                self.api.get_profile_ansyc()
-                
-            max_wait_time = 60  # Espera até 60 segundos pelo perfil
-            start_time = time.time()
+            self.api.get_profile_ansyc()
             
-            while time.time() - start_time < max_wait_time:
+            for _ in range(15): 
                 if hasattr(self.api, 'profile') and self.api.profile is not None:
                     self.logger.info("Conexão e perfil carregados com sucesso.")
                     return True
-                self.logger.info("Aguardando carregamento do perfil...")
                 time.sleep(1)
             
             self.logger.error("Conexão estabelecida, mas o perfil do utilizador não foi carregado a tempo.")
@@ -72,20 +66,14 @@ class ExnovaService:
         """Muda entre a conta de prática e a conta real."""
         try:
             self.api.change_balance(balance_type.upper())
-            self.logger.info(f"Conta alterada para: {balance_type.upper()}")
         except Exception as e:
-            self.logger.warning(f"Ocorreu um erro ao mudar de conta para {balance_type} (pode ser ignorado se já estiver na conta certa): {e}")
+            self.logger.warning(f"Ocorreu um erro esperado ao mudar de conta para {balance_type} (pode ser ignorado): {e}")
 
     def execute_trade(self, amount: float, asset: str, direction: str, expiration_minutes: int) -> Optional[int]:
         """Executa uma operação de compra ou venda."""
         try:
             status, order_id = self.api.buy(amount, asset, direction, expiration_minutes)
-            if status:
-                self.logger.info(f"Ordem executada: {asset} | {direction.upper()} | Valor: {amount} | Exp: {expiration_minutes} min | ID: {order_id}")
-                return order_id
-            else:
-                self.logger.error(f"Falha ao executar operação em {asset}. Ordem não aceita.")
-                return None
+            return order_id if status else None
         except Exception as e:
             self.logger.error(f"Erro ao executar operação em {asset}: {e}")
             return None
@@ -93,19 +81,15 @@ class ExnovaService:
     def check_win(self, order_id: int) -> Optional[str]:
         """Verifica o resultado de uma operação específica pelo seu ID."""
         try:
-            profit_or_loss = self.api.check_win_v3(order_id)
+            # Usando a função v3 que retorna o lucro/prejuízo numérico
+            profit_or_loss = self.api.check_win_v3(order_id)[1] # Pega o segundo valor da tupla
+            
             if profit_or_loss is None:
                 self.logger.warning(f"Não foi possível obter o resultado para a ordem {order_id}.")
                 return None
-            if profit_or_loss > 0:
-                self.logger.info(f"Ordem {order_id} RESULTADO: WIN")
-                return 'WIN'
-            elif profit_or_loss < 0:
-                self.logger.info(f"Ordem {order_id} RESULTADO: LOSS")
-                return 'LOSS'
-            else:
-                self.logger.info(f"Ordem {order_id} RESULTADO: DRAW")
-                return 'DRAW'
+            if profit_or_loss > 0: return 'WIN'
+            elif profit_or_loss < 0: return 'LOSS'
+            else: return 'DRAW'
         except Exception as e:
             self.logger.error(f"Erro ao verificar o resultado da ordem {order_id}: {e}")
             return None
