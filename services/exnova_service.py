@@ -5,51 +5,63 @@ from exnovaapi.stable_api import Exnova
 
 class ExnovaService:
     def __init__(self, email: str, password: str):
-        self.email = email # Guardar o email para depuração
-        self.password = password # Guardar a password
+        self.email = email
+        self.password = password
         self.api = Exnova(self.email, self.password)
         self.logger = logging.getLogger(__name__)
         self.api.profile = None
 
     def connect(self) -> bool:
         """
-        Conecta-se à API da Exnova com logging de depuração avançado
-        para inspecionar todas as mensagens recebidas.
+        Conecta-se à API da Exnova e força ativamente o pedido de perfil
+        para garantir que a autenticação é enviada.
         """
-        self.logger.info("A tentar ligar à Exnova em MODO DE DEPURAÇÃO...")
-        self.logger.info(f"A usar o email: {self.email}") # Verificar se o email está correto
+        self.logger.info("A tentar ligar à Exnova (Tentativa 2: Forçar Perfil)...")
+        self.logger.info(f"A usar o email: {self.email}")
 
-        # --- INÍCIO DA SECÇÃO DE DEPURAÇÃO ---
-        # Esta função irá imprimir todas as mensagens que a Exnova nos envia.
+        # Manter o callback de depuração para ver todas as mensagens
         def print_message(message):
             self.logger.info(f"MENSAGEM RECEBIDA DA EXNOVA: {message}")
         
-        # Atribuir a nossa função de logging ao message_callback da API
         self.api.message_callback = print_message
-        # --- FIM DA SECÇÃO DE DEPURAÇÃO ---
 
         try:
             check, reason = self.api.connect()
             
             if not check:
-                self.logger.error(f"Falha na ligação à Exnova: {reason}")
+                self.logger.error(f"Falha na ligação websocket inicial: {reason}")
                 return False
+            
+            self.logger.info("Websocket conectado. A forçar o pedido de perfil agora...")
+            
+            # --- NOVA SECÇÃO ---
+            # Após ligar, esperamos um momento e depois pedimos ativamente o perfil.
+            # Isto deve forçar a biblioteca a enviar o pedido de autenticação.
+            time.sleep(1) # Dar um segundo para a ligação estabilizar
+            
+            # A função pode ter um erro de digitação na biblioteca, vamos tentar as duas formas
+            if hasattr(self.api, 'get_profile_async'):
+                self.logger.info("A chamar get_profile_async()...")
+                self.api.get_profile_async()
+            elif hasattr(self.api, 'get_profile_ansyc'):
+                self.logger.info("A chamar get_profile_ansyc() (com erro de digitação)...")
+                self.api.get_profile_ansyc()
+            else:
+                self.logger.warning("A função get_profile_async() ou get_profile_ansyc() não foi encontrada na biblioteca.")
 
-            # Vamos continuar a esperar pelo perfil como antes, mas agora
-            # a função print_message irá mostrar-nos tudo o que acontece.
+            # Agora, esperamos pelo resultado como antes.
+            self.logger.info("Pedido de perfil enviado. A aguardar pela resposta do servidor...")
             for i in range(15):
                 if getattr(self.api, 'profile', None) is not None:
-                    self.logger.info("Ligação e perfil carregados com sucesso.")
+                    self.logger.info("SUCESSO! Perfil carregado com sucesso.")
                     self.logger.info(f"Saldo: {self.get_current_balance()}")
-                    # Remover o callback de depuração após o sucesso
                     self.api.message_callback = None 
                     return True
-                self.logger.info(f"A aguardar pelo perfil... ({i+1}/15)")
+                self.logger.info(f"A aguardar pela resposta do perfil... ({i+1}/15)")
                 time.sleep(1)
             
-            self.logger.error("Ligação estabelecida, mas o perfil do utilizador não foi carregado a tempo.")
-            self.logger.error("VERIFIQUE AS MENSAGENS 'MENSAGEM RECEBIDA DA EXNOVA' ACIMA PARA ENCONTRAR ERROS DE LOGIN OU 2FA.")
-            # Remover o callback de depuração após a falha
+            self.logger.error("O perfil do utilizador não foi carregado a tempo, mesmo após o pedido forçado.")
+            self.logger.error("Verifique as mensagens acima. Se continuar a não haver 'MENSAGEM RECEBIDA', o problema está na biblioteca 'exnovaapi'.")
             self.api.message_callback = None
             return False
 
@@ -58,7 +70,6 @@ class ExnovaService:
             return False
 
     # --- O resto dos métodos (get_open_assets, execute_trade, etc.) permanecem os mesmos ---
-    # --- Cole o resto do seu código da classe aqui ---
     def get_open_assets(self) -> List[str]:
         """Obtém a lista de ativos abertos para negociação."""
         self.logger.debug("A obter ativos abertos...")
