@@ -6,7 +6,7 @@ from typing import Dict, Optional
 from threading import Thread
 
 from config import settings
-from services.exnova_service import ExnovaService # Importa a classe síncrona correta
+from services.exnova_service import ExnovaService # Importa a classe síncrona
 from services.supabase_service import SupabaseService
 from analysis.technical import get_m15_sr_zones, get_h1_sr_zones
 from analysis import technical_indicators as ti
