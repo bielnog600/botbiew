@@ -6,7 +6,7 @@ from typing import Dict, Optional
 from threading import Thread
 
 from config import settings
-from services.exnova_service import ExnovaService
+from services.exnova_service import ExnovaService # Importa a classe síncrona correta
 from services.supabase_service import SupabaseService
 from analysis.technical import get_m15_sr_zones, get_h1_sr_zones
 from analysis import technical_indicators as ti
@@ -32,6 +32,7 @@ class TradingBot:
         self.main_loop = None
 
     def _run_async(self, coro):
+        """Executa uma corotina a partir de uma thread síncrona."""
         if self.main_loop and self.main_loop.is_running():
             return asyncio.run_coroutine_threadsafe(coro, self.main_loop)
         return None
@@ -63,6 +64,7 @@ class TradingBot:
                 self._run_async(self.supabase.update_config({'daily_initial_balance': bal, 'current_balance': bal}))
 
     def trading_loop_sync(self):
+        """O novo coração síncrono do bot, que corre numa thread separada."""
         self.logger('INFO', 'Bot a iniciar com GESTÃO DE RISCO ADAPTATIVA...')
         if not self.exnova.connect():
             self.is_running = False
@@ -103,6 +105,7 @@ class TradingBot:
                 time.sleep(30)
 
     async def run(self):
+        """Inicia o bot, criando os serviços e a thread de trading."""
         self.supabase = SupabaseService(settings.SUPABASE_URL, settings.SUPABASE_KEY)
         self.main_loop = asyncio.get_running_loop()
         
