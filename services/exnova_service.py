@@ -1,38 +1,46 @@
 import logging
 import time
 from typing import List, Optional, Dict
+
+# A usar a sua biblioteca local exnovaapi
 from exnovaapi.stable_api import Exnova
 
 class ExnovaService:
+    """
+    Versão corrigida e simplificada, baseada na lógica do seu 'botsock.py'.
+    """
     def __init__(self, email: str, password: str):
-        self.api = Exnova(email, password)
         self.logger = logging.getLogger(__name__)
-        self.api.profile = None
+        self.api = Exnova(email, password)
 
     def connect(self) -> bool:
-        """Conecta-se à API da Exnova e aguarda o perfil ser carregado."""
-        try:
-            check, reason = self.api.connect()
-            if not check:
-                self.logger.error(f"Falha na conexão com a Exnova: {reason}")
-                return False
-            
-            self.api.get_profile_ansyc()
-            
-            for _ in range(15): 
-                if hasattr(self.api, 'profile') and self.api.profile is not None:
-                    self.logger.info("Conexão e perfil carregados com sucesso.")
-                    return True
-                time.sleep(1)
-            
-            self.logger.error("Conexão estabelecida, mas o perfil do utilizador não foi carregado a tempo.")
+        """
+        Este método agora APENAS estabelece a ligação websocket.
+        Retorna True se a ligação for bem-sucedida, False caso contrário.
+        """
+        self.logger.info("A estabelecer ligação websocket com a Exnova...")
+        check, reason = self.api.connect()
+        if not check:
+            self.logger.error(f"Falha ao ligar o websocket: {reason}")
             return False
-        except Exception as e:
-            self.logger.error(f"Erro crítico na conexão: {e}")
-            return False
+        
+        self.logger.info("Websocket conectado com sucesso.")
+        return True
+
+    def get_profile(self) -> Optional[Dict]:
+        """Pede e retorna os dados do perfil do utilizador."""
+        self.logger.info("A pedir dados do perfil...")
+        # Usamos o nome do método com o erro de digitação, tal como no seu script funcional.
+        if hasattr(self.api, 'get_profile_ansyc'):
+            return self.api.get_profile_ansyc()
+        else:
+            self.logger.error("O método 'get_profile_ansyc' não foi encontrado na sua biblioteca exnovaapi.")
+            return None
+
+    # --- O resto dos métodos permanece igual ---
 
     def get_open_assets(self) -> List[str]:
-        """Obtém a lista de ativos abertos para negociação."""
+        self.logger.debug("A obter ativos abertos...")
         try:
             all_assets = self.api.get_all_open_time()
             open_assets = []
@@ -43,54 +51,58 @@ class ExnovaService:
                             open_assets.append(asset)
             return list(set(open_assets))
         except Exception as e:
-            self.logger.error(f"Erro ao obter ativos abertos: {e}")
+            self.logger.error(f"Erro ao obter ativos abertos: {e}", exc_info=True)
             return []
 
     def get_historical_candles(self, asset: str, timeframe: int, count: int) -> Optional[List[Dict]]:
-        """Busca o histórico de velas para um ativo."""
+        self.logger.debug(f"A obter {count} velas para {asset}...")
         try:
             return self.api.get_candles(asset, timeframe, count, time.time())
         except Exception as e:
-            self.logger.error(f"Erro ao obter velas para {asset}: {e}")
+            self.logger.error(f"Erro ao obter velas para {asset}: {e}", exc_info=True)
             return None
 
     def get_current_balance(self) -> Optional[float]:
-        """Obtém o saldo atual da conta selecionada."""
         try:
             return self.api.get_balance()
         except Exception as e:
-            self.logger.error(f"Erro ao obter saldo: {e}")
+            self.logger.error(f"Erro ao obter saldo: {e}", exc_info=True)
             return None
 
     def change_balance(self, balance_type: str):
-        """Muda entre a conta de prática e a conta real."""
+        self.logger.info(f"A mudar de conta para: {balance_type.upper()}")
         try:
             self.api.change_balance(balance_type.upper())
+            self.logger.info(f"Conta mudada com sucesso para {balance_type.upper()}.")
         except Exception as e:
-            self.logger.warning(f"Ocorreu um erro esperado ao mudar de conta para {balance_type} (pode ser ignorado): {e}")
+            self.logger.warning(f"Ocorreu um erro ao mudar de conta (pode ser normal): {e}")
 
     def execute_trade(self, amount: float, asset: str, direction: str, expiration_minutes: int) -> Optional[int]:
-        """Executa uma operação de compra ou venda."""
+        self.logger.info(f"A executar operação: {direction.upper()} {amount} em {asset} por {expiration_minutes} min.")
         try:
-            status, order_id = self.api.buy(amount, asset, direction, expiration_minutes)
-            return order_id if status else None
+            status, order_id = self.api.buy(amount, asset, direction.lower(), expiration_minutes)
+            if status:
+                self.logger.info(f"Operação executada com sucesso. ID da Ordem: {order_id}")
+                return order_id
+            else:
+                self.logger.error(f"Falha na execução da operação. Resposta: {order_id}")
+                return None
         except Exception as e:
-            self.logger.error(f"Erro ao executar operação em {asset}: {e}")
+            self.logger.error(f"Erro durante a execução da operação: {e}", exc_info=True)
             return None
 
     def check_win(self, order_id: int) -> Optional[str]:
-        """Verifica o resultado de uma operação específica pelo seu ID."""
+        self.logger.info(f"A verificar resultado para a Ordem ID: {order_id}...")
         try:
-            # A função v3 retorna uma tupla (resultado_str, lucro_num)
-            win_status, profit_or_loss = self.api.check_win_v3(order_id)
-            
-            if win_status is None:
-                self.logger.warning(f"Não foi possível obter o resultado para a ordem {order_id}.")
-                return None
-
-            if win_status == 'win': return 'WIN'
-            elif win_status == 'loose': return 'LOSS'
-            else: return 'DRAW'
+            profit_or_loss = self.api.check_win_v3(order_id)
+            if profit_or_loss is None:
+                return 'UNKNOWN'
+            if profit_or_loss > 0:
+                return 'WIN'
+            elif profit_or_loss < 0:
+                return 'LOSS'
+            else:
+                return 'DRAW'
         except Exception as e:
-            self.logger.error(f"Erro ao verificar o resultado da ordem {order_id}: {e}")
+            self.logger.error(f"Erro ao verificar o resultado da ordem {order_id}: {e}", exc_info=True)
             return None
