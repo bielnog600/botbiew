@@ -258,24 +258,58 @@ class TradingBot:
         try:
             is_martingale_trade = "Martingale" in signal.strategy
             entry_value = self._get_entry_value(signal.pair, is_martingale=is_martingale_trade)
+
+            # 1. Obter saldo ANTES da operação
+            balance_before = self.exnova.get_current_balance()
+            if balance_before is None:
+                self.logger('ERROR', "Não foi possível obter o saldo antes da operação. A cancelar a operação.")
+                self.is_trade_active = False
+                return
+
+            # 2. Executar a operação
             order_id = self.exnova.execute_trade(entry_value, full_name, signal.direction.lower(), expiration_minutes)
             if not order_id:
                 self.logger('ERROR', f"Falha ao executar a ordem para {full_name}.")
                 if is_martingale_trade: self.martingale_state[signal.pair] = {'level': 0}
                 self.is_trade_active = False
                 return
-            self.logger('INFO', f"Ordem {order_id} enviada. Valor: {entry_value}. Exp: {expiration_minutes} min.")
+
+            self.logger('INFO', f"Ordem {order_id} enviada. Valor: {entry_value}. Exp: {expiration_minutes} min. Saldo pré-op: {balance_before:.2f}")
             sid_future = self._run_async(self.supabase.insert_trade_signal(signal))
-            time.sleep(expiration_minutes * 60 + 10)
-            result = self.exnova.check_win(order_id) or 'UNKNOWN'
+
+            # 3. Aguardar o tempo da operação + uma margem de segurança
+            wait_time = expiration_minutes * 60 + 5
+            self.logger('INFO', f"A aguardar {wait_time} segundos pelo resultado...")
+            time.sleep(wait_time)
+
+            # 4. Obter saldo DEPOIS da operação
+            balance_after = self.exnova.get_current_balance()
+            
+            # 5. Determinar o resultado pela diferença de saldo
+            if balance_after is None:
+                self.logger('ERROR', "Não foi possível obter o saldo após a operação. A marcar como DESCONHECIDO.")
+                result = 'UNKNOWN'
+            else:
+                self.logger('INFO', f"Saldo pós-op: {balance_after:.2f}. A comparar com o saldo anterior: {balance_before:.2f}")
+                if balance_after > balance_before:
+                    result = 'WIN'
+                elif balance_after < balance_before:
+                    result = 'LOSS'
+                else:
+                    result = 'DRAW'
+            
             self.logger('SUCCESS' if result == 'WIN' else 'ERROR', f"Resultado da ordem {order_id}: {result}")
+            
+            # O resto da lógica de contagem e Martingale continua igual
             sid = sid_future.result() if sid_future else None
             if sid:
                 mg_lv = self.martingale_state.get(signal.pair, {}).get('level', 0)
                 self._run_async(self.supabase.update_trade_result(sid, result, mg_lv))
-            bal_after = self.exnova.get_current_balance()
-            if bal_after is not None:
-                self._run_async(self.supabase.update_current_balance(bal_after))
+            
+            # Atualiza o saldo no Supabase com o valor final
+            if balance_after is not None:
+                self._run_async(self.supabase.update_current_balance(balance_after))
+
             pair = signal.pair
             self.asset_performance.setdefault(pair, {'wins': 0, 'losses': 0})
             self.consecutive_losses.setdefault(pair, 0)
