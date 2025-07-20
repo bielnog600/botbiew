@@ -30,6 +30,8 @@ class TradingBot:
         self.last_daily_reset_date = None
         self.pending_martingale_trade: Optional[Dict] = None
         self.main_loop = None
+        # --- NOVO: Variável para guardar o tipo de conta atual ---
+        self.current_account_type = ''
 
     def _run_async(self, coro):
         if self.main_loop and self.main_loop.is_running():
@@ -44,25 +46,21 @@ class TradingBot:
 
     def trading_loop_sync(self):
         """
-        Coração síncrono do bot, agora imitando a lógica de sucesso do 'botsock.py'.
+        Coração síncrono do bot, com a correção para a mudança de conta em tempo real.
         """
         self.logger('INFO', 'A iniciar o bot...')
         
-        # --- LÓGICA DE LIGAÇÃO CORRIGIDA ---
-        # 1. Apenas estabelece a ligação
         if not self.exnova.connect():
             self.logger('ERROR', "Não foi possível ligar ao websocket. A encerrar.")
             self.is_running = False
             return
 
-        # 2. Pede o perfil, tal como no botsock.py
         profile_data = self.exnova.get_profile()
         if not profile_data:
-            self.logger('ERROR', "Não foi possível obter os dados do perfil após a ligação. Verifique a sua biblioteca 'exnovaapi'.")
+            self.logger('ERROR', "Não foi possível obter os dados do perfil após a ligação.")
             self.is_running = False
             return
 
-        # 3. Se tudo correu bem, extrai os dados
         try:
             user_name = profile_data.get('name', 'Utilizador')
             currency = profile_data.get('currency_char', '$')
@@ -72,26 +70,40 @@ class TradingBot:
             self.is_running = False
             return
         
-        # O resto da inicialização continua...
+        # Carrega a configuração inicial
         future = self._run_async(self.supabase.get_bot_config())
         self.bot_config = future.result()
         
-        account_type = self.bot_config.get('account_type', 'PRACTICE')
-        self.exnova.change_balance(account_type)
+        # Define a conta pela primeira vez e guarda o estado
+        initial_account_type = self.bot_config.get('account_type', 'PRACTICE')
+        self.exnova.change_balance(initial_account_type)
+        self.current_account_type = initial_account_type # --- NOVO: Guarda o estado atual
+        
         initial_balance = self.exnova.get_current_balance()
-        self.logger('INFO', f"Conta definida para: {account_type} | Saldo: {currency}{initial_balance:.2f}")
+        self.logger('INFO', f"Conta inicial definida para: {self.current_account_type} | Saldo: {currency}{initial_balance:.2f}")
 
         self._daily_reset_if_needed()
 
         while self.is_running:
             try:
-                # ... (o resto do seu loop principal permanece o mesmo) ...
                 self._daily_reset_if_needed()
                 if (datetime.utcnow() - self.last_reset_time).total_seconds() >= 3600:
                     self._hourly_cycle_reset()
 
+                # Obtém a configuração mais recente da base de dados
                 future = self._run_async(self.supabase.get_bot_config())
                 self.bot_config = future.result()
+                
+                # --- LÓGICA DE CORREÇÃO ---
+                # Verifica se o tipo de conta na base de dados mudou
+                desired_account_type = self.bot_config.get('account_type', 'PRACTICE')
+                if desired_account_type != self.current_account_type:
+                    self.logger('WARNING', f"MUDANÇA DE CONTA DETETADA! A alterar de {self.current_account_type} para {desired_account_type}.")
+                    self.exnova.change_balance(desired_account_type)
+                    self.current_account_type = desired_account_type # Atualiza o estado
+                    new_balance = self.exnova.get_current_balance()
+                    self.logger('SUCCESS', f"Conta alterada para {self.current_account_type}. Novo saldo: {currency}{new_balance:.2f}")
+
                 status = self.bot_config.get('status', 'PAUSED')
 
                 if status == 'RUNNING':
@@ -165,12 +177,19 @@ class TradingBot:
                 if not analysis_candles or not sr_candles: return
                 res, sup = get_h1_sr_zones(sr_candles)
             else: return
+            
             volatility_profile = self.bot_config.get('volatility_profile', 'EQUILIBRADO')
             atr_limits = {'ULTRA_CONSERVADOR': (0.00015, 0.00500), 'CONSERVADOR': (0.00008, 0.01500), 'EQUILIBRADO': (0.00005, 0.05000), 'AGRESSIVO': (0.00001, 0.15000), 'ULTRA_AGRESSIVO': (0.00001, 0.50000)}
+            
             if volatility_profile != 'DESATIVADO':
                 min_atr, max_atr = atr_limits.get(volatility_profile, (0.00005, 0.05000))
                 atr_value = ti.calculate_atr(analysis_candles, period=14)
-                if atr_value is None or not (min_atr < atr_value < max_atr): return
+                if atr_value is None or not (min_atr < atr_value < max_atr):
+                    # --- LOG ADICIONADO PARA FEEDBACK ---
+                    atr_text = f"{atr_value:.6f}" if atr_value is not None else "N/A"
+                    self.logger('INFO', f"Ativo {base} ignorado. ATR ({atr_text}) fora dos limites para o perfil '{volatility_profile}'.")
+                    return
+
             signal_candle = analysis_candles[-1]
             final_direction = None
             confluences = []
@@ -258,34 +277,23 @@ class TradingBot:
         try:
             is_martingale_trade = "Martingale" in signal.strategy
             entry_value = self._get_entry_value(signal.pair, is_martingale=is_martingale_trade)
-
-            # 1. Obter saldo ANTES da operação
             balance_before = self.exnova.get_current_balance()
             if balance_before is None:
                 self.logger('ERROR', "Não foi possível obter o saldo antes da operação. A cancelar a operação.")
                 self.is_trade_active = False
                 return
-
-            # 2. Executar a operação
             order_id = self.exnova.execute_trade(entry_value, full_name, signal.direction.lower(), expiration_minutes)
             if not order_id:
                 self.logger('ERROR', f"Falha ao executar a ordem para {full_name}.")
                 if is_martingale_trade: self.martingale_state[signal.pair] = {'level': 0}
                 self.is_trade_active = False
                 return
-
             self.logger('INFO', f"Ordem {order_id} enviada. Valor: {entry_value}. Exp: {expiration_minutes} min. Saldo pré-op: {balance_before:.2f}")
             sid_future = self._run_async(self.supabase.insert_trade_signal(signal))
-
-            # 3. Aguardar o tempo da operação + uma margem de segurança
             wait_time = expiration_minutes * 60 + 5
             self.logger('INFO', f"A aguardar {wait_time} segundos pelo resultado...")
             time.sleep(wait_time)
-
-            # 4. Obter saldo DEPOIS da operação
             balance_after = self.exnova.get_current_balance()
-            
-            # 5. Determinar o resultado pela diferença de saldo
             if balance_after is None:
                 self.logger('ERROR', "Não foi possível obter o saldo após a operação. A marcar como DESCONHECIDO.")
                 result = 'UNKNOWN'
@@ -297,19 +305,13 @@ class TradingBot:
                     result = 'LOSS'
                 else:
                     result = 'DRAW'
-            
             self.logger('SUCCESS' if result == 'WIN' else 'ERROR', f"Resultado da ordem {order_id}: {result}")
-            
-            # O resto da lógica de contagem e Martingale continua igual
             sid = sid_future.result() if sid_future else None
             if sid:
                 mg_lv = self.martingale_state.get(signal.pair, {}).get('level', 0)
                 self._run_async(self.supabase.update_trade_result(sid, result, mg_lv))
-            
-            # Atualiza o saldo no Supabase com o valor final
             if balance_after is not None:
                 self._run_async(self.supabase.update_current_balance(balance_after))
-
             pair = signal.pair
             self.asset_performance.setdefault(pair, {'wins': 0, 'losses': 0})
             self.consecutive_losses.setdefault(pair, 0)
