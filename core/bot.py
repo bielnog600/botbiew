@@ -134,15 +134,16 @@ class TradingBot:
             await asyncio.sleep(1)
 
     def trading_cycle(self):
+        """
+        Este método agora executa APENAS a análise de M1.
+        """
         now = datetime.utcnow()
         if now.second >= 45:
             if now.minute != self.last_analysis_minute:
                 self.last_analysis_minute = now.minute
-                self.logger('INFO', "Janela de análise ATIVADA.")
-                if (now.minute + 1) % 5 == 0:
-                    self.run_analysis_for_timeframe(300, 5)
-                else:
-                    self.run_analysis_for_timeframe(60, 1)
+                self.logger('INFO', "Janela de análise M1 ATIVADA.")
+                # Chama diretamente a análise de M1, sem verificar outras condições.
+                self.run_analysis_for_timeframe(60, 1)
 
     def run_analysis_for_timeframe(self, timeframe_seconds: int, expiration_minutes: int):
         assets = self.exnova.get_open_assets()
@@ -166,6 +167,8 @@ class TradingBot:
         try:
             if self.is_trade_active: return
             base = full_name.split('-')[0]
+            
+            # A lógica para M5 nunca será executada, mas mantemo-la para integridade.
             if expiration_minutes == 1:
                 analysis_candles = self.exnova.get_historical_candles(base, 60, 200)
                 sr_candles = self.exnova.get_historical_candles(base, 900, 100)
