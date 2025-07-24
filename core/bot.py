@@ -157,6 +157,13 @@ class TradingBot:
                 self.logger('WARNING', f"Dados de velas insuficientes ou indisponíveis para {base}.")
                 return
 
+            # --- MELHORIA: VERIFICAÇÃO DE TENDÊNCIA ---
+            trend = ti.check_ma_trend(analysis_candles)
+            if not trend:
+                self.logger('INFO', f"Ativo {base} ignorado. Tendência principal indefinida.")
+                return
+            # --- FIM DA MELHORIA ---
+
             res, sup = get_m15_sr_zones(sr_candles)
             
             volatility_profile = self.bot_config.get('volatility_profile', 'EQUILIBRADO')
@@ -177,20 +184,27 @@ class TradingBot:
             confirmation_threshold = self.bot_config.get('confirmation_threshold') or 2
             
             sr_signal_type = ti.check_price_near_sr(signal_candle, zones)
-            if sr_signal_type == 'call':
+
+            # --- LÓGICA DE CONFLUÊNCIA ATUALIZADA ---
+            if sr_signal_type == 'call' and trend == 'uptrend':
                 confluences.append("SR_Zone")
+                confluences.append("MA_Trend")
                 if ti.check_candlestick_pattern(analysis_candles) == 'call': confluences.append("Candle_Pattern")
                 if ti.check_rsi_condition(analysis_candles) == 'call': confluences.append("RSI_Condition")
                 if len(confluences) >= confirmation_threshold: final_direction = 'call'
-            elif sr_signal_type == 'put':
+            
+            elif sr_signal_type == 'put' and trend == 'downtrend':
                 confluences.append("SR_Zone")
+                confluences.append("MA_Trend")
                 if ti.check_candlestick_pattern(analysis_candles) == 'put': confluences.append("Candle_Pattern")
                 if ti.check_rsi_condition(analysis_candles) == 'put': confluences.append("RSI_Condition")
                 if len(confluences) >= confirmation_threshold: final_direction = 'put'
             
+            elif sr_signal_type: # Se houve um sinal de S/R, mas contra a tendência
+                self.logger('INFO', f"Sinal em {base} ignorado. Operação de {sr_signal_type} contra a tendência principal ('{trend}').")
+            # --- FIM DA LÓGICA DE CONFLUÊNCIA ATUALIZADA ---
+
             if final_direction:
-                # --- ATUALIZAÇÃO PRINCIPAL ---
-                # Aplica o novo filtro de qualidade da vela de sinal.
                 if not ti.validate_reversal_candle(signal_candle, final_direction):
                     self.logger('WARNING', f"Sinal em {base} ABORTADO. A vela de confirmação não tem qualidade suficiente (cor/tamanho do corpo).")
                     return
@@ -271,7 +285,6 @@ class TradingBot:
                 self.is_trade_active = False
                 self.logger('INFO', 'Ciclo de operação concluído.')
     
-    # ... os outros métodos (_execute_martingale_trade, _get_entry_value, _update_stats, etc.) continuam aqui
     def _execute_martingale_trade(self):
         trade_info = self.pending_martingale_trade
         if not trade_info: return
