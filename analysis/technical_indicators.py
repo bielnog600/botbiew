@@ -1,5 +1,6 @@
 import pandas as pd
 import pandas_ta as ta
+from typing import Optional
 
 # ===============================================
 # FUNÇÕES DE ANÁLISE DE SUPORTE E RESISTÊNCIA (S/R)
@@ -30,7 +31,7 @@ def check_price_near_sr(candle: dict, zones: dict, proximity_factor: float = 0.0
 # FUNÇÕES DE INDICADORES TÉCNICOS
 # ===============================================
 
-def calculate_atr(candles: list, period: int = 14) -> float:
+def calculate_atr(candles: list, period: int = 14) -> Optional[float]:
     """Calcula o Average True Range (ATR)."""
     if len(candles) < period: return None
     df = pd.DataFrame(candles)
@@ -38,7 +39,7 @@ def calculate_atr(candles: list, period: int = 14) -> float:
     atr_series = ta.atr(df['high'], df['low'], df['close'], length=period)
     return atr_series.iloc[-1] if not atr_series.empty else None
 
-def check_rsi_condition(candles: list, period: int = 14, overbought: int = 70, oversold: int = 30) -> str:
+def check_rsi_condition(candles: list, period: int = 14, overbought: int = 70, oversold: int = 30) -> Optional[str]:
     """Verifica se o RSI está em sobrecompra ou sobrevenda."""
     if len(candles) < period: return None
     df = pd.DataFrame(candles)
@@ -49,7 +50,7 @@ def check_rsi_condition(candles: list, period: int = 14, overbought: int = 70, o
     if last_rsi <= oversold: return 'call'
     return None
 
-def check_ma_trend(candles: list, fast_period: int = 9, slow_period: int = 21) -> str:
+def check_ma_trend(candles: list, fast_period: int = 9, slow_period: int = 21) -> Optional[str]:
     """Verifica a tendência usando duas médias móveis (rápida e lenta)."""
     if len(candles) < slow_period: return None
     df = pd.DataFrame(candles)
@@ -66,7 +67,7 @@ def check_ma_trend(candles: list, fast_period: int = 9, slow_period: int = 21) -
 # FUNÇÕES DE VALIDAÇÃO DE VELAS E PADRÕES
 # ===============================================
 
-def check_candlestick_pattern(candles: list) -> str:
+def check_candlestick_pattern(candles: list) -> Optional[str]:
     """Verifica padrões de vela de reversão."""
     if len(candles) < 2: return None
     df = pd.DataFrame(candles)
