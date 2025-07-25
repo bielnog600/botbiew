@@ -7,15 +7,14 @@ from datetime import datetime
 from typing import Dict, Optional, List
 from threading import Thread
 
-# --- SOLUÇÃO DEFINITIVA PARA O PROBLEMA DE IMPORTAÇÃO ---
 # Adiciona o diretório principal do projeto ('/app') ao path do Python.
-# Isto garante que todos os módulos sejam encontrados corretamente.
+# Esta é a correção final para garantir que todas as importações funcionam no Docker.
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import settings
 from services.exnova_service import ExnovaService
 from services.supabase_service import SupabaseService
-import analysis.strategies as strats 
+# --- CORREÇÃO: Importa tudo do mesmo ficheiro de análise ---
 import analysis.technical_indicators as ti
 from core.data_models import TradeSignal
 
@@ -35,11 +34,11 @@ class TradingBot:
         self.pending_martingale_trade: Optional[Dict] = None
         self.martingale_state: Dict[str, Dict] = {}
 
-        # --- Gestão de Estratégias Dinâmicas ---
+        # --- Mapa de Estratégias agora aponta para 'ti' ---
         self.strategy_map: Dict[str, callable] = {
-            'Pullback MQL': strats.strategy_mql_pullback,
-            'Padrão de Reversão': strats.strategy_reversal_pattern,
-            'Fluxo de Tendência': strats.strategy_trend_flow,
+            'Pullback MQL': ti.strategy_mql_pullback,
+            'Padrão de Reversão': ti.strategy_reversal_pattern,
+            'Fluxo de Tendência': ti.strategy_trend_flow,
         }
         self.asset_strategy_map: Dict[str, str] = {} # Armazena a melhor estratégia para cada par
 
