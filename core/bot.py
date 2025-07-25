@@ -8,9 +8,10 @@ from threading import Thread
 from config import settings
 from services.exnova_service import ExnovaService
 from services.supabase_service import SupabaseService
-# --- NOVO: Importa o ficheiro de estratégias ---
-from analysis import strategies as strats 
-from analysis import technical_indicators as ti
+# --- CORREÇÃO DE IMPORTAÇÃO ---
+import analysis.strategies as strats 
+import analysis.technical_indicators as ti
+# --- FIM DA CORREÇÃO ---
 from core.data_models import TradeSignal
 
 class TradingBot:
@@ -29,7 +30,7 @@ class TradingBot:
         self.pending_martingale_trade: Optional[Dict] = None
         self.martingale_state: Dict[str, Dict] = {}
 
-        # --- NOVO: Gestão de Estratégias Dinâmicas ---
+        # --- Gestão de Estratégias Dinâmicas ---
         self.strategy_map: Dict[str, callable] = {
             'Pullback MQL': strats.strategy_mql_pullback,
             'Padrão de Reversão': strats.strategy_reversal_pattern,
@@ -167,7 +168,6 @@ class TradingBot:
             except Exception as e:
                 self.logger('ERROR', f"Loop principal falhou: {e}"); traceback.print_exc(); time.sleep(30)
 
-    # --- trading_cycle e get_asset_score mantidos iguais ---
     def trading_cycle(self):
         now = datetime.utcnow()
         if now.second >= 45 and now.minute != self.last_analysis_minute:
@@ -195,33 +195,27 @@ class TradingBot:
             if self.is_trade_active: return
             base_name = full_name.split('-')[0]
 
-            # --- LÓGICA DE ANÁLISE ADAPTATIVA ---
             best_strategy_name = self.asset_strategy_map.get(base_name)
             if not best_strategy_name:
-                # self.logger('INFO', f"Ativo {base_name} ignorado. Nenhuma estratégia lucrativa encontrada na catalogação.")
                 return
 
-            analysis_candles = self.exnova.get_historical_candles(base_name, 60, 50) # Pega menos velas, só o necessário para a estratégia
+            analysis_candles = self.exnova.get_historical_candles(base_name, 60, 50)
             if not analysis_candles or len(analysis_candles) < 20:
-                self.logger('WARNING', f"Dados de velas insuficientes para {base_name} no momento da análise.")
+                self.logger('WARNING', f"Dados de velas insuficientes para {base_name}.")
                 return
 
-            # Obtém a função da estratégia a ser usada
             strategy_function = self.strategy_map.get(best_strategy_name)
             if not strategy_function: return
 
             self.logger('INFO', f"A analisar {base_name} com a sua melhor estratégia: '{best_strategy_name}'...")
             final_direction = strategy_function(analysis_candles)
-            # --- FIM DA LÓGICA DE ANÁLISE ADAPTATIVA ---
 
             if final_direction:
-                # Filtro de qualidade final na vela de sinal
                 signal_candle = analysis_candles[-1]
                 if not ti.validate_reversal_candle(signal_candle, final_direction):
-                    self.logger('WARNING', f"Sinal em {base_name} ABORTADO. A vela de confirmação não tem qualidade.")
+                    self.logger('WARNING', f"Sinal em {base_name} ABORTADO. Vela de confirmação sem qualidade.")
                     return
 
-                # Restante do código de execução da ordem mantido...
                 if self.is_trade_active: return
                 now = datetime.utcnow()
                 wait_seconds = (60 - now.second - 1) + (1 - now.microsecond / 1000000) + 0.2
@@ -240,9 +234,6 @@ class TradingBot:
             self.logger('ERROR', f"Erro em _analyze_asset({full_name}): {e}")
             traceback.print_exc()
             
-    # --- O restante do código (_execute_and_wait, martingale, resets, etc.) é mantido igual ---
-    # --- COLE O RESTANTE DO SEU CÓDIGO A PARTIR DAQUI ---
-
     async def run(self):
         self.supabase = SupabaseService(settings.SUPABASE_URL, settings.SUPABASE_KEY)
         self.main_loop = asyncio.get_running_loop()
@@ -258,31 +249,27 @@ class TradingBot:
             
             balance_before = self.exnova.get_current_balance()
             if balance_before is None:
-                self.logger('ERROR', "Não foi possível obter o saldo antes da operação. A cancelar.")
-                self.is_trade_active = False
-                return
+                self.logger('ERROR', "Não foi possível obter saldo antes da operação. A cancelar.")
+                self.is_trade_active = False; return
 
             order_id = self.exnova.execute_trade(entry_value, full_name, signal.direction.lower(), expiration_minutes)
             if not order_id:
-                self.logger('ERROR', f"Falha ao executar a ordem para {full_name}.")
+                self.logger('ERROR', f"Falha ao executar ordem para {full_name}.")
                 if is_martingale_trade: self.martingale_state[signal.pair] = {'level': 0}
-                self.is_trade_active = False
-                return
+                self.is_trade_active = False; return
 
             self.logger('INFO', f"Ordem {order_id} enviada. Valor: {self.currency_char}{entry_value:.2f}. Saldo pré-op: {self.currency_char}{balance_before:.2f}")
             sid_future = self._run_async(self.supabase.insert_trade_signal(signal))
             
-            wait_time = expiration_minutes * 60 + 5
-            self.logger('INFO', f"A aguardar {wait_time} segundos pelo resultado...")
-            time.sleep(wait_time)
+            time.sleep(expiration_minutes * 60 + 5)
 
             balance_after = self.exnova.get_current_balance()
             if balance_after is None:
-                self.logger('ERROR', "Não foi possível obter o saldo após a operação. A marcar como DESCONHECIDO.")
+                self.logger('ERROR', "Não foi possível obter saldo após a operação.")
                 result = 'UNKNOWN'
             else:
-                self.logger('INFO', f"Saldo pós-op: {self.currency_char}{balance_after:.2f}. A comparar com o saldo anterior: {self.currency_char}{balance_before:.2f}")
-                profit = balance_after - balance_before
+                self.logger('INFO', f"Saldo pós-op: {self.currency_char}{balance_after:.2f}. A comparar com: {self.currency_char}{balance_before:.2f}")
+                profit = round(balance_after - balance_before, 2)
                 if profit > 0: result = 'WIN'
                 elif profit < 0: result = 'LOSS'
                 else: result = 'DRAW'
@@ -316,11 +303,7 @@ class TradingBot:
         time.sleep(wait_seconds)
         self.is_trade_active = True
         strategy_name = f"M1_Martingale_{current_level}"
-        signal = TradeSignal(
-            pair=trade_info['pair'], 
-            direction=trade_info['direction'], 
-            strategy=strategy_name
-        )
+        signal = TradeSignal(pair=trade_info['pair'], direction=trade_info['direction'], strategy=strategy_name)
         self.logger('SUCCESS', f"EXECUTANDO MARTINGALE! Dir: {signal.direction.upper()}.")
         self._execute_and_wait(signal, trade_info['full_name'], trade_info['expiration_minutes'])
 
@@ -332,8 +315,7 @@ class TradingBot:
         if not is_martingale and mg_level == 0:
             return base_value
         factor = self.bot_config.get('martingale_factor', 2.3)
-        mg_value = base_value * (factor ** mg_level)
-        return round(mg_value, 2)
+        return round(base_value * (factor ** mg_level), 2)
 
     def _update_stats_and_martingale(self, result: str, signal: TradeSignal, full_name: str, expiration_minutes: int):
         pair = signal.pair
@@ -354,7 +336,7 @@ class TradingBot:
             self.consecutive_losses[pair] += 1
             if self.consecutive_losses[pair] >= 2:
                 self.blacklisted_assets.add(pair)
-                self.logger('ERROR', f"O par {pair} foi colocado na lista negra por 2 derrotas seguidas.")
+                self.logger('ERROR', f"O par {pair} foi colocado na lista negra.")
             
             if self.bot_config.get('use_martingale', False):
                 current_level = self.martingale_state.get(pair, {}).get('level', 0)
@@ -389,11 +371,10 @@ class TradingBot:
     def _daily_reset_if_needed(self):
         current_date_utc = datetime.utcnow().date()
         if self.last_daily_reset_date != current_date_utc:
-            self.logger('INFO', f"NOVO DIA DETETADO ({current_date_utc}). A zerar metas de Stop Win/Loss e saldo diário.")
+            self.logger('INFO', f"NOVO DIA DETETADO ({current_date_utc}).")
             self.daily_wins = 0
             self.daily_losses = 0
             self.last_daily_reset_date = current_date_utc
             bal = self.exnova.get_current_balance()
             if bal is not None and self.supabase:
                 self._run_async(self.supabase.update_config({'daily_initial_balance': bal, 'current_balance': bal}))
-
