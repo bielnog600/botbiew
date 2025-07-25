@@ -1,3 +1,5 @@
+import sys
+import os
 import asyncio
 import time
 import traceback
@@ -5,13 +7,16 @@ from datetime import datetime
 from typing import Dict, Optional, List
 from threading import Thread
 
+# --- SOLUÇÃO DEFINITIVA PARA O PROBLEMA DE IMPORTAÇÃO ---
+# Adiciona o diretório principal do projeto ('/app') ao path do Python.
+# Isto garante que todos os módulos sejam encontrados corretamente.
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from config import settings
 from services.exnova_service import ExnovaService
 from services.supabase_service import SupabaseService
-# --- CORREÇÃO DE IMPORTAÇÃO ---
 import analysis.strategies as strats 
 import analysis.technical_indicators as ti
-# --- FIM DA CORREÇÃO ---
 from core.data_models import TradeSignal
 
 class TradingBot:
