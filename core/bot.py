@@ -116,7 +116,7 @@ class TradingBot:
                             highest_win_rate = win_rate
                             best_strategy_for_asset = strategy_name
                 
-                if best_strategy_for_asset and highest_win_rate >= 55: # Limite mínimo de 55% de acerto
+                if best_strategy_for_asset and highest_win_rate >= 65: # Limite mínimo de 65% de acerto
                     self.asset_strategy_map[base_name] = best_strategy_for_asset
                     self.logger('SUCCESS', f"==> Melhor estratégia para {base_name} definida como: '{best_strategy_for_asset}' ({highest_win_rate:.2f}%)")
                 else:
