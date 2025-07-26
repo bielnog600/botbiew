@@ -17,7 +17,7 @@ from core.data_models import TradeSignal
 
 class TradingBot:
     def __init__(self):
-        # ... (outras inicializações mantidas)
+        # ... (inicializações mantidas)
         self.supabase: Optional[SupabaseService] = None
         self.exnova = ExnovaService(settings.EXNOVA_EMAIL, settings.EXNOVA_PASSWORD)
         self.is_running = True
@@ -28,17 +28,13 @@ class TradingBot:
         self.is_trade_active = False
         self.pending_martingale_trade: Optional[Dict] = None
         self.martingale_state: Dict[str, Dict] = {}
-
-        # --- ATUALIZAÇÃO: Adiciona a nova estratégia ao arsenal do bot ---
         self.strategy_map: Dict[str, callable] = {
             'Pullback MQL': ti.strategy_mql_pullback,
             'Padrão de Reversão': ti.strategy_reversal_pattern,
             'Fluxo de Tendência': ti.strategy_trend_flow,
-            'Reversão por Exaustão': ti.strategy_exhaustion_reversal, # <-- NOVA ESTRATÉGIA
+            'Reversão por Exaustão': ti.strategy_exhaustion_reversal,
         }
         self.asset_strategy_map: Dict[str, str] = {}
-
-        # ... (resto das inicializações mantido)
         self.asset_performance: Dict[str, Dict[str, int]] = {}
         self.consecutive_losses: Dict[str, int] = {}
         self.blacklisted_assets: set = set()
@@ -47,6 +43,71 @@ class TradingBot:
         self.daily_wins = 0
         self.daily_losses = 0
         self.last_daily_reset_date = None
+
+    # --- O resto do ficheiro permanece igual até ao método _analyze_asset ---
+    
+    def _analyze_asset(self, full_name: str, timeframe_seconds: int, expiration_minutes: int):
+        try:
+            if self.is_trade_active: return
+            base_name = full_name.split('-')[0]
+
+            best_strategy_name = self.asset_strategy_map.get(base_name)
+            if not best_strategy_name:
+                return
+
+            analysis_candles = self.exnova.get_historical_candles(base_name, 60, 50)
+            if not analysis_candles or len(analysis_candles) < 20:
+                self.logger('WARNING', f"Dados de velas insuficientes para {base_name}.")
+                return
+
+            # --- MELHORIA: Filtro de Volatilidade (ATR) ---
+            volatility_profile = self.bot_config.get('volatility_profile', 'EQUILIBRADO')
+            if volatility_profile != 'DESATIVADO':
+                atr_limits = {
+                    'ULTRA_CONSERVADOR': (0.00001, 0.00015), 
+                    'CONSERVADOR': (0.00010, 0.00050), 
+                    'EQUILIBRADO': (0.00030, 0.00100), 
+                    'AGRESSIVO': (0.00080, 0.00200), 
+                    'ULTRA_AGRESSIVO': (0.00150, 999.0)
+                }
+                min_atr, max_atr = atr_limits.get(volatility_profile, (0.00030, 0.00100))
+                atr_value = ti.calculate_atr(analysis_candles)
+                
+                if atr_value is None or not (min_atr <= atr_value <= max_atr):
+                    atr_text = f"{atr_value:.6f}" if atr_value is not None else "N/A"
+                    self.logger('INFO', f"Ativo {base_name} ignorado. Volatilidade (ATR {atr_text}) fora dos limites para o perfil '{volatility_profile}'.")
+                    return
+            # --- FIM DA MELHORIA ---
+
+            strategy_function = self.strategy_map.get(best_strategy_name)
+            if not strategy_function: return
+
+            self.logger('INFO', f"A analisar {base_name} com a sua melhor estratégia: '{best_strategy_name}'...")
+            final_direction = strategy_function(analysis_candles)
+
+            if final_direction:
+                signal_candle = analysis_candles[-1]
+                if not ti.validate_reversal_candle(signal_candle, final_direction):
+                    self.logger('WARNING', f"Sinal em {base_name} ABORTADO. Vela de confirmação sem qualidade.")
+                    return
+
+                if self.is_trade_active: return
+                now = datetime.utcnow()
+                wait_seconds = (60 - now.second - 1) + (1 - now.microsecond / 1000000) + 0.2
+                self.logger('SUCCESS', f"SINAL ENCONTRADO! Ativo: {base_name}, Estratégia: {best_strategy_name}, Direção: {final_direction.upper()}")
+                time.sleep(wait_seconds)
+                self.is_trade_active = True
+                
+                signal = TradeSignal(
+                    pair=base_name, direction=final_direction, strategy=best_strategy_name,
+                    setup_candle_open=signal_candle['open'], setup_candle_high=signal_candle['max'],
+                    setup_candle_low=signal_candle['min'], setup_candle_close=signal_candle['close']
+                )
+                self._execute_and_wait(signal, full_name, expiration_minutes)
+
+        except Exception as e:
+            self.logger('ERROR', f"Erro em _analyze_asset({full_name}): {e}")
+            traceback.print_exc()
 
     # --- O resto do ficheiro (funções de catalogação, operação, etc.) permanece exatamente igual ---
     # --- COLE O RESTANTE DO SEU FICHEIRO core/bot.py A PARTIR DAQUI ---
@@ -162,42 +223,6 @@ class TradingBot:
         for asset in prioritized_assets[:settings.MAX_ASSETS_TO_MONITOR]:
             if self.is_trade_active: break
             self._analyze_asset(asset, timeframe_seconds, expiration_minutes)
-
-    def _analyze_asset(self, full_name: str, timeframe_seconds: int, expiration_minutes: int):
-        try:
-            if self.is_trade_active: return
-            base_name = full_name.split('-')[0]
-            best_strategy_name = self.asset_strategy_map.get(base_name)
-            if not best_strategy_name:
-                return
-            analysis_candles = self.exnova.get_historical_candles(base_name, 60, 50)
-            if not analysis_candles or len(analysis_candles) < 20:
-                self.logger('WARNING', f"Dados de velas insuficientes para {base_name}.")
-                return
-            strategy_function = self.strategy_map.get(best_strategy_name)
-            if not strategy_function: return
-            self.logger('INFO', f"A analisar {base_name} com a sua melhor estratégia: '{best_strategy_name}'...")
-            final_direction = strategy_function(analysis_candles)
-            if final_direction:
-                signal_candle = analysis_candles[-1]
-                if not ti.validate_reversal_candle(signal_candle, final_direction):
-                    self.logger('WARNING', f"Sinal em {base_name} ABORTADO. Vela de confirmação sem qualidade.")
-                    return
-                if self.is_trade_active: return
-                now = datetime.utcnow()
-                wait_seconds = (60 - now.second - 1) + (1 - now.microsecond / 1000000) + 0.2
-                self.logger('SUCCESS', f"SINAL ENCONTRADO! Ativo: {base_name}, Estratégia: {best_strategy_name}, Direção: {final_direction.upper()}")
-                time.sleep(wait_seconds)
-                self.is_trade_active = True
-                signal = TradeSignal(
-                    pair=base_name, direction=final_direction, strategy=best_strategy_name,
-                    setup_candle_open=signal_candle['open'], setup_candle_high=signal_candle['max'],
-                    setup_candle_low=signal_candle['min'], setup_candle_close=signal_candle['close']
-                )
-                self._execute_and_wait(signal, full_name, expiration_minutes)
-        except Exception as e:
-            self.logger('ERROR', f"Erro em _analyze_asset({full_name}): {e}")
-            traceback.print_exc()
             
     async def run(self):
         self.supabase = SupabaseService(settings.SUPABASE_URL, settings.SUPABASE_KEY)
