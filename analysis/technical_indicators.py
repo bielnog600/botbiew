@@ -20,6 +20,18 @@ def get_m15_sr_zones(candles: List[Dict], window: int = 5) -> tuple:
 # FUNÇÕES DE INDICADORES TÉCNICOS
 # ===============================================
 
+def calculate_atr(candles: List[Dict], period: int = 14) -> Optional[float]:
+    """
+    Calcula o Average True Range (ATR) para medir a volatilidade.
+    Esta função foi re-adicionada para corrigir o erro.
+    """
+    if len(candles) < period: return None
+    df = pd.DataFrame(candles)
+    df.rename(columns={'max': 'high', 'min': 'low'}, inplace=True)
+    if not all(x in df.columns for x in ['high', 'low', 'close']): return None
+    atr_series = ta.atr(df['high'], df['low'], df['close'], length=period)
+    return atr_series.iloc[-1] if not atr_series.empty else None
+
 def check_ma_trend(candles: List[Dict], fast_period: int = 9, slow_period: int = 21) -> Optional[str]:
     if len(candles) < slow_period: return None
     df = pd.DataFrame(candles)
