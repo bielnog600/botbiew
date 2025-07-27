@@ -1,161 +1,245 @@
 import pandas as pd
-import pandas_ta as ta
-from typing import Optional, List, Dict
+from typing import List, Dict, Optional
 
-# ===============================================
-# FUNÇÕES DE ANÁLISE DE SUPORTE E RESISTÊNCIA (S/R)
-# ===============================================
+# --- Funções de Análise e Indicadores ---
 
-def get_m15_sr_zones(candles: List[Dict], window: int = 5) -> tuple:
-    if not candles: return [], []
-    df = pd.DataFrame(candles)
-    if 'max' not in df.columns or 'min' not in df.columns: return [], []
-    df['is_resistance'] = (df['max'] >= df['max'].rolling(window, center=True, min_periods=1).max()).astype(int)
-    df['is_support'] = (df['min'] <= df['min'].rolling(window, center=True, min_periods=1).min()).astype(int)
-    resistances = df[df['is_resistance'] == 1]['max'].unique().tolist()
-    supports = df[df['is_support'] == 1]['min'].unique().tolist()
-    return sorted(resistances, reverse=True), sorted(supports)
+def calculate_atr(candles: list, period: int = 14) -> Optional[float]:
+    """Calcula o Average True Range (ATR) para uma lista de velas."""
+    if len(candles) < period:
+        return None
+    
+    highs = pd.Series([c['max'] for c in candles])
+    lows = pd.Series([c['min'] for c in candles])
+    closes = pd.Series([c['close'] for c in candles])
+    
+    tr1 = highs - lows
+    tr2 = abs(highs - closes.shift())
+    tr3 = abs(lows - closes.shift())
+    
+    true_range = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    atr = true_range.ewm(alpha=1/period, adjust=False).mean()
+    
+    return atr.iloc[-1]
 
-# ===============================================
-# FUNÇÕES DE INDICADORES TÉCNICOS
-# ===============================================
+def get_sr_zones(candles: list, n: int = 5) -> (List[float], List[float]):
+    """Encontra zonas de suporte e resistência com base nos fractais."""
+    if len(candles) < 5:
+        return [], []
+    
+    highs = [c['max'] for c in candles]
+    lows = [c['min'] for c in candles]
+    
+    resistances = []
+    supports = []
 
-def calculate_atr(candles: List[Dict], period: int = 14) -> Optional[float]:
-    """
-    Calcula o Average True Range (ATR) para medir a volatilidade.
-    Esta função foi re-adicionada para corrigir o erro.
-    """
-    if len(candles) < period: return None
-    df = pd.DataFrame(candles)
-    df.rename(columns={'max': 'high', 'min': 'low'}, inplace=True)
-    if not all(x in df.columns for x in ['high', 'low', 'close']): return None
-    atr_series = ta.atr(df['high'], df['low'], df['close'], length=period)
-    return atr_series.iloc[-1] if not atr_series.empty else None
+    for i in range(2, len(candles) - 2):
+        # Fractal de Alta (Resistência)
+        if highs[i] > highs[i-1] and highs[i] > highs[i-2] and highs[i] > highs[i+1] and highs[i] > highs[i+2]:
+            resistances.append(highs[i])
+        # Fractal de Baixa (Suporte)
+        if lows[i] < lows[i-1] and lows[i] < lows[i-2] and lows[i] < lows[i+1] and lows[i] < lows[i+2]:
+            supports.append(lows[i])
+            
+    # Retorna as 'n' zonas mais recentes
+    return sorted(resistances, reverse=True)[:n], sorted(supports, reverse=True)[:n]
 
-def check_ma_trend(candles: List[Dict], fast_period: int = 9, slow_period: int = 21) -> Optional[str]:
-    if len(candles) < slow_period: return None
-    df = pd.DataFrame(candles)
-    if 'close' not in df.columns: return None
-    df['fast_ma'] = ta.sma(df['close'], length=fast_period)
-    df['slow_ma'] = ta.sma(df['close'], length=slow_period)
-    if df['fast_ma'].empty or df['slow_ma'].empty or pd.isna(df['fast_ma'].iloc[-1]) or pd.isna(df['slow_ma'].iloc[-1]): return None
-    last_fast = df['fast_ma'].iloc[-1]
-    last_slow = df['slow_ma'].iloc[-1]
-    if last_fast > last_slow: return 'call'
-    if last_fast < last_slow: return 'put'
-    return None
-
-# ===============================================
-# FUNÇÕES DE VALIDAÇÃO E PADRÕES AVANÇADOS
-# ===============================================
-
-def check_candlestick_pattern(candles: List[Dict]) -> Optional[str]:
-    if len(candles) < 2: return None
-    df = pd.DataFrame(candles)
-    if (df['close'].iloc[-2] < df['open'].iloc[-2] and 
-        df['close'].iloc[-1] > df['open'].iloc[-1] and 
-        df['close'].iloc[-1] >= df['open'].iloc[-2] and 
-        df['open'].iloc[-1] <= df['close'].iloc[-2]):
-        return 'call'
-    if (df['close'].iloc[-2] > df['open'].iloc[-2] and 
-        df['close'].iloc[-1] < df['open'].iloc[-1] and 
-        df['close'].iloc[-1] <= df['open'].iloc[-2] and 
-        df['open'].iloc[-1] >= df['close'].iloc[-2]):
-        return 'put'
-    return None
+def check_ma_trend(candles: list, fast_period: int = 9, slow_period: int = 21) -> Optional[str]:
+    """Verifica a tendência principal usando duas médias móveis exponenciais."""
+    if len(candles) < slow_period:
+        return None
+    
+    closes = pd.Series([c['close'] for c in candles])
+    ema_fast = closes.ewm(span=fast_period, adjust=False).mean()
+    ema_slow = closes.ewm(span=slow_period, adjust=False).mean()
+    
+    if ema_fast.iloc[-1] > ema_slow.iloc[-1]:
+        return 'call'  # Tendência de alta
+    else:
+        return 'put'  # Tendência de baixa
 
 def validate_reversal_candle(candle: dict, direction: str) -> bool:
-    is_call = direction == 'call'
-    open_price, high, low, close = candle['open'], candle['max'], candle['min'], candle['close']
-    if is_call and close <= open_price: return False
-    if not is_call and close >= open_price: return False
-    body_size = abs(close - open_price)
-    total_range = high - low
-    if total_range == 0: return False
-    if (body_size / total_range) < 0.25: return False
-    upper_wick = high - max(open_price, close)
-    lower_wick = min(open_price, close) - low
-    if is_call and (upper_wick / total_range) > 0.4: return False
-    if not is_call and (lower_wick / total_range) > 0.4: return False
-    return True
+    """Valida a qualidade da vela de sinal para uma reversão."""
+    body = abs(candle['close'] - candle['open'])
+    wick_range = candle['max'] - candle['min']
+    if wick_range == 0: return False
 
-def find_recent_peaks_and_troughs(candles: List[Dict], window: int = 5) -> tuple:
-    """Encontra os picos (máximas) e vales (mínimas) recentes no preço."""
-    df = pd.DataFrame(candles)
-    peaks = df[df['max'] >= df['max'].rolling(window, center=True, min_periods=1).max()]
-    troughs = df[df['min'] <= df['min'].rolling(window, center=True, min_periods=1).min()]
-    return peaks, troughs
+    body_ratio = body / wick_range
+    if body_ratio < 0.4: return False # Exige um corpo com pelo menos 40% do tamanho total
 
-def detect_double_top_bottom(candles: List[Dict]) -> Optional[str]:
-    """Deteta padrões de Topo Duplo ou Fundo Duplo."""
-    if len(candles) < 20: return None
-    peaks, troughs = find_recent_peaks_and_troughs(candles[-20:]) # Analisa as últimas 20 velas
+    if direction == 'call': # Para compra
+        return candle['close'] > candle['open'] # Vela verde
+    elif direction == 'put': # Para venda
+        return candle['close'] < candle['open'] # Vela vermelha
+    return False
+
+# --- Estratégias de Negociação ---
+
+def strategy_mql_pullback(candles: list) -> Optional[str]:
+    """Estratégia de Pullback em zonas de Suporte/Resistência a favor da tendência."""
+    if len(candles) < 25: return None
     
-    # Topo Duplo (padrão 'M')
-    if len(peaks) >= 2:
-        last_peak = peaks.iloc[-1]
-        prev_peak = peaks.iloc[-2]
-        # Verifica se os dois picos estão a um nível de preço semelhante
-        if abs(last_peak['max'] - prev_peak['max']) / last_peak['max'] < 0.001: # Tolerância de 0.1%
-            # Verifica se a vela atual está a fechar abaixo do vale entre os picos
-            valley = troughs[troughs.index > prev_peak.name]
-            if not valley.empty and candles[-1]['close'] < valley.iloc[0]['min']:
+    trend = check_ma_trend(candles)
+    if not trend: return None
+
+    resistances, supports = get_sr_zones(candles[:-1]) # Usa velas passadas para S/R
+    
+    signal_candle = candles[-1]
+
+    if trend == 'call' and supports:
+        for support_level in supports:
+            if signal_candle['min'] <= support_level and signal_candle['close'] > support_level:
+                return 'call'
+    
+    if trend == 'put' and resistances:
+        for resistance_level in resistances:
+            if signal_candle['max'] >= resistance_level and signal_candle['close'] < resistance_level:
                 return 'put'
 
-    # Fundo Duplo (padrão 'W')
-    if len(troughs) >= 2:
-        last_trough = troughs.iloc[-1]
-        prev_trough = troughs.iloc[-2]
-        if abs(last_trough['min'] - prev_trough['min']) / last_trough['min'] < 0.001:
-            peak_between = peaks[peaks.index > prev_trough.name]
-            if not peak_between.empty and candles[-1]['close'] > peak_between.iloc[0]['max']:
+    return None
+
+def strategy_reversal_pattern(candles: list) -> Optional[str]:
+    """Estratégia de Engolfo em zonas de S/R a favor da tendência, com filtros de qualidade."""
+    if len(candles) < 25: return None
+
+    trend = check_ma_trend(candles)
+    if not trend: return None
+    
+    resistances, supports = get_sr_zones(candles[:-2]) # S/R baseado em velas mais antigas
+    
+    # Velas relevantes para o padrão
+    prev_candle_2 = candles[-3]
+    prev_candle_1 = candles[-2]
+    signal_candle = candles[-1]
+    
+    # --- Filtro de Qualidade 1: Contexto (Mini-tendência de reversão) ---
+    is_reversal_context = False
+    if trend == 'call': # Procurando um Engolfo de Alta
+        # Exige que as 2 velas anteriores sejam de baixa (vermelhas)
+        if prev_candle_1['close'] < prev_candle_1['open'] and prev_candle_2['close'] < prev_candle_2['open']:
+            is_reversal_context = True
+    elif trend == 'put': # Procurando um Engolfo de Baixa
+        # Exige que as 2 velas anteriores sejam de alta (verdes)
+        if prev_candle_1['close'] > prev_candle_1['open'] and prev_candle_2['close'] > prev_candle_2['open']:
+            is_reversal_context = True
+
+    if not is_reversal_context:
+        return None # Aborta se não houver um contexto claro de reversão
+
+    # --- Filtro de Qualidade 2: Força do Engolfo ---
+    is_strong_engulfing = False
+    body_prev = abs(prev_candle_1['close'] - prev_candle_1['open'])
+    body_signal = abs(signal_candle['close'] - signal_candle['open'])
+
+    # Engolfo de Alta
+    if trend == 'call' and signal_candle['close'] > signal_candle['open'] and prev_candle_1['close'] < prev_candle_1['open']:
+        if signal_candle['close'] > prev_candle_1['max'] and signal_candle['open'] < prev_candle_1['min']:
+            if body_signal > body_prev * 1.5: # Corpo da vela de sinal é 50% maior
+                is_strong_engulfing = True
+    
+    # Engolfo de Baixa
+    elif trend == 'put' and signal_candle['close'] < signal_candle['open'] and prev_candle_1['close'] > prev_candle_1['open']:
+        if signal_candle['close'] < prev_candle_1['min'] and signal_candle['open'] > prev_candle_1['max']:
+            if body_signal > body_prev * 1.5: # Corpo da vela de sinal é 50% maior
+                is_strong_engulfing = True
+    
+    if not is_strong_engulfing:
+        return None # Aborta se o engolfo não for forte o suficiente
+
+    # --- Confluência Final com Suporte e Resistência ---
+    if trend == 'call' and supports: # Engolfo de Alta
+        for support_level in supports:
+            if prev_candle_1['min'] <= support_level: # A vela engolfada tocou no suporte
                 return 'call'
+
+    if trend == 'put' and resistances: # Engolfo de Baixa
+        for resistance_level in resistances:
+            if prev_candle_1['max'] >= resistance_level: # A vela engolfada tocou na resistência
+                return 'put'
+
     return None
 
-# ===============================================
-# ESTRATÉGIAS COMPLETAS
-# ===============================================
-
-def strategy_reversal_pattern(candles: List[Dict]) -> Optional[str]:
-    """Estratégia de Engolfo em zonas de S/R, a favor da tendência."""
-    if len(candles) < 50: return None
+def strategy_trend_flow(candles: list) -> Optional[str]:
+    """Estratégia de fluxo a favor da tendência."""
+    if len(candles) < 25: return None
+    
     trend = check_ma_trend(candles)
     if not trend: return None
-    pattern = check_candlestick_pattern(candles)
-    if not pattern or pattern != trend: return None
-    resistances, supports = get_m15_sr_zones(candles[-100:])
-    engulfing_candle = candles[-1]
-    if pattern == 'call':
-        if any(engulfing_candle['min'] <= sup for sup in supports): return 'call'
-    if pattern == 'put':
-        if any(engulfing_candle['max'] >= res for res in resistances): return 'put'
-    return None
-
-def strategy_trend_flow(candles: List[Dict]) -> Optional[str]:
-    """Estratégia de continuação de tendência (fluxo)."""
-    if len(candles) < 3: return None
-    trend = check_ma_trend(candles)
-    if not trend: return None
+    
+    # Verifica as últimas 3 velas
     last_three_candles = candles[-3:]
-    if trend == 'call' and all(c['close'] > c['open'] for c in last_three_candles): return 'call'
-    if trend == 'put' and all(c['close'] < c['open'] for c in last_three_candles): return 'put'
+    
+    if trend == 'call':
+        if all(c['close'] > c['open'] for c in last_three_candles): # 3 velas verdes
+            return 'call'
+            
+    if trend == 'put':
+        if all(c['close'] < c['open'] for c in last_three_candles): # 3 velas vermelhas
+            return 'put'
+
     return None
 
-def strategy_mql_pullback(candles: List[Dict]) -> Optional[str]:
-    """Estratégia de pullback em zonas de S/R a favor da tendência."""
+def detect_double_top_bottom(candles: list) -> Optional[str]:
+    """Detecta padrões de Topo ou Fundo Duplo."""
+    if len(candles) < 20: return None
+    
+    closes = pd.Series([c['close'] for c in candles])
+    
+    # Lógica simplificada para encontrar picos e vales
+    peak_indices = (closes.shift(1) < closes) & (closes.shift(-1) < closes)
+    valley_indices = (closes.shift(1) > closes) & (closes.shift(-1) > closes)
+    
+    peaks = closes[peak_indices].tail(2)
+    valleys = closes[valley_indices].tail(2)
+
+    # Topo Duplo
+    if len(peaks) == 2:
+        price_diff = abs(peaks.iloc[0] - peaks.iloc[1])
+        if price_diff / peaks.iloc[0] < 0.001: # Picos com preços muito próximos (0.1%)
+            return 'put'
+    
+    # Fundo Duplo
+    if len(valleys) == 2:
+        price_diff = abs(valleys.iloc[0] - valleys.iloc[1])
+        if price_diff / valleys.iloc[0] < 0.001: # Vales com preços muito próximos
+            return 'call'
+    
+    return None
+
+def strategy_exhaustion_reversal(candles: list) -> Optional[str]:
+    """Estratégia que combina exaustão do preço com padrões de reversão."""
+    if len(candles) < 25: return None
+    
     trend = check_ma_trend(candles)
     if not trend: return None
-    resistances, supports = get_m15_sr_zones(candles[-100:])
-    last_candle = candles[-1]
-    if trend == 'call':
-        if any(last_candle['min'] <= sup and last_candle['close'] > sup for sup in supports): return 'call'
-    if trend == 'put':
-        if any(last_candle['max'] >= res and last_candle['close'] < res for res in resistances): return 'put'
-    return None
 
-def strategy_exhaustion_reversal(candles: List[Dict]) -> Optional[str]:
-    """
-    NOVA ESTRATÉGIA: Procura por Topos/Fundos Duplos como sinal principal de reversão.
-    Esta é uma estratégia de alta seletividade.
-    """
-    return detect_double_top_bottom(candles)
+    # 1. Verifica Exaustão (3+ velas da mesma cor contra a tendência)
+    exhaustion_direction = None
+    if trend == 'call': # Tendência de alta, procura exaustão de venda
+        if all(c['close'] < c['open'] for c in candles[-4:-1]): # 3 velas vermelhas seguidas
+            exhaustion_direction = 'call' # Espera uma reversão para compra
+            
+    elif trend == 'put': # Tendência de baixa, procura exaustão de compra
+        if all(c['close'] > c['open'] for c in candles[-4:-1]): # 3 velas verdes seguidas
+            exhaustion_direction = 'put' # Espera uma reversão para venda
+    
+    if not exhaustion_direction: return None
+
+    # 2. Confirma com Padrão de Reversão (Engolfo) ou Duplo Topo/Fundo
+    double_pattern = detect_double_top_bottom(candles)
+    if double_pattern == exhaustion_direction:
+        return double_pattern # Sinal forte
+    
+    # Usa a lógica de engolfo, mas sem checar a tendência novamente
+    signal_candle = candles[-1]
+    prev_candle_1 = candles[-2]
+    if exhaustion_direction == 'call':
+        if signal_candle['close'] > signal_candle['open'] and prev_candle_1['close'] < prev_candle_1['open']:
+            if signal_candle['close'] > prev_candle_1['max'] and signal_candle['open'] < prev_candle_1['min']:
+                return 'call'
+    
+    if exhaustion_direction == 'put':
+        if signal_candle['close'] < signal_candle['open'] and prev_candle_1['close'] > prev_candle_1['open']:
+            if signal_candle['close'] < prev_candle_1['min'] and signal_candle['open'] > prev_candle_1['max']:
+                return 'put'
+
+    return None
