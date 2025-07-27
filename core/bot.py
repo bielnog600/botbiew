@@ -115,7 +115,6 @@ class TradingBot:
         self.logger('INFO', "--- CATALOGAÇÃO CONCLUÍDA ---")
 
     def trading_loop_sync(self):
-        # ... (código de inicialização mantido) ...
         self.logger('INFO', 'A iniciar o bot...')
         if not self.exnova.connect(): self.is_running = False; return
         profile_data = self.exnova.get_profile()
@@ -154,7 +153,6 @@ class TradingBot:
                     self.current_account_type = desired_account_type
 
                 if current_status == 'RUNNING':
-                    # --- LÓGICA DE PRIORIDADE DO MARTINGALE ---
                     if self.pending_martingale_trade and not self.is_trade_active:
                         self._execute_martingale_trade()
                     elif not self.is_trade_active:
@@ -169,7 +167,6 @@ class TradingBot:
                 self.logger('ERROR', f"Loop principal falhou: {e}"); traceback.print_exc(); time.sleep(30)
 
     def trading_cycle(self):
-        # ... (código mantido) ...
         now = datetime.utcnow()
         if now.second >= 45 and now.minute != self.last_analysis_minute:
             self.last_analysis_minute = now.minute
@@ -179,7 +176,6 @@ class TradingBot:
             self.logger('INFO', f"A aguardar janela de análise (segundo atual: {now.second})...")
 
     def run_analysis_for_timeframe(self, timeframe_seconds: int, expiration_minutes: int):
-        # ... (código mantido) ...
         assets_with_strategy = list(self.asset_strategy_map.keys())
         if not assets_with_strategy:
             self.logger('INFO', "Nenhum ativo qualificado para análise no momento.")
@@ -199,8 +195,6 @@ class TradingBot:
                 self._analyze_asset(full_asset_name, timeframe_seconds, expiration_minutes)
 
     def _analyze_asset(self, full_name: str, timeframe_seconds: int, expiration_minutes: int):
-        # ... (código mantido, sem alterações) ...
-        # ... A única alteração aqui é que no final ele chama _execute_and_wait, que agora tem a lógica de MG ...
         try:
             if self.is_trade_active: return
             base_name = full_name.split('-')[0]
@@ -242,7 +236,6 @@ class TradingBot:
             self.logger('ERROR', f"Erro em _analyze_asset({full_name}): {e}"); traceback.print_exc()
 
     def _execute_and_wait(self, signal: TradeSignal, full_name: str, expiration_minutes: int):
-        # ... (código mantido, sem alterações) ...
         try:
             is_martingale_trade = "Martingale" in signal.strategy
             entry_value = self._get_entry_value(signal.pair, is_martingale=is_martingale_trade)
@@ -278,9 +271,12 @@ class TradingBot:
             
             self._update_stats_and_martingale(result, signal, full_name, expiration_minutes)
         finally:
-            if not self.pending_martingale_trade:
-                self.is_trade_active = False
-                self.logger('INFO', 'Ciclo de operação concluído.')
+            # --- CORREÇÃO DO BUG DE CONGELAMENTO ---
+            # Independentemente de ter um martingale pendente, a operação ATUAL terminou.
+            # A flag is_trade_active deve ser liberada para que o loop principal possa
+            # decidir o que fazer a seguir (executar o gale ou procurar novo sinal).
+            self.is_trade_active = False
+            self.logger('INFO', 'Ciclo de operação concluído. O loop principal irá decidir a próxima ação.')
 
     # --- FUNÇÕES DE MARTINGALE ---
 
@@ -311,18 +307,15 @@ class TradingBot:
         
         self.logger('SUCCESS', f"EXECUTANDO MARTINGALE! Ativo: {trade_info['pair']}, Direção: {signal.direction.upper()}.")
         
-        # Chama a função principal de execução
         self._execute_and_wait(signal, trade_info['full_name'], trade_info['expiration_minutes'])
 
     def _get_entry_value(self, asset: str, is_martingale: bool = False) -> float:
         """Calcula o valor da entrada, considerando o Martingale se aplicável."""
         base_value = self.bot_config.get('entry_value', 1.0)
         
-        # Se Martingale não estiver em uso, retorna o valor base
         if not self.bot_config.get('use_martingale', False):
             return base_value
             
-        # Obtém o nível atual de Martingale para o ativo
         mg_level = self.martingale_state.get(asset, {}).get('level', 0)
         
         if mg_level == 0:
@@ -354,7 +347,6 @@ class TradingBot:
                 self.blacklisted_assets.add(pair)
                 self.logger('ERROR', f"O par {pair} foi colocado na lista negra por 1 hora.")
 
-            # --- LÓGICA DE PREPARAÇÃO DO MARTINGALE ---
             use_mg = self.bot_config.get('use_martingale', False)
             if use_mg:
                 current_level = self.martingale_state.get(pair, {}).get('level', 0)
