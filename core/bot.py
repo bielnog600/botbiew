@@ -25,11 +25,7 @@ class TradingBot:
         self.main_loop = None
         self.currency_char = '$'
         self.current_account_type = ''
-        
-        # --- MELHORIA: Controlo de Estado para Reinício ---
-        self.previous_status = 'PAUSED' # Guarda o estado anterior para detetar a mudança
-        # ------------------------------------------------
-        
+        self.previous_status = 'PAUSED'
         self.is_trade_active = False
         self.pending_martingale_trade: Optional[Dict] = None
         self.martingale_state: Dict[str, Dict] = {}
@@ -61,11 +57,8 @@ class TradingBot:
             self._run_async(self.supabase.insert_log(level, message))
             
     def _soft_restart(self):
-        """
-        Executa uma reinicialização 'suave' do bot, limpando o estado e
-        re-executando a catalogação para começar do zero.
-        """
-        self.logger('WARNING', "--- REINÍCIO SUAVE ACIONADO PELO PAINEL ---")
+        """Executa uma reinicialização 'suave' do bot."""
+        self.logger('WARNING', "--- REINÍCIO SUAVE ATIVADO ---")
         self.asset_strategy_map.clear()
         self.asset_performance.clear()
         self.consecutive_losses.clear()
@@ -96,7 +89,7 @@ class TradingBot:
                 highest_win_rate = 0
                 for strategy_name, strategy_func in self.strategy_map.items():
                     wins, losses, total_trades = 0, 0, 0
-                    for i in range(20, len(historical_candles) - 1):
+                    for i in range(50, len(historical_candles) - 1): # Aumentado range para mais testes
                         past_candles = historical_candles[:i]
                         signal_candle = past_candles[-1]
                         result_candle = historical_candles[i]
@@ -106,9 +99,9 @@ class TradingBot:
                             if signal == 'call' and result_candle['close'] > signal_candle['close']: wins += 1
                             elif signal == 'put' and result_candle['close'] < signal_candle['close']: wins += 1
                             else: losses += 1
-                    if total_trades > 5:
+                    if total_trades > 10: # Exige um mínimo de sinais para ser estatisticamente relevante
                         win_rate = (wins / total_trades) * 100
-                        self.logger('INFO', f"  - Ativo: {base_name}, Estratégia: '{strategy_name}', Assertividade: {win_rate:.2f}% ({wins}W/{losses}L)")
+                        # self.logger('INFO', f"  - Ativo: {base_name}, Estratégia: '{strategy_name}', Assertividade: {win_rate:.2f}% ({wins}W/{losses}L)")
                         if win_rate > highest_win_rate:
                             highest_win_rate, best_strategy_for_asset = win_rate, strategy_name
                 if best_strategy_for_asset and highest_win_rate >= 55:
@@ -130,49 +123,44 @@ class TradingBot:
             self.logger('SUCCESS', f"Perfil carregado! Olá, {profile_data.get('name', 'Utilizador')}.")
         except Exception: self.is_running = False; return
         
-        # Carrega a configuração inicial
         self.bot_config = self._run_async(self.supabase.get_bot_config()).result()
         self.current_account_type = self.bot_config.get('account_type', 'PRACTICE')
-        self.previous_status = self.bot_config.get('status', 'PAUSED') # Sincroniza estado inicial
-        
+        self.previous_status = self.bot_config.get('status', 'PAUSED')
         self.exnova.change_balance(self.current_account_type)
         self.logger('INFO', f"Conta inicial definida para: {self.current_account_type}")
         
         self._daily_reset_if_needed()
-        self._run_cataloging() # Primeira catalogação ao arrancar
+        if self.previous_status == 'RUNNING':
+            self._run_cataloging()
         
         while self.is_running:
             try:
-                # Resets de ciclo horário e diário
                 if (datetime.utcnow() - self.last_reset_time).total_seconds() >= 3600:
                     self._hourly_cycle_reset()
                 self._daily_reset_if_needed()
 
-                # Busca a configuração mais recente da base de dados
                 self.bot_config = self._run_async(self.supabase.get_bot_config()).result()
                 current_status = self.bot_config.get('status', 'PAUSED')
 
-                # --- LÓGICA DE REINÍCIO ---
-                # Se o estado mudou de PAUSADO para A CORRER, reinicia.
                 if current_status == 'RUNNING' and self.previous_status == 'PAUSED':
                     self._soft_restart()
-                
-                # Atualiza o estado anterior para o próximo ciclo
                 self.previous_status = current_status
-                # -------------------------
 
-                # Verifica se é necessário mudar de conta (REAL/PRACTICE)
                 desired_account_type = self.bot_config.get('account_type', 'PRACTICE')
                 if desired_account_type != self.current_account_type:
                     self.logger('WARNING', f"MUDANÇA DE CONTA! De {self.current_account_type} para {desired_account_type}.")
                     self.exnova.change_balance(desired_account_type)
                     self.current_account_type = desired_account_type
 
-                # Se o bot estiver a correr, procura por operações
-                if current_status == 'RUNNING' and not self.is_trade_active:
-                    self.trading_cycle()
+                if current_status == 'RUNNING':
+                    if not self.is_trade_active:
+                        self.trading_cycle()
+                else:
+                    # Log para mostrar que está em pausa
+                    self.logger('INFO', "Bot PAUSADO. A aguardar o estado 'RUNNING' no painel.")
+                    time.sleep(5) # Dorme por mais tempo quando pausado
 
-                time.sleep(1) # Pausa para não sobrecarregar
+                time.sleep(1)
                 
             except Exception as e:
                 self.logger('ERROR', f"Loop principal falhou: {e}"); traceback.print_exc(); time.sleep(30)
@@ -181,26 +169,40 @@ class TradingBot:
         now = datetime.utcnow()
         if now.second >= 45 and now.minute != self.last_analysis_minute:
             self.last_analysis_minute = now.minute
-            self.logger('INFO', f"Janela de análise M1 ATIVADA.")
+            self.logger('INFO', f"Janela de análise M1 ATIVADA. A procurar oportunidades...")
             self.run_analysis_for_timeframe(60, 1)
+        elif now.second % 15 == 0: # Log de pulsação a cada 15 segundos
+            self.logger('INFO', f"A aguardar janela de análise (segundo atual: {now.second})...")
+
 
     def run_analysis_for_timeframe(self, timeframe_seconds: int, expiration_minutes: int):
-        assets = self.exnova.get_open_assets()
-        if not assets: self.logger('WARNING', "Nenhum ativo aberto encontrado."); return
-        
-        available_assets = [asset for asset in assets if asset.split('-')[0] in self.asset_strategy_map]
-        if not available_assets: self.logger('INFO', "Nenhum ativo qualificado após catalogação."); return
-        
-        def get_asset_score(asset_name):
-            pair = asset_name.split('-')[0]
+        assets_with_strategy = list(self.asset_strategy_map.keys())
+        if not assets_with_strategy:
+            self.logger('INFO', "Nenhum ativo qualificado para análise no momento.")
+            return
+
+        def get_asset_score(pair):
             stats = self.asset_performance.get(pair, {'wins': 0, 'losses': 0})
-            return (stats['wins'] + 1) / (stats['wins'] + stats['losses'] + 2) # Fórmula de Laplace
+            return (stats['wins'] + 1) / (stats['wins'] + stats['losses'] + 2)
         
-        prioritized_assets = sorted(available_assets, key=get_asset_score, reverse=True)
+        # O nome do ativo na corretora pode ser 'EURUSD-OTC', mas no mapa usamos 'EURUSD'
+        prioritized_pairs = sorted(assets_with_strategy, key=get_asset_score, reverse=True)
         
-        for asset in prioritized_assets[:settings.MAX_ASSETS_TO_MONITOR]:
+        # Precisamos de encontrar o nome completo do ativo para analisar
+        all_open_assets = self.exnova.get_open_assets()
+
+        for pair in prioritized_pairs:
             if self.is_trade_active: break
-            self._analyze_asset(asset, timeframe_seconds, expiration_minutes)
+            
+            # Encontra o nome completo do ativo que corresponde ao par
+            full_asset_name = next((asset for asset in all_open_assets if asset.startswith(pair)), None)
+
+            if full_asset_name:
+                 if full_asset_name.split('-')[0] not in self.blacklisted_assets:
+                    self._analyze_asset(full_asset_name, timeframe_seconds, expiration_minutes)
+            else:
+                self.logger('WARNING', f"O par qualificado '{pair}' não parece estar aberto no momento.")
+
 
     def _analyze_asset(self, full_name: str, timeframe_seconds: int, expiration_minutes: int):
         try:
@@ -210,9 +212,11 @@ class TradingBot:
             best_strategy_name = self.asset_strategy_map.get(base_name)
             if not best_strategy_name: return
 
+            self.logger('INFO', f"A analisar {base_name} com a sua melhor estratégia: '{best_strategy_name}'...")
+            
             analysis_candles = self.exnova.get_historical_candles(base_name, 60, 50)
             if not analysis_candles or len(analysis_candles) < 20:
-                self.logger('WARNING', f"Dados de velas insuficientes para {base_name}."); return
+                self.logger('WARNING', f"[{base_name}] Análise abortada: Dados de velas insuficientes."); return
 
             volatility_profile = self.bot_config.get('volatility_profile', 'EQUILIBRADO')
             if volatility_profile != 'DESATIVADO':
@@ -221,26 +225,28 @@ class TradingBot:
                 atr_value = ti.calculate_atr(analysis_candles)
                 if atr_value is None or not (min_atr <= atr_value <= max_atr):
                     atr_text = f"{atr_value:.6f}" if atr_value is not None else "N/A"
-                    self.logger('INFO', f"Ativo {base_name} ignorado. Volatilidade (ATR {atr_text}) fora dos limites para o perfil '{volatility_profile}'."); return
+                    self.logger('INFO', f"[{base_name}] Análise abortada: Volatilidade (ATR {atr_text}) fora dos limites para o perfil '{volatility_profile}'."); return
 
             strategy_function = self.strategy_map.get(best_strategy_name)
             if not strategy_function: return
 
-            self.logger('INFO', f"A analisar {base_name} com a sua melhor estratégia: '{best_strategy_name}'...")
             final_direction = strategy_function(analysis_candles)
+            if not final_direction:
+                self.logger('INFO', f"[{base_name}] Análise concluída: Nenhum sinal encontrado pela estratégia '{best_strategy_name}'."); return
 
-            if final_direction:
-                signal_candle = analysis_candles[-1]
-                if not ti.validate_reversal_candle(signal_candle, final_direction):
-                    self.logger('WARNING', f"Sinal em {base_name} ABORTADO. Vela de confirmação sem qualidade."); return
-                if self.is_trade_active: return
-                now = datetime.utcnow()
-                wait_seconds = (60 - now.second - 1) + (1 - now.microsecond / 1000000) + 0.2
-                self.logger('SUCCESS', f"SINAL ENCONTRADO! Ativo: {base_name}, Estratégia: {best_strategy_name}, Direção: {final_direction.upper()}")
-                time.sleep(wait_seconds)
-                self.is_trade_active = True
-                signal = TradeSignal(pair=base_name, direction=final_direction, strategy=best_strategy_name, setup_candle_open=signal_candle['open'], setup_candle_high=signal_candle['max'], setup_candle_low=signal_candle['min'], setup_candle_close=signal_candle['close'])
-                self._execute_and_wait(signal, full_name, expiration_minutes)
+            signal_candle = analysis_candles[-1]
+            if not ti.validate_reversal_candle(signal_candle, final_direction):
+                self.logger('WARNING', f"[{base_name}] Sinal ABORTADO: A vela de confirmação não tem qualidade suficiente."); return
+            
+            # Se todas as verificações passaram, temos um sinal!
+            if self.is_trade_active: return
+            now = datetime.utcnow()
+            wait_seconds = (60 - now.second - 1) + (1 - now.microsecond / 1000000) + 0.2
+            self.logger('SUCCESS', f"SINAL ENCONTRADO! Ativo: {base_name}, Estratégia: {best_strategy_name}, Direção: {final_direction.upper()}")
+            time.sleep(wait_seconds)
+            self.is_trade_active = True
+            signal = TradeSignal(pair=base_name, direction=final_direction, strategy=best_strategy_name, setup_candle_open=signal_candle['open'], setup_candle_high=signal_candle['max'], setup_candle_low=signal_candle['min'], setup_candle_close=signal_candle['close'])
+            self._execute_and_wait(signal, full_name, expiration_minutes)
 
         except Exception as e:
             self.logger('ERROR', f"Erro em _analyze_asset({full_name}): {e}"); traceback.print_exc()
@@ -252,6 +258,8 @@ class TradingBot:
         trading_thread.start()
         while self.is_running and trading_thread.is_alive(): await asyncio.sleep(1)
 
+    # ... (O resto das funções como _execute_and_wait, etc., permanecem as mesmas) ...
+    # ... (Código de Martingale, stats, etc., ainda precisa ser implementado) ...
     def _execute_and_wait(self, signal: TradeSignal, full_name: str, expiration_minutes: int):
         try:
             is_martingale_trade = "Martingale" in signal.strategy
@@ -293,12 +301,11 @@ class TradingBot:
                 self.logger('INFO', 'Ciclo de operação concluído.')
 
     def _execute_martingale_trade(self):
-        # A implementar ou manter a lógica existente...
         pass
 
     def _get_entry_value(self, asset: str, is_martingale: bool = False) -> float:
-        # A implementar ou manter a lógica existente...
         base_value = self.bot_config.get('entry_value', 1.0)
+        # Lógica de Martingale seria adicionada aqui se ativada.
         return base_value
 
     def _update_stats_and_martingale(self, result: str, signal: TradeSignal, full_name: str, expiration_minutes: int):
@@ -328,7 +335,7 @@ class TradingBot:
 
     def _hourly_cycle_reset(self):
         self.logger('INFO', "--- RESET DE CICLO HORÁRIO ---")
-        self._soft_restart() # Re-utiliza a função de reinício suave
+        self._soft_restart()
 
     def _daily_reset_if_needed(self):
         current_date_utc = datetime.utcnow().date()
