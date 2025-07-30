@@ -13,6 +13,7 @@ from config import settings
 from services.exnova_service import ExnovaService
 from services.supabase_service import SupabaseService
 import analysis.technical_indicators as ti
+# Importa a classe de modelo de dados
 from core.data_models import TradeSignal
 
 class TradingBot:
@@ -55,7 +56,6 @@ class TradingBot:
         ts = datetime.utcnow().isoformat()
         print(f"[{ts}] [{level.upper()}] {message}", flush=True)
         if self.supabase:
-            # Chamada síncrona direta, sem _run_async
             self.supabase.insert_log(level, message)
 
     def _is_news_time(self) -> bool:
@@ -145,7 +145,6 @@ class TradingBot:
         
         if cataloged_data_to_save:
             self.logger('INFO', f"A guardar {len(cataloged_data_to_save)} ativos catalogados na base de dados...")
-            # Chamada síncrona direta
             self.supabase.upsert_cataloged_assets(cataloged_data_to_save)
 
         self.logger('INFO', "--- CATALOGAÇÃO CONCLUÍDA ---")
@@ -160,7 +159,6 @@ class TradingBot:
         retry_delay = 10
         for attempt in range(max_retries):
             self.logger('INFO', f"A buscar configuração do bot... (Tentativa {attempt + 1}/{max_retries})")
-            # Chamada síncrona direta
             config = self.supabase.get_bot_config()
             if config:
                 self.bot_config = config
@@ -203,7 +201,6 @@ class TradingBot:
 
                 self._daily_reset_if_needed()
                 
-                # Chamada síncrona direta
                 new_config = self.supabase.get_bot_config()
                 if new_config:
                     self.bot_config = new_config
@@ -312,6 +309,7 @@ class TradingBot:
                     time.sleep(wait)
                     
                     self.is_trade_active = True
+                    # A criação do objeto TradeSignal agora funciona corretamente
                     signal = TradeSignal(pair=base_name, direction=direction, strategy=strat_name, **candles[-1])
                     self._execute_and_wait(signal, full_name, exp_mins)
 
@@ -323,21 +321,13 @@ class TradingBot:
         """
         Função principal que inicia o bot.
         """
-        # Apenas o SupabaseService é criado aqui. O loop principal é síncrono.
         self.supabase = SupabaseService(settings.SUPABASE_URL, settings.SUPABASE_KEY)
-        
-        # O main_loop do asyncio não é mais necessário para as chamadas ao Supabase
-        # mas pode ser mantido se houver outras funcionalidades async.
-        # Por simplicidade, vamos assumir que não é mais necessário para a lógica principal.
-        
         thread = Thread(target=self.trading_loop_sync, daemon=True)
         thread.start()
-        
-        # O loop principal do programa pode simplesmente esperar a thread terminar.
         while self.is_running and thread.is_alive(): 
             await asyncio.sleep(1)
 
-    def _execute_and_wait(self, signal, full_name, exp_mins):
+    def _execute_and_wait(self, signal: TradeSignal, full_name: str, exp_mins: int):
         try:
             is_mg = "Martingale" in signal.strategy
             value = self._get_entry_value(signal.pair, is_mg)
@@ -348,7 +338,7 @@ class TradingBot:
             
             self.logger('INFO', f"Ordem {order_id} enviada. Valor: {self.currency_char}{value:.2f}")
             
-            # Chamada síncrona direta
+            # A chamada para inserir o sinal agora funciona
             sid = self.supabase.insert_trade_signal(signal)
             
             time.sleep(exp_mins * 60 + 5)
@@ -363,10 +353,8 @@ class TradingBot:
             self.logger('SUCCESS' if result == 'WIN' else 'ERROR', f"Resultado: {result}")
             
             if sid:
-                # Chamada síncrona direta
                 self.supabase.update_trade_result(sid, result, self.martingale_state.get(signal.pair, {}).get('level', 0))
             if bal_after:
-                # Chamada síncrona direta
                 self.supabase.update_current_balance(bal_after)
             
             self._update_stats_and_martingale(result, signal, full_name, exp_mins)
@@ -383,8 +371,15 @@ class TradingBot:
         self.logger('WARNING', f"MARTINGALE NÍVEL {level} PREPARADO. A aguardar {wait:.2f}s.")
         if wait > 0: time.sleep(wait)
         self.is_trade_active = True
+        # Para o martingale, precisamos de obter os dados da vela mais recente
+        candles = self.exnova.get_historical_candles(info['pair'], 60, 1)
+        if not candles:
+            self.logger("ERROR", f"Não foi possível obter a vela para o martingale de {info['pair']}.")
+            self.is_trade_active = False
+            return
+            
         strat_name = f"{info['strategy']}_MG_{level}"
-        signal = TradeSignal(pair=info['pair'], direction=info['direction'], strategy=strat_name)
+        signal = TradeSignal(pair=info['pair'], direction=info['direction'], strategy=strat_name, **candles[-1])
         self.logger('SUCCESS', f"EXECUTANDO MARTINGALE!")
         self._execute_and_wait(signal, info['full_name'], info['expiration_minutes'])
 
@@ -422,10 +417,14 @@ class TradingBot:
                 else:
                     self.martingale_state[pair] = {'level': 0}
                     self.logger('ERROR', f"Nível máximo de Martingale atingido.")
-        stop_win, stop_loss = self.bot_config.get('stop_win', 0), self.bot_config.get('stop_loss', 0)
+        
+        # --- CORREÇÃO DO TypeError ---
+        # Garante que stop_win e stop_loss sejam 0 se forem None
+        stop_win = self.bot_config.get('stop_win') or 0
+        stop_loss = self.bot_config.get('stop_loss') or 0
+        
         if (stop_win > 0 and self.daily_wins >= stop_win) or (stop_loss > 0 and self.daily_losses >= stop_loss):
             self.logger('SUCCESS' if result == 'WIN' else 'ERROR', f"META DE STOP ATINGIDA!")
-            # Chamada síncrona direta
             self.supabase.update_config({'status': 'PAUSED'})
 
     def _hourly_cycle_reset(self):
@@ -439,6 +438,4 @@ class TradingBot:
             self.last_daily_reset_date = datetime.utcnow().date()
             bal = self.exnova.get_current_balance()
             if bal:
-                # Chamada síncrona direta
                 self.supabase.update_config({'daily_initial_balance': bal, 'current_balance': bal})
-
