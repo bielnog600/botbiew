@@ -1,70 +1,127 @@
-import asyncio
+import logging
+from typing import Dict, Any, List, Optional
 from supabase import create_client, Client
-from typing import Optional, Dict
 from core.data_models import TradeSignal
 
+# Configura o logger para a biblioteca da Supabase para evitar spam de logs
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+
 class SupabaseService:
+    """
+    Serviço para interagir com a base de dados Supabase.
+    """
     def __init__(self, url: str, key: str):
-        self.client: Client = create_client(url, key)
-
-    async def _execute_sync(self, func, *args):
         """
-        Executa uma função síncrona (como as da biblioteca do Supabase)
-        em uma thread separada para não bloquear o loop de eventos principal.
+        Inicializa a conexão com o Supabase.
+        :param url: URL do projeto Supabase.
+        :param key: Chave de API (anon key) do Supabase.
         """
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, func, *args)
-
-    async def get_bot_config(self) -> Dict:
-        """Busca a configuração atual do bot de forma não-bloqueante."""
         try:
-            query = self.client.from_('bot_config').select('*').eq('id', 1).single()
-            response = await self._execute_sync(query.execute)
-            return response.data if response.data else {}
+            self.client: Client = create_client(url, key)
+            logging.info("Conexão com o Supabase estabelecida com sucesso.")
         except Exception as e:
-            print(f"Erro ao buscar config: {e}")
+            logging.error(f"Falha ao conectar com o Supabase: {e}")
+            self.client = None
+
+    async def get_bot_config(self) -> Dict[str, Any]:
+        """
+        Busca a configuração principal do bot na tabela 'bot_config'.
+        Assume que a configuração está no registo com id = 1.
+        """
+        if not self.client:
+            return {}
+        try:
+            response = await self.client.from_('bot_config').select("*").eq('id', 1).single().execute()
+            if response.data:
+                return response.data
+            return {}
+        except Exception as e:
+            logging.error(f"Erro ao buscar configuração do bot: {e}")
             return {}
 
-    async def update_config(self, data: Dict) -> bool:
-        """Atualiza campos específicos na configuração do bot de forma não-bloqueante."""
+    async def update_config(self, updates: Dict[str, Any]) -> bool:
+        """
+        Atualiza campos específicos na configuração do bot.
+        """
+        if not self.client:
+            return False
         try:
-            query = self.client.from_('bot_config').update(data).eq('id', 1)
-            await self._execute_sync(query.execute)
+            await self.client.from_('bot_config').update(updates).eq('id', 1).execute()
             return True
         except Exception as e:
-            print(f"Erro ao atualizar config: {e}")
+            logging.error(f"Erro ao atualizar configuração: {e}")
             return False
-            
-    async def update_current_balance(self, balance: float):
-        """Atualiza apenas o saldo atual na configuração."""
-        return await self.update_config({'current_balance': balance})
 
-    async def insert_log(self, level: str, message: str):
-        """Insere uma nova linha de log de forma não-bloqueante."""
+    async def insert_log(self, level: str, message: str) -> None:
+        """
+        Insere um novo registo de log na tabela 'bot_logs'.
+        """
+        if not self.client:
+            return
         try:
-            log_data = {'level': level, 'message': message}
-            query = self.client.from_('bot_logs').insert(log_data)
-            await self._execute_sync(query.execute)
+            await self.client.from_('bot_logs').insert({
+                "level": level,
+                "message": message
+            }).execute()
         except Exception as e:
-            print(f"Erro ao inserir log: {e}")
+            # Não logar o erro de log para evitar loops infinitos
+            print(f"ERRO CRÍTICO: Falha ao inserir log no Supabase: {e}")
 
     async def insert_trade_signal(self, signal: TradeSignal) -> Optional[int]:
-        """Insere um novo sinal de trade e retorna o seu ID de forma não-bloqueante."""
+        """
+        Insere um novo sinal de trade na tabela 'trade_signals'.
+        Retorna o ID do registo inserido.
+        """
+        if not self.client:
+            return None
         try:
-            query = self.client.from_('trade_signals').insert(signal.dict())
-            response = await self._execute_sync(query.execute)
+            response = await self.client.from_('trade_signals').insert(signal.to_dict()).execute()
             if response.data:
                 return response.data[0]['id']
             return None
         except Exception as e:
-            print(f"Erro ao inserir sinal: {e}")
+            logging.error(f"Erro ao inserir sinal de trade: {e}")
             return None
 
-    async def update_trade_result(self, signal_id: int, result: str, martingale_level: int):
-        """Atualiza o resultado de um sinal de trade de forma não-bloqueante."""
+    async def update_trade_result(self, signal_id: int, result: str, mg_level: int) -> bool:
+        """
+        Atualiza o resultado de um trade e o nível de martingale.
+        """
+        if not self.client:
+            return False
         try:
-            update_data = {'result': result, 'martingale_level': martingale_level}
-            query = self.client.from_('trade_signals').update(update_data).eq('id', signal_id)
-            await self._execute_sync(query.execute)
+            await self.client.from_('trade_signals').update({
+                "result": result,
+                "martingale_level": mg_level
+            }).eq('id', signal_id).execute()
+            return True
         except Exception as e:
-            print(f"Erro ao atualizar resultado do sinal: {e}")
+            logging.error(f"Erro ao atualizar resultado do trade: {e}")
+            return False
+            
+    async def update_current_balance(self, new_balance: float) -> bool:
+        """
+        Atualiza o saldo atual na tabela de configuração.
+        """
+        return await self.update_config({'current_balance': new_balance})
+
+    # ===================================================================
+    # === NOVA FUNÇÃO (ESSENCIAL PARA CORRIGIR O PROBLEMA) ===
+    # ===================================================================
+    async def upsert_cataloged_assets(self, assets_data: List[Dict[str, Any]]) -> bool:
+        """
+        Insere ou atualiza os dados dos ativos catalogados na tabela 'cataloged_assets'.
+        Usa o 'pair' como chave para o upsert.
+        """
+        if not self.client or not assets_data:
+            return False
+        try:
+            # 'upsert' irá inserir novas linhas ou atualizar as existentes se o 'pair' já existir.
+            await self.client.from_('cataloged_assets').upsert(assets_data, on_conflict='pair').execute()
+            logging.info(f"{len(assets_data)} ativos catalogados foram guardados/atualizados.")
+            return True
+        except Exception as e:
+            logging.error(f"Erro ao fazer upsert dos ativos catalogados: {e}")
+            return False
+
