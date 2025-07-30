@@ -48,16 +48,15 @@ class TradingBot:
         self.daily_losses = 0
         self.last_daily_reset_date = None
 
-    def _run_async(self, coro):
-        if self.main_loop and self.main_loop.is_running():
-            return asyncio.run_coroutine_threadsafe(coro, self.main_loop)
-        return None
-
     def logger(self, level: str, message: str):
+        """
+        Função de log que imprime na consola e guarda no Supabase.
+        """
         ts = datetime.utcnow().isoformat()
         print(f"[{ts}] [{level.upper()}] {message}", flush=True)
         if self.supabase:
-            self._run_async(self.supabase.insert_log(level, message))
+            # Chamada síncrona direta, sem _run_async
+            self.supabase.insert_log(level, message)
 
     def _is_news_time(self) -> bool:
         pause_times = self.bot_config.get('news_pause_times', [])
@@ -146,42 +145,81 @@ class TradingBot:
         
         if cataloged_data_to_save:
             self.logger('INFO', f"A guardar {len(cataloged_data_to_save)} ativos catalogados na base de dados...")
-            self._run_async(self.supabase.upsert_cataloged_assets(cataloged_data_to_save))
+            # Chamada síncrona direta
+            self.supabase.upsert_cataloged_assets(cataloged_data_to_save)
 
         self.logger('INFO', "--- CATALOGAÇÃO CONCLUÍDA ---")
 
     def trading_loop_sync(self):
         self.logger('INFO', 'A iniciar o bot...')
-        if not self.exnova.connect(): self.is_running = False; return
+        if not self.exnova.connect(): 
+            self.is_running = False
+            return
+
+        max_retries = 5
+        retry_delay = 10
+        for attempt in range(max_retries):
+            self.logger('INFO', f"A buscar configuração do bot... (Tentativa {attempt + 1}/{max_retries})")
+            # Chamada síncrona direta
+            config = self.supabase.get_bot_config()
+            if config:
+                self.bot_config = config
+                self.logger('SUCCESS', "Configuração carregada com sucesso!")
+                break
+            
+            self.logger('WARNING', f"Não foi possível obter a configuração. A tentar novamente em {retry_delay} segundos...")
+            time.sleep(retry_delay)
+        else:
+            self.logger('CRITICAL', "NÃO FOI POSSÍVEL CARREGAR A CONFIGURAÇÃO. O BOT NÃO IRÁ INICIAR.")
+            self.is_running = False
+            return
+
         profile_data = self.exnova.get_profile()
-        if not profile_data: self.is_running = False; return
+        if not profile_data: 
+            self.is_running = False
+            return
+            
         try:
             self.currency_char = profile_data.get('currency_char', '$')
             self.logger('SUCCESS', f"Perfil carregado! Olá, {profile_data.get('name', 'Utilizador')}.")
-        except Exception: self.is_running = False; return
+        except Exception as e:
+            self.logger('ERROR', f"Erro ao processar perfil: {e}")
+            self.is_running = False
+            return
         
-        self.bot_config = self._run_async(self.supabase.get_bot_config()).result()
         self.current_account_type = self.bot_config.get('account_type', 'PRACTICE')
         self.previous_status = self.bot_config.get('status', 'PAUSED')
         self.exnova.change_balance(self.current_account_type)
-        self.logger('INFO', f"Conta inicial: {self.current_account_type}")
+        self.logger('INFO', f"Conta inicial definida para: {self.current_account_type}")
         
         self._daily_reset_if_needed()
-        if self.previous_status == 'RUNNING': self._run_cataloging()
+        if self.previous_status == 'RUNNING': 
+            self._run_cataloging()
 
         while self.is_running:
             try:
-                if (datetime.utcnow() - self.last_reset_time).total_seconds() >= 3600: self._hourly_cycle_reset()
+                if (datetime.utcnow() - self.last_reset_time).total_seconds() >= 3600: 
+                    self._hourly_cycle_reset()
+
                 self._daily_reset_if_needed()
-                self.bot_config = self._run_async(self.supabase.get_bot_config()).result()
+                
+                # Chamada síncrona direta
+                new_config = self.supabase.get_bot_config()
+                if new_config:
+                    self.bot_config = new_config
+                
                 current_status = self.bot_config.get('status', 'PAUSED')
-                if current_status == 'RUNNING' and self.previous_status == 'PAUSED': self._soft_restart()
+                if current_status == 'RUNNING' and self.previous_status == 'PAUSED': 
+                    self._soft_restart()
+                
                 self.previous_status = current_status
+                
                 desired_account_type = self.bot_config.get('account_type', 'PRACTICE')
                 if desired_account_type != self.current_account_type:
                     self.logger('WARNING', f"MUDANÇA DE CONTA! De {self.current_account_type} para {desired_account_type}.")
                     self.exnova.change_balance(desired_account_type)
                     self.current_account_type = desired_account_type
+                
                 if current_status == 'RUNNING':
                     if self._is_news_time():
                         time.sleep(15)
@@ -211,19 +249,18 @@ class TradingBot:
             assets_to_check = self.bot_config.get('manual_pairs', [])
             strategies_to_check = self.bot_config.get('manual_strategies', [])
             if not assets_to_check or not strategies_to_check:
-                self.logger("WARNING", "Modo manual ativo, mas nenhum par ou estratégia foi selecionado. Nenhuma operação será feita.")
+                self.logger("WARNING", "Modo manual ativo, mas nenhum par ou estratégia foi selecionado.")
                 return
             self.logger("INFO", f"Pares manuais: {assets_to_check}")
             self.logger("INFO", f"Estratégias manuais: {strategies_to_check}")
         else:
             assets_to_check = list(self.asset_strategy_map.keys())
-            strategies_to_check = [] # Em modo auto, a estratégia é definida por par
+            strategies_to_check = []
             if not assets_to_check: 
                 self.logger('INFO', "Nenhum ativo qualificado para análise automática."); return
 
         all_open_assets = self.exnova.get_open_assets()
         
-        # Priorização de ativos (apenas para modo automático)
         if not manual_mode:
             prioritized_assets = sorted(assets_to_check, key=lambda p: (self.asset_performance.get(p,{}).get('wins',0)+1)/(self.asset_performance.get(p,{}).get('wins',0)+self.asset_performance.get(p,{}).get('losses',0)+2), reverse=True)
         else:
@@ -233,18 +270,16 @@ class TradingBot:
             if self.is_trade_active: break
             full_name = next((a for a in all_open_assets if a.startswith(pair)), None)
             if full_name and pair not in self.blacklisted_assets:
-                # Em modo manual, passamos a lista de estratégias. Em modo auto, a lista estará vazia.
                 self._analyze_asset(full_name, tf_secs, exp_mins, strategies_to_check if manual_mode else [])
-
 
     def _analyze_asset(self, full_name, tf_secs, exp_mins, manual_strategies: List[str]):
         try:
             base_name = full_name.split('-')[0]
             
             strategies_to_run = []
-            if manual_strategies: # Modo Manual
+            if manual_strategies:
                 strategies_to_run = manual_strategies
-            else: # Modo Automático
+            else:
                 best_strat = self.asset_strategy_map.get(base_name)
                 if best_strat:
                     strategies_to_run.append(best_strat)
@@ -264,7 +299,7 @@ class TradingBot:
                     self.logger('INFO', f"[{base_name}] Análise abortada: Volatilidade fora dos limites."); return
             
             for strat_name in strategies_to_run:
-                if self.is_trade_active: break # Se já encontrou um sinal, para.
+                if self.is_trade_active: break
 
                 strategy_function = self.strategy_map.get(strat_name)
                 if not strategy_function: continue
@@ -285,14 +320,23 @@ class TradingBot:
             traceback.print_exc()
 
     async def run(self):
+        """
+        Função principal que inicia o bot.
+        """
+        # Apenas o SupabaseService é criado aqui. O loop principal é síncrono.
         self.supabase = SupabaseService(settings.SUPABASE_URL, settings.SUPABASE_KEY)
-        self.main_loop = asyncio.get_running_loop()
+        
+        # O main_loop do asyncio não é mais necessário para as chamadas ao Supabase
+        # mas pode ser mantido se houver outras funcionalidades async.
+        # Por simplicidade, vamos assumir que não é mais necessário para a lógica principal.
+        
         thread = Thread(target=self.trading_loop_sync, daemon=True)
         thread.start()
-        while self.is_running and thread.is_alive(): await asyncio.sleep(1)
+        
+        # O loop principal do programa pode simplesmente esperar a thread terminar.
+        while self.is_running and thread.is_alive(): 
+            await asyncio.sleep(1)
 
-    # --- O resto do ficheiro (funções de operação, martingale, etc.) permanece igual ---
-    # --- COLE O RESTANTE DO SEU FICHEIRO A PARTIR DAQUI ---
     def _execute_and_wait(self, signal, full_name, exp_mins):
         try:
             is_mg = "Martingale" in signal.strategy
@@ -301,8 +345,12 @@ class TradingBot:
             if bal_before is None: self.is_trade_active = False; return
             order_id = self.exnova.execute_trade(value, full_name, signal.direction.lower(), exp_mins)
             if not order_id: self.is_trade_active = False; return
+            
             self.logger('INFO', f"Ordem {order_id} enviada. Valor: {self.currency_char}{value:.2f}")
-            sid_future = self._run_async(self.supabase.insert_trade_signal(signal))
+            
+            # Chamada síncrona direta
+            sid = self.supabase.insert_trade_signal(signal)
+            
             time.sleep(exp_mins * 60 + 5)
             bal_after = self.exnova.get_current_balance()
             result = 'UNKNOWN'
@@ -311,10 +359,16 @@ class TradingBot:
                 if profit > 0: result = 'WIN'
                 elif profit < 0: result = 'LOSS'
                 else: result = 'DRAW'
+            
             self.logger('SUCCESS' if result == 'WIN' else 'ERROR', f"Resultado: {result}")
-            sid = sid_future.result()
-            if sid: self._run_async(self.supabase.update_trade_result(sid, result, self.martingale_state.get(signal.pair, {}).get('level', 0)))
-            if bal_after: self._run_async(self.supabase.update_current_balance(bal_after))
+            
+            if sid:
+                # Chamada síncrona direta
+                self.supabase.update_trade_result(sid, result, self.martingale_state.get(signal.pair, {}).get('level', 0))
+            if bal_after:
+                # Chamada síncrona direta
+                self.supabase.update_current_balance(bal_after)
+            
             self._update_stats_and_martingale(result, signal, full_name, exp_mins)
         finally:
             self.is_trade_active = False
@@ -371,7 +425,8 @@ class TradingBot:
         stop_win, stop_loss = self.bot_config.get('stop_win', 0), self.bot_config.get('stop_loss', 0)
         if (stop_win > 0 and self.daily_wins >= stop_win) or (stop_loss > 0 and self.daily_losses >= stop_loss):
             self.logger('SUCCESS' if result == 'WIN' else 'ERROR', f"META DE STOP ATINGIDA!")
-            self._run_async(self.supabase.update_config({'status': 'PAUSED'}))
+            # Chamada síncrona direta
+            self.supabase.update_config({'status': 'PAUSED'})
 
     def _hourly_cycle_reset(self):
         self.logger('INFO', "--- RESET DE CICLO HORÁRIO ---")
@@ -383,5 +438,7 @@ class TradingBot:
             self.daily_wins, self.daily_losses = 0, 0
             self.last_daily_reset_date = datetime.utcnow().date()
             bal = self.exnova.get_current_balance()
-            if bal: self._run_async(self.supabase.update_config({'daily_initial_balance': bal, 'current_balance': bal}))
+            if bal:
+                # Chamada síncrona direta
+                self.supabase.update_config({'daily_initial_balance': bal, 'current_balance': bal})
 
