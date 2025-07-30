@@ -1,6 +1,7 @@
 import logging
 from typing import Dict, Any, List, Optional
-from supabase import create_client, Client
+# A importação foi alterada para usar o cliente assíncrono (aio)
+from supabase.aio import create_client, AsyncClient
 from core.data_models import TradeSignal
 
 # Configura o logger para a biblioteca da Supabase para evitar spam de logs
@@ -18,7 +19,8 @@ class SupabaseService:
         :param key: Chave de API (anon key) do Supabase.
         """
         try:
-            self.client: Client = create_client(url, key)
+            # O cliente agora é um AsyncClient, o que torna as chamadas 'await' válidas
+            self.client: AsyncClient = create_client(url, key)
             logging.info("Conexão com o Supabase estabelecida com sucesso.")
         except Exception as e:
             logging.error(f"Falha ao conectar com o Supabase: {e}")
@@ -106,9 +108,6 @@ class SupabaseService:
         """
         return await self.update_config({'current_balance': new_balance})
 
-    # ===================================================================
-    # === NOVA FUNÇÃO (ESSENCIAL PARA CORRIGIR O PROBLEMA) ===
-    # ===================================================================
     async def upsert_cataloged_assets(self, assets_data: List[Dict[str, Any]]) -> bool:
         """
         Insere ou atualiza os dados dos ativos catalogados na tabela 'cataloged_assets'.
@@ -117,11 +116,9 @@ class SupabaseService:
         if not self.client or not assets_data:
             return False
         try:
-            # 'upsert' irá inserir novas linhas ou atualizar as existentes se o 'pair' já existir.
             await self.client.from_('cataloged_assets').upsert(assets_data, on_conflict='pair').execute()
             logging.info(f"{len(assets_data)} ativos catalogados foram guardados/atualizados.")
             return True
         except Exception as e:
             logging.error(f"Erro ao fazer upsert dos ativos catalogados: {e}")
             return False
-
