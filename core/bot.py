@@ -29,14 +29,13 @@ class TradingBot:
         self.pending_martingale_trade: Optional[Dict] = None
         self.martingale_state: Dict[str, Dict] = {}
         
-        # --- ATUALIZAÇÃO: Adiciona as novas estratégias ao arsenal do bot ---
         self.strategy_map: Dict[str, callable] = {
             'Pullback MQL': ti.strategy_mql_pullback,
             'Padrão de Reversão': ti.strategy_reversal_pattern,
             'Fluxo de Tendência': ti.strategy_trend_flow,
             'Reversão por Exaustão': ti.strategy_exhaustion_reversal,
-            'Bandas de Bollinger': ti.strategy_bollinger_bands, # <-- NOVA
-            'Cruzamento MACD': ti.strategy_macd_crossover,   # <-- NOVA
+            'Bandas de Bollinger': ti.strategy_bollinger_bands,
+            'Cruzamento MACD': ti.strategy_macd_crossover,
         }
         self.asset_strategy_map: Dict[str, str] = {}
         
@@ -49,8 +48,6 @@ class TradingBot:
         self.daily_losses = 0
         self.last_daily_reset_date = None
 
-    # --- O resto do ficheiro (funções de catalogação, operação, etc.) permanece exatamente igual ---
-    # --- COLE O RESTANTE DO SEU FICHEIRO core/bot.py A PARTIR DAQUI ---
     def _run_async(self, coro):
         if self.main_loop and self.main_loop.is_running():
             return asyncio.run_coroutine_threadsafe(coro, self.main_loop)
@@ -100,14 +97,21 @@ class TradingBot:
         if not open_assets:
             self.logger('WARNING', "Nenhum ativo aberto encontrado para catalogar.")
             return
-        self.logger('INFO', f"Encontrados {len(open_assets)} ativos. A analisar cada um...")
+
+        min_win_rate_threshold = self.bot_config.get('min_win_rate', 55)
+        self.logger('INFO', f"A usar taxa de acerto mínima de {min_win_rate_threshold}%.")
+        
+        cataloged_data_to_save = []
+
         for asset in open_assets:
             base_name = asset.split('-')[0]
             try:
                 historical_candles = self.exnova.get_historical_candles(base_name, 60, 500)
                 if not historical_candles or len(historical_candles) < 100:
                     continue
+                
                 best_strategy_for_asset, highest_win_rate = None, 0
+                
                 for strategy_name, strategy_func in self.strategy_map.items():
                     wins, losses, total_trades = 0, 0, 0
                     for i in range(50, len(historical_candles) - 1):
@@ -120,17 +124,30 @@ class TradingBot:
                                 wins += 1
                             else:
                                 losses += 1
+                    
                     if total_trades > 10:
                         win_rate = (wins / total_trades) * 100
                         if win_rate > highest_win_rate:
                             highest_win_rate, best_strategy_for_asset = win_rate, strategy_name
-                if best_strategy_for_asset and highest_win_rate >= 55:
+                
+                if best_strategy_for_asset and highest_win_rate >= min_win_rate_threshold:
                     self.asset_strategy_map[base_name] = best_strategy_for_asset
                     self.logger('SUCCESS', f"==> Melhor estratégia para {base_name}: '{best_strategy_for_asset}' ({highest_win_rate:.2f}%)")
+                    cataloged_data_to_save.append({
+                        "pair": base_name,
+                        "best_strategy": best_strategy_for_asset,
+                        "win_rate": round(highest_win_rate, 2)
+                    })
                 else:
                     self.logger('WARNING', f"==> Nenhuma estratégia qualificada para {base_name}.")
+
             except Exception as e:
                 self.logger('ERROR', f"Erro ao catalogar {base_name}: {e}")
+        
+        if cataloged_data_to_save:
+            self.logger('INFO', f"A guardar {len(cataloged_data_to_save)} ativos catalogados na base de dados...")
+            self._run_async(self.supabase.upsert_cataloged_assets(cataloged_data_to_save))
+
         self.logger('INFO', "--- CATALOGAÇÃO CONCLUÍDA ---")
 
     def trading_loop_sync(self):
@@ -187,41 +204,85 @@ class TradingBot:
             self.run_analysis_for_timeframe(60, 1)
 
     def run_analysis_for_timeframe(self, tf_secs, exp_mins):
-        assets = list(self.asset_strategy_map.keys())
-        if not assets: self.logger('INFO', "Nenhum ativo qualificado para análise."); return
-        all_open = self.exnova.get_open_assets()
-        prioritized_assets = sorted(assets, key=lambda p: (self.asset_performance.get(p,{}).get('wins',0)+1)/(self.asset_performance.get(p,{}).get('wins',0)+self.asset_performance.get(p,{}).get('losses',0)+2), reverse=True)
+        manual_mode = self.bot_config.get('manual_mode_enabled', False)
+        
+        if manual_mode:
+            self.logger("INFO", "MODO MANUAL ATIVO.")
+            assets_to_check = self.bot_config.get('manual_pairs', [])
+            strategies_to_check = self.bot_config.get('manual_strategies', [])
+            if not assets_to_check or not strategies_to_check:
+                self.logger("WARNING", "Modo manual ativo, mas nenhum par ou estratégia foi selecionado. Nenhuma operação será feita.")
+                return
+            self.logger("INFO", f"Pares manuais: {assets_to_check}")
+            self.logger("INFO", f"Estratégias manuais: {strategies_to_check}")
+        else:
+            assets_to_check = list(self.asset_strategy_map.keys())
+            strategies_to_check = [] # Em modo auto, a estratégia é definida por par
+            if not assets_to_check: 
+                self.logger('INFO', "Nenhum ativo qualificado para análise automática."); return
+
+        all_open_assets = self.exnova.get_open_assets()
+        
+        # Priorização de ativos (apenas para modo automático)
+        if not manual_mode:
+            prioritized_assets = sorted(assets_to_check, key=lambda p: (self.asset_performance.get(p,{}).get('wins',0)+1)/(self.asset_performance.get(p,{}).get('wins',0)+self.asset_performance.get(p,{}).get('losses',0)+2), reverse=True)
+        else:
+            prioritized_assets = assets_to_check
+
         for pair in prioritized_assets:
             if self.is_trade_active: break
-            full_name = next((a for a in all_open if a.startswith(pair)), None)
+            full_name = next((a for a in all_open_assets if a.startswith(pair)), None)
             if full_name and pair not in self.blacklisted_assets:
-                self._analyze_asset(full_name, tf_secs, exp_mins)
+                # Em modo manual, passamos a lista de estratégias. Em modo auto, a lista estará vazia.
+                self._analyze_asset(full_name, tf_secs, exp_mins, strategies_to_check if manual_mode else [])
 
-    def _analyze_asset(self, full_name, tf_secs, exp_mins):
+
+    def _analyze_asset(self, full_name, tf_secs, exp_mins, manual_strategies: List[str]):
         try:
             base_name = full_name.split('-')[0]
-            best_strat = self.asset_strategy_map.get(base_name)
-            if not best_strat: return
-            self.logger('INFO', f"A analisar {base_name} com '{best_strat}'...")
+            
+            strategies_to_run = []
+            if manual_strategies: # Modo Manual
+                strategies_to_run = manual_strategies
+            else: # Modo Automático
+                best_strat = self.asset_strategy_map.get(base_name)
+                if best_strat:
+                    strategies_to_run.append(best_strat)
+
+            if not strategies_to_run:
+                return
+
+            self.logger('INFO', f"A analisar {base_name} com as estratégias: {strategies_to_run}...")
             candles = self.exnova.get_historical_candles(base_name, 60, 50)
             if not candles or len(candles) < 20: return
+
             vol_prof = self.bot_config.get('volatility_profile', 'EQUILIBRADO')
             if vol_prof != 'DESATIVADO':
                 limits = {'ULTRA_CONSERVADOR': (0.00001, 0.00015), 'CONSERVADOR': (0.00010, 0.00050), 'EQUILIBRADO': (0.00030, 0.00100), 'AGRESSIVO': (0.00080, 0.00200), 'ULTRA_AGRESSIVO': (0.00150, 999.0)}.get(vol_prof)
                 atr = ti.calculate_atr(candles)
                 if atr is None or not (limits[0] <= atr <= limits[1]):
                     self.logger('INFO', f"[{base_name}] Análise abortada: Volatilidade fora dos limites."); return
-            direction = self.strategy_map[best_strat](candles)
-            if direction and ti.validate_reversal_candle(candles[-1], direction):
-                now = datetime.utcnow()
-                wait = (60 - now.second - 1) + (1 - now.microsecond / 1e6) + 0.2
-                self.logger('SUCCESS', f"SINAL ENCONTRADO! {base_name} | {best_strat} | {direction.upper()}")
-                time.sleep(wait)
-                self.is_trade_active = True
-                signal = TradeSignal(pair=base_name, direction=direction, strategy=best_strat, **candles[-1])
-                self._execute_and_wait(signal, full_name, exp_mins)
+            
+            for strat_name in strategies_to_run:
+                if self.is_trade_active: break # Se já encontrou um sinal, para.
+
+                strategy_function = self.strategy_map.get(strat_name)
+                if not strategy_function: continue
+
+                direction = strategy_function(candles)
+                if direction and ti.validate_reversal_candle(candles[-1], direction):
+                    now = datetime.utcnow()
+                    wait = (60 - now.second - 1) + (1 - now.microsecond / 1e6) + 0.2
+                    self.logger('SUCCESS', f"SINAL ENCONTRADO! {base_name} | {strat_name} | {direction.upper()}")
+                    time.sleep(wait)
+                    
+                    self.is_trade_active = True
+                    signal = TradeSignal(pair=base_name, direction=direction, strategy=strat_name, **candles[-1])
+                    self._execute_and_wait(signal, full_name, exp_mins)
+
         except Exception as e:
             self.logger('ERROR', f"Erro em _analyze_asset({full_name}): {e}")
+            traceback.print_exc()
 
     async def run(self):
         self.supabase = SupabaseService(settings.SUPABASE_URL, settings.SUPABASE_KEY)
@@ -230,6 +291,8 @@ class TradingBot:
         thread.start()
         while self.is_running and thread.is_alive(): await asyncio.sleep(1)
 
+    # --- O resto do ficheiro (funções de operação, martingale, etc.) permanece igual ---
+    # --- COLE O RESTANTE DO SEU FICHEIRO A PARTIR DAQUI ---
     def _execute_and_wait(self, signal, full_name, exp_mins):
         try:
             is_mg = "Martingale" in signal.strategy
@@ -321,3 +384,4 @@ class TradingBot:
             self.last_daily_reset_date = datetime.utcnow().date()
             bal = self.exnova.get_current_balance()
             if bal: self._run_async(self.supabase.update_config({'daily_initial_balance': bal, 'current_balance': bal}))
+
