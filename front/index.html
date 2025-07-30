@@ -4,6 +4,55 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>MAROMBIEW BOT</title>
+
+    <!-- =================================================================== -->
+    <!-- === INÍCIO DAS TAGS PARA INSTALAÇÃO NO IPHONE (PWA) === -->
+    <!-- =================================================================== -->
+
+    <!-- Define o nome da aplicação que aparece no ecrã principal -->
+    <meta name="apple-mobile-web-app-title" content="MarombiewBot">
+    
+    <!-- Permite que a aplicação corra em modo de ecrã inteiro -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    
+    <!-- Define a cor da barra de status (topo do ecrã do iPhone) -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    
+    <!-- Ícone principal da aplicação (o que aparece no ecrã principal) -->
+    <link rel="apple-touch-icon" href="https://placehold.co/180x180/238636/FFFFFF?text=MB">
+    
+    <!-- Ícones para diferentes tamanhos de ecrã -->
+    <link rel="apple-touch-icon" sizes="152x152" href="https://placehold.co/152x152/238636/FFFFFF?text=MB">
+    <link rel="apple-touch-icon" sizes="167x167" href="https://placehold.co/167x167/238636/FFFFFF?text=MB">
+    <link rel="apple-touch-icon" sizes="180x180" href="https://placehold.co/180x180/238636/FFFFFF?text=MB">
+
+    <!-- Ficheiro de Manifesto (necessário para PWAs) -->
+    <link rel="manifest" href="data:application/manifest+json,{
+        &quot;name&quot;: &quot;Marombiew Bot&quot;,
+        &quot;short_name&quot;: &quot;MarombiewBot&quot;,
+        &quot;start_url&quot;: &quot;.&quot;,
+        &quot;display&quot;: &quot;standalone&quot;,
+        &quot;background_color&quot;: &quot;#0D1117&quot;,
+        &quot;theme_color&quot;: &quot;#0D1117&quot;,
+        &quot;description&quot;: &quot;Painel de Controlo para o Marombiew Bot.&quot;,
+        &quot;icons&quot;: [
+            {
+                &quot;src&quot;: &quot;https://placehold.co/192x192/238636/FFFFFF?text=MB&quot;,
+                &quot;sizes&quot;: &quot;192x192&quot;,
+                &quot;type&quot;: &quot;image/png&quot;
+            },
+            {
+                &quot;src&quot;: &quot;https://placehold.co/512x512/238636/FFFFFF?text=MB&quot;,
+                &quot;sizes&quot;: &quot;512x512&quot;,
+                &quot;type&quot;: &quot;image/png&quot;
+            }
+        ]
+    }">
+    
+    <!-- =================================================================== -->
+    <!-- === FIM DAS TAGS PARA INSTALAÇÃO NO IPHONE (PWA) === -->
+    <!-- =================================================================== -->
+
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -58,13 +107,11 @@
             const [loading, setLoading] = useState(true);
             const [saving, setSaving] = useState(false);
             const [statusSaving, setStatusSaving] = useState(false);
-            // --- NOVO: Estado para o filtro de notícias ---
             const [newsTime, setNewsTime] = useState("10:00");
 
             const fetchConfig = useCallback(async () => {
                 const { data, error } = await supabaseClient.from('bot_config').select('*').eq('id', 1).single();
                 if (data) {
-                    // Garante que news_pause_times é sempre um array
                     setConfig({ ...data, news_pause_times: Array.isArray(data.news_pause_times) ? data.news_pause_times : [] });
                 } else {
                     const defaultConfig = { stop_win: 0, stop_loss: 0, volatility_profile: 'EQUILIBRADO', confirmation_threshold: 2, news_pause_times: [] };
@@ -79,7 +126,6 @@
                 setConfig(prev => ({ ...prev, [key]: value }));
             };
             
-            // --- NOVO: Funções para gerir os horários de notícias ---
             const addNewsTime = () => {
                 if (newsTime && !config.news_pause_times.includes(newsTime)) {
                     const updatedTimes = [...config.news_pause_times, newsTime].sort();
@@ -104,7 +150,6 @@
             
             const handleSave = async () => {
                 setSaving(true);
-                // --- ATUALIZADO: Inclui news_pause_times no update ---
                 const { entry_value, account_type, use_martingale, martingale_levels, martingale_factor, stop_win, stop_loss, volatility_profile, confirmation_threshold, news_pause_times } = config;
                 const { error } = await supabaseClient.from('bot_config').update({
                     entry_value, account_type, use_martingale, martingale_levels, martingale_factor, stop_win, stop_loss, volatility_profile, confirmation_threshold, news_pause_times
@@ -134,7 +179,6 @@
                                 </div>
                             </div>
                             
-                            {/* --- NOVO: Card do Filtro de Notícias --- */}
                             <div className="glass-card p-6 rounded-xl">
                                 <h2 className="text-xl font-bold mb-4">Filtro de Notícias (Horário UTC)</h2>
                                 <p className="text-xs text-gray-400 mb-4">O bot irá pausar 15 min antes e 15 min depois dos horários selecionados.</p>
@@ -187,7 +231,6 @@
             );
         }
         
-        // --- Componentes (LogsView, AdminDashboard, App) permanecem os mesmos ---
         function LogsView() { const [logs, setLogs] = useState([]); const endOfLogsRef = useRef(null); const scrollToBottom = () => { endOfLogsRef.current?.scrollIntoView({ behavior: "smooth" }); }; useEffect(() => { const fetchInitialLogs = async () => { const { data, error } = await supabaseClient.from('bot_logs').select('*').order('created_at', { ascending: false }).limit(100); if (error) console.error("Erro ao buscar logs iniciais:", error); else if (data) setLogs(data.reverse()); }; fetchInitialLogs(); const channel = supabaseClient.channel('bot_logs_realtime').on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'bot_logs' }, payload => { setLogs(current => [...current, payload.new]); }).subscribe((status, err) => { if (err) console.error('Erro na subscrição:', err); }); return () => supabaseClient.removeChannel(channel); }, []); useEffect(() => { scrollToBottom(); }, [logs]); const LogLine = ({ log }) => { const colors = { SUCCESS: 'text-accent-win', ERROR: 'text-accent-loss', INFO: 'text-accent-info', WARNING: 'text-accent-warning', CRITICAL: 'bg-red-800 text-white p-1 rounded' }; const icons = { SUCCESS: 'fa-check-circle', ERROR: 'fa-times-circle', INFO: 'fa-info-circle', WARNING: 'fa-exclamation-triangle', CRITICAL: 'fa-skull-crossbones' }; return (<div className="flex items-start"><span className="text-gray-500 mr-3">{new Date(log.created_at).toLocaleTimeString()}</span><i className={`fas ${icons[log.level] || 'fa-question-circle'} ${colors[log.level] || 'text-gray-400'} mt-1 mr-2`}></i><p className="flex-1">{log.message}</p></div>); }; return (<div><h1 className="text-3xl font-bold text-white mb-6">Logs em Tempo Real</h1><div className="glass-card font-mono text-sm p-4 rounded-xl h-[70vh] overflow-y-auto space-y-2">{logs.length > 0 ? logs.map(log => <LogLine key={log.id} log={log} />) : <p className="text-gray-400 text-center py-8">A aguardar logs...</p>}<div ref={endOfLogsRef} /></div></div>); }
         function AdminDashboard() { const [view, setView] = useState('home'); const handleLogout = async () => { await supabaseClient.auth.signOut(); }; const NavLink = ({ viewName, icon, text, isMobile = false }) => ( <a href="#" onClick={(e) => {e.preventDefault(); setView(viewName);}} className={`flex items-center rounded-lg text-sm font-semibold transition-colors ${ isMobile ? `flex-1 flex-col py-2 text-xs ${view === viewName ? 'text-green-400' : 'text-gray-400'}` : `space-x-3 px-4 py-3 ${view === viewName ? 'nav-link-active' : 'hover:bg-gray-700'}`}`}> <i className={`fa-solid ${icon} text-xl ${isMobile ? 'mb-1' : 'w-6 text-center'}`}></i> <span className={isMobile ? '' : 'hidden md:inline'}>{text}</span> </a> ); const renderView = () => { switch (view) { case 'home': return <HomeView />; case 'settings': return <SettingsView />; case 'logs': return <LogsView />; default: return <HomeView />; } }; return (<div className="flex h-screen bg-bg-dark"><aside className="hidden md:flex w-64 bg-bg-medium text-white flex-col p-4 border-r border-border-color"><div className="h-16 flex items-center px-2 text-xl font-bold"><i className="fas fa-robot text-green-400 mr-3"></i> MAROMBIEW</div><nav className="flex-1 space-y-2"><NavLink viewName="home" icon="fa-home" text="Home" /><NavLink viewName="settings" icon="fa-sliders" text="Configurações" /><NavLink viewName="logs" icon="fa-terminal" text="Logs do Bot" /></nav><div className="p-2"><button onClick={handleLogout} className="w-full flex items-center space-x-3 px-4 py-3 rounded-lg text-sm font-semibold hover:bg-red-500/80"><i className="fa-solid fa-right-from-bracket text-lg w-6 text-center"></i><span>Sair</span></button></div></aside><div className="flex-1 flex flex-col overflow-hidden"><main className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-8">{renderView()}</main><nav className="md:hidden w-full bg-bg-medium border-t border-border-color flex justify-around"><NavLink viewName="home" icon="fa-home" text="Home" isMobile={true} /><NavLink viewName="settings" icon="fa-sliders" text="Config" isMobile={true} /><NavLink viewName="logs" icon="fa-terminal" text="Logs" isMobile={true} /><a href="#" onClick={handleLogout} className="flex-1 flex flex-col items-center py-2 text-xs text-gray-400"><i className="fa-solid fa-right-from-bracket text-xl mb-1"></i>Sair</a></nav></div></div>); }
         function App() { const [session, setSession] = useState(null); const [loading, setLoading] = useState(true); useEffect(() => { const timer = setTimeout(() => { supabaseClient.auth.getSession().then(({ data: { session } }) => { setSession(session); setLoading(false); }); const { data: { subscription } } = supabaseClient.auth.onAuthStateChange((_event, session) => { setSession(session); }); return () => subscription.unsubscribe(); }, 1500); return () => clearTimeout(timer); }, []); if (loading) return <SplashScreen />; if (!session) return <LoginPage onLogin={() => {}} />; return <AdminDashboard />; }
