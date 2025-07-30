@@ -8,25 +8,13 @@
     <!-- =================================================================== -->
     <!-- === INÍCIO DAS TAGS PARA INSTALAÇÃO NO IPHONE (PWA) === -->
     <!-- =================================================================== -->
-
-    <!-- Define o nome da aplicação que aparece no ecrã principal -->
     <meta name="apple-mobile-web-app-title" content="MarombiewBot">
-    
-    <!-- Permite que a aplicação corra em modo de ecrã inteiro -->
     <meta name="apple-mobile-web-app-capable" content="yes">
-    
-    <!-- Define a cor da barra de status (topo do ecrã do iPhone) -->
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    
-    <!-- Ícone principal da aplicação (o que aparece no ecrã principal) -->
     <link rel="apple-touch-icon" href="https://placehold.co/180x180/238636/FFFFFF?text=MB">
-    
-    <!-- Ícones para diferentes tamanhos de ecrã -->
     <link rel="apple-touch-icon" sizes="152x152" href="https://placehold.co/152x152/238636/FFFFFF?text=MB">
     <link rel="apple-touch-icon" sizes="167x167" href="https://placehold.co/167x167/238636/FFFFFF?text=MB">
     <link rel="apple-touch-icon" sizes="180x180" href="https://placehold.co/180x180/238636/FFFFFF?text=MB">
-
-    <!-- Ficheiro de Manifesto (necessário para PWAs) -->
     <link rel="manifest" href="data:application/manifest+json,{
         &quot;name&quot;: &quot;Marombiew Bot&quot;,
         &quot;short_name&quot;: &quot;MarombiewBot&quot;,
@@ -36,19 +24,10 @@
         &quot;theme_color&quot;: &quot;#0D1117&quot;,
         &quot;description&quot;: &quot;Painel de Controlo para o Marombiew Bot.&quot;,
         &quot;icons&quot;: [
-            {
-                &quot;src&quot;: &quot;https://placehold.co/192x192/238636/FFFFFF?text=MB&quot;,
-                &quot;sizes&quot;: &quot;192x192&quot;,
-                &quot;type&quot;: &quot;image/png&quot;
-            },
-            {
-                &quot;src&quot;: &quot;https://placehold.co/512x512/238636/FFFFFF?text=MB&quot;,
-                &quot;sizes&quot;: &quot;512x512&quot;,
-                &quot;type&quot;: &quot;image/png&quot;
-            }
+            { &quot;src&quot;: &quot;https://placehold.co/192x192/238636/FFFFFF?text=MB&quot;, &quot;sizes&quot;: &quot;192x192&quot;, &quot;type&quot;: &quot;image/png&quot; },
+            { &quot;src&quot;: &quot;https://placehold.co/512x512/238636/FFFFFF?text=MB&quot;, &quot;sizes&quot;: &quot;512x512&quot;, &quot;type&quot;: &quot;image/png&quot; }
         ]
     }">
-    
     <!-- =================================================================== -->
     <!-- === FIM DAS TAGS PARA INSTALAÇÃO NO IPHONE (PWA) === -->
     <!-- =================================================================== -->
@@ -93,7 +72,6 @@
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlvZHVhaHdrbmZza3R1anRoZnljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEzMDc0NDcsImV4cCI6MjA2Njg4MzQ0N30.96f8wZO6SvABKFMWjIiw1pSugAB4Isldj7yxLcLJRSE';
         const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-        // --- Componentes (SplashScreen, LoginPage, etc. permanecem os mesmos) ---
         function SplashScreen() { return (<div className="fixed inset-0 bg-bg-dark flex flex-col items-center justify-center z-50"><i className="fas fa-robot text-green-400 text-6xl mb-4"></i><h1 className="text-3xl font-bold text-white mb-2">MAROMBIEW BOT</h1><div className="spinner w-8 h-8 border-4 rounded-full animate-spin"></div></div>); }
         function LoginPage({ onLogin }) { const [email, setEmail] = useState(''); const [password, setPassword] = useState(''); const [error, setError] = useState(''); const [loading, setLoading] = useState(false); const handleLogin = async (e) => { e.preventDefault(); setLoading(true); setError(''); const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password }); if (error) setError(error.message); else if (data.user) onLogin(data.user); setLoading(false); }; return (<div className="min-h-screen flex items-center justify-center p-4"><div className="w-full max-w-md p-8 space-y-6 glass-card rounded-2xl shadow-lg"><div className="text-center"><i className="fas fa-robot text-4xl text-green-400 mb-2"></i><h2 className="text-3xl font-bold text-white">Admin Login</h2><p className="text-gray-400">MAROMBIEW BOT</p></div><form className="space-y-6" onSubmit={handleLogin}><div className="space-y-4"><div><input type="email" required className="form-input w-full px-4 py-3 rounded-lg" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} /></div><div><input type="password" required className="form-input w-full px-4 py-3 rounded-lg" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} /></div></div>{error && <p className="text-red-400 text-sm text-center">{error}</p>}<div><button type="submit" className="btn bg-green-600 hover:bg-green-700 w-full py-3 rounded-lg text-white font-semibold" disabled={loading}>{loading ? 'A entrar...' : 'Entrar'}</button></div></form></div></div>); }
         function CandleStick({ open, high, low, close }) { if (!open || !high || !low || !close) return <div className="w-10 h-24 flex items-center justify-center text-xs text-gray-500">Sem dados</div>; const isBullish = close > open; const color = isBullish ? 'var(--accent-win)' : 'var(--accent-loss)'; const range = high - low; if (range === 0) return null; const bodyTop = isBullish ? close : open; const bodyBottom = isBullish ? open : close; const bodyHeight = Math.max(((bodyTop - bodyBottom) / range) * 100, 1); const topWickHeight = ((high - bodyTop) / range) * 100; return (<div className="w-10 h-24 flex flex-col items-center justify-center" title={`O:${open} H:${high} L:${low} C:${close}`}><div className="w-0.5 h-full bg-gray-600 relative"><div className="absolute w-full" style={{ height: `${topWickHeight}%`, top: 0 }}></div><div className="absolute w-2 -ml-1" style={{ height: `${bodyHeight}%`, top: `${topWickHeight}%`, backgroundColor: color }}></div></div></div>); }
