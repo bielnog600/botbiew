@@ -4,7 +4,7 @@
 pydantic
 pydantic-settings
 python-dotenv
-supabase==2.5.0  # Versão específica para garantir consistência
+supabase
 
 # Dependências necessárias para a pasta local exnovaapi
 requests
