@@ -7,7 +7,6 @@ from datetime import datetime, timedelta
 from typing import Dict, Optional, List
 from threading import Thread
 
-# Adiciona o diretório principal do projeto ao path para garantir que todas as importações funcionam
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import settings
@@ -27,18 +26,20 @@ class TradingBot:
         self.current_account_type = ''
         self.previous_status = 'PAUSED'
         self.is_trade_active = False
-        
-        # --- Atributos para o Martingale ---
         self.pending_martingale_trade: Optional[Dict] = None
-        self.martingale_state: Dict[str, Dict] = {} 
-
+        self.martingale_state: Dict[str, Dict] = {}
+        
+        # --- ATUALIZAÇÃO: Adiciona as novas estratégias ao arsenal do bot ---
         self.strategy_map: Dict[str, callable] = {
             'Pullback MQL': ti.strategy_mql_pullback,
             'Padrão de Reversão': ti.strategy_reversal_pattern,
             'Fluxo de Tendência': ti.strategy_trend_flow,
             'Reversão por Exaustão': ti.strategy_exhaustion_reversal,
+            'Bandas de Bollinger': ti.strategy_bollinger_bands, # <-- NOVA
+            'Cruzamento MACD': ti.strategy_macd_crossover,   # <-- NOVA
         }
         self.asset_strategy_map: Dict[str, str] = {}
+        
         self.asset_performance: Dict[str, Dict[str, int]] = {}
         self.consecutive_losses: Dict[str, int] = {}
         self.blacklisted_assets: set = set()
@@ -48,6 +49,8 @@ class TradingBot:
         self.daily_losses = 0
         self.last_daily_reset_date = None
 
+    # --- O resto do ficheiro (funções de catalogação, operação, etc.) permanece exatamente igual ---
+    # --- COLE O RESTANTE DO SEU FICHEIRO core/bot.py A PARTIR DAQUI ---
     def _run_async(self, coro):
         if self.main_loop and self.main_loop.is_running():
             return asyncio.run_coroutine_threadsafe(coro, self.main_loop)
@@ -60,10 +63,8 @@ class TradingBot:
             self._run_async(self.supabase.insert_log(level, message))
 
     def _is_news_time(self) -> bool:
-        """Verifica se a hora atual está dentro de uma janela de pausa para notícias."""
         pause_times = self.bot_config.get('news_pause_times', [])
-        if not pause_times:
-            return False
+        if not pause_times: return False
         now_utc = datetime.utcnow()
         for time_str in pause_times:
             try:
