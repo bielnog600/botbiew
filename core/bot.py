@@ -100,7 +100,7 @@ class TradingBot:
         min_win_rate_threshold = self.bot_config.get('min_win_rate', 55)
         self.logger('INFO', f"A usar taxa de acerto mínima de {min_win_rate_threshold}%.")
         
-        cataloged_data_to_save = []
+        cataloged_results = {}
 
         for asset in open_assets:
             base_name = asset.split('-')[0]
@@ -130,19 +130,21 @@ class TradingBot:
                             highest_win_rate, best_strategy_for_asset = win_rate, strategy_name
                 
                 if best_strategy_for_asset and highest_win_rate >= min_win_rate_threshold:
-                    self.asset_strategy_map[base_name] = best_strategy_for_asset
-                    self.logger('SUCCESS', f"==> Melhor estratégia para {base_name}: '{best_strategy_for_asset}' ({highest_win_rate:.2f}%)")
-                    cataloged_data_to_save.append({
-                        "pair": base_name,
-                        "best_strategy": best_strategy_for_asset,
-                        "win_rate": round(highest_win_rate, 2)
-                    })
+                    if base_name not in cataloged_results or highest_win_rate > cataloged_results[base_name]['win_rate']:
+                        self.asset_strategy_map[base_name] = best_strategy_for_asset
+                        self.logger('SUCCESS', f"==> Melhor estratégia para {base_name}: '{best_strategy_for_asset}' ({highest_win_rate:.2f}%)")
+                        cataloged_results[base_name] = {
+                            "pair": base_name,
+                            "best_strategy": best_strategy_for_asset,
+                            "win_rate": round(highest_win_rate, 2)
+                        }
                 else:
                     self.logger('WARNING', f"==> Nenhuma estratégia qualificada para {base_name}.")
 
             except Exception as e:
                 self.logger('ERROR', f"Erro ao catalogar {base_name}: {e}")
         
+        cataloged_data_to_save = list(cataloged_results.values())
         if cataloged_data_to_save:
             self.logger('INFO', f"A guardar {len(cataloged_data_to_save)} ativos catalogados na base de dados...")
             self.supabase.upsert_cataloged_assets(cataloged_data_to_save)
@@ -335,7 +337,6 @@ class TradingBot:
             order_id = self.exnova.execute_trade(value, full_name, signal.direction.lower(), exp_mins)
             if not order_id: 
                 self.is_trade_active = False
-                # Se a ordem falhar, guarde o sinal mesmo assim, mas com resultado 'ERROR'
                 self.supabase.insert_trade_signal(signal)
                 return
             
