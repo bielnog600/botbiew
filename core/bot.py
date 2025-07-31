@@ -309,7 +309,6 @@ class TradingBot:
                     time.sleep(wait)
                     
                     self.is_trade_active = True
-                    # A criação do objeto TradeSignal agora funciona corretamente
                     signal = TradeSignal(pair=base_name, direction=direction, strategy=strat_name, **candles[-1])
                     self._execute_and_wait(signal, full_name, exp_mins)
 
@@ -334,11 +333,14 @@ class TradingBot:
             bal_before = self.exnova.get_current_balance()
             if bal_before is None: self.is_trade_active = False; return
             order_id = self.exnova.execute_trade(value, full_name, signal.direction.lower(), exp_mins)
-            if not order_id: self.is_trade_active = False; return
+            if not order_id: 
+                self.is_trade_active = False
+                # Se a ordem falhar, guarde o sinal mesmo assim, mas com resultado 'ERROR'
+                self.supabase.insert_trade_signal(signal)
+                return
             
             self.logger('INFO', f"Ordem {order_id} enviada. Valor: {self.currency_char}{value:.2f}")
             
-            # A chamada para inserir o sinal agora funciona
             sid = self.supabase.insert_trade_signal(signal)
             
             time.sleep(exp_mins * 60 + 5)
@@ -371,7 +373,7 @@ class TradingBot:
         self.logger('WARNING', f"MARTINGALE NÍVEL {level} PREPARADO. A aguardar {wait:.2f}s.")
         if wait > 0: time.sleep(wait)
         self.is_trade_active = True
-        # Para o martingale, precisamos de obter os dados da vela mais recente
+        
         candles = self.exnova.get_historical_candles(info['pair'], 60, 1)
         if not candles:
             self.logger("ERROR", f"Não foi possível obter a vela para o martingale de {info['pair']}.")
@@ -418,8 +420,6 @@ class TradingBot:
                     self.martingale_state[pair] = {'level': 0}
                     self.logger('ERROR', f"Nível máximo de Martingale atingido.")
         
-        # --- CORREÇÃO DO TypeError ---
-        # Garante que stop_win e stop_loss sejam 0 se forem None
         stop_win = self.bot_config.get('stop_win') or 0
         stop_loss = self.bot_config.get('stop_loss') or 0
         
