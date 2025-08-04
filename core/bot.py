@@ -198,7 +198,7 @@ class TradingBot:
 
         while self.is_running:
             try:
-                if (datetime.utcnow() - self.last_reset_time).total_seconds() >= 3600: 
+                if (datetime.utcnow() - self.last_reset_time).total_seconds() >= 7200: 
                     self._hourly_cycle_reset()
 
                 self._daily_reset_if_needed()
