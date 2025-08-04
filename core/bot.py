@@ -198,6 +198,7 @@ class TradingBot:
 
         while self.is_running:
             try:
+                # --- ALTERAÇÃO: Ciclo de 2 horas (7200 segundos) ---
                 if (datetime.utcnow() - self.last_reset_time).total_seconds() >= 7200: 
                     self._hourly_cycle_reset()
 
@@ -234,6 +235,10 @@ class TradingBot:
                 self.logger('ERROR', f"Loop principal falhou: {e}"); traceback.print_exc(); time.sleep(30)
 
     def trading_cycle(self):
+        # --- CORREÇÃO: Verificação de stop ANTES de procurar trades ---
+        if self._check_stop_limits():
+            return # Para o ciclo imediatamente se a meta foi atingida
+
         now = datetime.utcnow()
         if now.second >= 45 and now.minute != self.last_analysis_minute:
             self.last_analysis_minute = now.minute
@@ -421,12 +426,41 @@ class TradingBot:
                     self.martingale_state[pair] = {'level': 0}
                     self.logger('ERROR', f"Nível máximo de Martingale atingido.")
         
+        # --- CORREÇÃO: A verificação de stop é delegada para a nova função ---
+        self._check_stop_limits()
+
+    def _check_stop_limits(self) -> bool:
+        """
+        --- NOVA FUNÇÃO ---
+        Verifica se os limites de stop win ou stop loss foram atingidos e pausa o bot.
+        Retorna True se um limite foi atingido, False caso contrário.
+        """
+        # Garante que os valores sejam 0 se forem None, evitando erros
         stop_win = self.bot_config.get('stop_win') or 0
         stop_loss = self.bot_config.get('stop_loss') or 0
         
-        if (stop_win > 0 and self.daily_wins >= stop_win) or (stop_loss > 0 and self.daily_losses >= stop_loss):
-            self.logger('SUCCESS' if result == 'WIN' else 'ERROR', f"META DE STOP ATINGIDA!")
-            self.supabase.update_config({'status': 'PAUSED'})
+        limit_hit = False
+        message = ""
+
+        if stop_win > 0 and self.daily_wins >= stop_win:
+            limit_hit = True
+            message = f"META DE STOP WIN ATINGIDA ({self.daily_wins}/{stop_win})!"
+        
+        if not limit_hit and stop_loss > 0 and self.daily_losses >= stop_loss:
+            limit_hit = True
+            message = f"META DE STOP LOSS ATINGIDA ({self.daily_losses}/{stop_loss})!"
+
+        if limit_hit:
+            # Verifica se o bot já está em pausa para não enviar comandos repetidos
+            if self.bot_config.get('status') == 'RUNNING':
+                self.logger('SUCCESS' if 'WIN' in message else 'ERROR', message)
+                self.logger('WARNING', "O BOT FOI PAUSADO AUTOMATICAMENTE.")
+                self.supabase.update_config({'status': 'PAUSED'})
+                # Atualiza o estado local para refletir a pausa imediatamente
+                self.bot_config['status'] = 'PAUSED'
+            return True # Retorna True para indicar que o limite foi atingido
+
+        return False # Nenhum limite atingido
 
     def _hourly_cycle_reset(self):
         self.logger('INFO', "--- RESET DE CICLO HORÁRIO ---")
