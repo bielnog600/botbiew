@@ -78,6 +78,10 @@ class TradingBot:
             
     def _soft_restart(self):
         self.logger('WARNING', "--- REINÍCIO SUAVE ATIVADO ---")
+        
+        # --- CORREÇÃO: Garante que os contadores diários são resetados se for um novo dia ---
+        self._daily_reset_if_needed()
+        
         self.asset_strategy_map.clear()
         self.asset_performance.clear()
         self.consecutive_losses.clear()
