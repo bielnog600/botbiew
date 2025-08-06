@@ -37,8 +37,10 @@ class TradingBot:
             'Reversão por Exaustão': ti.strategy_exhaustion_reversal,
             'Bandas de Bollinger': ti.strategy_bollinger_bands,
             'Cruzamento MACD': ti.strategy_macd_crossover,
-            # --- NOVA ESTRATÉGIA ---
             'Tripla Confirmação': ti.strategy_triple_confirmation,
+            # --- NOVAS ESTRATÉGIAS ADICIONADAS ---
+            'Fuga Bollinger + EMA': ti.strategy_bb_ema_filter,
+            'MACD + RSI': ti.strategy_macd_rsi_confirm,
         }
         self.asset_strategy_map: Dict[str, str] = {}
         
@@ -81,7 +83,6 @@ class TradingBot:
     def _soft_restart(self):
         self.logger('WARNING', "--- REINÍCIO SUAVE ATIVADO ---")
         
-        # --- CORREÇÃO: Zera os contadores internos sempre que o bot é iniciado ---
         self.daily_wins = 0
         self.daily_losses = 0
         self.logger('INFO', "Placar diário interno zerado.")
@@ -152,7 +153,6 @@ class TradingBot:
                     self.logger('WARNING', f"==> Nenhuma estratégia qualificada para {base_name}.")
 
             except ValueError as ve:
-                # Ignora silenciosamente os erros de "Asset not found" para limpar os logs
                 if "not found in constants" not in str(ve):
                     self.logger('ERROR', f"Erro de valor ao catalogar {base_name}: {ve}")
             except Exception as e:
