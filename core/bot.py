@@ -37,6 +37,8 @@ class TradingBot:
             'Reversão por Exaustão': ti.strategy_exhaustion_reversal,
             'Bandas de Bollinger': ti.strategy_bollinger_bands,
             'Cruzamento MACD': ti.strategy_macd_crossover,
+            # --- NOVA ESTRATÉGIA ---
+            'Tripla Confirmação': ti.strategy_triple_confirmation,
         }
         self.asset_strategy_map: Dict[str, str] = {}
         
@@ -79,7 +81,11 @@ class TradingBot:
     def _soft_restart(self):
         self.logger('WARNING', "--- REINÍCIO SUAVE ATIVADO ---")
         
-        # --- CORREÇÃO: Garante que os contadores diários são resetados se for um novo dia ---
+        # --- CORREÇÃO: Zera os contadores internos sempre que o bot é iniciado ---
+        self.daily_wins = 0
+        self.daily_losses = 0
+        self.logger('INFO', "Placar diário interno zerado.")
+        
         self._daily_reset_if_needed()
         
         self.asset_strategy_map.clear()
@@ -145,8 +151,12 @@ class TradingBot:
                 else:
                     self.logger('WARNING', f"==> Nenhuma estratégia qualificada para {base_name}.")
 
+            except ValueError as ve:
+                # Ignora silenciosamente os erros de "Asset not found" para limpar os logs
+                if "not found in constants" not in str(ve):
+                    self.logger('ERROR', f"Erro de valor ao catalogar {base_name}: {ve}")
             except Exception as e:
-                self.logger('ERROR', f"Erro ao catalogar {base_name}: {e}")
+                self.logger('ERROR', f"Erro geral ao catalogar {base_name}: {e}")
         
         cataloged_data_to_save = list(cataloged_results.values())
         if cataloged_data_to_save:
@@ -202,7 +212,6 @@ class TradingBot:
 
         while self.is_running:
             try:
-                # --- ALTERAÇÃO: Ciclo de 2 horas (7200 segundos) ---
                 if (datetime.utcnow() - self.last_reset_time).total_seconds() >= 7200: 
                     self._hourly_cycle_reset()
 
@@ -239,9 +248,8 @@ class TradingBot:
                 self.logger('ERROR', f"Loop principal falhou: {e}"); traceback.print_exc(); time.sleep(30)
 
     def trading_cycle(self):
-        # --- CORREÇÃO: Verificação de stop ANTES de procurar trades ---
         if self._check_stop_limits():
-            return # Para o ciclo imediatamente se a meta foi atingida
+            return
 
         now = datetime.utcnow()
         if now.second >= 45 and now.minute != self.last_analysis_minute:
@@ -430,16 +438,13 @@ class TradingBot:
                     self.martingale_state[pair] = {'level': 0}
                     self.logger('ERROR', f"Nível máximo de Martingale atingido.")
         
-        # --- CORREÇÃO: A verificação de stop é delegada para a nova função ---
         self._check_stop_limits()
 
     def _check_stop_limits(self) -> bool:
         """
-        --- NOVA FUNÇÃO ---
         Verifica se os limites de stop win ou stop loss foram atingidos e pausa o bot.
         Retorna True se um limite foi atingido, False caso contrário.
         """
-        # Garante que os valores sejam 0 se forem None, evitando erros
         stop_win = self.bot_config.get('stop_win') or 0
         stop_loss = self.bot_config.get('stop_loss') or 0
         
@@ -455,16 +460,14 @@ class TradingBot:
             message = f"META DE STOP LOSS ATINGIDA ({self.daily_losses}/{stop_loss})!"
 
         if limit_hit:
-            # Verifica se o bot já está em pausa para não enviar comandos repetidos
             if self.bot_config.get('status') == 'RUNNING':
                 self.logger('SUCCESS' if 'WIN' in message else 'ERROR', message)
                 self.logger('WARNING', "O BOT FOI PAUSADO AUTOMATICAMENTE.")
                 self.supabase.update_config({'status': 'PAUSED'})
-                # Atualiza o estado local para refletir a pausa imediatamente
                 self.bot_config['status'] = 'PAUSED'
-            return True # Retorna True para indicar que o limite foi atingido
+            return True
 
-        return False # Nenhum limite atingido
+        return False
 
     def _hourly_cycle_reset(self):
         self.logger('INFO', "--- RESET DE CICLO HORÁRIO ---")
