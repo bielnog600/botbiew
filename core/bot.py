@@ -40,7 +40,6 @@ class TradingBot:
             'Tripla Confirmação': ti.strategy_triple_confirmation,
             'Fuga Bollinger + EMA': ti.strategy_bb_ema_filter,
             'MACD + RSI': ti.strategy_macd_rsi_confirm,
-            # --- NOVAS ESTRATÉGIAS ADICIONADAS ---
             'Rejeição RSI + Pavio': ti.strategy_rejection_rsi_wick,
             'EMA Cross + Volume': ti.strategy_ema_volume_crossover,
         }
@@ -323,7 +322,10 @@ class TradingBot:
                 if not strategy_function: continue
 
                 direction = strategy_function(candles)
-                if direction and ti.validate_reversal_candle(candles[-1], direction):
+                
+                # --- CORREÇÃO: A validação de vela de reversão foi removida daqui ---
+                # Agora, confiamos apenas no sinal retornado pela própria estratégia.
+                if direction:
                     now = datetime.utcnow()
                     wait = (60 - now.second - 1) + (1 - now.microsecond / 1e6) + 0.2
                     self.logger('SUCCESS', f"SINAL ENCONTRADO! {base_name} | {strat_name} | {direction.upper()}")
