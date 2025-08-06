@@ -244,3 +244,68 @@ def strategy_macd_rsi_confirm(candles: List[Dict]) -> Optional[str]:
         return 'put'
         
     return None
+
+# --- NOVAS ESTRATÉGIAS ADICIONADAS ---
+
+def strategy_rejection_rsi_wick(candles: List[Dict]) -> Optional[str]:
+    """
+    Estratégia de Rejeição com RSI e Pavio.
+    Busca por velas de reversão (martelos/estrelas cadentes) em zonas de RSI extremo.
+    """
+    df = _create_and_validate_dataframe(candles, ['high', 'low', 'open', 'close'])
+    if df is None or len(df) < 15: return None
+
+    df['rsi'] = ta.rsi(df['close'], length=14)
+    df.dropna(inplace=True)
+    if df.empty: return None
+
+    last = df.iloc[-1]
+    body = abs(last['open'] - last['close'])
+    if body == 0: return None
+
+    upper_wick = last['high'] - max(last['open'], last['close'])
+    lower_wick = min(last['open'], last['close']) - last['low']
+
+    # Sinal de PUT (Venda)
+    is_rsi_overbought = last['rsi'] > 75
+    is_shooting_star = upper_wick > 2 * body and lower_wick < 0.7 * body
+    if is_rsi_overbought and is_shooting_star:
+        return 'put'
+
+    # Sinal de CALL (Compra)
+    is_rsi_oversold = last['rsi'] < 25
+    is_hammer = lower_wick > 2 * body and upper_wick < 0.7 * body
+    if is_rsi_oversold and is_hammer:
+        return 'call'
+
+    return None
+
+def strategy_ema_volume_crossover(candles: List[Dict]) -> Optional[str]:
+    """
+    Estratégia de Cruzamento de Médias Móveis com Confirmação de Volume.
+    """
+    df = _create_and_validate_dataframe(candles, ['close', 'volume'])
+    if df is None or len(df) < 22: return None
+
+    df['ema_fast'] = ta.ema(df['close'], length=9)
+    df['ema_slow'] = ta.ema(df['close'], length=21)
+    df['volume_sma'] = ta.sma(df['volume'], length=20)
+    df.dropna(inplace=True)
+    if len(df) < 2: return None
+
+    last = df.iloc[-1]
+    prev = df.iloc[-2]
+
+    volume_confirmed = last['volume'] > last['volume_sma'] * 1.2 # Volume 20% acima da média
+
+    # Sinal de CALL (Compra)
+    fast_crosses_above_slow = prev['ema_fast'] < prev['ema_slow'] and last['ema_fast'] > last['ema_slow']
+    if fast_crosses_above_slow and volume_confirmed:
+        return 'call'
+
+    # Sinal de PUT (Venda)
+    fast_crosses_below_slow = prev['ema_fast'] > prev['ema_slow'] and last['ema_fast'] < last['ema_slow']
+    if fast_crosses_below_slow and volume_confirmed:
+        return 'put'
+
+    return None
