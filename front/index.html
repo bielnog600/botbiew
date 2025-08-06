@@ -83,11 +83,11 @@
             const [loading, setLoading] = useState(true);
             const [saving, setSaving] = useState(false);
 
-            // --- ATUALIZAÇÃO: Adiciona as novas estratégias à lista do painel ---
             const ALL_STRATEGIES = [
                 'Pullback MQL', 'Padrão de Reversão', 'Fluxo de Tendência', 
                 'Reversão por Exaustão', 'Bandas de Bollinger', 'Cruzamento MACD',
-                'Tripla Confirmação', 'Fuga Bollinger + EMA', 'MACD + RSI'
+                'Tripla Confirmação', 'Fuga Bollinger + EMA', 'MACD + RSI',
+                'Rejeição RSI + Pavio', 'EMA Cross + Volume'
             ];
 
             const fetchData = useCallback(async () => {
@@ -109,7 +109,7 @@
 
             useEffect(() => {
                 fetchData();
-                const intervalId = setInterval(fetchData, 10000); // Atualiza a cada 10 segundos
+                const intervalId = setInterval(fetchData, 10000);
                 return () => clearInterval(intervalId);
             }, [fetchData]);
 
