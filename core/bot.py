@@ -38,9 +38,11 @@ class TradingBot:
             'Bandas de Bollinger': ti.strategy_bollinger_bands,
             'Cruzamento MACD': ti.strategy_macd_crossover,
             'Tripla Confirmação': ti.strategy_triple_confirmation,
-            # --- NOVAS ESTRATÉGIAS ADICIONADAS ---
             'Fuga Bollinger + EMA': ti.strategy_bb_ema_filter,
             'MACD + RSI': ti.strategy_macd_rsi_confirm,
+            # --- NOVAS ESTRATÉGIAS ADICIONADAS ---
+            'Rejeição RSI + Pavio': ti.strategy_rejection_rsi_wick,
+            'EMA Cross + Volume': ti.strategy_ema_volume_crossover,
         }
         self.asset_strategy_map: Dict[str, str] = {}
         
