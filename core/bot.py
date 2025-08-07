@@ -291,7 +291,6 @@ class TradingBot:
                     max_atr = self.bot_config.get('manual_atr_max', 0.00100)
                     limits = (min_atr, max_atr)
                 else:
-                    # --- VALORES DE VOLATILIDADE MAIS SENSÍVEIS ---
                     predefined_limits = {
                         'ULTRA_CONSERVADOR': (0.00005, 0.00025), 
                         'CONSERVADOR': (0.00020, 0.00070), 
@@ -303,10 +302,13 @@ class TradingBot:
                 
                 if limits:
                     atr = ti.calculate_atr(candles)
-                    if atr is None or not (limits[0] <= atr <= limits[1]):
-                        atr_value_str = f"{atr:.5f}" if atr is not None else "N/A"
-                        self.logger('INFO', f"[{base_name}] Análise abortada: Volatilidade (ATR: {atr_value_str}) fora dos limites {limits}.")
-                        return
+                    # --- LÓGICA DE VERIFICAÇÃO DE ATR MELHORADA ---
+                    if atr is not None: # Apenas verifica se o ATR foi calculado com sucesso
+                        if not (limits[0] <= atr <= limits[1]):
+                            self.logger('INFO', f"[{base_name}] Análise abortada: Volatilidade (ATR: {atr:.5f}) fora dos limites {limits}.")
+                            return
+                    else: # Se o ATR não pôde ser calculado
+                        self.logger('WARNING', f"[{base_name}] Não foi possível calcular o ATR. O filtro de volatilidade será ignorado para esta análise.")
             
             for strat_name in strategies_to_run:
                 if self.is_trade_active: break
