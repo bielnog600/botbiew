@@ -13,7 +13,6 @@ from config import settings
 from services.exnova_service import ExnovaService
 from services.supabase_service import SupabaseService
 import analysis.technical_indicators as ti
-# Importa a classe de modelo de dados
 from core.data_models import TradeSignal
 
 class TradingBot:
@@ -30,20 +29,17 @@ class TradingBot:
         self.martingale_state: Dict[str, Dict] = {}
         
         self.strategy_map: Dict[str, callable] = {
-            # Estratégias Originais
             'Pullback MQL': ti.strategy_mql_pullback,
             'Padrão de Reversão': ti.strategy_reversal_pattern,
             'Fluxo de Tendência': ti.strategy_trend_flow,
             'Reversão por Exaustão': ti.strategy_exhaustion_reversal,
             'Bandas de Bollinger': ti.strategy_bollinger_bands,
             'Cruzamento MACD': ti.strategy_macd_crossover,
-            # Estratégias de Confluência (Nível 1)
             'Tripla Confirmação': ti.strategy_triple_confirmation,
             'Fuga Bollinger + EMA': ti.strategy_bb_ema_filter,
             'MACD + RSI': ti.strategy_macd_rsi_confirm,
+            'Rejeição RSI + Pavio': ti.strategy_rejection_rsi_wick,
             'EMA Cross + Volume': ti.strategy_ema_volume_crossover,
-            # Estratégias Profissionais (Nível 2)
-            'Reversão Pavio + RSI': ti.strategy_rejection_rsi_wick,
             'Rompimento Falso': ti.strategy_fake_breakout,
             'Inside Bar + RSI': ti.strategy_inside_bar_rsi,
             'Engolfo + Tendência': ti.strategy_engulfing_trend,
@@ -287,12 +283,29 @@ class TradingBot:
             candles = self.exnova.get_historical_candles(base_name, 60, 50)
             if not candles or len(candles) < 20: return
 
+            # --- LÓGICA DE VOLATILIDADE ATUALIZADA ---
             vol_prof = self.bot_config.get('volatility_profile', 'EQUILIBRADO')
             if vol_prof != 'DESATIVADO':
-                limits = {'ULTRA_CONSERVADOR': (0.00001, 0.00015), 'CONSERVADOR': (0.00010, 0.00050), 'EQUILIBRADO': (0.00030, 0.00100), 'AGRESSIVO': (0.00080, 0.00200), 'ULTRA_AGRESSIVO': (0.00150, 999.0)}.get(vol_prof)
-                atr = ti.calculate_atr(candles)
-                if atr is None or not (limits[0] <= atr <= limits[1]):
-                    self.logger('INFO', f"[{base_name}] Análise abortada: Volatilidade fora dos limites."); return
+                limits = None
+                if vol_prof == 'MANUAL':
+                    min_atr = self.bot_config.get('manual_atr_min', 0.00030)
+                    max_atr = self.bot_config.get('manual_atr_max', 0.00100)
+                    limits = (min_atr, max_atr)
+                else:
+                    predefined_limits = {
+                        'ULTRA_CONSERVADOR': (0.00001, 0.00015), 
+                        'CONSERVADOR': (0.00010, 0.00050), 
+                        'EQUILIBRADO': (0.00030, 0.00100), 
+                        'AGRESSIVO': (0.00080, 0.00200), 
+                        'ULTRA_AGRESSIVO': (0.00150, 999.0)
+                    }
+                    limits = predefined_limits.get(vol_prof)
+                
+                if limits:
+                    atr = ti.calculate_atr(candles)
+                    if atr is None or not (limits[0] <= atr <= limits[1]):
+                        self.logger('INFO', f"[{base_name}] Análise abortada: Volatilidade (ATR: {atr:.5f}) fora dos limites {limits}.")
+                        return
             
             for strat_name in strategies_to_run:
                 if self.is_trade_active: break
