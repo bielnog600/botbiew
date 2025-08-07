@@ -27,22 +27,27 @@ class TradingBot:
         self.current_account_type = ''
         self.previous_status = 'PAUSED'
         self.is_trade_active = False
-        # --- REMOVIDO: A variável de martingale pendente não é mais necessária ---
-        # self.pending_martingale_trade: Optional[Dict] = None 
         self.martingale_state: Dict[str, Dict] = {}
         
         self.strategy_map: Dict[str, callable] = {
+            # Estratégias Originais
             'Pullback MQL': ti.strategy_mql_pullback,
             'Padrão de Reversão': ti.strategy_reversal_pattern,
             'Fluxo de Tendência': ti.strategy_trend_flow,
             'Reversão por Exaustão': ti.strategy_exhaustion_reversal,
             'Bandas de Bollinger': ti.strategy_bollinger_bands,
             'Cruzamento MACD': ti.strategy_macd_crossover,
+            # Estratégias de Confluência (Nível 1)
             'Tripla Confirmação': ti.strategy_triple_confirmation,
             'Fuga Bollinger + EMA': ti.strategy_bb_ema_filter,
             'MACD + RSI': ti.strategy_macd_rsi_confirm,
-            'Rejeição RSI + Pavio': ti.strategy_rejection_rsi_wick,
             'EMA Cross + Volume': ti.strategy_ema_volume_crossover,
+            # Estratégias Profissionais (Nível 2)
+            'Reversão Pavio + RSI': ti.strategy_rejection_rsi_wick,
+            'Rompimento Falso': ti.strategy_fake_breakout,
+            'Inside Bar + RSI': ti.strategy_inside_bar_rsi,
+            'Engolfo + Tendência': ti.strategy_engulfing_trend,
+            'Compressão Bollinger': ti.strategy_bollinger_squeeze,
         }
         self.asset_strategy_map: Dict[str, str] = {}
         
@@ -228,7 +233,6 @@ class TradingBot:
                     if self._is_news_time():
                         time.sleep(15)
                         continue
-                    # --- REMOVIDO: A verificação de martingale pendente foi removida daqui ---
                     if not self.is_trade_active:
                         self.trading_cycle()
                 else:
@@ -350,7 +354,6 @@ class TradingBot:
             
             self._update_stats_and_martingale(result, signal, full_name, exp_mins)
         finally:
-            # Apenas desativa o 'trade_active' se não houver um martingale a ser executado
             if not self.martingale_state.get(signal.pair, {}).get('is_active', False):
                 self.is_trade_active = False
 
@@ -384,7 +387,6 @@ class TradingBot:
                 level = self.martingale_state.get(pair, {}).get('level', 0)
                 max_levels = self.bot_config.get('martingale_levels', 2)
                 if level < max_levels:
-                    # --- CORREÇÃO: Lógica de Martingale Imediato ---
                     self.logger('WARNING', f"MARTINGALE NÍVEL {level + 1} ATIVADO IMEDIATAMENTE.")
                     self.martingale_state[pair] = {'level': level + 1, 'is_active': True}
                     
@@ -398,9 +400,8 @@ class TradingBot:
                     mg_signal = TradeSignal(pair=pair, direction=signal.direction, strategy=strat_name, **candles[-1])
                     
                     self.logger('SUCCESS', f"EXECUTANDO MARTINGALE!")
-                    # Chamada recursiva para executar o trade imediatamente
                     self._execute_and_wait(mg_signal, full_name, exp_mins)
-                    return # Retorna para evitar que o 'is_trade_active' seja desativado prematuramente
+                    return
                 else:
                     self.logger('ERROR', f"Nível máximo de Martingale atingido.")
                     self.martingale_state[pair] = {'level': 0, 'is_active': False}
