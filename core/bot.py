@@ -13,6 +13,7 @@ from config import settings
 from services.exnova_service import ExnovaService
 from services.supabase_service import SupabaseService
 import analysis.technical_indicators as ti
+# Importa a classe de modelo de dados
 from core.data_models import TradeSignal
 
 class TradingBot:
@@ -283,7 +284,6 @@ class TradingBot:
             candles = self.exnova.get_historical_candles(base_name, 60, 50)
             if not candles or len(candles) < 20: return
 
-            # --- LÓGICA DE VOLATILIDADE ATUALIZADA ---
             vol_prof = self.bot_config.get('volatility_profile', 'EQUILIBRADO')
             if vol_prof != 'DESATIVADO':
                 limits = None
@@ -292,19 +292,15 @@ class TradingBot:
                     max_atr = self.bot_config.get('manual_atr_max', 0.00100)
                     limits = (min_atr, max_atr)
                 else:
-                    predefined_limits = {
-                        'ULTRA_CONSERVADOR': (0.00001, 0.00015), 
-                        'CONSERVADOR': (0.00010, 0.00050), 
-                        'EQUILIBRADO': (0.00030, 0.00100), 
-                        'AGRESSIVO': (0.00080, 0.00200), 
-                        'ULTRA_AGRESSIVO': (0.00150, 999.0)
-                    }
+                    predefined_limits = { 'ULTRA_CONSERVADOR': (0.00001, 0.00015), 'CONSERVADOR': (0.00010, 0.00050), 'EQUILIBRADO': (0.00030, 0.00100), 'AGRESSIVO': (0.00080, 0.00200), 'ULTRA_AGRESSIVO': (0.00150, 999.0) }
                     limits = predefined_limits.get(vol_prof)
                 
                 if limits:
                     atr = ti.calculate_atr(candles)
                     if atr is None or not (limits[0] <= atr <= limits[1]):
-                        self.logger('INFO', f"[{base_name}] Análise abortada: Volatilidade (ATR: {atr:.5f}) fora dos limites {limits}.")
+                        # --- CORREÇÃO DO LOG ---
+                        atr_value_str = f"{atr:.5f}" if atr is not None else "N/A"
+                        self.logger('INFO', f"[{base_name}] Análise abortada: Volatilidade (ATR: {atr_value_str}) fora dos limites {limits}.")
                         return
             
             for strat_name in strategies_to_run:
