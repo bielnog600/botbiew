@@ -283,7 +283,6 @@ class TradingBot:
             candles = self.exnova.get_historical_candles(base_name, 60, 50)
             if not candles or len(candles) < 20: return
 
-            # --- LÓGICA DE VOLATILIDADE ATUALIZADA ---
             vol_prof = self.bot_config.get('volatility_profile', 'EQUILIBRADO')
             if vol_prof != 'DESATIVADO':
                 limits = None
@@ -292,12 +291,13 @@ class TradingBot:
                     max_atr = self.bot_config.get('manual_atr_max', 0.00100)
                     limits = (min_atr, max_atr)
                 else:
+                    # --- VALORES DE VOLATILIDADE MAIS SENSÍVEIS ---
                     predefined_limits = {
-                        'ULTRA_CONSERVADOR': (0.00001, 0.00015), 
-                        'CONSERVADOR': (0.00010, 0.00050), 
-                        'EQUILIBRADO': (0.00030, 0.00100), 
-                        'AGRESSIVO': (0.00080, 0.00200), 
-                        'ULTRA_AGRESSIVO': (0.00150, 999.0)
+                        'ULTRA_CONSERVADOR': (0.00005, 0.00025), 
+                        'CONSERVADOR': (0.00020, 0.00070), 
+                        'EQUILIBRADO': (0.00050, 0.00150), 
+                        'AGRESSIVO': (0.00100, 0.00300), 
+                        'ULTRA_AGRESSIVO': (0.00250, 999.0)
                     }
                     limits = predefined_limits.get(vol_prof)
                 
