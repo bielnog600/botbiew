@@ -215,7 +215,7 @@ def strategy_engulfing_trend(candles: List[Dict]) -> Optional[str]:
     return None
 
 def strategy_bollinger_squeeze(candles: List[Dict]) -> Optional[str]:
-    df = _create_and_validate_dataframe(candles, ['close'])
+    df = _create_and_validate_dataframe(candles, ['close', 'open', 'high', 'low'])
     if df is None or len(df) < 21: return None
     bollinger = ta.bbands(df['close'], length=20, std=2)
     if bollinger is None: return None
@@ -234,78 +234,62 @@ def strategy_bollinger_squeeze(candles: List[Dict]) -> Optional[str]:
     if is_strong_candle and last['close'] < last['BBL_20_2.0']: return 'put'
     return None
 
-# --- NOVAS ESTRATÉGIAS PARA OTC ---
+# --- NOVAS ESTRATÉGIAS FRACTAIS ---
 
-def strategy_stochrsi_scalp(candles: List[Dict]) -> Optional[str]:
-    df = _create_and_validate_dataframe(candles, ['close'])
-    if df is None or len(df) < 30: return None
-    stoch_rsi = ta.stochrsi(df['close'], length=14, rsi_length=14, k=3, d=3)
-    if stoch_rsi is None: return None
-    df = pd.concat([df, stoch_rsi], axis=1)
-    df.dropna(inplace=True)
-    if len(df) < 2: return None
-    last, prev = df.iloc[-1], df.iloc[-2]
-    if prev['STOCHRSIk_14_14_3_3'] < 20 and last['STOCHRSIk_14_14_3_3'] > 20: return 'call'
-    if prev['STOCHRSIk_14_14_3_3'] > 80 and last['STOCHRSIk_14_14_3_3'] < 80: return 'put'
-    return None
-
-def strategy_awesome_saucer(candles: List[Dict]) -> Optional[str]:
+def strategy_fractal_reversal(candles: List[Dict]) -> Optional[str]:
+    """
+    Estratégia de reversão baseada apenas em Fractais de Williams (período 5).
+    O sinal é confirmado 2 velas após o pico/vale.
+    """
     df = _create_and_validate_dataframe(candles, ['high', 'low'])
-    if df is None or len(df) < 35: return None
-    df['ao'] = ta.ao(df['high'], df['low'])
-    df.dropna(inplace=True)
-    if len(df) < 3: return None
-    c1, c2, c3 = df['ao'].iloc[-3], df['ao'].iloc[-2], df['ao'].iloc[-1]
-    if c1 > 0 and c2 > 0 and c3 > 0 and c1 > c2 and c3 > c2: return 'call' # Pires de compra
-    if c1 < 0 and c2 < 0 and c3 < 0 and c1 < c2 and c3 < c2: return 'put' # Pires de venda
+    if df is None or len(df) < 5: return None
+
+    # Verifica se a vela de 2 períodos atrás foi o ponto mais alto dos últimos 5 períodos
+    if df['high'].iloc[-3] == df['high'].iloc[-5:].max():
+        return 'put'
+
+    # Verifica se a vela de 2 períodos atrás foi o ponto mais baixo dos últimos 5 períodos
+    if df['low'].iloc[-3] == df['low'].iloc[-5:].min():
+        return 'call'
+        
     return None
 
-def strategy_keltner_reversion(candles: List[Dict]) -> Optional[str]:
+def strategy_bollinger_fractal_stoch(candles: List[Dict]) -> Optional[str]:
+    """
+    Estratégia de alta confluência: Bollinger + Fractal + Estocástico.
+    """
     df = _create_and_validate_dataframe(candles, ['high', 'low', 'close'])
     if df is None or len(df) < 21: return None
-    kc = ta.kc(df['high'], df['low'], df['close'], length=20)
-    if kc is None: return None
-    df = pd.concat([df, kc], axis=1)
+
+    # 1. Bollinger Bands
+    bollinger = ta.bbands(df['close'], length=20, std=2)
+    if bollinger is None: return None
+    df = pd.concat([df, bollinger], axis=1)
+
+    # 2. Stochastic Oscillator
+    stoch = ta.stoch(df['high'], df['low'], df['close'], k=14, d=3, smooth_k=3)
+    if stoch is None: return None
+    df = pd.concat([df, stoch], axis=1)
+
     df.dropna(inplace=True)
-    if df.empty: return None
-    last = df.iloc[-1]
-    if last['close'] < last['KCLe_20_2']: return 'call'
-    if last['close'] > last['KCUe_20_2']: return 'put'
-    return None
-
-def strategy_heikinashi_trend(candles: List[Dict]) -> Optional[str]:
-    df = _create_and_validate_dataframe(candles, ['open', 'high', 'low', 'close'])
-    if df is None: return None
-    ha_df = ta.ha(df['open'], df['high'], df['low'], df['close'])
-    if ha_df is None: return None
-    df = pd.concat([df, ha_df], axis=1)
-    df.dropna(inplace=True)
-    if len(df) < 3: return None
-    
-    last = df.iloc[-1]
-    prev = df.iloc[-2]
-
-    is_green = last['HA_close'] > last['HA_open']
-    is_red = last['HA_close'] < last['HA_open']
-    prev_is_green = prev['HA_close'] > prev['HA_open']
-    prev_is_red = prev['HA_close'] < prev['HA_open']
-
-    if is_green and prev_is_green and last['HA_open'] == last['HA_low']: return 'call'
-    if is_red and prev_is_red and last['HA_open'] == last['HA_high']: return 'put'
-    return None
-
-def strategy_vortex_cross(candles: List[Dict]) -> Optional[str]:
-    df = _create_and_validate_dataframe(candles, ['high', 'low', 'close'])
-    if df is None or len(df) < 15: return None
-    vortex = ta.vortex(df['high'], df['low'], df['close'], length=14)
-    if vortex is None: return None
-    df = pd.concat([df, vortex], axis=1)
-    df.dropna(inplace=True)
-    if len(df) < 2: return None
+    if len(df) < 5: return None
 
     last = df.iloc[-1]
-    prev = df.iloc[-2]
 
-    if prev['VTXP_14'] < prev['VTXM_14'] and last['VTXP_14'] > last['VTXM_14']: return 'call'
-    if prev['VTXP_14'] > prev['VTXM_14'] and last['VTXP_14'] < last['VTXM_14']: return 'put'
+    # 3. Fractals (lógica não-repintável)
+    is_sell_fractal = df['high'].iloc[-3] == df['high'].iloc[-5:].max()
+    is_buy_fractal = df['low'].iloc[-3] == df['low'].iloc[-5:].min()
+
+    # Confluência para CALL
+    is_bb_oversold = last['close'] < last['BBL_20_2.0']
+    is_stoch_oversold = last['STOCHk_14_3_3'] < 20
+    if is_buy_fractal and is_bb_oversold and is_stoch_oversold:
+        return 'call'
+
+    # Confluência para PUT
+    is_bb_overbought = last['close'] > last['BBU_20_2.0']
+    is_stoch_overbought = last['STOCHk_14_3_3'] > 80
+    if is_sell_fractal and is_bb_overbought and is_stoch_overbought:
+        return 'put'
+
     return None
