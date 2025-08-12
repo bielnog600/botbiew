@@ -44,11 +44,16 @@ class TradingBot:
             'Inside Bar + RSI': ti.strategy_inside_bar_rsi,
             'Engolfo + Tendência': ti.strategy_engulfing_trend,
             'Compressão Bollinger': ti.strategy_bollinger_squeeze,
-            # --- NOVAS ESTRATÉGIAS ADICIONADAS ---
+            'Scalping StochRSI': ti.strategy_stochrsi_scalp,
+            'Pires Awesome': ti.strategy_awesome_saucer,
+            'Reversão Keltner': ti.strategy_keltner_reversion,
+            'Tendência Heikin-Ashi': ti.strategy_heikinashi_trend,
+            'Cruzamento Vortex': ti.strategy_vortex_cross,
             'Reversão de Fractal': ti.strategy_fractal_reversal,
             'Bollinger + Fractal + Stoch': ti.strategy_bollinger_fractal_stoch,
         }
-        self.asset_strategy_map: Dict[str, str] = {}
+        # --- ATUALIZAÇÃO: Armazena uma LISTA de estratégias qualificadas por par ---
+        self.asset_qualified_strategies: Dict[str, List[str]] = {}
         
         self.asset_performance: Dict[str, Dict[str, int]] = {}
         self.consecutive_losses: Dict[str, int] = {}
@@ -89,7 +94,7 @@ class TradingBot:
         self.daily_losses = 0
         self.logger('INFO', "Placar diário interno zerado.")
         self._daily_reset_if_needed()
-        self.asset_strategy_map.clear()
+        self.asset_qualified_strategies.clear()
         self.asset_performance.clear()
         self.consecutive_losses.clear()
         self.blacklisted_assets.clear()
@@ -101,7 +106,7 @@ class TradingBot:
 
     def _run_cataloging(self):
         self.logger('INFO', "--- INICIANDO MODO DE CATALOGAÇÃO DINÂMICA ---")
-        self.asset_strategy_map.clear()
+        self.asset_qualified_strategies.clear()
         open_assets = self.exnova.get_open_assets()
         if not open_assets:
             self.logger('WARNING', "Nenhum ativo aberto encontrado para catalogar.")
@@ -119,7 +124,8 @@ class TradingBot:
                 if not historical_candles or len(historical_candles) < 100:
                     continue
                 
-                best_strategy_for_asset, highest_win_rate = None, 0
+                # --- ATUALIZAÇÃO: Guarda todas as estratégias que passam no teste ---
+                qualified_strats_for_pair = []
                 
                 for strategy_name, strategy_func in self.strategy_map.items():
                     wins, losses, total_trades = 0, 0, 0
@@ -136,14 +142,16 @@ class TradingBot:
                     
                     if total_trades > 10:
                         win_rate = (wins / total_trades) * 100
-                        if win_rate > highest_win_rate:
-                            highest_win_rate, best_strategy_for_asset = win_rate, strategy_name
-                
-                if best_strategy_for_asset and highest_win_rate >= min_win_rate_threshold:
-                    if base_name not in cataloged_results or highest_win_rate > cataloged_results[base_name]['win_rate']:
-                        self.asset_strategy_map[base_name] = best_strategy_for_asset
-                        self.logger('SUCCESS', f"==> Melhor estratégia para {base_name}: '{best_strategy_for_asset}' ({highest_win_rate:.2f}%)")
-                        cataloged_results[base_name] = { "pair": base_name, "best_strategy": best_strategy_for_asset, "win_rate": round(highest_win_rate, 2) }
+                        if win_rate >= min_win_rate_threshold:
+                            qualified_strats_for_pair.append(strategy_name)
+                            self.logger('SUCCESS', f"==> Estratégia qualificada para {base_name}: '{strategy_name}' ({win_rate:.2f}%)")
+                            
+                            # Atualiza o melhor resultado para guardar na DB (apenas para visualização no painel)
+                            if base_name not in cataloged_results or win_rate > cataloged_results[base_name]['win_rate']:
+                                cataloged_results[base_name] = { "pair": base_name, "best_strategy": strategy_name, "win_rate": round(win_rate, 2) }
+
+                if qualified_strats_for_pair:
+                    self.asset_qualified_strategies[base_name] = qualified_strats_for_pair
                 else:
                     self.logger('WARNING', f"==> Nenhuma estratégia qualificada para {base_name}.")
 
@@ -207,7 +215,7 @@ class TradingBot:
 
         while self.is_running:
             try:
-                if (datetime.utcnow() - self.last_reset_time).total_seconds() >= 14400: # 4 horas
+                if (datetime.utcnow() - self.last_reset_time).total_seconds() >= 14400: 
                     self._hourly_cycle_reset()
 
                 self._daily_reset_if_needed()
@@ -238,7 +246,11 @@ class TradingBot:
                     time.sleep(5)
                 time.sleep(1)
             except Exception as e:
-                self.logger('ERROR', f"Loop principal falhou: {e}"); traceback.print_exc(); time.sleep(30)
+                self.logger('ERROR', f"Loop principal falhou: {e}")
+                traceback.print_exc()
+                self.logger('WARNING', "A tentar reconectar em 15 segundos...")
+                time.sleep(15)
+                self.exnova.reconnect()
 
     def trading_cycle(self):
         if self._check_stop_limits():
@@ -260,7 +272,7 @@ class TradingBot:
                 self.logger("WARNING", "Modo manual ativo, mas nenhum par ou estratégia foi selecionado.")
                 return
         else:
-            assets_to_check = list(self.asset_strategy_map.keys())
+            assets_to_check = list(self.asset_qualified_strategies.keys())
             strategies_to_check = []
             if not assets_to_check: 
                 self.logger('INFO', "Nenhum ativo qualificado para análise automática."); return
@@ -279,7 +291,8 @@ class TradingBot:
         try:
             base_name = full_name.split('-')[0]
             
-            strategies_to_run = manual_strategies or ([self.asset_strategy_map.get(base_name)] if self.asset_strategy_map.get(base_name) else [])
+            # --- ATUALIZAÇÃO: Usa a lista de estratégias qualificadas ---
+            strategies_to_run = manual_strategies or self.asset_qualified_strategies.get(base_name, [])
             if not strategies_to_run: return
 
             self.logger('INFO', f"A analisar {base_name} com as estratégias: {strategies_to_run}...")
