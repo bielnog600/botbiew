@@ -44,6 +44,9 @@ class TradingBot:
             'Inside Bar + RSI': ti.strategy_inside_bar_rsi,
             'Engolfo + Tendência': ti.strategy_engulfing_trend,
             'Compressão Bollinger': ti.strategy_bollinger_squeeze,
+            # --- NOVAS ESTRATÉGIAS ADICIONADAS ---
+            'Reversão de Fractal': ti.strategy_fractal_reversal,
+            'Bollinger + Fractal + Stoch': ti.strategy_bollinger_fractal_stoch,
         }
         self.asset_strategy_map: Dict[str, str] = {}
         
@@ -204,7 +207,7 @@ class TradingBot:
 
         while self.is_running:
             try:
-                if (datetime.utcnow() - self.last_reset_time).total_seconds() >= 7200: 
+                if (datetime.utcnow() - self.last_reset_time).total_seconds() >= 14400: # 4 horas
                     self._hourly_cycle_reset()
 
                 self._daily_reset_if_needed()
@@ -234,14 +237,8 @@ class TradingBot:
                 else:
                     time.sleep(5)
                 time.sleep(1)
-            # --- LÓGICA DE RECONEXÃO ---
             except Exception as e:
-                self.logger('ERROR', f"Loop principal falhou: {e}")
-                traceback.print_exc()
-                self.logger('WARNING', "A tentar reconectar em 15 segundos...")
-                time.sleep(15)
-                self.exnova.reconnect()
-
+                self.logger('ERROR', f"Loop principal falhou: {e}"); traceback.print_exc(); time.sleep(30)
 
     def trading_cycle(self):
         if self._check_stop_limits():
@@ -402,9 +399,9 @@ class TradingBot:
                 level = self.martingale_state.get(pair, {}).get('level', 0)
                 max_levels = self.bot_config.get('martingale_levels', 2)
                 if level < max_levels:
+                    self.logger('WARNING', f"MARTINGALE NÍVEL {level + 1} ATIVADO IMEDIATAMENTE.")
                     self.martingale_state[pair] = {'level': level + 1, 'is_active': True}
                     
-                    # --- PREVENÇÃO DE MARTINGALE SEM SALDO ---
                     mg_value = self._get_entry_value(pair, True)
                     current_balance = self.exnova.get_current_balance()
                     if current_balance is not None and mg_value > current_balance:
@@ -412,7 +409,6 @@ class TradingBot:
                         self.martingale_state[pair] = {'level': 0, 'is_active': False}
                         return
 
-                    self.logger('WARNING', f"MARTINGALE NÍVEL {level + 1} ATIVADO IMEDIATAMENTE.")
                     candles = self.exnova.get_historical_candles(pair, 60, 1)
                     if not candles:
                         self.logger("ERROR", f"Não foi possível obter a vela para o martingale de {pair}.")
