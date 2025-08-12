@@ -204,7 +204,7 @@ class TradingBot:
 
         while self.is_running:
             try:
-                if (datetime.utcnow() - self.last_reset_time).total_seconds() >= 14400: 
+                if (datetime.utcnow() - self.last_reset_time).total_seconds() >= 7200: 
                     self._hourly_cycle_reset()
 
                 self._daily_reset_if_needed()
@@ -234,8 +234,14 @@ class TradingBot:
                 else:
                     time.sleep(5)
                 time.sleep(1)
+            # --- LÓGICA DE RECONEXÃO ---
             except Exception as e:
-                self.logger('ERROR', f"Loop principal falhou: {e}"); traceback.print_exc(); time.sleep(30)
+                self.logger('ERROR', f"Loop principal falhou: {e}")
+                traceback.print_exc()
+                self.logger('WARNING', "A tentar reconectar em 15 segundos...")
+                time.sleep(15)
+                self.exnova.reconnect()
+
 
     def trading_cycle(self):
         if self._check_stop_limits():
@@ -291,23 +297,16 @@ class TradingBot:
                     max_atr = self.bot_config.get('manual_atr_max', 0.00100)
                     limits = (min_atr, max_atr)
                 else:
-                    predefined_limits = {
-                        'ULTRA_CONSERVADOR': (0.00005, 0.00025), 
-                        'CONSERVADOR': (0.00020, 0.00070), 
-                        'EQUILIBRADO': (0.00050, 0.00150), 
-                        'AGRESSIVO': (0.00100, 0.00300), 
-                        'ULTRA_AGRESSIVO': (0.00250, 999.0)
-                    }
+                    predefined_limits = { 'ULTRA_CONSERVADOR': (0.00005, 0.00025), 'CONSERVADOR': (0.00020, 0.00070), 'EQUILIBRADO': (0.00050, 0.00150), 'AGRESSIVO': (0.00100, 0.00300), 'ULTRA_AGRESSIVO': (0.00250, 999.0) }
                     limits = predefined_limits.get(vol_prof)
                 
                 if limits:
                     atr = ti.calculate_atr(candles)
-                    # --- LÓGICA DE VERIFICAÇÃO DE ATR MELHORADA ---
-                    if atr is not None: # Apenas verifica se o ATR foi calculado com sucesso
+                    if atr is not None:
                         if not (limits[0] <= atr <= limits[1]):
                             self.logger('INFO', f"[{base_name}] Análise abortada: Volatilidade (ATR: {atr:.5f}) fora dos limites {limits}.")
                             return
-                    else: # Se o ATR não pôde ser calculado
+                    else:
                         self.logger('WARNING', f"[{base_name}] Não foi possível calcular o ATR. O filtro de volatilidade será ignorado para esta análise.")
             
             for strat_name in strategies_to_run:
@@ -403,9 +402,17 @@ class TradingBot:
                 level = self.martingale_state.get(pair, {}).get('level', 0)
                 max_levels = self.bot_config.get('martingale_levels', 2)
                 if level < max_levels:
-                    self.logger('WARNING', f"MARTINGALE NÍVEL {level + 1} ATIVADO IMEDIATAMENTE.")
                     self.martingale_state[pair] = {'level': level + 1, 'is_active': True}
                     
+                    # --- PREVENÇÃO DE MARTINGALE SEM SALDO ---
+                    mg_value = self._get_entry_value(pair, True)
+                    current_balance = self.exnova.get_current_balance()
+                    if current_balance is not None and mg_value > current_balance:
+                        self.logger('ERROR', f"MARTINGALE CANCELADO: Saldo insuficiente ({self.currency_char}{current_balance:.2f}) para a entrada de {self.currency_char}{mg_value:.2f}.")
+                        self.martingale_state[pair] = {'level': 0, 'is_active': False}
+                        return
+
+                    self.logger('WARNING', f"MARTINGALE NÍVEL {level + 1} ATIVADO IMEDIATAMENTE.")
                     candles = self.exnova.get_historical_candles(pair, 60, 1)
                     if not candles:
                         self.logger("ERROR", f"Não foi possível obter a vela para o martingale de {pair}.")
