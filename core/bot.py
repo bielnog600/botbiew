@@ -115,7 +115,7 @@ class TradingBot:
         for asset in open_assets:
             base_name = asset.split('-')[0]
             try:
-                historical_candles = self.exnova.get_historical_candles(base_name, 60, 500)
+                historical_candles = self.exnova.get_historical_candles(base_name, 60, 200)
                 if not historical_candles or len(historical_candles) < 100:
                     continue
                 
