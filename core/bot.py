@@ -29,30 +29,34 @@ class TradingBot:
         self.martingale_state: Dict[str, Dict] = {}
         
         self.strategy_map: Dict[str, callable] = {
+            # Estratégias Originais
             'Pullback MQL': ti.strategy_mql_pullback,
             'Padrão de Reversão': ti.strategy_reversal_pattern,
             'Fluxo de Tendência': ti.strategy_trend_flow,
             'Reversão por Exaustão': ti.strategy_exhaustion_reversal,
             'Bandas de Bollinger': ti.strategy_bollinger_bands,
             'Cruzamento MACD': ti.strategy_macd_crossover,
+            # Estratégias de Confluência (Nível 1)
             'Tripla Confirmação': ti.strategy_triple_confirmation,
             'Fuga Bollinger + EMA': ti.strategy_bb_ema_filter,
             'MACD + RSI': ti.strategy_macd_rsi_confirm,
-            'Rejeição RSI + Pavio': ti.strategy_rejection_rsi_wick,
             'EMA Cross + Volume': ti.strategy_ema_volume_crossover,
+            # Estratégias Profissionais (Nível 2)
+            'Rejeição RSI + Pavio': ti.strategy_rejection_rsi_wick,
             'Rompimento Falso': ti.strategy_fake_breakout,
             'Inside Bar + RSI': ti.strategy_inside_bar_rsi,
             'Engolfo + Tendência': ti.strategy_engulfing_trend,
             'Compressão Bollinger': ti.strategy_bollinger_squeeze,
+            # Estratégias OTC / Scalping
             'Scalping StochRSI': ti.strategy_stochrsi_scalp,
             'Pires Awesome': ti.strategy_awesome_saucer,
             'Reversão Keltner': ti.strategy_keltner_reversion,
             'Tendência Heikin-Ashi': ti.strategy_heikinashi_trend,
             'Cruzamento Vortex': ti.strategy_vortex_cross,
+            # Estratégias com Fractais
             'Reversão de Fractal': ti.strategy_fractal_reversal,
             'Bollinger + Fractal + Stoch': ti.strategy_bollinger_fractal_stoch,
         }
-        # --- ATUALIZAÇÃO: Armazena uma LISTA de estratégias qualificadas por par ---
         self.asset_qualified_strategies: Dict[str, List[str]] = {}
         
         self.asset_performance: Dict[str, Dict[str, int]] = {}
@@ -120,11 +124,10 @@ class TradingBot:
         for asset in open_assets:
             base_name = asset.split('-')[0]
             try:
-                historical_candles = self.exnova.get_historical_candles(base_name, 60, 200)
+                historical_candles = self.exnova.get_historical_candles(base_name, 60, 200) # Alterado para 200 velas
                 if not historical_candles or len(historical_candles) < 100:
                     continue
                 
-                # --- ATUALIZAÇÃO: Guarda todas as estratégias que passam no teste ---
                 qualified_strats_for_pair = []
                 
                 for strategy_name, strategy_func in self.strategy_map.items():
@@ -146,7 +149,6 @@ class TradingBot:
                             qualified_strats_for_pair.append(strategy_name)
                             self.logger('SUCCESS', f"==> Estratégia qualificada para {base_name}: '{strategy_name}' ({win_rate:.2f}%)")
                             
-                            # Atualiza o melhor resultado para guardar na DB (apenas para visualização no painel)
                             if base_name not in cataloged_results or win_rate > cataloged_results[base_name]['win_rate']:
                                 cataloged_results[base_name] = { "pair": base_name, "best_strategy": strategy_name, "win_rate": round(win_rate, 2) }
 
@@ -215,7 +217,7 @@ class TradingBot:
 
         while self.is_running:
             try:
-                if (datetime.utcnow() - self.last_reset_time).total_seconds() >= 14400: 
+                if (datetime.utcnow() - self.last_reset_time).total_seconds() >= 14400: # 4 horas
                     self._hourly_cycle_reset()
 
                 self._daily_reset_if_needed()
@@ -291,7 +293,6 @@ class TradingBot:
         try:
             base_name = full_name.split('-')[0]
             
-            # --- ATUALIZAÇÃO: Usa a lista de estratégias qualificadas ---
             strategies_to_run = manual_strategies or self.asset_qualified_strategies.get(base_name, [])
             if not strategies_to_run: return
 
