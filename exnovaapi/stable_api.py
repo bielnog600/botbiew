@@ -10,7 +10,8 @@ from threading import Thread
 
 from websocket import create_connection
 
-from exnovaapi.api import ExnovaAPI
+# --- CORREÇÃO: O nome da classe foi corrigido de ExnovaAPI para API ---
+from exnovaapi.api import API
 from exnovaapi.constants import constants
 from exnovaapi.http.login import Login
 from exnovaapi.http.loginv2 import Loginv2
@@ -91,9 +92,6 @@ from exnovaapi.ws.chanels.digital_option_placed import DigitalOptionPlaced
 from exnovaapi.ws.chanels.training_balance_reset import TrainingBalanceReset
 from exnovaapi.ws.chanels.candles_history import CandlesHistory
 
-# In Python 2, unicode is a separate type from str
-# In Python 3, str is unicode, and there is a separate bytes type
-# pylint: disable=redefined-builtin
 try:
     unicode
 except NameError:
@@ -109,10 +107,10 @@ class Exnova:
         :param dict proxies: (optional) The http request proxies.
         """
         self.https_url = "https://{host}/api".format(host=host)
-        # --- CORREÇÃO: Garante que o protocolo websocket (wss) é usado ---
         self.wss_url = "wss://{host}/echo/websocket".format(host=host)
         self.websocket_client = None
-        self.api = ExnovaAPI(host, proxies)
+        # --- CORREÇÃO: O nome da classe foi corrigido de ExnovaAPI para API ---
+        self.api = API(host, proxies)
         self.instruments = None
         self.ssid = None
         self.profile = Profile()
@@ -197,14 +195,10 @@ class Exnova:
 
     @property
     def websocket(self):
-        """Property to get websocket.
-        :returns: The instance of :class:`ExnovaWs`.
-        """
         return self.websocket_client
 
     @websocket.setter
     def websocket(self, websocket):
-        """Method to set websocket."""
         self.websocket_client = websocket
 
     def get_ssid(self):
@@ -245,16 +239,11 @@ class Exnova:
         self.api.http.cookies = cookies
 
     def get_instruments(self, type, only_active=False):
-        """
-        type: "cfd", "forex", "crypto", "digital", "binary"
-        """
         self.api.get_instruments(type)
         while self.api.instruments is None:
             pass
-
         if only_active:
             return [x for x in self.api.instruments if x['is_enabled']]
-
         return self.api.instruments
 
     def get_financial_stats(self, instrument_type, active, country_id, user_group_id):
@@ -498,40 +487,21 @@ class Exnova:
         return self.training_balance.data
 
     def get_profile_ansyc(self):
-        """
-        return user profile
-        """
         self.profile.send_get_profile()
         while self.profile.isSuccessful is False:
             pass
         return self.profile.data
 
     def get_candles(self, active_id, time_interval, count, end_time):
-        """
-        :param int active_id: The active/asset id.
-        :param int time_interval: The time interval of the candles.
-        :param int count: The count of the candles.
-        :param int end_time: The end time of the candles.
-        """
         self.candles.send_get_candles(active_id, time_interval, count, end_time)
         while self.candles.isSuccessful is False:
             pass
         return self.candles.candles_data
 
-    # ------------------------------------------------------------------------
-
     def start_candles_stream(self, active_id, time_interval):
-        """
-        :param int active_id: The active/asset id.
-        :param int time_interval: The time interval of the candles.
-        """
         self.candles.subscribe(active_id, time_interval)
 
     def stop_candles_stream(self, active_id, time_interval):
-        """
-        :param int active_id: The active/asset id.
-        :param int time_interval: The time interval of the candles.
-        """
         self.candles.unsubscribe(active_id, time_interval)
 
     def start_instrument_quotes_stream(self, active_id, instrument_type):
@@ -541,15 +511,9 @@ class Exnova:
         self.instrument_quotes_generated.unsubscribe(active_id, instrument_type)
 
     def start_mood_stream(self, active_id):
-        """
-        :param int active_id: The active/asset id.
-        """
         self.traders_mood.subscribe(active_id)
 
     def stop_mood_stream(self, active_id):
-        """
-        :param int active_id: The active/asset id.
-        """
         self.traders_mood.unsubscribe(active_id)
 
     def start_candle_generated_v2(self, active_id, timeframe):
@@ -601,12 +565,6 @@ class Exnova:
         self.live_deal_cfd.unsubscribe(instrument_type, asset_id)
 
     def buy(self, amount, active_id, direction, duration):
-        """
-        :param int amount: The amount to bet.
-        :param int active_id: The active/asset id.
-        :param str direction: The direction of the bet ('call' or 'put').
-        :param int duration: The duration of the bet in minutes.
-        """
         self.buy_v3.send_buy(amount, active_id, direction, duration)
         while self.buy_v3.isSuccessful is False:
             pass
@@ -631,13 +589,9 @@ class Exnova:
         return self.profile.balance_id
 
     def check_connect(self):
-        # pylint: disable=no-member
         return self.websocket_thread.is_alive()
 
     def connect(self):
-        """
-        Connect to Exnova server.
-        """
         self.websocket_client = ExnovaWs(self)
         self.websocket_thread = Thread(target=self.websocket_client.run, daemon=True)
         self.websocket_thread.start()
