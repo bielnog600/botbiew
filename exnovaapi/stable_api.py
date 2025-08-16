@@ -36,8 +36,19 @@ from exnovaapi.api import Exnovaapi
 # HTTP endpoints
 from exnovaapi.http.getprofile import Getprofile
 
-# WebSocket core
-from exnovaapi.ws.client import ExnovaWs
+# WebSocket core (imports compatíveis)
+try:
+    from exnovaapi.ws.client import ExnovaWs  # nome esperado
+except Exception:
+    try:
+        from exnovaapi.ws.client import ExnovaWS as ExnovaWs  # variação de caixa
+    except Exception:
+        try:
+            from exnovaapi.ws.websocket_client import ExnovaWs  # caminho alternativo
+        except Exception as _ws_import_error:
+            ExnovaWs = None
+            _WS_IMPORT_ERROR = _ws_import_error
+
 
 # Canais WS
 from exnovaapi.ws.chanels.buyv3 import Buyv3
@@ -306,6 +317,10 @@ class Exnova:
         Retorna (True, None) em caso de sucesso, ou (False, "motivo").
         """
         with self.connect_wock:
+            if ExnovaWs is None:
+                raise ImportError(
+                    f"Não foi possível importar ExnovaWs. Erro original: {_WS_IMPORT_ERROR}"
+                )
             self.websocket_client = ExnovaWs(self)
             self.websocket_thread = Thread(target=self.websocket_client.run, daemon=True)
             self.websocket_thread.start()
