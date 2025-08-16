@@ -9,7 +9,7 @@ import websocket
 import exnovaapi.constants as OP_code
 import exnovaapi.global_value as global_value
 
-from threading import Thread  # pode ser útil em usos futuros
+from threading import Thread
 
 # Handlers de mensagens recebidas
 from exnovaapi.ws.received.technical_indicators import technical_indicators
@@ -75,12 +75,13 @@ class WebsocketClient(object):
     """
 
     def __init__(self, ctx):
-        # ctx = instância de Exnova. ctx.api = Exnovaapi (estado e métodos)
+        # --- CORREÇÃO: O 'ctx' já é o objeto da API ---
+        # A linha foi alterada de self.api = ctx.api para self.api = ctx
+        self.api = ctx
         self.ctx = ctx
-        self.api = ctx.api
 
         self.wss = websocket.WebSocketApp(
-            self.ctx.wss_url,
+            self.api.wss_url,
             on_message=self.on_message,
             on_error=self.on_error,
             on_close=self.on_close,
@@ -91,7 +92,7 @@ class WebsocketClient(object):
     def run(self):
         """Inicia o loop do websocket na thread criada pelo stable_api."""
         self.wss.run_forever(
-            sslopt={"cert_reqs": ssl.CERT_NONE},  # ajuste conforme necessidade
+            sslopt={"cert_reqs": ssl.CERT_NONE},
             ping_interval=20,
             ping_timeout=10,
         )
