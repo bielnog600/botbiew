@@ -1,8 +1,10 @@
+# Dependências da aplicação principal
 pydantic
 pydantic-settings
 python-dotenv
 supabase==2.5.0
-selenium==4.21.0  # <-- BIBLIOTECA ADICIONADA
+selenium==4.21.0
+psutil==5.9.8  # <-- NOVA BIBLIOTECA PARA GERIR PROCESSOS
 
 # Dependências de análise técnica
 pandas==2.2.2
