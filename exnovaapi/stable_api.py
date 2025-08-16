@@ -1,20 +1,5 @@
 # coding: utf-8
 
-"""
-stable_api_updated.py
----------------------
-Implementação completa e atualizada da classe Exnova, consolidando:
-- Imports corrigidos e ampliados
-- Assinatura do __init__ retrocompatível (email, password, active_account_type) + novos (host, proxies)
-- Setup de URLs HTTPS/WSS
-- Instanciação de todos os canais WebSocket conforme solicitado
-- Propriedades e métodos utilitários (websocket property, get/set ssid, context manager, close, connect)
-- Stubs seguros para métodos referenciados no restante do projeto (ex.: get_profile_ansyc),
-  evitando quebrar o código se a implementação concreta estiver nos canais.
-
-Observação: Esta classe depende do pacote "exnovaapi" e seus submódulos, conforme os imports abaixo.
-"""
-
 import json
 import logging
 import ssl
@@ -27,32 +12,17 @@ from datetime import datetime, timedelta
 from random import randint
 import queue
 
-# Removido: from websocket import create_connection (não utilizado)
-
-# API principal
 from exnovaapi.api import Exnovaapi
-# Removido: from exnovaapi.constants import constants (não utilizado)
-
-# HTTP endpoints
+import exnovaapi.constants as OP_code
+import exnovaapi.country_id as Country
+import exnovaapi.global_value as global_value
+from exnovaapi.expiration import get_expiration_time, get_remaning_time
+from exnovaapi.version_control import api_version
 from exnovaapi.http.getprofile import Getprofile
-
-# WebSocket core (imports compatíveis)
-try:
-    from exnovaapi.ws.client import ExnovaWs  # nome esperado
-except Exception:
-    try:
-        from exnovaapi.ws.client import ExnovaWS as ExnovaWs  # variação de caixa
-    except Exception:
-        try:
-            from exnovaapi.ws.websocket_client import ExnovaWs  # caminho alternativo
-        except Exception as _ws_import_error:
-            ExnovaWs = None
-            _WS_IMPORT_ERROR = _ws_import_error
-
-
-# Canais WS
+from exnovaapi.ws.client import ExnovaWs
 from exnovaapi.ws.chanels.buyv3 import Buyv3
-from exnovaapi.ws.chanels.buyv4 import Buyv4
+# --- REMOVIDO: Importação do módulo inexistente ---
+# from exnovaapi.ws.chanels.buyv4 import Buyv4 
 from exnovaapi.ws.chanels.candles import GetCandles
 from exnovaapi.ws.chanels.digital_placing import DigitalPlacing
 from exnovaapi.ws.chanels.financial_information import FinancialInformation
@@ -124,77 +94,46 @@ from exnovaapi.ws.chanels.digital_option_placed import DigitalOptionPlaced
 from exnovaapi.ws.chanels.training_balance_reset import TrainingBalanceReset
 from exnovaapi.ws.chanels.candles_history import CandlesHistory
 
-# Complementos do arquivo original
-import exnovaapi.constants as OP_code
-import exnovaapi.country_id as Country
-import exnovaapi.global_value as global_value
-from exnovaapi.expiration import get_expiration_time, get_remaning_time
-from exnovaapi.version_control import api_version
-
 try:
     unicode
 except NameError:
     unicode = str
 
-
-# ---------- util global (fora da classe!) ----------
-def nested_dict(n, typ):
-    """Cria um defaultdict recursivo: nested_dict(3, dict) -> dict de 3 níveis."""
+def nested_dict(n, type):
     if n == 1:
-        return defaultdict(typ)
-    return defaultdict(lambda: nested_dict(n - 1, typ))
-
+        return defaultdict(type)
+    else:
+        return defaultdict(lambda: nested_dict(n - 1, type))
 
 class Exnova:
-    """Class for communication with Exnova API."""
     __version__ = api_version
 
-    def __init__(self, email=None, password=None, active_account_type="PRACTICE", host="exnova.com", proxies=None):
-        """
-        Compatível com assinaturas antigas e adiciona novos parâmetros:
-        - email, password, active_account_type (compat)
-        - host, proxies (novos)
-        """
-        # --- Campos tradicionais usados em diversos métodos do projeto ---
+    def __init__(self, email, password, active_account_type="PRACTICE"):
         self.size = [1, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800,
                      3600, 7200, 14400, 28800, 43200, 86400, 604800, 2592000]
         self.email = email
         self.password = password
-        self.active_account_type = active_account_type
         self.suspend = 0.5
         self.thread = None
         self.subscribe_candle = []
         self.subscribe_candle_all_size = []
         self.subscribe_mood = []
         self.subscribe_indicators = []
-        self.get_digital_spot_profit_after_sale_data = defaultdict(lambda: defaultdict(int))
+        self.get_digital_spot_profit_after_sale_data = nested_dict(2, int)
         self.get_realtime_strike_list_temp_data = {}
         self.get_realtime_strike_list_temp_expiration = 0
         self.SESSION_HEADER = {
-            "User-Agent": r"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/66.0.3359.139 Safari/537.36"
-        }
+            "User-Agent": r"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/66.0.3359.139 Safari/537.36"}
         self.SESSION_COOKIE = {}
         self.q = queue.Queue(maxsize=4)
-
-        # --- Novos campos / correções ---
-        self.https_url = f"https://{host}/api"
-        self.wss_url = f"wss://{host}/echo/websocket"
-        self.websocket_client = None
-        self.websocket_thread = None
-        self.is_connected = False
-        self.connect_wock = threading.Lock()
-
-        # API + canais
-        self.api = Exnovaapi(host, proxies)
-        self.instruments = None
-        self.ssid = None
+        self.api = Exnovaapi(self.email, self.password)
         self.profile = Profile()
-        self.change_balance_id = None
         self.candles = GetCandles()
         self.instrument_quotes_generated = InstrumentQuotesGenerated()
         self.traders_mood = TradersMood()
         self.buy_v3 = Buyv3()
-        self.buy_v4 = Buyv4()
+        # --- REMOVIDO: Instanciação do módulo inexistente ---
+        # self.buy_v4 = Buyv4()
         self.list_info_data = ListInfoData()
         self.strike_list = StrikeList()
         self.digital_placing = DigitalPlacing()
@@ -202,15 +141,12 @@ class Exnova:
         self.training_balance = TrainingBalancen()
         self.buy_place_cancel_order = BuyPlaceCancelOrder()
         self.buy_place_close_order = BuyPlaceCloseOrder()
-
-        # Renomeados para não colidirem com métodos homônimos
         self.get_order_ch = GetOrder()
         self.get_positions_ch = GetPositions()
         self.get_position_ch = GetPosition()
         self.get_available_leverages_ch = GetAvailableLeverages()
         self.close_position_ch = ClosePosition()
         self.get_instruments_ch = GetInstruments()
-
         self.get_tpsl = GetTpsl()
         self.get_initialization_data = GetInitializationData()
         self.underlying_list = UnderlyingList()
@@ -265,147 +201,6 @@ class Exnova:
         self.quotes = Quotes()
         self.timesync = Ssid()
 
-
-    # ------------------------------------------------------------------
-    # Propriedades e utilitários
-    # ------------------------------------------------------------------
-    @property
-    def websocket(self):
-        return self.websocket_client
-
-    @websocket.setter
-    def websocket(self, websocket):
-        self.websocket_client = websocket
-
-    def get_ssid(self):
-        return self.api.ssid
-
-    def set_ssid(self, ssid):
-        self.api.ssid = ssid
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.close()
-
-    # ------------------------------------------------------------------
-    # Ciclo de vida da conexão
-    # ------------------------------------------------------------------
-    def close(self):
-        """
-        Fecha o cliente WebSocket e aguarda o término da thread.
-        Seguro para ser chamado múltiplas vezes.
-        """
-        try:
-            if self.websocket_client:
-                try:
-                    self.websocket_client.close()
-                except Exception:
-                    pass
-        finally:
-            if self.websocket_thread and self.websocket_thread.is_alive():
-                try:
-                    self.websocket_thread.join(timeout=2)
-                except Exception:
-                    pass
-
-    def connect(self):
-        """
-        Inicializa o cliente WS (ExnovaWs) em thread daemon, sincroniza SSID
-        e checa verificação de conta.
-        Retorna (True, None) em caso de sucesso, ou (False, "motivo").
-        """
-        with self.connect_wock:
-            if ExnovaWs is None:
-                raise ImportError(
-                    f"Não foi possível importar ExnovaWs. Erro original: {_WS_IMPORT_ERROR}"
-                )
-            self.websocket_client = ExnovaWs(self)
-            self.websocket_thread = Thread(target=self.websocket_client.run, daemon=True)
-            self.websocket_thread.start()
-
-            # Solicita sincronização de SSID via canal apropriado
-            try:
-                self.timesync.subscribe_ssid()
-            except Exception:
-                # Alguns builds usam outro nome de método; a chamada é "best effort".
-                pass
-
-            # Aguarda o flag de conexão
-            start = time.time()
-            while not self.is_connected and (time.time() - start) < 20:
-                time.sleep(0.01)
-
-            if not self.is_connected:
-                return False, "Timeout conectando WebSocket"
-
-            # Busca/assina perfil logo após conectar
-            self.get_profile_ansyc()
-            check, reason = self.check_verification()
-            if not check:
-                return False, reason
-
-            return True, None
-
-    def check_verification(self):
-        """
-        Valida se a conta está verificada. Mantém a semântica original:
-        retorna (True, None) se ok ou (False, 'mensagem') se não-verificada.
-        """
-        if getattr(self, "profile", None) and getattr(self.profile, "data", None):
-            # Alguns clientes usam chave direta; garantimos acesso seguro:
-            is_verified = self.profile.data.get("is_verified")
-            if is_verified is False:
-                return False, "Please verify your account"
-        return True, None
-
-    # Hooks chamados pelo cliente WS (se suportado)
-    def _on_ws_open(self):
-        self.is_connected = True
-
-    def _on_ws_close(self):
-        self.is_connected = False
-
-    def _on_ws_error(self, err):
-        logging.error("WebSocket error: %s", err)
-
-    # ------------------------------------------------------------------
-    # Stubs / utilitários compatíveis
-    # ------------------------------------------------------------------
-    def get_profile_ansyc(self):
-        """
-        Assina/solicita dados de perfil e devolve o payload do perfil.
-        - Tenta WS (Profile.subscribe)
-        - Tenta fallback HTTP (Getprofile) se disponível
-        - Aguarda até o dado aparecer em self.api.profile.msg
-        Retorna dict (ou {} se não disponível).
-        """
-        # Tentativa via canal WS
-        try:
-            if hasattr(self.profile, "subscribe"):
-                self.profile.subscribe()
-        except Exception:
-            pass
-
-        # Fallback HTTP (best-effort)
-        try:
-            gp = Getprofile()
-            if hasattr(gp, "send"):
-                gp.send(self)
-        except Exception:
-            pass
-
-        # Aguarda até 20s por self.api.profile.msg
-        start = time.time()
-        while getattr(self.api, "profile", None) is not None and getattr(self.api.profile, "msg", None) is None:
-            if time.time() - start > 20:
-                break
-            time.sleep(0.05)
-
-        return getattr(self.api.profile, "msg", {}) or {}
-
-
     def get_server_timestamp(self):
         return self.api.timesync.server_timestamp
 
@@ -416,13 +211,11 @@ class Exnova:
                 self.start_candles_one_stream(sp[0], sp[1])
         except:
             pass
-        # -----------------
         try:
             for ac in self.subscribe_candle_all_size:
                 self.start_candles_all_size_stream(ac)
         except:
             pass
-        # -------------reconnect subscribe_mood
         try:
             for ac in self.subscribe_mood:
                 self.start_mood_stream(ac)
@@ -433,11 +226,16 @@ class Exnova:
         self.SESSION_HEADER = header
         self.SESSION_COOKIE = cookie
 
+    def connect_2fa(self, sms_code):
+        return self.connect(sms_code=sms_code)
+
     def check_connect(self):
         if not global_value.check_websocket_if_connect:
             return False
         else:
             return True
+
+
         # wait for timestamp getting
 
     # _________________________UPDATE ACTIVES OPCODE_____________________
