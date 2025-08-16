@@ -2263,18 +2263,15 @@ class Exnova:
             self.api.close()
         except:
             pass
-            # logging.error('**warning** self.api.close() fail')
 
         self.api = Exnovaapi(self.email, self.password)
         check = None
 
-        # 2FA--
         if sms_code is not None:
             self.api.setTokenSMS(self.resp_sms)
             status, reason = self.api.connect2fa(sms_code)
             if not status:
                 return status, reason
-        # 2FA--
 
         self.api.set_session(headers=self.SESSION_HEADER,
                              cookies=self.SESSION_COOKIE)
@@ -2282,10 +2279,8 @@ class Exnova:
         check, reason = self.api.connect()
 
         if check == True:
-            # -------------reconnect subscribe_candle
             self.re_subscribe_stream()
 
-            # ---------for async get name: "position-changed", microserviceName
             while global_value.balance_id == None:
                 pass
 
@@ -2305,7 +2300,6 @@ class Exnova:
                     if response.json()['code'] != 'success':
                         return False, response.json()['message']
 
-                    # token_sms
                     self.resp_sms = response
                     return False, "2FA"
             except:
