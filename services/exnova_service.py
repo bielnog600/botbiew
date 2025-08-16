@@ -29,6 +29,7 @@ class ExnovaService:
         chrome_options.add_argument("--disable-gpu")
         chrome_options.add_argument("--window-size=1920x1080")
         
+        # --- CORREÇÃO: Adiciona um diretório de perfil único a cada arranque ---
         user_data_dir = f"/tmp/selenium_user_data_{int(time.time())}_{random.randint(1000, 9999)}"
         chrome_options.add_argument(f"--user-data-dir={user_data_dir}")
         
