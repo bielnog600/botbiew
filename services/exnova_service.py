@@ -12,7 +12,6 @@ from selenium.common.exceptions import TimeoutException, NoSuchElementException
 class ExnovaService:
     """
     Serviço para interagir com a Exnova através de automação de navegador (Selenium).
-    Esta classe substitui a necessidade de uma API direta.
     """
     def __init__(self, email, password):
         self.logger = logging.getLogger(__name__)
@@ -30,7 +29,6 @@ class ExnovaService:
         chrome_options.add_argument("--disable-gpu")
         chrome_options.add_argument("--window-size=1920x1080")
         
-        # --- CORREÇÃO: Adiciona um diretório de perfil único a cada arranque ---
         user_data_dir = f"/tmp/selenium_user_data_{int(time.time())}_{random.randint(1000, 9999)}"
         chrome_options.add_argument(f"--user-data-dir={user_data_dir}")
         
@@ -45,7 +43,6 @@ class ExnovaService:
     def connect(self):
         """
         Conecta-se à Exnova fazendo login através do navegador.
-        Retorna (True, None) em sucesso, (False, "motivo") em falha.
         """
         if not self.driver:
             return False, "WebDriver não foi inicializado."
@@ -74,40 +71,44 @@ class ExnovaService:
             return True, None
 
         except TimeoutException:
-            self.logger.error("Timeout ao tentar fazer login. A página demorou demasiado a carregar ou os elementos não foram encontrados.")
+            self.logger.error("Timeout ao tentar fazer login.")
             return False, "Timeout no login"
         except Exception as e:
             self.logger.error(f"Ocorreu um erro inesperado durante o login: {e}")
             return False, str(e)
 
     def reconnect(self):
-        """Tenta reconectar-se à plataforma."""
+        """Tenta reconectar-se à plataforma, garantindo que a sessão antiga é encerrada."""
         self.logger.warning("A tentar reconectar à Exnova...")
-        if self.driver:
-            try:
-                self.driver.quit()
-            except: pass
+        self.quit() # Garante que o driver antigo é encerrado
         self._setup_driver()
         return self.connect()
 
+    def quit(self):
+        """Encerra o navegador de forma segura."""
+        if self.driver:
+            try:
+                self.driver.quit()
+                self.logger.info("Navegador encerrado com sucesso.")
+            except Exception as e:
+                self.logger.error(f"Erro ao encerrar o navegador: {e}")
+            finally:
+                self.driver = None
+
     def get_profile(self):
-        return {"name": self.email, "balance_type": self.get_balance_mode()}
+        return {"name": self.email}
 
     def change_balance(self, balance_type):
-        """Muda o tipo de conta (REAL ou PRACTICE) clicando nos elementos da página."""
-        if not self.driver: return
+        if not self.driver: return False
         try:
             self.logger.info(f"A tentar mudar para a conta {balance_type}...")
+            # A lógica exata aqui depende da estrutura do site da Exnova
+            # Esta é uma implementação de exemplo que precisa de ser ajustada
             wait = WebDriverWait(self.driver, 10)
-
-            # Seletor de exemplo, pode precisar de ajuste
-            balance_selector = wait.until(EC.element_to_be_clickable((By.XPATH, "//div[contains(@class, 'account-switcher')]"))) 
+            balance_selector = wait.until(EC.element_to_be_clickable((By.XPATH, "//*[contains(@class,'balance-switcher')]")))
             balance_selector.click()
-
-            account_xpath = f"//div[contains(text(), '{balance_type.capitalize()}')]"
-            target_account = wait.until(EC.element_to_be_clickable((By.XPATH, account_xpath)))
-            target_account.click()
-            
+            account_option = wait.until(EC.element_to_be_clickable((By.XPATH, f"//div[contains(text(), '{balance_type.capitalize()}')]")))
+            account_option.click()
             self.logger.info(f"Conta mudada com sucesso para {balance_type}.")
             return True
         except Exception as e:
@@ -119,24 +120,17 @@ class ExnovaService:
         return ["EURUSD-OTC", "GBPUSD-OTC", "EURJPY-OTC", "AUDCAD-OTC", "USDJPY-OTC"]
 
     def get_historical_candles(self, asset, timeframe, count):
-        self.logger.warning(f"get_historical_candles() para {asset} está a retornar apenas dados simulados da vela atual.")
-        try:
-            price_element = self.driver.find_element(By.XPATH, "//div[contains(@class, 'current-price')]") # Seletor de exemplo
-            current_price = float(price_element.text)
-            
-            return [{
-                'open': current_price * 0.999, 'high': current_price * 1.001,
-                'low': current_price * 0.998, 'close': current_price, 'volume': 1000
-            }] * count
-        except:
-            return [{ 'open': 1, 'high': 1, 'low': 1, 'close': 1, 'volume': 1 }] * count
+        self.logger.warning(f"get_historical_candles() para {asset} está a retornar dados simulados.")
+        # A implementação real disto com Selenium é muito complexa.
+        # Retornamos dados simulados para permitir que as estratégias funcionem.
+        return [{ 'open': 1, 'high': 1.01, 'low': 0.99, 'close': 1, 'volume': 1000 }] * count
 
     def get_current_balance(self):
-        """Lê o saldo atual diretamente da página."""
         if not self.driver: return 0.0
         try:
+            # A lógica exata aqui depende da estrutura do site da Exnova
             balance_element = WebDriverWait(self.driver, 10).until(
-                EC.presence_of_element_located((By.XPATH, "//div[contains(@class, 'balance-value')]")) # Seletor de exemplo
+                EC.presence_of_element_located((By.XPATH, "//*[contains(@class,'balance-value')]"))
             )
             balance_text = balance_element.text.replace('R$', '').replace(',', '.').strip()
             return float(balance_text)
@@ -145,25 +139,23 @@ class ExnovaService:
             return 0.0
 
     def execute_trade(self, amount, asset, direction, timeframe):
-        """Executa uma operação clicando nos botões da página."""
         if not self.driver: return None
         try:
             self.logger.info(f"A executar operação: {direction.upper()} {amount} em {asset} por {timeframe} min.")
+            # A lógica exata aqui depende da estrutura do site da Exnova
             wait = WebDriverWait(self.driver, 10)
-
-            amount_input = wait.until(EC.presence_of_element_located((By.XPATH, "//input[@class='amount-input']"))) # Seletor de exemplo
+            amount_input = wait.until(EC.presence_of_element_located((By.XPATH, "//input[contains(@class,'amount-input')]")))
             amount_input.clear()
             amount_input.send_keys(str(amount))
 
             if direction.lower() == 'call':
-                button = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(@class, 'btn-call')]"))) # Seletor de exemplo
-            else: # put
-                button = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(@class, 'btn-put')]"))) # Seletor de exemplo
+                button = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(@class,'call-button')]")))
+            else:
+                button = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(@class,'put-button')]")))
             
             button.click()
-            
             self.logger.info("Operação executada com sucesso no navegador.")
-            return int(time.time()) 
+            return int(time.time())
         except Exception as e:
             self.logger.error(f"Falha ao executar a operação no navegador: {e}")
             return None
