@@ -21,7 +21,7 @@ class ExnovaService:
         self.email = email
         self.password = password
         self.driver = None
-        # Limpa sessões antigas ANTES de iniciar uma nova
+        # --- CORREÇÃO: Limpa sessões antigas ANTES de iniciar uma nova ---
         self._cleanup_old_sessions()
         self._setup_driver()
 
