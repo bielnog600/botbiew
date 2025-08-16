@@ -1,8 +1,8 @@
 # Usa uma imagem base oficial do Python.
 FROM python:3.10-slim
 
-# Define variáveis para as versões para garantir a compatibilidade
-ENV CHROME_VERSION="127.0.6533.72"
+# --- CORREÇÃO: Define a versão exata e compatível do Chrome/ChromeDriver ---
+ENV CHROME_VERSION="139.0.7258.68"
 
 # 1. Instala as dependências do sistema e utilitários (wget, unzip)
 RUN apt-get update -y && \
