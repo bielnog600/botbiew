@@ -18,6 +18,7 @@ from core.data_models import TradeSignal
 class TradingBot:
     def __init__(self):
         self.supabase: Optional[SupabaseService] = None
+        # O ExnovaService agora usa Selenium
         self.exnova = ExnovaService(settings.EXNOVA_EMAIL, settings.EXNOVA_PASSWORD)
         self.is_running = True
         self.bot_config: Dict = {}
@@ -29,40 +30,30 @@ class TradingBot:
         self.martingale_state: Dict[str, Dict] = {}
         
         self.strategy_map: Dict[str, callable] = {
-            # Estratégias Originais
             'Pullback MQL': ti.strategy_mql_pullback,
             'Padrão de Reversão': ti.strategy_reversal_pattern,
             'Fluxo de Tendência': ti.strategy_trend_flow,
             'Reversão por Exaustão': ti.strategy_exhaustion_reversal,
             'Bandas de Bollinger': ti.strategy_bollinger_bands,
             'Cruzamento MACD': ti.strategy_macd_crossover,
-            # Estratégias de Confluência (Nível 1)
             'Tripla Confirmação': ti.strategy_triple_confirmation,
             'Fuga Bollinger + EMA': ti.strategy_bb_ema_filter,
             'MACD + RSI': ti.strategy_macd_rsi_confirm,
-            'EMA Cross + Volume': ti.strategy_ema_volume_crossover,
-            # Estratégias Profissionais (Nível 2)
             'Rejeição RSI + Pavio': ti.strategy_rejection_rsi_wick,
+            'EMA Cross + Volume': ti.strategy_ema_volume_crossover,
             'Rompimento Falso': ti.strategy_fake_breakout,
             'Inside Bar + RSI': ti.strategy_inside_bar_rsi,
             'Engolfo + Tendência': ti.strategy_engulfing_trend,
             'Compressão Bollinger': ti.strategy_bollinger_squeeze,
-            # Estratégias OTC / Scalping
             'Scalping StochRSI': ti.strategy_stochrsi_scalp,
             'Pires Awesome': ti.strategy_awesome_saucer,
             'Reversão Keltner': ti.strategy_keltner_reversion,
             'Tendência Heikin-Ashi': ti.strategy_heikinashi_trend,
             'Cruzamento Vortex': ti.strategy_vortex_cross,
-            # Estratégias com Fractais
             'Reversão de Fractal': ti.strategy_fractal_reversal,
             'Bollinger + Fractal + Stoch': ti.strategy_bollinger_fractal_stoch,
         }
-        self.asset_qualified_strategies: Dict[str, List[str]] = {}
         
-        self.asset_performance: Dict[str, Dict[str, int]] = {}
-        self.consecutive_losses: Dict[str, int] = {}
-        self.blacklisted_assets: set = set()
-        self.last_reset_time: datetime = datetime.utcnow()
         self.last_analysis_minute = -1
         self.daily_wins = 0
         self.daily_losses = 0
@@ -74,108 +65,26 @@ class TradingBot:
         if self.supabase:
             self.supabase.insert_log(level, message)
 
-    def _is_news_time(self) -> bool:
-        pause_times = self.bot_config.get('news_pause_times', [])
-        if not pause_times: return False
-        now_utc = datetime.utcnow()
-        for time_str in pause_times:
-            try:
-                pause_hour, pause_minute = map(int, time_str.split(':'))
-                news_time_utc = now_utc.replace(hour=pause_hour, minute=pause_minute, second=0, microsecond=0)
-                pause_start = news_time_utc - timedelta(minutes=15)
-                pause_end = news_time_utc + timedelta(minutes=15)
-                if pause_start <= now_utc <= pause_end:
-                    self.logger("WARNING", f"Bot em pausa. Dentro da janela de notícias das {time_str} UTC.")
-                    return True
-            except ValueError:
-                self.logger("ERROR", f"Formato de hora inválido no filtro de notícias: {time_str}")
-                continue
-        return False
-            
     def _soft_restart(self):
         self.logger('WARNING', "--- REINÍCIO SUAVE ATIVADO ---")
         self.daily_wins = 0
         self.daily_losses = 0
         self.logger('INFO', "Placar diário interno zerado.")
         self._daily_reset_if_needed()
-        self.asset_qualified_strategies.clear()
-        self.asset_performance.clear()
-        self.consecutive_losses.clear()
-        self.blacklisted_assets.clear()
         self.is_trade_active = False
         self.martingale_state.clear()
-        self.last_reset_time = datetime.utcnow()
-        self.logger('INFO', "Estado interno limpo. A iniciar nova catalogação...")
-        self._run_cataloging()
-
-    def _run_cataloging(self):
-        self.logger('INFO', "--- INICIANDO MODO DE CATALOGAÇÃO DINÂMICA ---")
-        self.asset_qualified_strategies.clear()
-        open_assets = self.exnova.get_open_assets()
-        if not open_assets:
-            self.logger('WARNING', "Nenhum ativo aberto encontrado para catalogar.")
-            return
-
-        min_win_rate_threshold = self.bot_config.get('min_win_rate', 55)
-        self.logger('INFO', f"A usar taxa de acerto mínima de {min_win_rate_threshold}%.")
-        
-        cataloged_results = {}
-
-        for asset in open_assets:
-            base_name = asset.split('-')[0]
-            try:
-                historical_candles = self.exnova.get_historical_candles(base_name, 60, 200) # Alterado para 200 velas
-                if not historical_candles or len(historical_candles) < 100:
-                    continue
-                
-                qualified_strats_for_pair = []
-                
-                for strategy_name, strategy_func in self.strategy_map.items():
-                    wins, losses, total_trades = 0, 0, 0
-                    for i in range(50, len(historical_candles) - 1):
-                        past_candles, signal_candle, result_candle = historical_candles[:i], historical_candles[i-1], historical_candles[i]
-                        signal = strategy_func(past_candles)
-                        if signal:
-                            total_trades += 1
-                            if (signal == 'call' and result_candle['close'] > signal_candle['close']) or \
-                               (signal == 'put' and result_candle['close'] < signal_candle['close']):
-                                wins += 1
-                            else:
-                                losses += 1
-                    
-                    if total_trades > 10:
-                        win_rate = (wins / total_trades) * 100
-                        if win_rate >= min_win_rate_threshold:
-                            qualified_strats_for_pair.append(strategy_name)
-                            self.logger('SUCCESS', f"==> Estratégia qualificada para {base_name}: '{strategy_name}' ({win_rate:.2f}%)")
-                            
-                            if base_name not in cataloged_results or win_rate > cataloged_results[base_name]['win_rate']:
-                                cataloged_results[base_name] = { "pair": base_name, "best_strategy": strategy_name, "win_rate": round(win_rate, 2) }
-
-                if qualified_strats_for_pair:
-                    self.asset_qualified_strategies[base_name] = qualified_strats_for_pair
-                else:
-                    self.logger('WARNING', f"==> Nenhuma estratégia qualificada para {base_name}.")
-
-            except ValueError as ve:
-                if "not found in constants" not in str(ve):
-                    self.logger('ERROR', f"Erro de valor ao catalogar {base_name}: {ve}")
-            except Exception as e:
-                self.logger('ERROR', f"Erro geral ao catalogar {base_name}: {e}")
-        
-        cataloged_data_to_save = list(cataloged_results.values())
-        if cataloged_data_to_save:
-            self.logger('INFO', f"A guardar {len(cataloged_data_to_save)} ativos catalogados na base de dados...")
-            self.supabase.upsert_cataloged_assets(cataloged_data_to_save)
-
-        self.logger('INFO', "--- CATALOGAÇÃO CONCLUÍDA ---")
+        self.logger('INFO', "Estado interno limpo. O bot está pronto para operar.")
 
     def trading_loop_sync(self):
         self.logger('INFO', 'A iniciar o bot...')
-        if not self.exnova.connect(): 
+        # A conexão agora é o login via Selenium
+        check, reason = self.exnova.connect()
+        if not check:
+            self.logger('CRITICAL', f"Falha ao conectar/fazer login na Exnova: {reason}. O bot será encerrado.")
             self.is_running = False
             return
 
+        # Lógica de arranque para obter configuração
         max_retries = 5
         retry_delay = 10
         for attempt in range(max_retries):
@@ -185,7 +94,6 @@ class TradingBot:
                 self.bot_config = config
                 self.logger('SUCCESS', "Configuração carregada com sucesso!")
                 break
-            
             self.logger('WARNING', f"Não foi possível obter a configuração. A tentar novamente em {retry_delay} segundos...")
             time.sleep(retry_delay)
         else:
@@ -194,37 +102,20 @@ class TradingBot:
             return
 
         profile_data = self.exnova.get_profile()
-        if not profile_data: 
-            self.is_running = False
-            return
-            
-        try:
-            self.currency_char = profile_data.get('currency_char', '$')
-            self.logger('SUCCESS', f"Perfil carregado! Olá, {profile_data.get('name', 'Utilizador')}.")
-        except Exception as e:
-            self.logger('ERROR', f"Erro ao processar perfil: {e}")
-            self.is_running = False
-            return
+        self.logger('SUCCESS', f"Perfil carregado! Olá, {profile_data.get('name', 'Utilizador')}.")
         
         self.current_account_type = self.bot_config.get('account_type', 'PRACTICE')
         self.previous_status = self.bot_config.get('status', 'PAUSED')
         self.exnova.change_balance(self.current_account_type)
-        self.logger('INFO', f"Conta inicial definida para: {self.current_account_type}")
         
         self._daily_reset_if_needed()
-        if self.previous_status == 'RUNNING': 
-            self._run_cataloging()
 
         while self.is_running:
             try:
-                if (datetime.utcnow() - self.last_reset_time).total_seconds() >= 14400: # 4 horas
-                    self._hourly_cycle_reset()
-
                 self._daily_reset_if_needed()
                 
                 new_config = self.supabase.get_bot_config()
-                if new_config:
-                    self.bot_config = new_config
+                if new_config: self.bot_config = new_config
                 
                 current_status = self.bot_config.get('status', 'PAUSED')
                 if current_status == 'RUNNING' and self.previous_status == 'PAUSED': 
@@ -239,9 +130,6 @@ class TradingBot:
                     self.current_account_type = desired_account_type
                 
                 if current_status == 'RUNNING':
-                    if self._is_news_time():
-                        time.sleep(15)
-                        continue
                     if not self.is_trade_active:
                         self.trading_cycle()
                 else:
@@ -250,8 +138,6 @@ class TradingBot:
             except Exception as e:
                 self.logger('ERROR', f"Loop principal falhou: {e}")
                 traceback.print_exc()
-                self.logger('WARNING', "A tentar reconectar em 15 segundos...")
-                time.sleep(15)
                 self.exnova.reconnect()
 
     def trading_cycle(self):
@@ -265,60 +151,25 @@ class TradingBot:
             self.run_analysis_for_timeframe(60, 1)
 
     def run_analysis_for_timeframe(self, tf_secs, exp_mins):
-        manual_mode = self.bot_config.get('manual_mode_enabled', False)
+        # Com Selenium, o bot opera sempre com base nas configurações do painel
+        assets_to_check = self.bot_config.get('manual_pairs', [])
+        strategies_to_check = self.bot_config.get('manual_strategies', [])
         
-        if manual_mode:
-            assets_to_check = self.bot_config.get('manual_pairs', [])
-            strategies_to_check = self.bot_config.get('manual_strategies', [])
-            if not assets_to_check or not strategies_to_check:
-                self.logger("WARNING", "Modo manual ativo, mas nenhum par ou estratégia foi selecionado.")
-                return
-        else:
-            assets_to_check = list(self.asset_qualified_strategies.keys())
-            strategies_to_check = []
-            if not assets_to_check: 
-                self.logger('INFO', "Nenhum ativo qualificado para análise automática."); return
+        if not assets_to_check or not strategies_to_check:
+            self.logger("INFO", "Nenhum par ou estratégia selecionado no painel. A aguardar...")
+            return
 
-        all_open_assets = self.exnova.get_open_assets()
-        
-        prioritized_assets = assets_to_check if manual_mode else sorted(assets_to_check, key=lambda p: (self.asset_performance.get(p,{}).get('wins',0)+1)/(self.asset_performance.get(p,{}).get('wins',0)+self.asset_performance.get(p,{}).get('losses',0)+2), reverse=True)
-
-        for pair in prioritized_assets:
+        for pair in assets_to_check:
             if self.is_trade_active: break
-            full_name = next((a for a in all_open_assets if a.startswith(pair)), None)
-            if full_name and pair not in self.blacklisted_assets:
-                self._analyze_asset(full_name, tf_secs, exp_mins, strategies_to_check if manual_mode else [])
+            self._analyze_asset(pair, tf_secs, exp_mins, strategies_to_check)
 
-    def _analyze_asset(self, full_name, tf_secs, exp_mins, manual_strategies: List[str]):
+    def _analyze_asset(self, pair_name, tf_secs, exp_mins, strategies_to_run: List[str]):
         try:
-            base_name = full_name.split('-')[0]
-            
-            strategies_to_run = manual_strategies or self.asset_qualified_strategies.get(base_name, [])
-            if not strategies_to_run: return
-
-            self.logger('INFO', f"A analisar {base_name} com as estratégias: {strategies_to_run}...")
-            candles = self.exnova.get_historical_candles(base_name, 60, 50)
-            if not candles or len(candles) < 20: return
-
-            vol_prof = self.bot_config.get('volatility_profile', 'EQUILIBRADO')
-            if vol_prof != 'DESATIVADO':
-                limits = None
-                if vol_prof == 'MANUAL':
-                    min_atr = self.bot_config.get('manual_atr_min', 0.00030)
-                    max_atr = self.bot_config.get('manual_atr_max', 0.00100)
-                    limits = (min_atr, max_atr)
-                else:
-                    predefined_limits = { 'ULTRA_CONSERVADOR': (0.00005, 0.00025), 'CONSERVADOR': (0.00020, 0.00070), 'EQUILIBRADO': (0.00050, 0.00150), 'AGRESSIVO': (0.00100, 0.00300), 'ULTRA_AGRESSIVO': (0.00250, 999.0) }
-                    limits = predefined_limits.get(vol_prof)
-                
-                if limits:
-                    atr = ti.calculate_atr(candles)
-                    if atr is not None:
-                        if not (limits[0] <= atr <= limits[1]):
-                            self.logger('INFO', f"[{base_name}] Análise abortada: Volatilidade (ATR: {atr:.5f}) fora dos limites {limits}.")
-                            return
-                    else:
-                        self.logger('WARNING', f"[{base_name}] Não foi possível calcular o ATR. O filtro de volatilidade será ignorado para esta análise.")
+            self.logger('INFO', f"A analisar {pair_name} com as estratégias: {strategies_to_run}...")
+            # AVISO: get_historical_candles com Selenium retorna dados simulados!
+            # Apenas estratégias que dependem da vela mais recente podem funcionar de forma fiável.
+            candles = self.exnova.get_historical_candles(pair_name, 60, 50)
+            if not candles: return
             
             for strat_name in strategies_to_run:
                 if self.is_trade_active: break
@@ -329,14 +180,14 @@ class TradingBot:
                 if direction:
                     now = datetime.utcnow()
                     wait = (60 - now.second - 1) + (1 - now.microsecond / 1e6) + 0.2
-                    self.logger('SUCCESS', f"SINAL ENCONTRADO! {base_name} | {strat_name} | {direction.upper()}")
+                    self.logger('SUCCESS', f"SINAL ENCONTRADO! {pair_name} | {strat_name} | {direction.upper()}")
                     if wait > 0: time.sleep(wait)
                     
-                    signal = TradeSignal(pair=base_name, direction=direction, strategy=strat_name, **candles[-1])
-                    self._execute_and_wait(signal, full_name, exp_mins)
+                    signal = TradeSignal(pair=pair_name, direction=direction, strategy=strat_name, **candles[-1])
+                    self._execute_and_wait(signal, pair_name, exp_mins)
 
         except Exception as e:
-            self.logger('ERROR', f"Erro em _analyze_asset({full_name}): {e}")
+            self.logger('ERROR', f"Erro em _analyze_asset({pair_name}): {e}")
             traceback.print_exc()
 
     async def run(self):
@@ -345,6 +196,8 @@ class TradingBot:
         thread.start()
         while self.is_running and thread.is_alive(): 
             await asyncio.sleep(1)
+        if self.exnova.driver:
+            self.exnova.driver.quit()
 
     def _execute_and_wait(self, signal: TradeSignal, full_name: str, exp_mins: int):
         self.is_trade_active = True
@@ -359,7 +212,6 @@ class TradingBot:
                 self.supabase.insert_trade_signal(signal)
                 return
             
-            self.logger('INFO', f"Ordem {order_id} enviada. Valor: {self.currency_char}{value:.2f}")
             sid = self.supabase.insert_trade_signal(signal)
             
             time.sleep(exp_mins * 60 + 5)
@@ -393,39 +245,27 @@ class TradingBot:
 
     def _update_stats_and_martingale(self, result, signal, full_name, exp_mins):
         pair = signal.pair
-        self.asset_performance.setdefault(pair, {'wins': 0, 'losses': 0})
-        self.consecutive_losses.setdefault(pair, 0)
         
         if result == 'WIN':
             self.daily_wins += 1
-            self.asset_performance[pair]['wins'] += 1
-            self.consecutive_losses[pair] = 0
             self.martingale_state[pair] = {'level': 0, 'is_active': False}
         elif result == 'LOSS':
             self.daily_losses += 1
-            self.asset_performance[pair]['losses'] += 1
-            self.consecutive_losses[pair] += 1
-            if self.consecutive_losses[pair] >= 2:
-                self.blacklisted_assets.add(pair)
-                self.logger('ERROR', f"Par {pair} na lista negra.")
-            
             if self.bot_config.get('use_martingale', False):
                 level = self.martingale_state.get(pair, {}).get('level', 0)
                 max_levels = self.bot_config.get('martingale_levels', 2)
                 if level < max_levels:
-                    self.logger('WARNING', f"MARTINGALE NÍVEL {level + 1} ATIVADO IMEDIATAMENTE.")
                     self.martingale_state[pair] = {'level': level + 1, 'is_active': True}
                     
                     mg_value = self._get_entry_value(pair, True)
                     current_balance = self.exnova.get_current_balance()
                     if current_balance is not None and mg_value > current_balance:
-                        self.logger('ERROR', f"MARTINGALE CANCELADO: Saldo insuficiente ({self.currency_char}{current_balance:.2f}) para a entrada de {self.currency_char}{mg_value:.2f}.")
+                        self.logger('ERROR', f"MARTINGALE CANCELADO: Saldo insuficiente.")
                         self.martingale_state[pair] = {'level': 0, 'is_active': False}
                         return
 
                     candles = self.exnova.get_historical_candles(pair, 60, 1)
                     if not candles:
-                        self.logger("ERROR", f"Não foi possível obter a vela para o martingale de {pair}.")
                         self.is_trade_active = False
                         return
                     
@@ -465,10 +305,6 @@ class TradingBot:
                 self.bot_config['status'] = 'PAUSED'
             return True
         return False
-
-    def _hourly_cycle_reset(self):
-        self.logger('INFO', "--- RESET DE CICLO HORÁRIO ---")
-        self._soft_restart()
 
     def _daily_reset_if_needed(self):
         if self.last_daily_reset_date != datetime.utcnow().date():
