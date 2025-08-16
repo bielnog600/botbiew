@@ -1,14 +1,8 @@
-# requirements.txt - Configurado para a biblioteca local exnovaapi
-
-# Dependências da aplicação principal
 pydantic
 pydantic-settings
 python-dotenv
-supabase
-
-# Dependências necessárias para a pasta local exnovaapi
-requests
-websocket-client
+supabase==2.5.0
+selenium==4.21.0  # <-- BIBLIOTECA ADICIONADA
 
 # Dependências de análise técnica
 pandas==2.2.2
