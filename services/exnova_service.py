@@ -1,5 +1,6 @@
 import logging
 import time
+import random
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
@@ -23,13 +24,16 @@ class ExnovaService:
     def _setup_driver(self):
         """Configura as opções do Chrome e inicializa o WebDriver."""
         chrome_options = Options()
-        chrome_options.add_argument("--headless")  # Executa o Chrome sem interface gráfica
+        chrome_options.add_argument("--headless")
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--disable-gpu")
         chrome_options.add_argument("--window-size=1920x1080")
         
-        # O ChromeDriver já deve estar no PATH do sistema (/usr/local/bin/)
+        # --- CORREÇÃO: Adiciona um diretório de perfil único a cada arranque ---
+        user_data_dir = f"/tmp/selenium_user_data_{int(time.time())}_{random.randint(1000, 9999)}"
+        chrome_options.add_argument(f"--user-data-dir={user_data_dir}")
+        
         service = Service()
         try:
             self.driver = webdriver.Chrome(service=service, options=chrome_options)
@@ -50,7 +54,6 @@ class ExnovaService:
             self.logger.info("A navegar para a página de login da Exnova...")
             self.driver.get("https://exnova.com/login")
 
-            # Espera pelos campos de email e senha e preenche-os
             wait = WebDriverWait(self.driver, 20)
             
             email_input = wait.until(EC.presence_of_element_located((By.NAME, "email")))
@@ -61,12 +64,10 @@ class ExnovaService:
             password_input.send_keys(self.password)
             self.logger.info("Campo de senha preenchido.")
 
-            # Encontra e clica no botão de login
             login_button = self.driver.find_element(By.XPATH, "//button[@type='submit']")
             login_button.click()
             self.logger.info("Botão de login clicado. A aguardar pela página principal...")
 
-            # Espera por um elemento da página principal para confirmar o login
             wait.until(EC.presence_of_element_located((By.XPATH, "//*[contains(text(), 'Total Portfolio')]")))
             
             self.logger.info("Login realizado com sucesso!")
@@ -83,13 +84,13 @@ class ExnovaService:
         """Tenta reconectar-se à plataforma."""
         self.logger.warning("A tentar reconectar à Exnova...")
         if self.driver:
-            self.driver.quit()
+            try:
+                self.driver.quit()
+            except: pass
         self._setup_driver()
         return self.connect()
 
     def get_profile(self):
-        # Com Selenium, o perfil já está carregado na sessão do navegador.
-        # Retornamos um dicionário simulado para manter a compatibilidade.
         return {"name": self.email, "balance_type": self.get_balance_mode()}
 
     def change_balance(self, balance_type):
@@ -99,12 +100,11 @@ class ExnovaService:
             self.logger.info(f"A tentar mudar para a conta {balance_type}...")
             wait = WebDriverWait(self.driver, 10)
 
-            # Clica no seletor de conta para abrir o menu
-            balance_selector = wait.until(EC.element_to_be_clickable((By.XPATH, "//div[contains(@class, 'account-switcher')]"))) # Seletor de exemplo
+            # Seletor de exemplo, pode precisar de ajuste
+            balance_selector = wait.until(EC.element_to_be_clickable((By.XPATH, "//div[contains(@class, 'account-switcher')]"))) 
             balance_selector.click()
 
-            # Clica na conta desejada
-            account_xpath = f"//div[contains(text(), '{balance_type.capitalize()}')]" # Seletor de exemplo
+            account_xpath = f"//div[contains(text(), '{balance_type.capitalize()}')]"
             target_account = wait.until(EC.element_to_be_clickable((By.XPATH, account_xpath)))
             target_account.click()
             
@@ -115,32 +115,20 @@ class ExnovaService:
             return False
 
     def get_open_assets(self):
-        # Esta função é complexa de implementar com Selenium.
-        # Por agora, retornamos uma lista estática de pares comuns para permitir que o bot funcione.
-        # No futuro, podemos implementar um "scraper" para ler os ativos abertos.
         self.logger.warning("get_open_assets() está a usar uma lista estática de ativos.")
         return ["EURUSD-OTC", "GBPUSD-OTC", "EURJPY-OTC", "AUDCAD-OTC", "USDJPY-OTC"]
 
     def get_historical_candles(self, asset, timeframe, count):
-        # Obter um histórico completo de velas é extremamente difícil com Selenium.
-        # Esta função agora retorna apenas a informação da vela mais recente para permitir
-        # que as estratégias que dependem apenas da última vela funcionem.
         self.logger.warning(f"get_historical_candles() para {asset} está a retornar apenas dados simulados da vela atual.")
         try:
-            # Tenta "ler" o preço atual diretamente da página
             price_element = self.driver.find_element(By.XPATH, "//div[contains(@class, 'current-price')]") # Seletor de exemplo
             current_price = float(price_element.text)
             
-            # Retorna uma lista com uma única vela simulada
             return [{
-                'open': current_price * 0.999,
-                'high': current_price * 1.001,
-                'low': current_price * 0.998,
-                'close': current_price,
-                'volume': 1000
-            }] * count # Multiplica para simular um histórico
+                'open': current_price * 0.999, 'high': current_price * 1.001,
+                'low': current_price * 0.998, 'close': current_price, 'volume': 1000
+            }] * count
         except:
-            # Fallback se não conseguir ler o preço
             return [{ 'open': 1, 'high': 1, 'low': 1, 'close': 1, 'volume': 1 }] * count
 
     def get_current_balance(self):
@@ -163,12 +151,10 @@ class ExnovaService:
             self.logger.info(f"A executar operação: {direction.upper()} {amount} em {asset} por {timeframe} min.")
             wait = WebDriverWait(self.driver, 10)
 
-            # Insere o valor da entrada
             amount_input = wait.until(EC.presence_of_element_located((By.XPATH, "//input[@class='amount-input']"))) # Seletor de exemplo
             amount_input.clear()
             amount_input.send_keys(str(amount))
 
-            # Clica no botão de compra ou venda
             if direction.lower() == 'call':
                 button = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(@class, 'btn-call')]"))) # Seletor de exemplo
             else: # put
@@ -177,7 +163,6 @@ class ExnovaService:
             button.click()
             
             self.logger.info("Operação executada com sucesso no navegador.")
-            # Como não temos um ID de ordem, podemos retornar um timestamp como identificador único
             return int(time.time()) 
         except Exception as e:
             self.logger.error(f"Falha ao executar a operação no navegador: {e}")
