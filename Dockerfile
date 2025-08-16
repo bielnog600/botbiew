@@ -9,11 +9,12 @@ RUN apt-get update -y && \
     apt-get install -y --no-install-recommends \
     wget \
     unzip \
-    # Dependências do Chrome
-    libglib2.0-0 libnss3 libgconf-2-4 libfontconfig1 libx11-6 libx11-xcb1 \
+    # Dependências do Chrome (com o pacote obsoleto removido)
+    libglib2.0-0 libnss3 libfontconfig1 libx11-6 libx11-xcb1 \
     libxcb1 libxcomposite1 libxcursor1 libxdamage1 libxext6 libxfixes3 \
     libxi6 libxrandr2 libxrender1 libxss1 libxtst6 libasound2 libatk1.0-0 \
     libatk-bridge2.0-0 libcups2 libdbus-1-3 libatspi2.0-0 libgtk-3-0 && \
+    # Limpa o cache do apt para manter a imagem pequena
     rm -rf /var/lib/apt/lists/*
 
 # 2. Descarrega e instala o Google Chrome
