@@ -10,8 +10,8 @@ from threading import Thread
 
 from websocket import create_connection
 
-# --- CORREÇÃO: O nome da classe foi corrigido de ExnovaAPI para API ---
-from exnovaapi.api import API
+# --- CORREÇÃO: Voltamos a usar o nome original 'ExnovaAPI' ---
+from exnovaapi.api import ExnovaAPI
 from exnovaapi.constants import constants
 from exnovaapi.http.login import Login
 from exnovaapi.http.loginv2 import Loginv2
@@ -109,8 +109,8 @@ class Exnova:
         self.https_url = "https://{host}/api".format(host=host)
         self.wss_url = "wss://{host}/echo/websocket".format(host=host)
         self.websocket_client = None
-        # --- CORREÇÃO: O nome da classe foi corrigido de ExnovaAPI para API ---
-        self.api = API(host, proxies)
+        # --- CORREÇÃO: Voltamos a usar o nome original 'ExnovaAPI' ---
+        self.api = ExnovaAPI(host, proxies)
         self.instruments = None
         self.ssid = None
         self.profile = Profile()
