@@ -267,3 +267,18 @@ class WebsocketClient(object):
         logger = logging.getLogger(__name__)
         logger.debug("Websocket connection closed.")
         global_value.check_websocket_if_connect = 0
+
+
+        
+# Alias de compatibilidade (se a classe tiver outro nome)
+try:
+    ExnovaWs
+except NameError:
+    try:
+        ExnovaWs = ExnovaWS
+    except NameError:
+        try:
+            ExnovaWs = WebSocketClient
+        except NameError:
+            pass
+
