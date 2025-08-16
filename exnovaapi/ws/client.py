@@ -80,8 +80,12 @@ class WebsocketClient(object):
         self.api = ctx
         self.ctx = ctx
 
+        # Constrói o URL do WebSocket de forma segura para garantir o protocolo 'wss://'
+        host = getattr(self.api, "host", "exnova.com")
+        wss_url = f"wss://{host}/echo/websocket"
+
         self.wss = websocket.WebSocketApp(
-            self.api.wss_url,
+            wss_url,
             on_message=self.on_message,
             on_error=self.on_error,
             on_close=self.on_close,
@@ -149,13 +153,13 @@ class WebsocketClient(object):
         balances(self.api, message)
         profile(self.api, message)
         balance_changed(self.api, message)
-        # candles(self.api, message)
+        candles(self.api, message)
         buy_complete(self.api, message)
         option(self.api, message)
         position_history(self.api, message)
         list_info_data(self.api, message)
-        # candle_generated_realtime(self.api, message, self.dict_queue_add)
-        # candle_generated_v2(self.api, message, self.dict_queue_add)
+        candle_generated_realtime(self.api, message, self.dict_queue_add)
+        candle_generated_v2(self.api, message, self.dict_queue_add)
         commission_changed(self.api, message)
         socket_option_opened(self.api, message)
         api_option_init_all_result(self.api, message)
