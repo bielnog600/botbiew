@@ -1,6 +1,9 @@
 import logging
 import time
 import random
+import os
+import shutil
+import psutil
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
@@ -18,21 +21,41 @@ class ExnovaService:
         self.email = email
         self.password = password
         self.driver = None
+        # --- CORREÇÃO: Limpa sessões antigas ANTES de iniciar uma nova ---
+        self._cleanup_old_sessions()
         self._setup_driver()
+
+    def _cleanup_old_sessions(self):
+        """Força o encerramento de processos antigos do Chrome e limpa pastas temporárias."""
+        self.logger.info("A verificar e limpar sessões antigas do navegador...")
+        try:
+            # Encerra processos "zombie"
+            for proc in psutil.process_iter(['pid', 'name']):
+                if 'chrome' in proc.info['name'].lower() or 'chromedriver' in proc.info['name'].lower():
+                    self.logger.warning(f"A encerrar processo antigo: {proc.info['name']} (PID: {proc.info['pid']})")
+                    proc.kill()
+            
+            # Limpa pastas de perfil antigas
+            for item in os.listdir('/tmp'):
+                if item.startswith('selenium_user_data_'):
+                    path = os.path.join('/tmp', item)
+                    self.logger.warning(f"A remover pasta de perfil antiga: {path}")
+                    shutil.rmtree(path, ignore_errors=True)
+            self.logger.info("Limpeza de sessões antigas concluída.")
+        except Exception as e:
+            self.logger.error(f"Erro durante a limpeza de sessões antigas: {e}")
+
 
     def _setup_driver(self):
         """Configura as opções do Chrome e inicializa o WebDriver."""
         chrome_options = Options()
-        # --- CORREÇÃO: Usa o novo modo headless e adiciona argumentos de estabilidade ---
         chrome_options.add_argument("--headless=new") 
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--disable-gpu")
         chrome_options.add_argument("--window-size=1920x1080")
-        # Argumento para evitar problemas de DNS e processos em alguns containers Docker
         chrome_options.add_argument("--disable-features=IsolateOrigins,site-per-process")
         
-        # A criação de um diretório único continua a ser a solução principal
         user_data_dir = f"/tmp/selenium_user_data_{int(time.time())}_{random.randint(1000, 9999)}"
         chrome_options.add_argument(f"--user-data-dir={user_data_dir}")
         
@@ -76,11 +99,15 @@ class ExnovaService:
 
         except TimeoutException:
             self.logger.error("Timeout ao tentar fazer login. A página demorou demasiado a carregar ou os elementos não foram encontrados.")
-            self.driver.save_screenshot("login_timeout_error.png")
+            try:
+                self.driver.save_screenshot("login_timeout_error.png")
+            except: pass
             return False, "Timeout no login"
         except Exception as e:
             self.logger.error(f"Ocorreu um erro inesperado durante o login: {e}")
-            self.driver.save_screenshot("login_unexpected_error.png")
+            try:
+                self.driver.save_screenshot("login_unexpected_error.png")
+            except: pass
             return False, str(e)
 
     def reconnect(self):
