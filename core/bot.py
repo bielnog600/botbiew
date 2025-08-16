@@ -194,10 +194,13 @@ class TradingBot:
         self.supabase = SupabaseService(settings.SUPABASE_URL, settings.SUPABASE_KEY)
         thread = Thread(target=self.trading_loop_sync, daemon=True)
         thread.start()
-        while self.is_running and thread.is_alive(): 
-            await asyncio.sleep(1)
-        if self.exnova.driver:
-            self.exnova.driver.quit()
+        try:
+            while self.is_running and thread.is_alive(): 
+                await asyncio.sleep(1)
+        finally:
+            # Garante que o navegador é sempre encerrado
+            self.logger("INFO", "A encerrar o bot e o navegador...")
+            self.exnova.quit()
 
     def _execute_and_wait(self, signal: TradeSignal, full_name: str, exp_mins: int):
         self.is_trade_active = True
