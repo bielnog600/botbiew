@@ -1,9 +1,17 @@
-import json, time
+# coding: utf-8
+
+import json
+import time
 import logging
+import ssl
 import websocket
+
 import exnovaapi.constants as OP_code
 import exnovaapi.global_value as global_value
-from threading import Thread
+
+from threading import Thread  # pode ser útil em usos futuros
+
+# Handlers de mensagens recebidas
 from exnovaapi.ws.received.technical_indicators import technical_indicators
 from exnovaapi.ws.received.time_sync import time_sync
 from exnovaapi.ws.received.heartbeat import heartbeat
@@ -61,61 +69,92 @@ from exnovaapi.ws.received.users_availability import users_availability
 
 
 class WebsocketClient(object):
+    """
+    Este cliente é instanciado pelo Exnova (stable_api) com `ExnovaWs(self)`,
+    onde `self` é a instância Exnova (que possui .wss_url e .api).
+    """
 
+    def __init__(self, ctx):
+        # ctx = instância de Exnova. ctx.api = Exnovaapi (estado e métodos)
+        self.ctx = ctx
+        self.api = ctx.api
 
-    def __init__(self, api):
-
-        self.api = api
         self.wss = websocket.WebSocketApp(
-            self.api.wss_url, on_message=self.on_message,
-            on_error=self.on_error, on_close=self.on_close,
-            on_open=self.on_open)
+            self.ctx.wss_url,
+            on_message=self.on_message,
+            on_error=self.on_error,
+            on_close=self.on_close,
+            on_open=self.on_open,
+        )
 
-    def dict_queue_add(self, dict, maxdict, key1, key2, key3, value):
-        if key3 in dict[key1][key2]:
-            dict[key1][key2][key3] = value
+    # ===== ciclo de vida =====
+    def run(self):
+        """Inicia o loop do websocket na thread criada pelo stable_api."""
+        self.wss.run_forever(
+            sslopt={"cert_reqs": ssl.CERT_NONE},  # ajuste conforme necessidade
+            ping_interval=20,
+            ping_timeout=10,
+        )
+
+    def close(self):
+        try:
+            self.wss.close()
+        except Exception:
+            pass
+
+    # ===== util =====
+    def dict_queue_add(self, dct, maxdict, key1, key2, key3, value):
+        if key3 in dct[key1][key2]:
+            dct[key1][key2][key3] = value
         else:
             while True:
                 try:
-                    dic_size = len(dict[key1][key2])
-                except:
+                    dic_size = len(dct[key1][key2])
+                except Exception:
                     dic_size = 0
                 if dic_size < maxdict:
-                    dict[key1][key2][key3] = value
+                    dct[key1][key2][key3] = value
                     break
                 else:
-                    # del mini key
-                    del dict[key1][key2][sorted(
-                        dict[key1][key2].keys(), reverse=False)[0]]
+                    # remove o menor timestamp (primeira chave ordenada)
+                    try:
+                        del dct[key1][key2][sorted(dct[key1][key2].keys(), reverse=False)[0]]
+                    except Exception:
+                        break
 
     def api_dict_clean(self, obj):
+        # evita iterar e deletar ao mesmo tempo
         if len(obj) > 5000:
-            for k in obj.keys():
-                del obj[k]
-                break
+            try:
+                obj.pop(next(iter(obj)))
+            except StopIteration:
+                pass
+            except Exception:
+                pass
 
-    def on_message(self,wss, message):  # pylint: disable=unused-argument
-        """Method to process websocket messages."""
+    # ===== callbacks do websocket =====
+    def on_message(self, wss, message):  # pylint: disable=unused-argument
+        """Processa mensagens do WS."""
         global_value.ssl_Mutual_exclusion = True
         logger = logging.getLogger(__name__)
         logger.debug(message)
 
         message = json.loads(str(message))
 
-
+        # --- roteamento para handlers ---
         technical_indicators(self.api, message, self.api_dict_clean)
         time_sync(self.api, message)
         heartbeat(self.api, message)
         balances(self.api, message)
         profile(self.api, message)
         balance_changed(self.api, message)
-        #candles(self.api, message)
+        # candles(self.api, message)
         buy_complete(self.api, message)
         option(self.api, message)
         position_history(self.api, message)
         list_info_data(self.api, message)
-        #candle_generated_realtime(self.api, message, self.dict_queue_add)
-        #candle_generated_v2(self.api, message, self.dict_queue_add)
+        # candle_generated_realtime(self.api, message, self.dict_queue_add)
+        # candle_generated_v2(self.api, message, self.dict_queue_add)
         commission_changed(self.api, message)
         socket_option_opened(self.api, message)
         api_option_init_all_result(self.api, message)
@@ -130,7 +169,7 @@ class WebsocketClient(object):
         strike_list(self.api, message)
         api_game_betinfo_result(self.api, message)
         traders_mood_changed(self.api, message)
-         # ------for forex&cfd&crypto..
+        # ------ forex&cfd&crypto ------
         order_placed_temp(self.api, message)
         order(self.api, message)
         position(self.api, message)
@@ -159,126 +198,135 @@ class WebsocketClient(object):
         leaderboard_userinfo_deals_client(self.api, message)
         users_availability(self.api, message)
         client_price_generated(self.api, message)
-        
-        if message['name'] == 'client-price-generated':
-            ask_price = [d for d in message["msg"]["prices"] if d['strike'] == 'SPT'][0]['call']['ask']
-            pay = int(((100-ask_price)*100)/ask_price)
-            self.api.payouts_digital[message["msg"]["asset_id"]] = {}
-            self.api.payouts_digital[message["msg"]["asset_id"]]['hora']= time.time()
-            self.api.payouts_digital[message["msg"]["asset_id"]]['pay']= pay
 
-        if message["name"] == "alert":
+        # --- mensagens específicas tratadas aqui ---
+        if message.get("name") == "client-price-generated":
             try:
-                self.api.alerta = message['msg']
-            except:
+                ask_price = [
+                    d for d in message["msg"]["prices"] if d["strike"] == "SPT"
+                ][0]["call"]["ask"]
+                pay = int(((100 - ask_price) * 100) / ask_price)
+                asset_id = message["msg"]["asset_id"]
+                self.api.payouts_digital[asset_id] = {
+                    "hora": time.time(),
+                    "pay": pay,
+                }
+            except Exception:
                 pass
-                
-        if message["name"] == "alert-triggered":
+
+        if message.get("name") == "alert":
+            try:
+                self.api.alerta = message["msg"]
+            except Exception:
+                pass
+
+        if message.get("name") == "alert-triggered":
             try:
                 self.api.alertas_tocados.append(message["msg"])
-            except:
-                pass
-            
-        if message["name"] == "alerts":
-            try:
-                self.api.alertas = message['msg']['records']
-            except:
+            except Exception:
                 pass
 
-        if message["name"] == "candle-generated":
+        if message.get("name") == "alerts":
             try:
-                active_name = list(OP_code.ACTIVES.keys())[list(OP_code.ACTIVES.values()).index(message["msg"]["active_id"])]
+                self.api.alertas = message["msg"]["records"]
+            except Exception:
+                pass
+
+        if message.get("name") == "candle-generated":
+            try:
+                active_name = list(OP_code.ACTIVES.keys())[
+                    list(OP_code.ACTIVES.values()).index(message["msg"]["active_id"])
+                ]
                 self.api.all_realtime_candles[active_name] = message["msg"]
-            except:
+            except Exception:
                 pass
 
-
-        if message["name"] == "stop-order-placed":
+        if message.get("name") == "stop-order-placed":
             try:
                 self.api.buy_forex_id = message
-            except:
+            except Exception:
                 pass
 
-        if message["name"] == "pending-order-canceled":
+        if message.get("name") == "pending-order-canceled":
             try:
                 self.api.cancel_order_forex = message
-            except:
+            except Exception:
                 pass
 
-        if message["name"] == "positions":
+        if message.get("name") == "positions":
             try:
-                self.api.positions_forex= message
-            except:
+                self.api.positions_forex = message
+            except Exception:
                 pass
 
-        if message["name"] == "history-positions":
+        if message.get("name") == "history-positions":
             try:
                 self.api.fechadas_forex = message
-            except:
+            except Exception:
                 pass
 
-        if message["name"] == "orders":
+        if message.get("name") == "orders":
             try:
                 self.api.pendentes_forex = message
-            except:
+            except Exception:
                 pass
 
-        if message["name"] == "underlying-list":
-
+        if message.get("name") == "underlying-list":
             try:
                 self.api.leverage_forex = message
-            except:
+            except Exception:
                 pass
 
-        if message['name'] == 'candles':
+        if message.get("name") == "candles":
             try:
                 self.api.addcandles(message["request_id"], message["msg"]["candles"])
-            except:
+            except Exception:
                 pass
-        if message['name'] == 'digital-option-placed':
-            request_id = message['request_id']
-            self.api.orders[request_id] = message['msg']
 
-        if message['name'] == 'option':
-            request_id = message['request_id']
-            self.api.orders[request_id] = message['msg']
+        if message.get("name") == "digital-option-placed":
+            try:
+                request_id = message["request_id"]
+                self.api.orders[request_id] = message["msg"]
+            except Exception:
+                pass
 
+        if message.get("name") == "option":
+            try:
+                request_id = message["request_id"]
+                self.api.orders[request_id] = message["msg"]
+            except Exception:
+                pass
 
         global_value.ssl_Mutual_exclusion = False
 
-    @staticmethod
-    def on_error(wss, error):  # pylint: disable=unused-argument
-        """Method to process websocket errors."""
+    def on_error(self, wss, error):  # pylint: disable=unused-argument
+        """Erros do websocket."""
         logger = logging.getLogger(__name__)
         logger.error(error)
         global_value.websocket_error_reason = str(error)
         global_value.check_websocket_if_error = True
+        cb = getattr(self.ctx, "_on_ws_error", None)
+        if callable(cb):
+            cb(error)
 
-    @staticmethod
-    def on_open(wss):  # pylint: disable=unused-argument
-        """Method to process websocket open."""
+    def on_open(self, wss):  # pylint: disable=unused-argument
+        """Abertura do websocket."""
         logger = logging.getLogger(__name__)
         logger.debug("Websocket client connected.")
         global_value.check_websocket_if_connect = 1
+        cb = getattr(self.ctx, "_on_ws_open", None)
+        if callable(cb):
+            cb()
 
-    @staticmethod
-    def on_close(wss, close_status_code, close_msg):  # pylint: disable=unused-argument
-        """Method to process websocket close."""
+    def on_close(self, wss, close_status_code, close_msg):  # pylint: disable=unused-argument
+        """Fechamento do websocket."""
         logger = logging.getLogger(__name__)
         logger.debug("Websocket connection closed.")
         global_value.check_websocket_if_connect = 0
+        cb = getattr(self.ctx, "_on_ws_close", None)
+        if callable(cb):
+            cb()
 
 
-        
-# Alias de compatibilidade (se a classe tiver outro nome)
-try:
-    ExnovaWs
-except NameError:
-    try:
-        ExnovaWs = ExnovaWS
-    except NameError:
-        try:
-            ExnovaWs = WebSocketClient
-        except NameError:
-            pass
-
+# Alias de compatibilidade esperado por stable_api: from exnovaapi.ws.client import ExnovaWs
+ExnovaWs = WebsocketClient
