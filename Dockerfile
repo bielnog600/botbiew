@@ -4,10 +4,10 @@ FROM python:3.10-slim
 # 1. Instala as dependências do sistema necessárias para o Chrome e ChromeDriver
 # O RUN é executado como root por padrão, então não precisamos de 'sudo'.
 RUN apt-get update -y && \
-    apt-get install -y \
+    apt-get install -y --no-install-recommends \
     libglib2.0-0 \
     libnss3 \
-    libgconf-2-4 \
+    # libgconf-2-4 foi removido por ser obsoleto \
     libfontconfig1 \
     libx11-6 \
     libx11-xcb1 \
