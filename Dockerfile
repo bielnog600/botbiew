@@ -1,20 +1,20 @@
 # Usa uma imagem base oficial do Python.
 FROM python:3.10-slim
 
-# --- CORREÇÃO: Define a versão exata e compatível do Chrome/ChromeDriver ---
+# Define a versão exata e compatível do Chrome/ChromeDriver
 ENV CHROME_VERSION="139.0.7258.68"
 
-# 1. Instala as dependências do sistema e utilitários (wget, unzip)
+# 1. Instala o 'tini' (init system) e as dependências do sistema
 RUN apt-get update -y && \
     apt-get install -y --no-install-recommends \
+    tini \
     wget \
     unzip \
-    # Dependências do Chrome (com o pacote obsoleto removido)
+    # Dependências do Chrome
     libglib2.0-0 libnss3 libfontconfig1 libx11-6 libx11-xcb1 \
     libxcb1 libxcomposite1 libxcursor1 libxdamage1 libxext6 libxfixes3 \
     libxi6 libxrandr2 libxrender1 libxss1 libxtst6 libasound2 libatk1.0-0 \
     libatk-bridge2.0-0 libcups2 libdbus-1-3 libatspi2.0-0 libgtk-3-0 && \
-    # Limpa o cache do apt para manter a imagem pequena
     rm -rf /var/lib/apt/lists/*
 
 # 2. Descarrega e instala o Google Chrome
@@ -44,6 +44,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copia todo o código do projeto para o diretório de trabalho.
 COPY . .
+
+# --- CORREÇÃO FINAL ---
+# Define o 'tini' como o ponto de entrada do container.
+# Ele irá garantir que o processo do Chrome seja encerrado corretamente.
+ENTRYPOINT ["/usr/bin/tini", "--"]
 
 # Comando para executar o bot quando o container iniciar.
 CMD ["python", "main.py"]
