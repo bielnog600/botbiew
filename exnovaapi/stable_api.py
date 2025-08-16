@@ -434,9 +434,11 @@ class Exnova:
         while True:
             try:
                 request_id = self.api.getcandles(OP_code.ACTIVES[ACTIVES], interval, count, endtime)
+                # Adiciona um pequeno atraso para evitar busy-waiting
                 start_time = time.time()
                 while self.check_connect and request_id not in self.api.candles:
-                    if time.time() - start_time > 10:
+                    if time.time() - start_time > 10:  # Tempo limite de 10 segundos
+                        #raise TimeoutError('Erro API, Tempo limite aguardando candles')
                         self.connect()
                         break
                     time.sleep(0.1) 
@@ -2255,3 +2257,56 @@ class Exnova:
             return True, message['id']
         except:
             return False, message['message']
+
+    def connect(self, sms_code=None):
+        try:
+            self.api.close()
+        except:
+            pass
+            # logging.error('**warning** self.api.close() fail')
+
+        self.api = Exnovaapi(self.email, self.password)
+        check = None
+
+        # 2FA--
+        if sms_code is not None:
+            self.api.setTokenSMS(self.resp_sms)
+            status, reason = self.api.connect2fa(sms_code)
+            if not status:
+                return status, reason
+        # 2FA--
+
+        self.api.set_session(headers=self.SESSION_HEADER,
+                             cookies=self.SESSION_COOKIE)
+
+        check, reason = self.api.connect()
+
+        if check == True:
+            # -------------reconnect subscribe_candle
+            self.re_subscribe_stream()
+
+            # ---------for async get name: "position-changed", microserviceName
+            while global_value.balance_id == None:
+                pass
+
+            self.position_change_all(
+                "subscribeMessage", global_value.balance_id)
+
+            self.order_changed_all("subscribeMessage")
+            self.api.setOptions(1, True)
+
+            return True, None
+        else:
+            try:
+                if json.loads(reason)['code'] == 'verify':
+
+                    response = self.api.send_sms_code(json.loads(reason)['method'],json.loads(reason)['token'])
+
+                    if response.json()['code'] != 'success':
+                        return False, response.json()['message']
+
+                    # token_sms
+                    self.resp_sms = response
+                    return False, "2FA"
+            except:
+                return False, reason
