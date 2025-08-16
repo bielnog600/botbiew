@@ -15,6 +15,7 @@ RUN apt-get update -y && \
     libxcb1 libxcomposite1 libxcursor1 libxdamage1 libxext6 libxfixes3 \
     libxi6 libxrandr2 libxrender1 libxss1 libxtst6 libasound2 libatk1.0-0 \
     libatk-bridge2.0-0 libcups2 libdbus-1-3 libatspi2.0-0 libgtk-3-0 && \
+    # Limpa o cache do apt para manter a imagem pequena
     rm -rf /var/lib/apt/lists/*
 
 # 2. Descarrega e instala o Google Chrome
@@ -45,7 +46,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copia todo o código do projeto para o diretório de trabalho.
 COPY . .
 
-# --- CORREÇÃO FINAL ---
+# --- SOLUÇÃO DEFINITIVA ---
 # Define o 'tini' como o ponto de entrada do container.
 # Ele irá garantir que o processo do Chrome seja encerrado corretamente.
 ENTRYPOINT ["/usr/bin/tini", "--"]
