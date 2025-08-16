@@ -23,12 +23,16 @@ class ExnovaService:
     def _setup_driver(self):
         """Configura as opções do Chrome e inicializa o WebDriver."""
         chrome_options = Options()
-        chrome_options.add_argument("--headless")
+        # --- CORREÇÃO: Usa o novo modo headless e adiciona argumentos de estabilidade ---
+        chrome_options.add_argument("--headless=new") 
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--disable-gpu")
         chrome_options.add_argument("--window-size=1920x1080")
+        # Argumento para evitar problemas de DNS e processos em alguns containers Docker
+        chrome_options.add_argument("--disable-features=IsolateOrigins,site-per-process")
         
+        # A criação de um diretório único continua a ser a solução principal
         user_data_dir = f"/tmp/selenium_user_data_{int(time.time())}_{random.randint(1000, 9999)}"
         chrome_options.add_argument(f"--user-data-dir={user_data_dir}")
         
@@ -51,9 +55,8 @@ class ExnovaService:
             self.logger.info("A navegar para a página de login da Exnova...")
             self.driver.get("https://trade.exnova.com/en/login")
 
-            wait = WebDriverWait(self.driver, 30) # Aumentado o tempo de espera
+            wait = WebDriverWait(self.driver, 30)
             
-            # --- CORREÇÃO: Usa os seletores corretos para a página de login da Exnova ---
             email_input = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "input[name='email']")))
             email_input.send_keys(self.email)
             self.logger.info("Campo de email preenchido.")
@@ -62,12 +65,10 @@ class ExnovaService:
             password_input.send_keys(self.password)
             self.logger.info("Campo de senha preenchido.")
 
-            # O botão de login é um <button> com o texto "Log in"
             login_button = self.driver.find_element(By.XPATH, "//button[contains(text(), 'Log in')]")
             login_button.click()
             self.logger.info("Botão de login clicado. A aguardar pela sala de negociação...")
 
-            # Espera por um elemento da sala de negociação para confirmar o login
             wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "div.traderoom")))
             
             self.logger.info("Login realizado com sucesso! Sala de negociação carregada.")
@@ -75,7 +76,6 @@ class ExnovaService:
 
         except TimeoutException:
             self.logger.error("Timeout ao tentar fazer login. A página demorou demasiado a carregar ou os elementos não foram encontrados.")
-            # Tira um screenshot da página para ajudar a depurar
             self.driver.save_screenshot("login_timeout_error.png")
             return False, "Timeout no login"
         except Exception as e:
