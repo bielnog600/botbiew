@@ -1,17 +1,17 @@
 # python
-from iqoptionaapi.api import Iqoptionaapi
-import iqoptionaapi.constants as OP_code
-import iqoptionaapi.country_id as Country
+from exnovaapi.api import Iqoptionaapi
+import exnovaapi.constants as OP_code
+import exnovaapi.country_id as Country
 import threading
 import time
 import json
 import logging
 import operator
-import iqoptionaapi.global_value as global_value
+import exnovaapi.global_value as global_value
 from collections import defaultdict
 from collections import deque
-from iqoptionaapi.expiration import get_expiration_time, get_remaning_time
-from iqoptionaapi.version_control import api_version
+from exnovaapi.expiration import get_expiration_time, get_remaning_time
+from exnovaapi.version_control import api_version
 from datetime import datetime, timedelta
 from random import randint
 import queue
@@ -2389,10 +2389,3 @@ class IQ_Option:
             return True, message['id']
         except:
             return False, message['message']
-
-
-
-
-
-
-
