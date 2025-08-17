@@ -6,65 +6,65 @@ import requests
 import ssl
 import atexit
 from collections import deque
-from iqoptionaapi.http.login import Login
-from iqoptionaapi.http.loginv2 import Loginv2
-from iqoptionaapi.http.logout import Logout
-from iqoptionaapi.http.login2fa import Login2FA
-from iqoptionaapi.http.send_sms import SMS_Sender
-from iqoptionaapi.http.verify import Verify
-from iqoptionaapi.http.getprofile import Getprofile
-from iqoptionaapi.http.auth import Auth
-from iqoptionaapi.http.token import Token
-from iqoptionaapi.http.appinit import Appinit
-from iqoptionaapi.http.billing import Billing
-from iqoptionaapi.http.buyback import Buyback
-from iqoptionaapi.http.changebalance import Changebalance
-from iqoptionaapi.http.events import Events
-from iqoptionaapi.ws.client import WebsocketClient
-from iqoptionaapi.ws.chanels.get_balances import *
+from exnovaapi.http.login import Login
+from exnovaapi.http.loginv2 import Loginv2
+from exnovaapi.http.logout import Logout
+from exnovaapi.http.login2fa import Login2FA
+from exnovaapi.http.send_sms import SMS_Sender
+from exnovaapi.http.verify import Verify
+from exnovaapi.http.getprofile import Getprofile
+from exnovaapi.http.auth import Auth
+from exnovaapi.http.token import Token
+from exnovaapi.http.appinit import Appinit
+from exnovaapi.http.billing import Billing
+from exnovaapi.http.buyback import Buyback
+from exnovaapi.http.changebalance import Changebalance
+from exnovaapi.http.events import Events
+from exnovaapi.ws.client import WebsocketClient
+from exnovaapi.ws.chanels.get_balances import *
 
-from iqoptionaapi.ws.chanels.ssid import Ssid
-from iqoptionaapi.ws.chanels.subscribe import *
-from iqoptionaapi.ws.chanels.unsubscribe import *
-from iqoptionaapi.ws.chanels.setactives import SetActives
-from iqoptionaapi.ws.chanels.candles import GetCandles
-from iqoptionaapi.ws.chanels.buyv2 import Buyv2
-from iqoptionaapi.ws.chanels.buyv3 import *
-from iqoptionaapi.ws.chanels.user import *
-from iqoptionaapi.ws.chanels.api_game_betinfo import Game_betinfo
-from iqoptionaapi.ws.chanels.instruments import Get_instruments
-from iqoptionaapi.ws.chanels.get_financial_information import GetFinancialInformation
-from iqoptionaapi.ws.chanels.strike_list import Strike_list
-from iqoptionaapi.ws.chanels.leaderboard import Leader_Board
+from exnovaapi.ws.chanels.ssid import Ssid
+from exnovaapi.ws.chanels.subscribe import *
+from exnovaapi.ws.chanels.unsubscribe import *
+from exnovaapi.ws.chanels.setactives import SetActives
+from exnovaapi.ws.chanels.candles import GetCandles
+from exnovaapi.ws.chanels.buyv2 import Buyv2
+from exnovaapi.ws.chanels.buyv3 import *
+from exnovaapi.ws.chanels.user import *
+from exnovaapi.ws.chanels.api_game_betinfo import Game_betinfo
+from exnovaapi.ws.chanels.instruments import Get_instruments
+from exnovaapi.ws.chanels.get_financial_information import GetFinancialInformation
+from exnovaapi.ws.chanels.strike_list import Strike_list
+from exnovaapi.ws.chanels.leaderboard import Leader_Board
 
-from iqoptionaapi.ws.chanels.traders_mood import Traders_mood_subscribe
-from iqoptionaapi.ws.chanels.traders_mood import Traders_mood_unsubscribe
-from iqoptionaapi.ws.chanels.technical_indicators import Technical_indicators
-from iqoptionaapi.ws.chanels.buy_place_order_temp import Buy_place_order_temp
-from iqoptionaapi.ws.chanels.get_order import Get_order
-from iqoptionaapi.ws.chanels.get_deferred_orders import GetDeferredOrders
-from iqoptionaapi.ws.chanels.get_positions import *
+from exnovaapi.ws.chanels.traders_mood import Traders_mood_subscribe
+from exnovaapi.ws.chanels.traders_mood import Traders_mood_unsubscribe
+from exnovaapi.ws.chanels.technical_indicators import Technical_indicators
+from exnovaapi.ws.chanels.buy_place_order_temp import Buy_place_order_temp
+from exnovaapi.ws.chanels.get_order import Get_order
+from exnovaapi.ws.chanels.get_deferred_orders import GetDeferredOrders
+from exnovaapi.ws.chanels.get_positions import *
 
-from iqoptionaapi.ws.chanels.get_available_leverages import Get_available_leverages
-from iqoptionaapi.ws.chanels.cancel_order import Cancel_order
-from iqoptionaapi.ws.chanels.close_position import Close_position
-from iqoptionaapi.ws.chanels.get_overnight_fee import Get_overnight_fee
-from iqoptionaapi.ws.chanels.heartbeat import Heartbeat
+from exnovaapi.ws.chanels.get_available_leverages import Get_available_leverages
+from exnovaapi.ws.chanels.cancel_order import Cancel_order
+from exnovaapi.ws.chanels.close_position import Close_position
+from exnovaapi.ws.chanels.get_overnight_fee import Get_overnight_fee
+from exnovaapi.ws.chanels.heartbeat import Heartbeat
 
 
-from iqoptionaapi.ws.chanels.digital_option import *
-from iqoptionaapi.ws.chanels.api_game_getoptions import *
-from iqoptionaapi.ws.chanels.sell_option import Sell_Option
-from iqoptionaapi.ws.chanels.sell_digital_option import Sell_Digital_Option
-from iqoptionaapi.ws.chanels.change_tpsl import Change_Tpsl
-from iqoptionaapi.ws.chanels.change_auto_margin_call import ChangeAutoMarginCall
+from exnovaapi.ws.chanels.digital_option import *
+from exnovaapi.ws.chanels.api_game_getoptions import *
+from exnovaapi.ws.chanels.sell_option import Sell_Option
+from exnovaapi.ws.chanels.sell_digital_option import Sell_Digital_Option
+from exnovaapi.ws.chanels.change_tpsl import Change_Tpsl
+from exnovaapi.ws.chanels.change_auto_margin_call import ChangeAutoMarginCall
 
-from iqoptionaapi.ws.objects.timesync import TimeSync
-from iqoptionaapi.ws.objects.profile import Profile
-from iqoptionaapi.ws.objects.candles import Candles
-from iqoptionaapi.ws.objects.listinfodata import ListInfoData
-from iqoptionaapi.ws.objects.betinfo import Game_betinfo_data
-import iqoptionaapi.global_value as global_value
+from exnovaapi.ws.objects.timesync import TimeSync
+from exnovaapi.ws.objects.profile import Profile
+from exnovaapi.ws.objects.candles import Candles
+from exnovaapi.ws.objects.listinfodata import ListInfoData
+from exnovaapi.ws.objects.betinfo import Game_betinfo_data
+import exnovaapi.global_value as global_value
 from collections import defaultdict
 
 
@@ -161,11 +161,8 @@ class Iqoptionaapi(object):  # pylint: disable=too-many-instance-attributes
 
     def __init__(self,username, password, proxies=None):
         
-        # ALTERAÇÃO PRINCIPAL AQUI:
-        # Trocámos "iqoption.com" por "exnova.com"
         self.host = "exnova.com"
 
-        # O resto das URLs será atualizado automaticamente com base na variável self.host
         self.url_auth2 = f"https://auth.{self.host}/api/v2/verify/2fa"
         self.https_url = f"https://{self.host}/api".format(host=self.host)
         self.wss_url = f"wss://{self.host}/echo/websocket".format(host=self.host)
