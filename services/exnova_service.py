@@ -1,34 +1,30 @@
 import logging
 import time
-from exnovaapi.stable_api import IQ_Option # Alterado para corresponder à nova biblioteca
+# --- CORREÇÃO: Altera o nome da classe importada para 'Exnova' ---
+from exnovaapi.stable_api import Exnova 
 
 class ExnovaService:
     """
-    Serviço para interagir com a API da IQ Option (usada pela Exnova).
+    Serviço para interagir com a API da Exnova (usando a biblioteca correta).
     """
     def __init__(self, email, password):
         self.logger = logging.getLogger(__name__)
-        # --- CORREÇÃO: Usa a classe correta da nova biblioteca ---
-        self.api = IQ_Option(email, password)
-        self.api.connect() # Conecta-se imediatamente
+        # --- CORREÇÃO: Usa a classe correta 'Exnova' ---
+        self.api = Exnova(email, password)
+        # A conexão é chamada separadamente pelo bot, não aqui.
 
     def connect(self):
         """
-        Verifica se a conexão com a API está ativa.
+        Verifica se a conexão com a API está ativa ou tenta conectar.
         """
-        self.logger.info("A verificar a conexão com a API...")
-        if self.api.check_connect():
+        self.logger.info("A estabelecer ligação websocket com a Exnova...")
+        check, reason = self.api.connect()
+        if check:
             self.logger.info("Conectado com sucesso.")
             return True, None
         else:
-            self.logger.error("Falha na conexão. A tentar reconectar...")
-            # A biblioteca original já tem uma lógica de reconexão, vamos confiar nela.
-            check, reason = self.api.connect()
-            if check:
-                self.logger.info("Reconexão bem-sucedida.")
-            else:
-                self.logger.error(f"Falha ao reconectar: {reason}")
-            return check, reason
+            self.logger.error(f"Falha na conexão: {reason}")
+            return False, reason
 
     def reconnect(self):
         """Tenta reconectar-se à API."""
@@ -49,9 +45,9 @@ class ExnovaService:
         """Busca a lista de ativos abertos para negociação."""
         open_assets_data = self.api.get_all_open_time()
         open_assets_list = []
-        for type in open_assets_data:
-            for asset in open_assets_data[type]:
-                if open_assets_data[type][asset].get("open", False):
+        for asset_type in open_assets_data:
+            for asset in open_assets_data[asset_type]:
+                if open_assets_data[asset_type][asset].get("open", False):
                     open_assets_list.append(asset)
         return list(set(open_assets_list))
 
