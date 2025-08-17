@@ -1,26 +1,36 @@
+import sys
+import os
 import asyncio
 import logging
+import traceback # <-- IMPORTAÇÃO ADICIONADA
+from dotenv import load_dotenv
+
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
 from core.bot import TradingBot
 
-# NOVO: Configuração para silenciar os logs desnecessários da biblioteca httpx (usada pelo Supabase)
-# Isto irá limpar a sua consola, mostrando apenas os logs importantes do seu bot.
-logging.basicConfig(level=logging.INFO)
-logging.getLogger('httpx').setLevel(logging.WARNING)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s:%(name)s:%(message)s'
+)
 
 def main():
-    """
-    Ponto de entrada principal para a aplicação.
-    Cria uma instância do TradingBot e inicia o seu ciclo de execução.
-    """
+    load_dotenv()
     bot = TradingBot()
+    
     try:
-        print("A iniciar o bot...")
+        logging.info("A iniciar o bot...")
         asyncio.run(bot.run())
     except KeyboardInterrupt:
-        print("\nBot a desligar...")
+        logging.info("Bot interrompido pelo utilizador. A encerrar...")
     except Exception as e:
-        print(f"Ocorreu um erro fatal: {e}")
-        traceback.print_exc()
+        logging.critical(f"Ocorreu um erro fatal no arranque do bot: {e}")
+        traceback.print_exc() # Agora funciona
+    finally:
+        bot.is_running = False
+        if bot.exnova and hasattr(bot.exnova, 'quit'):
+            bot.exnova.quit()
+        logging.info("Bot encerrado.")
 
 if __name__ == "__main__":
     main()
