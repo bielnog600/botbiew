@@ -1,17 +1,17 @@
 # python
-from exnovaapi.api import Exnovaapi
-import exnovaapi.constants as OP_code
-import exnovaapi.country_id as Country
+from iqoptionaapi.api import Iqoptionaapi
+import iqoptionaapi.constants as OP_code
+import iqoptionaapi.country_id as Country
 import threading
 import time
 import json
 import logging
 import operator
-import exnovaapi.global_value as global_value
+import iqoptionaapi.global_value as global_value
 from collections import defaultdict
 from collections import deque
-from exnovaapi.expiration import get_expiration_time, get_remaning_time
-from exnovaapi.version_control import api_version
+from iqoptionaapi.expiration import get_expiration_time, get_remaning_time
+from iqoptionaapi.version_control import api_version
 from datetime import datetime, timedelta
 from random import randint
 import queue
@@ -24,7 +24,7 @@ def nested_dict(n, type):
         return defaultdict(lambda: nested_dict(n - 1, type))
 
 
-class Exnova:
+class IQ_Option:
     __version__ = api_version
 
     def __init__(self, email, password, active_account_type="PRACTICE"):
@@ -46,7 +46,6 @@ class Exnova:
             "User-Agent": r"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/66.0.3359.139 Safari/537.36"}
         self.SESSION_COOKIE = {}
         self.q = queue.Queue(maxsize=4)
-        self.api = Exnovaapi(self.email, self.password)
 
 
     def get_server_timestamp(self):
@@ -756,7 +755,7 @@ class Exnova:
             logging.error('buy_multi error please input all same len')
 
     def get_remaining(self, duration):
-        for remaining in get_remaning_time(self.api.timesync.server_timestamp):
+        for remaining in get_remaining_time(self.api.timesync.server_timestamp):
             if remaining[0] == duration:
                 return remaning[1]
         logging.error('get_remaining(self,duration) ERROR duration')
@@ -1027,6 +1026,63 @@ class Exnova:
         else:
             return False, blitz_order_id
     
+    def get_digital_current_profit(self, ACTIVE, duration):
+        profit = self.api.instrument_quites_generated_data[ACTIVE][duration * 60]
+        for key in profit:
+            if key.find("SPT") != -1:
+                return profit[key]
+        return False
+    
+    def get_blitz_current_profit(self, ACTIVE, duration):
+        profit = self.api.instrument_quites_generated_data[ACTIVE][duration * 60]
+        for key in profit:
+            if key.find("SPT") != -1:
+                return profit[key]
+        return False
+    
+    def buy_blitz_spot(self, active, amount, action, duration):
+        # Expiration time need to be formatted like this: YYYYMMDDHHII
+        # And need to be on GMT time
+
+        # Type - P or C
+        action = action.lower()
+        if action == 'put':
+            action = 'P'
+        elif action == 'call':
+            action = 'C'
+        else:
+            logging.error('buy_blitz_spot active error')
+            return -1, None
+        # doEURUSD201907191250PT5MPSPT
+        timestamp = int(self.api.timesync.server_timestamp)
+        if duration == 1:
+            exp, _ = get_expiration_time(timestamp, duration)
+        else:
+            now_date = datetime.fromtimestamp(
+                timestamp) + timedelta(minutes=1, seconds=30)
+            while True:
+                if now_date.minute % duration == 0 and time.mktime(now_date.timetuple()) - timestamp > 30:
+                    break
+                now_date = now_date + timedelta(minutes=1)
+            exp = time.mktime(now_date.timetuple())
+
+        dateFormated = str(datetime.utcfromtimestamp(
+            exp).strftime("%Y%m%d%H%M"))
+        instrument_id = "do" + active + dateFormated + \
+                        "PT" + str(duration) + "M" + action + "SPT"
+        # self.api.digital_option_placed_id = None
+
+        request_id = self.api.place_blitz_option(instrument_id, amount)
+
+        while self.api.blitz_option_placed_id.get(request_id) == None:
+            pass
+        blitz_order_id = self.api.blitz_option_placed_id.get(request_id)
+        if isinstance(blitz_order_id, int):
+            return True, blitz_order_id
+        else:
+            return False, blitz_order_id
+    
+    
     def get_digital_spot_profit_after_sale(self, position_id):
         def get_instrument_id_to_bid(data, instrument_id):
             for row in data["msg"]["quotes"]:
@@ -1228,7 +1284,7 @@ class Exnova:
         self.api.digital_option_placed_id = None
         self.api.place_digital_option(instrument_id, amount)
         start_t = time.time()
-        while self.api.digital_option_placed_id is None:
+        while self.api.digital_option_placed_id == None:
             if time.time() - start_t > 30:
                 logging.error('buy_digital loss digital_option_placed_id')
                 return False, None
@@ -1238,9 +1294,10 @@ class Exnova:
         self.api.result = None
         while self.get_async_order(position_id)["position-changed"] == {}:
             pass
-        position_changed = self.get_async_order(position_id)["position-changed"]["msg"]
+        position_changed = self.get_async_order(
+            position_id)["position-changed"]["msg"]
         self.api.close_digital_option(position_changed["external_id"])
-        while self.api.result is None:
+        while self.api.result == None:
             pass
         return self.api.result
 
@@ -1256,10 +1313,12 @@ class Exnova:
                     return data["msg"]["position"]["pnl_realized"] - data["msg"]["position"]["buy_amount"]
 
     def check_win_digital_v2(self, buy_order_id):
+
         while self.get_async_order(buy_order_id)["position-changed"] == {}:
             pass
-        order_data = self.get_async_order(buy_order_id)["position-changed"]["msg"]
-        if order_data is not None:
+        order_data = self.get_async_order(
+            buy_order_id)["position-changed"]["msg"]
+        if order_data != None:
             if order_data["status"] == "closed":
                 if order_data["close_reason"] == "expired":
                     return True, order_data["close_profit"] - order_data["invest"]
@@ -1274,7 +1333,7 @@ class Exnova:
         self.api.blitz_option_placed_id = None
         self.api.place_blitz_option(instrument_id, amount)
         start_t = time.time()
-        while self.api.blitz_option_placed_id is None:
+        while self.api.blitz_option_placed_id == None:
             if time.time() - start_t > 30:
                 logging.error('buy_blitz loss blitz_option_placed_id')
                 return False, None
@@ -1284,9 +1343,10 @@ class Exnova:
         self.api.result = None
         while self.get_async_order(position_id)["position-changed"] == {}:
             pass
-        position_changed = self.get_async_order(position_id)["position-changed"]["msg"]
+        position_changed = self.get_async_order(
+            position_id)["position-changed"]["msg"]
         self.api.close_blitz_option(position_changed["external_id"])
-        while self.api.result is None:
+        while self.api.result == None:
             pass
         return self.api.result
     
@@ -1307,7 +1367,7 @@ class Exnova:
             pass
         order_data = self.get_async_order(
             buy_order_id)["position-changed"]["msg"]
-        if order_data is not None:
+        if order_data != None:
             if order_data["status"] == "closed":
                 if order_data["close_reason"] == "expired":
                     return True, order_data["close_profit"] - order_data["invest"]
@@ -1759,7 +1819,7 @@ class Exnova:
             else:
                 return False, blitz_order_id
     
-    def get_digital_payout(self, par):
+    def get_digital_payout(self,par):
 
         asset_id = OP_code.ACTIVES[par]
         t = time.time()
@@ -2137,6 +2197,78 @@ class Exnova:
         else:
             return False, self.api.pendentes_forex["msg"]
 
+    def connect(self, sms_code=None):
+        try:
+            self.api.close()
+        except:
+            pass
+            # logging.error('**warning** self.api.close() fail')
+
+        self.api = Iqoptionaapi(self.email, self.password)
+        check = None
+
+        # 2FA--
+        if sms_code is not None:
+            self.api.setTokenSMS(self.resp_sms)
+            status, reason = self.api.connect2fa(sms_code)
+            if not status:
+                return status, reason
+        # 2FA--
+
+        self.api.set_session(headers=self.SESSION_HEADER,
+                             cookies=self.SESSION_COOKIE)
+
+        check, reason = self.api.connect()
+
+        if check == True:
+            # -------------reconnect subscribe_candle
+            self.re_subscribe_stream()
+
+            # ---------for async get name: "position-changed", microserviceName
+            while global_value.balance_id == None:
+                pass
+
+            self.position_change_all(
+                "subscribeMessage", global_value.balance_id)
+
+            self.order_changed_all("subscribeMessage")
+            self.api.setOptions(1, True)
+
+            """
+            self.api.subscribe_position_changed(
+                "position-changed", "multi-option", 2)
+
+            self.api.subscribe_position_changed(
+                "trading-fx-option.position-changed", "fx-option", 3)
+
+            self.api.subscribe_position_changed(
+                "position-changed", "crypto", 4)
+
+            self.api.subscribe_position_changed(
+                "position-changed", "forex", 5)
+
+            self.api.subscribe_position_changed(
+                "digital-options.position-changed", "digital-option", 6)
+
+            self.api.subscribe_position_changed(
+                "position-changed", "cfd", 7)
+            """
+
+            # self.get_balance_id()
+            return True, None
+        else:
+            if json.loads(reason)['code'] == 'verify':
+
+                response = self.api.send_sms_code(json.loads(reason)['method'],json.loads(reason)['token'])
+
+                if response.json()['code'] != 'success':
+                    return False, response.json()['message']
+
+                # token_sms
+                self.resp_sms = response
+                return False, "2FA"
+            return False, reason
+
     def get_instrument(self, active, exp, direcao, timeframe):
 
         if direcao == 'call':
@@ -2192,7 +2324,7 @@ class Exnova:
             time.sleep(0.1)
             if time.time() - start <= 5:
                 try:
-                    message = self.api.orders[str(req_id)]
+                    message =self.api.orders[str(req_id)]
                     break
                 except Exception as err:
                     # print(err)
@@ -2258,49 +2390,9 @@ class Exnova:
         except:
             return False, message['message']
 
-    def connect(self, sms_code=None):
-        try:
-            self.api.close()
-        except:
-            pass
 
-        self.api = Exnovaapi(self.email, self.password)
-        check = None
 
-        if sms_code is not None:
-            self.api.setTokenSMS(self.resp_sms)
-            status, reason = self.api.connect2fa(sms_code)
-            if not status:
-                return status, reason
 
-        self.api.set_session(headers=self.SESSION_HEADER,
-                             cookies=self.SESSION_COOKIE)
 
-        check, reason = self.api.connect()
 
-        if check == True:
-            self.re_subscribe_stream()
 
-            while global_value.balance_id == None:
-                pass
-
-            self.position_change_all(
-                "subscribeMessage", global_value.balance_id)
-
-            self.order_changed_all("subscribeMessage")
-            self.api.setOptions(1, True)
-
-            return True, None
-        else:
-            try:
-                if json.loads(reason)['code'] == 'verify':
-
-                    response = self.api.send_sms_code(json.loads(reason)['method'],json.loads(reason)['token'])
-
-                    if response.json()['code'] != 'success':
-                        return False, response.json()['message']
-
-                    self.resp_sms = response
-                    return False, "2FA"
-            except:
-                return False, reason
