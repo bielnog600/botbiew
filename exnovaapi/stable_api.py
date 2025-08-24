@@ -24,7 +24,7 @@ def nested_dict(n, type):
         return defaultdict(lambda: nested_dict(n - 1, type))
 
 
-class Exnova: # <-- ALTERAÇÃO AQUI: O nome da classe foi mudado de IQ_Option para Exnova
+class Exnova:
     __version__ = api_version
 
     def __init__(self, email, password, active_account_type="PRACTICE"):
@@ -2233,42 +2233,26 @@ class Exnova: # <-- ALTERAÇÃO AQUI: O nome da classe foi mudado de IQ_Option p
 
             self.order_changed_all("subscribeMessage")
             self.api.setOptions(1, True)
-
-            """
-            self.api.subscribe_position_changed(
-                "position-changed", "multi-option", 2)
-
-            self.api.subscribe_position_changed(
-                "trading-fx-option.position-changed", "fx-option", 3)
-
-            self.api.subscribe_position_changed(
-                "position-changed", "crypto", 4)
-
-            self.api.subscribe_position_changed(
-                "position-changed", "forex", 5)
-
-            self.api.subscribe_position_changed(
-                "digital-options.position-changed", "digital-option", 6)
-
-            self.api.subscribe_position_changed(
-                "position-changed", "cfd", 7)
-            """
-
-            # self.get_balance_id()
             return True, None
         else:
-            if json.loads(reason)['code'] == 'verify':
-
-                response = self.api.send_sms_code(json.loads(reason)['method'],json.loads(reason)['token'])
-
-                if response.json()['code'] != 'success':
-                    return False, response.json()['message']
-
-                # token_sms
-                self.resp_sms = response
-                return False, "2FA"
+            # AQUI ESTÁ A CORREÇÃO
+            try:
+                # Tenta analisar a resposta como JSON (para casos como 2FA)
+                reason_json = json.loads(reason)
+                if reason_json.get('code') == 'verify':
+                    response = self.api.send_sms_code(reason_json.get('method'), reason_json.get('token'))
+                    if response.json().get('code') != 'success':
+                        return False, response.json().get('message')
+                    
+                    self.resp_sms = response
+                    return False, "2FA"
+            except (json.JSONDecodeError, TypeError, AttributeError):
+                # Se 'reason' não for um JSON válido, é uma mensagem de erro direta.
+                # Retorna a mensagem de erro original.
+                pass
+            
             return False, reason
-
+        
     def get_instrument(self, active, exp, direcao, timeframe):
 
         if direcao == 'call':
