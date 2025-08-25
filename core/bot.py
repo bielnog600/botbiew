@@ -150,13 +150,11 @@ class TradingBot:
             self.logger('INFO', "Janela de análise M1 ATIVADA.")
             self.run_analysis_for_timeframe(60, 1)
     
-    # NOVA FUNÇÃO para obter os melhores pares automaticamente
     def _get_automatic_pairs(self, min_payout):
         """
         Busca os pares abertos com o melhor payout.
         """
         try:
-            self.logger('INFO', f"Buscando pares automáticos com payout mínimo de {min_payout*100}%...")
             all_profits = self.exnova.api.get_all_profit()
             open_assets = self.exnova.api.get_all_open_time()
             
@@ -164,7 +162,6 @@ class TradingBot:
 
             for asset, types in all_profits.items():
                 is_open = False
-                # Verifica se o par está aberto em turbo ou binárias
                 if open_assets.get('turbo', {}).get(asset, {}).get('open', False):
                     is_open = True
                 elif open_assets.get('binary', {}).get(asset, {}).get('open', False):
@@ -173,16 +170,13 @@ class TradingBot:
                 if not is_open:
                     continue
 
-                # Pega o melhor payout entre turbo e binárias
                 payout = max(types.get('turbo', 0), types.get('binary', 0))
                 
                 if payout >= min_payout:
                     best_pairs[asset] = payout
             
-            # Ordena os pares pelo maior payout
             sorted_pairs = sorted(best_pairs.items(), key=lambda item: item[1], reverse=True)
             
-            # Retorna apenas os nomes dos pares
             return [pair[0] for pair in sorted_pairs]
 
         except Exception as e:
@@ -190,7 +184,6 @@ class TradingBot:
             traceback.print_exc()
             return []
 
-    # FUNÇÃO ATUALIZADA para lidar com modo automático e manual
     def run_analysis_for_timeframe(self, tf_secs, exp_mins):
         pair_mode = self.bot_config.get('pair_management_mode', 'MANUAL')
         strategy_mode = self.bot_config.get('strategy_management_mode', 'MANUAL')
@@ -198,9 +191,11 @@ class TradingBot:
         assets_to_check = []
         if pair_mode == 'AUTOMATIC':
             min_payout = self.bot_config.get('min_payout', 80) / 100.0
+            # NOVA LINHA DE LOG ADICIONADA AQUI
+            self.logger('INFO', f"Modo Automático: Buscando pares com payout mínimo de {min_payout*100}%.")
             assets_to_check = self._get_automatic_pairs(min_payout)
             if assets_to_check:
-                self.logger('INFO', f"Modo Automático: A analisar os melhores pares: {assets_to_check}")
+                self.logger('INFO', f"Pares encontrados: {assets_to_check}")
         else:  # MANUAL
             assets_to_check = self.bot_config.get('manual_pairs', [])
 
@@ -222,7 +217,7 @@ class TradingBot:
 
     def _analyze_asset(self, pair_name, tf_secs, exp_mins, strategies_to_run: List[str]):
         try:
-            self.logger('INFO', f"A analisar {pair_name} com as estratégias: {strategies_to_run}...")
+            self.logger('INFO', f"A analisar {pair_name}...")
             candles = self.exnova.get_historical_candles(pair_name, 60, 50)
             if not candles: return
             
