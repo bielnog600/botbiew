@@ -18,7 +18,6 @@ from core.data_models import TradeSignal
 class TradingBot:
     def __init__(self):
         self.supabase: Optional[SupabaseService] = None
-        # O ExnovaService agora usa a nova API
         self.exnova = ExnovaService(settings.EXNOVA_EMAIL, settings.EXNOVA_PASSWORD)
         self.is_running = True
         self.bot_config: Dict = {}
@@ -77,14 +76,12 @@ class TradingBot:
 
     def trading_loop_sync(self):
         self.logger('INFO', 'A iniciar o bot...')
-        # A conexão agora usa a nova API
         check, reason = self.exnova.connect()
         if not check:
             self.logger('CRITICAL', f"Falha ao conectar na Exnova: {reason}. O bot será encerrado.")
             self.is_running = False
             return
 
-        # Lógica de arranque para obter configuração
         max_retries = 5
         retry_delay = 10
         for attempt in range(max_retries):
@@ -150,31 +147,45 @@ class TradingBot:
             self.logger('INFO', "Janela de análise M1 ATIVADA.")
             self.run_analysis_for_timeframe(60, 1)
     
+    # FUNÇÃO ATUALIZADA E MAIS ROBUSTA
     def _get_automatic_pairs(self, min_payout):
         """
-        Busca os pares abertos com o melhor payout.
+        Busca os pares abertos com o melhor payout de forma mais direta.
         """
         try:
-            all_profits = self.exnova.api.get_all_profit()
-            open_assets = self.exnova.api.get_all_open_time()
-            
             best_pairs = {}
+            # Usamos get_all_init_v2() que é mais moderno e completo
+            init_data = self.exnova.api.get_all_init_v2()
 
-            for asset, types in all_profits.items():
-                is_open = False
-                if open_assets.get('turbo', {}).get(asset, {}).get('open', False):
-                    is_open = True
-                elif open_assets.get('binary', {}).get(asset, {}).get('open', False):
-                    is_open = True
+            if not init_data:
+                self.logger('WARNING', "Não foi possível obter os dados de inicialização da corretora.")
+                return []
 
-                if not is_open:
-                    continue
+            # Itera sobre os tipos de opção (binárias e turbo)
+            for option_type in ['binary', 'turbo']:
+                if option_type in init_data:
+                    for asset_id, asset_details in init_data[option_type]['actives'].items():
+                        asset_name = asset_details.get('name', '').split('.')[-1]
+                        
+                        is_enabled = asset_details.get('enabled', False)
+                        is_suspended = asset_details.get('is_suspended', False)
+                        
+                        if is_enabled and not is_suspended:
+                            commission = asset_details.get('option', {}).get('profit', {}).get('commission', 100)
+                            payout = (100 - commission) / 100.0
+                            
+                            if payout >= min_payout:
+                                # Armazena o melhor payout para cada par
+                                if asset_name not in best_pairs or payout > best_pairs[asset_name]:
+                                    best_pairs[asset_name] = payout
+                        # else:
+                        #     self.logger('DEBUG', f"Par {asset_name} ignorado (Fechado ou Suspenso).")
 
-                payout = max(types.get('turbo', 0), types.get('binary', 0))
-                
-                if payout >= min_payout:
-                    best_pairs[asset] = payout
+            if not best_pairs:
+                self.logger('INFO', "Nenhum par aberto cumpre o requisito de payout mínimo no momento.")
+                return []
             
+            # Ordena os pares pelo maior payout
             sorted_pairs = sorted(best_pairs.items(), key=lambda item: item[1], reverse=True)
             
             return [pair[0] for pair in sorted_pairs]
@@ -191,11 +202,10 @@ class TradingBot:
         assets_to_check = []
         if pair_mode == 'AUTOMATIC':
             min_payout = self.bot_config.get('min_payout', 80) / 100.0
-            # NOVA LINHA DE LOG ADICIONADA AQUI
-            self.logger('INFO', f"Modo Automático: Buscando pares com payout mínimo de {min_payout*100}%.")
+            self.logger('INFO', f"Modo Automático: Buscando pares com payout mínimo de {min_payout*100:.0f}%.")
             assets_to_check = self._get_automatic_pairs(min_payout)
             if assets_to_check:
-                self.logger('INFO', f"Pares encontrados: {assets_to_check}")
+                self.logger('INFO', f"Pares encontrados que cumprem os critérios: {assets_to_check}")
         else:  # MANUAL
             assets_to_check = self.bot_config.get('manual_pairs', [])
 
@@ -207,7 +217,7 @@ class TradingBot:
             strategies_to_check = self.bot_config.get('manual_strategies', [])
 
         if not assets_to_check or not strategies_to_check:
-            self.logger("INFO", "Nenhum par ou estratégia disponível para análise (verifique o modo e as seleções no painel). A aguardar...")
+            self.logger("INFO", "Nenhum par ou estratégia disponível para análise. A aguardar...")
             return
 
         for pair in assets_to_check:
