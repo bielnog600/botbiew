@@ -109,30 +109,29 @@ class TradingBot:
 
         while self.is_running:
             try:
-                self._daily_reset_if_needed()
-                
+                # Puxa a configuração mais recente a cada ciclo do loop principal
                 new_config = self.supabase.get_bot_config()
                 if new_config: self.bot_config = new_config
                 
                 current_status = self.bot_config.get('status', 'PAUSED')
-                # LÓGICA DE REINÍCIO SUAVE AO INICIAR
+                
                 if current_status == 'RUNNING' and self.previous_status == 'PAUSED': 
                     self._soft_restart()
                 
                 self.previous_status = current_status
                 
-                desired_account_type = self.bot_config.get('account_type', 'PRACTICE')
-                if desired_account_type != self.current_account_type:
-                    self.logger('WARNING', f"MUDANÇA DE CONTA! De {self.current_account_type} para {desired_account_type}.")
-                    self.exnova.change_balance(desired_account_type)
-                    self.current_account_type = desired_account_type
-                
                 if current_status == 'RUNNING':
+                    self._daily_reset_if_needed()
+                    desired_account_type = self.bot_config.get('account_type', 'PRACTICE')
+                    if desired_account_type != self.current_account_type:
+                        self.logger('WARNING', f"MUDANÇA DE CONTA! De {self.current_account_type} para {desired_account_type}.")
+                        self.exnova.change_balance(desired_account_type)
+                        self.current_account_type = desired_account_type
+                    
                     if not self.is_trade_active:
                         self.trading_cycle()
                 else:
-                    # Se estiver pausado, aguarda antes de verificar novamente
-                    time.sleep(5)
+                    time.sleep(5) # Aguarda em modo PAUSED
                 time.sleep(1)
             except Exception as e:
                 self.logger('ERROR', f"Loop principal falhou: {e}")
@@ -140,7 +139,8 @@ class TradingBot:
                 self.exnova.reconnect()
 
     def trading_cycle(self):
-        if self._check_stop_limits():
+        # VERIFICAÇÃO DE SEGURANÇA #1: Antes de iniciar o ciclo de trading
+        if self.bot_config.get('status') != 'RUNNING' or self._check_stop_limits():
             return
 
         now = datetime.utcnow()
@@ -185,7 +185,6 @@ class TradingBot:
             return []
 
     def run_analysis_for_timeframe(self, tf_secs, exp_mins):
-        # O bot agora usa o modo "manual_mode_enabled" para decidir. Por simplicidade, vamos assumir que o painel controla os modos de pares e estratégias.
         pair_mode = self.bot_config.get('pair_management_mode', 'AUTOMATIC')
         strategy_mode = self.bot_config.get('strategy_management_mode', 'AUTOMATIC')
         
@@ -210,6 +209,15 @@ class TradingBot:
             return
 
         for pair in assets_to_check:
+            # VERIFICAÇÃO DE SEGURANÇA #2: Antes de analisar CADA par
+            # Puxa a configuração mais recente do banco de dados para garantir que não foi pausado
+            current_config = self.supabase.get_bot_config()
+            if current_config: self.bot_config = current_config
+            
+            if self.bot_config.get('status') != 'RUNNING' or self._check_stop_limits():
+                self.logger('WARNING', f"Paragem detectada. A interromper análise de pares.")
+                break # Sai do loop de pares
+
             if self.is_trade_active: break
             self._analyze_asset(pair, tf_secs, exp_mins, strategies_to_check)
 
@@ -222,7 +230,13 @@ class TradingBot:
                 return
             
             for strat_name in strategies_to_run:
+                # VERIFICAÇÃO DE SEGURANÇA #3: Antes de executar CADA estratégia
+                if self.bot_config.get('status') != 'RUNNING' or self._check_stop_limits():
+                    self.logger('WARNING', f"Paragem detectada. A interromper análise de estratégias.")
+                    return # Sai da função de análise
+
                 if self.is_trade_active: break
+                
                 strategy_function = self.strategy_map.get(strat_name)
                 if not strategy_function: continue
 
@@ -235,6 +249,7 @@ class TradingBot:
                     
                     signal = TradeSignal(pair=pair_name, direction=direction, strategy=strat_name, **candles[-1])
                     self._execute_and_wait(signal, pair_name, exp_mins)
+                    return # Sai após encontrar um sinal para não abrir múltiplos trades
 
         except Exception as e:
             self.logger('ERROR', f"Erro em _analyze_asset({pair_name}): {e}")
@@ -265,22 +280,27 @@ class TradingBot:
             
             sid = self.supabase.insert_trade_signal(signal)
             
-            time.sleep(exp_mins * 60 + 5)
-            bal_after = self.exnova.get_current_balance()
+            # Lógica de espera pelo resultado sem usar time.sleep() longo
+            expiration_timestamp = time.time() + exp_mins * 60
             result = 'UNKNOWN'
             profit = 0
-            if bal_after is not None:
-                profit = round(bal_after - bal_before, 2)
-                if profit > 0: result = 'WIN'
-                elif profit < 0: result = 'LOSS'
-                else: result = 'DRAW'
             
+            while time.time() < expiration_timestamp + 10: # Espera até 10s após a expiração
+                bal_after = self.exnova.get_current_balance()
+                if bal_after is not None and bal_after != bal_before:
+                    profit = round(bal_after - bal_before, 2)
+                    if profit > 0: result = 'WIN'
+                    elif profit < 0: result = 'LOSS'
+                    else: result = 'DRAW'
+                    break
+                time.sleep(2) # Verifica o saldo a cada 2 segundos
+
             self.logger('SUCCESS' if result == 'WIN' else 'ERROR', f"Resultado: {result} | Lucro: {profit}")
             
             if sid:
                 self.supabase.update_trade_result(sid, result, self.martingale_state.get(signal.pair, {}).get('level', 0))
-            if bal_after:
-                self.supabase.update_current_balance(bal_after)
+            if self.exnova.get_current_balance():
+                self.supabase.update_current_balance(self.exnova.get_current_balance())
             
             self._update_stats_and_martingale(result, signal, full_name, exp_mins)
         finally:
@@ -308,15 +328,8 @@ class TradingBot:
                 max_levels = self.bot_config.get('martingale_levels', 1)
                 if level < max_levels:
                     self.martingale_state[pair] = {'level': level + 1, 'is_active': True}
-                    mg_value = self._get_entry_value(pair)
-                    current_balance = self.exnova.get_current_balance()
-                    if current_balance is not None and mg_value > current_balance:
-                        self.logger('ERROR', f"MARTINGALE CANCELADO: Saldo insuficiente.")
-                        self.martingale_state[pair] = {'level': 0, 'is_active': False}
-                        return
-                    
                     self.logger('SUCCESS', f"EXECUTANDO MARTINGALE NÍVEL {level + 1}!")
-                    self._execute_and_wait(signal, full_name, exp_mins) # Re-executa o mesmo sinal
+                    self._execute_and_wait(signal, full_name, exp_mins)
                     return
                 else:
                     self.logger('ERROR', f"Nível máximo de Martingale atingido.")
@@ -325,20 +338,18 @@ class TradingBot:
         self.martingale_state.setdefault(pair, {})['is_active'] = False
         self._check_stop_limits()
 
-    # FUNÇÃO DE STOP TOTALMENTE REFEITA
     def _check_stop_limits(self) -> bool:
         stop_mode = self.bot_config.get('stop_mode', 'VALUE')
         limit_hit = False
         message = ""
 
         if stop_mode == 'PERCENT':
-            # Lógica de Stop por Percentagem
             stop_win_percent = self.bot_config.get('stop_win_percent', 0)
             stop_loss_percent = self.bot_config.get('stop_loss_percent', 0)
             initial_balance = self.bot_config.get('daily_initial_balance', 0)
-            current_balance = self.bot_config.get('current_balance', 0)
+            current_balance = self.exnova.get_current_balance() # Pega o saldo mais recente
 
-            if initial_balance > 0:
+            if initial_balance > 0 and current_balance is not None:
                 profit = current_balance - initial_balance
                 
                 if stop_win_percent > 0:
@@ -353,7 +364,6 @@ class TradingBot:
                         limit_hit = True
                         message = f"META DE STOP LOSS ATINGIDA ({profit:.2f} <= {-max_loss:.2f})!"
         else:
-            # Lógica de Stop por Valor (Número de Operações)
             stop_win = self.bot_config.get('stop_win', 0)
             stop_loss = self.bot_config.get('stop_loss', 0)
             
