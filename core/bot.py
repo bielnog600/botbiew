@@ -3,6 +3,7 @@ import os
 import asyncio
 import time
 import traceback
+import json # Importado para o diagnóstico
 from datetime import datetime, timedelta
 from typing import Dict, Optional, List
 from threading import Thread
@@ -147,21 +148,26 @@ class TradingBot:
             self.logger('INFO', "Janela de análise M1 ATIVADA.")
             self.run_analysis_for_timeframe(60, 1)
     
-    # FUNÇÃO TOTALMENTE REFEITA PARA MAIOR CONFIABILIDADE
     def _get_automatic_pairs(self, min_payout):
-        """
-        Busca os pares abertos com o melhor payout de forma mais direta e com logs detalhados.
-        """
         try:
-            best_pairs = {}
-            # Usamos get_all_init_v2() que é mais moderno e completo
             init_data = self.exnova.api.get_all_init_v2()
 
+            # --- CÓDIGO DE DIAGNÓSTICO TEMPORÁRIO ---
+            self.logger('DEBUG', '--- INÍCIO: ESTRUTURA DE DADOS DA API (get_all_init_v2) ---')
+            try:
+                # Tenta formatar como JSON para melhor leitura
+                self.logger('DEBUG', json.dumps(init_data, indent=2))
+            except Exception:
+                # Se não for um formato que o JSON consiga ler, imprime diretamente
+                self.logger('DEBUG', str(init_data))
+            self.logger('DEBUG', '--- FIM: ESTRUTURA DE DADOS DA API ---')
+            # --- FIM DO CÓDIGO DE DIAGNÓSTICO ---
+
+            best_pairs = {}
             if not init_data:
                 self.logger('WARNING', "Não foi possível obter os dados de inicialização da corretora.")
                 return []
 
-            # Itera sobre os tipos de opção (binárias e turbo)
             for option_type in ['binary', 'turbo']:
                 if option_type in init_data:
                     actives = init_data[option_type].get('actives')
@@ -170,7 +176,6 @@ class TradingBot:
                         
                     for asset_id, asset_details in actives.items():
                         asset_name = asset_details.get('name', f'ID_{asset_id}').split('.')[-1]
-                        
                         is_enabled = asset_details.get('enabled', False)
                         is_suspended = asset_details.get('is_suspended', False)
                         
@@ -188,9 +193,7 @@ class TradingBot:
                 self.logger('INFO', "Nenhum par aberto cumpre o requisito de payout mínimo no momento.")
                 return []
             
-            # Ordena os pares pelo maior payout
             sorted_pairs = sorted(best_pairs.items(), key=lambda item: item[1], reverse=True)
-            
             return [pair[0] for pair in sorted_pairs]
 
         except Exception as e:
