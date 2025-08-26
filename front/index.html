@@ -174,7 +174,7 @@
                 else { alert("Configurações guardadas com sucesso!"); }
                 setSaving(false);
             };
-
+            
             const handleReset = async () => {
                 if (!window.confirm("Tem a certeza que quer ZERAR O PLACAR? Esta ação irá apagar o histórico de hoje.")) return;
                 const { error } = await supabaseClient.rpc('reset_daily_stats');
