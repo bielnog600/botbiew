@@ -34,10 +34,12 @@ class SupabaseService:
             # Evita loop infinito de logs de erro
             print(f"Falha ao inserir log no Supabase: {e}")
 
-    def insert_trade_signal(self, signal_data):
+    def insert_trade_signal(self, signal_dict: dict):
         if not self.supabase: return None
         try:
-            response = self.supabase.table('trade_signals').insert(signal_data.to_dict()).execute()
+            # Garante que o resultado inicial é 'PENDENTE'
+            signal_dict['result'] = 'PENDENTE'
+            response = self.supabase.table('trade_signals').insert(signal_dict).execute()
             return response.data[0]['id']
         except Exception as e:
             logging.error(f"Erro ao inserir sinal de trade: {e}")
