@@ -11,8 +11,6 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="MarombiewBot">
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon-180x180.png">
-    <link rel="apple-touch-icon" sizes="152x152" href="/icons/apple-touch-icon-152x152.png">
-    <link rel="apple-touch-icon" sizes="167x167" href="/icons/apple-touch-icon-167x167.png">
 
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
@@ -81,7 +79,7 @@
             const [scores, setScores] = useState({ wins: 0, losses: 0, gales: 0 });
             const [loading, setLoading] = useState(true);
 
-            const fetchInitialData = useCallback(async () => {
+            const fetchAllData = useCallback(async () => {
                 const { data: configData } = await supabaseClient.from('bot_config').select('*').eq('id', 1).single();
                 setConfig(configData);
 
@@ -99,34 +97,19 @@
             }, []);
 
             useEffect(() => {
-                fetchInitialData();
+                fetchAllData();
+                // Fallback polling
+                const pollInterval = setInterval(fetchAllData, 5000);
 
-                const configChannel = supabaseClient.channel('bot_config_realtime')
-                    .on('postgres_changes', { event: '*', schema: 'public', table: 'bot_config', filter: 'id=eq.1' }, payload => {
-                        setConfig(payload.new);
-                    }).subscribe();
-
-                const signalsChannel = supabaseClient.channel('trade_signals_realtime')
-                    .on('postgres_changes', { event: '*', schema: 'public', table: 'trade_signals' }, payload => {
-                        const today = new Date();
-                        today.setHours(0, 0, 0, 0);
-                        if (new Date(payload.new.created_at) < today) return;
-
-                        if (payload.eventType === 'INSERT') {
-                            setSignals(current => [payload.new, ...current]);
-                        }
-                        if (payload.eventType === 'UPDATE') {
-                            setSignals(current => current.map(s => s.id === payload.new.id ? payload.new : s));
-                        }
-                    }).subscribe();
-
-                const logsChannel = supabaseClient.channel('bot_logs_realtime')
-                    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'bot_logs' }, payload => {
-                        setLogs(current => [...current.slice(-99), payload.new]);
-                    }).subscribe();
-
-                return () => supabaseClient.removeAllChannels();
-            }, [fetchInitialData]);
+                const configChannel = supabaseClient.channel('bot_config_realtime').on('postgres_changes', { event: '*', schema: 'public', table: 'bot_config', filter: 'id=eq.1' }, payload => setConfig(payload.new)).subscribe();
+                const signalsChannel = supabaseClient.channel('trade_signals_realtime').on('postgres_changes', { event: '*', schema: 'public', table: 'trade_signals' }, fetchAllData).subscribe();
+                const logsChannel = supabaseClient.channel('bot_logs_realtime').on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'bot_logs' }, payload => setLogs(current => [...current.slice(-99), payload.new])).subscribe();
+                
+                return () => {
+                    clearInterval(pollInterval);
+                    supabaseClient.removeAllChannels();
+                };
+            }, [fetchAllData]);
             
             useEffect(() => {
                 const wins = signals.filter(s => s.result === 'WIN').length;
