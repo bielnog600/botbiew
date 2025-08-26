@@ -56,7 +56,6 @@ class TradingBot:
 
     def cataloging_loop_sync(self):
         self.logger('INFO', "Thread de catalogação iniciada.")
-        # --- NOVO: Conexão Dedicada para Catalogação ---
         catalog_exnova = ExnovaService(settings.EXNOVA_EMAIL, settings.EXNOVA_PASSWORD)
         
         while self.is_running:
@@ -84,7 +83,7 @@ class TradingBot:
             except Exception as e: self.logger('ERROR', f"[CATALOGER] Erro no loop: {e}"); traceback.print_exc()
             time.sleep(15 * 60)
         
-        catalog_exnova.quit() # Encerra a conexão de catalogação
+        catalog_exnova.quit()
 
     def trading_loop_sync(self):
         self.logger('INFO', 'A iniciar o bot...')
@@ -147,13 +146,12 @@ class TradingBot:
                 self.logger('SUCCESS', f"SINAL ENCONTRADO! {pair_name} | {best_strategy_name} | {direction.upper()}")
                 signal = TradeSignal(pair=pair_name, direction=direction, strategy=best_strategy_name, **candles[-1])
                 
-                # Regista a entrada como PENDENTE antes de executar
                 sid = self.supabase.insert_trade_signal(signal.to_dict())
                 if not sid:
                     self.logger('ERROR', "Falha ao registar sinal PENDENTE na base de dados.")
                     return
 
-                time.sleep(max(0, 60 - datetime.utcnow().second)) # Espera o início da próxima vela
+                time.sleep(max(0, 60 - datetime.utcnow().second))
                 self._execute_and_wait(signal, pair_name, exp_mins, sid)
         except Exception as e: self.logger('ERROR', f"Erro em _analyze_asset({pair_name}): {e}"); traceback.print_exc()
 
@@ -166,7 +164,9 @@ class TradingBot:
         try:
             while self.is_running: await asyncio.sleep(1)
         finally:
-            self.is_running = False; self.logger("INFO", "A encerrar o bot..."); self.exnova.quit()
+            self.is_running = False
+            self.logger("INFO", "A encerrar o bot...")
+            if self.exnova: self.exnova.quit()
 
     def _execute_and_wait(self, signal: TradeSignal, full_name: str, exp_mins: int, sid: int):
         self.is_trade_active = True
@@ -221,10 +221,8 @@ class TradingBot:
                 if level < max_levels:
                     self.martingale_state[pair] = {'level': level + 1, 'is_active': True}
                     self.logger('SUCCESS', f"EXECUTANDO MARTINGALE NÍVEL {level + 1}!")
-                    # Para o Martingale, precisamos de um novo ID de sinal
                     new_sid = self.supabase.insert_trade_signal(signal.to_dict())
-                    if new_sid:
-                        self._execute_and_wait(signal, full_name, exp_mins, new_sid)
+                    if new_sid: self._execute_and_wait(signal, full_name, exp_mins, new_sid)
                     return
                 else:
                     self.logger('ERROR', f"Nível máximo de Martingale atingido.")
@@ -234,7 +232,41 @@ class TradingBot:
         self._check_stop_limits()
 
     def _check_stop_limits(self) -> bool:
-        # ... (implementação anterior) ...
+        stop_mode = self.bot_config.get('stop_mode', 'VALUE')
+        limit_hit = False
+        message = ""
+
+        if stop_mode == 'PERCENT':
+            stop_win_percent = self.bot_config.get('stop_win_percent', 0)
+            stop_loss_percent = self.bot_config.get('stop_loss_percent', 0)
+            initial_balance = self.bot_config.get('daily_initial_balance', 0)
+            current_balance = self.exnova.get_current_balance()
+
+            if initial_balance > 0 and current_balance is not None:
+                profit = current_balance - initial_balance
+                if stop_win_percent > 0:
+                    target_profit = initial_balance * (stop_win_percent / 100.0)
+                    if profit >= target_profit:
+                        limit_hit = True; message = f"META DE STOP WIN ATINGIDA ({profit:.2f} >= {target_profit:.2f})!"
+                if not limit_hit and stop_loss_percent > 0:
+                    max_loss = initial_balance * (stop_loss_percent / 100.0)
+                    if profit <= -max_loss:
+                        limit_hit = True; message = f"META DE STOP LOSS ATINGIDA ({profit:.2f} <= {-max_loss:.2f})!"
+        else:
+            stop_win = self.bot_config.get('stop_win', 0)
+            stop_loss = self.bot_config.get('stop_loss', 0)
+            if stop_win > 0 and self.daily_wins >= stop_win:
+                limit_hit = True; message = f"META DE STOP WIN ATINGIDA ({self.daily_wins}/{stop_win})!"
+            if not limit_hit and stop_loss > 0 and self.daily_losses >= stop_loss:
+                limit_hit = True; message = f"META DE STOP LOSS ATINGIDA ({self.daily_losses}/{stop_loss})!"
+
+        if limit_hit:
+            if self.bot_config.get('status') == 'RUNNING':
+                self.logger('SUCCESS' if 'WIN' in message else 'ERROR', message)
+                self.logger('WARNING', "O BOT FOI PAUSADO AUTOMATICAMENTE.")
+                self.supabase.update_config({'status': 'PAUSED'})
+                self.bot_config['status'] = 'PAUSED'
+            return True
         return False
 
     def _daily_reset_if_needed(self):
