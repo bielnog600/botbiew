@@ -1,120 +1,71 @@
 import logging
-from typing import Dict, Any, List, Optional
-# Voltamos a usar o cliente síncrono original
 from supabase import create_client, Client
-from core.data_models import TradeSignal
-
-# Configura o logger para a biblioteca da Supabase para evitar spam de logs
-logging.getLogger("httpx").setLevel(logging.WARNING)
-logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 class SupabaseService:
-    """
-    Serviço para interagir com a base de dados Supabase (versão síncrona).
-    """
     def __init__(self, url: str, key: str):
-        """
-        Inicializa a conexão com o Supabase.
-        """
         try:
-            # Usamos o cliente síncrono padrão
-            self.client: Client = create_client(url, key)
+            self.supabase: Client = create_client(url, key)
             logging.info("Conexão com o Supabase estabelecida com sucesso.")
         except Exception as e:
-            logging.error(f"Falha ao conectar com o Supabase: {e}")
-            self.client = None
+            logging.error(f"Erro ao conectar com o Supabase: {e}")
+            self.supabase = None
 
-    # As funções já não são 'async'
-    def get_bot_config(self) -> Dict[str, Any]:
-        """
-        Busca a configuração principal do bot.
-        """
-        if not self.client:
-            return {}
+    def get_bot_config(self):
+        if not self.supabase: return None
         try:
-            # A chamada '.execute()' é bloqueante (síncrona)
-            response = self.client.from_('bot_config').select("*").eq('id', 1).single().execute()
-            if response.data:
-                return response.data
-            return {}
+            response = self.supabase.table('bot_config').select('*').eq('id', 1).single().execute()
+            return response.data
         except Exception as e:
             logging.error(f"Erro ao buscar configuração do bot: {e}")
-            return {}
+            return None
 
-    def update_config(self, updates: Dict[str, Any]) -> bool:
-        """
-        Atualiza campos específicos na configuração do bot.
-        """
-        if not self.client:
-            return False
+    def update_config(self, data: dict):
+        if not self.supabase: return
         try:
-            self.client.from_('bot_config').update(updates).eq('id', 1).execute()
-            return True
+            self.supabase.table('bot_config').update(data).eq('id', 1).execute()
         except Exception as e:
             logging.error(f"Erro ao atualizar configuração: {e}")
-            return False
 
-    def insert_log(self, level: str, message: str) -> None:
-        """
-        Insere um novo registo de log.
-        """
-        if not self.client:
-            return
+    def insert_log(self, level: str, message: str):
+        if not self.supabase: return
         try:
-            self.client.from_('bot_logs').insert({
-                "level": level,
-                "message": message
-            }).execute()
+            self.supabase.table('bot_logs').insert({'level': level, 'message': message}).execute()
         except Exception as e:
-            print(f"ERRO CRÍTICO: Falha ao inserir log no Supabase: {e}")
+            # Evita loop infinito de logs de erro
+            print(f"Falha ao inserir log no Supabase: {e}")
 
-    def insert_trade_signal(self, signal: TradeSignal) -> Optional[int]:
-        """
-        Insere um novo sinal de trade.
-        """
-        if not self.client:
-            return None
+    def insert_trade_signal(self, signal_data):
+        if not self.supabase: return None
         try:
-            response = self.client.from_('trade_signals').insert(signal.to_dict()).execute()
-            if response.data:
-                return response.data[0]['id']
-            return None
+            response = self.supabase.table('trade_signals').insert(signal_data.to_dict()).execute()
+            return response.data[0]['id']
         except Exception as e:
             logging.error(f"Erro ao inserir sinal de trade: {e}")
             return None
 
-    def update_trade_result(self, signal_id: int, result: str, mg_level: int) -> bool:
-        """
-        Atualiza o resultado de um trade.
-        """
-        if not self.client:
-            return False
+    def update_trade_result(self, signal_id: int, result: str, martingale_level: int):
+        if not self.supabase: return
         try:
-            self.client.from_('trade_signals').update({
-                "result": result,
-                "martingale_level": mg_level
-            }).eq('id', signal_id).execute()
-            return True
+            self.supabase.table('trade_signals').update({'result': result, 'martingale_level': martingale_level}).eq('id', signal_id).execute()
         except Exception as e:
             logging.error(f"Erro ao atualizar resultado do trade: {e}")
-            return False
-            
-    def update_current_balance(self, new_balance: float) -> bool:
-        """
-        Atualiza o saldo atual na configuração.
-        """
-        return self.update_config({'current_balance': new_balance})
 
-    def upsert_cataloged_assets(self, assets_data: List[Dict[str, Any]]) -> bool:
-        """
-        Insere ou atualiza os dados dos ativos catalogados.
-        """
-        if not self.client or not assets_data:
-            return False
+    def update_current_balance(self, balance: float):
+        self.update_config({'current_balance': balance})
+
+    def upsert_cataloged_asset(self, asset_data: dict):
+        if not self.supabase: return
         try:
-            self.client.from_('cataloged_assets').upsert(assets_data, on_conflict='pair').execute()
-            logging.info(f"{len(assets_data)} ativos catalogados foram guardados/atualizados.")
-            return True
+            # 'upsert' insere um novo registo ou atualiza um existente se o 'pair' já existir
+            self.supabase.table('cataloged_assets').upsert(asset_data, on_conflict='pair').execute()
         except Exception as e:
-            logging.error(f"Erro ao fazer upsert dos ativos catalogados: {e}")
-            return False
+            logging.error(f"Erro ao salvar ativo catalogado ({asset_data.get('pair')}): {e}")
+
+    def get_cataloged_assets(self, min_win_rate: float):
+        if not self.supabase: return []
+        try:
+            response = self.supabase.table('cataloged_assets').select('*').gte('win_rate', min_win_rate).order('win_rate', desc=True).execute()
+            return response.data
+        except Exception as e:
+            logging.error(f"Erro ao buscar ativos catalogados: {e}")
+            return []
