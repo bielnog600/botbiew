@@ -147,10 +147,10 @@ class TradingBot:
             self.logger('INFO', "Janela de análise M1 ATIVADA.")
             self.run_analysis_for_timeframe(60, 1)
     
-    # FUNÇÃO ATUALIZADA E MAIS ROBUSTA
+    # FUNÇÃO TOTALMENTE REFEITA PARA MAIOR CONFIABILIDADE
     def _get_automatic_pairs(self, min_payout):
         """
-        Busca os pares abertos com o melhor payout de forma mais direta.
+        Busca os pares abertos com o melhor payout de forma mais direta e com logs detalhados.
         """
         try:
             best_pairs = {}
@@ -164,22 +164,25 @@ class TradingBot:
             # Itera sobre os tipos de opção (binárias e turbo)
             for option_type in ['binary', 'turbo']:
                 if option_type in init_data:
-                    for asset_id, asset_details in init_data[option_type]['actives'].items():
-                        asset_name = asset_details.get('name', '').split('.')[-1]
+                    actives = init_data[option_type].get('actives')
+                    if not actives:
+                        continue
+                        
+                    for asset_id, asset_details in actives.items():
+                        asset_name = asset_details.get('name', f'ID_{asset_id}').split('.')[-1]
                         
                         is_enabled = asset_details.get('enabled', False)
                         is_suspended = asset_details.get('is_suspended', False)
                         
-                        if is_enabled and not is_suspended:
-                            commission = asset_details.get('option', {}).get('profit', {}).get('commission', 100)
-                            payout = (100 - commission) / 100.0
-                            
-                            if payout >= min_payout:
-                                # Armazena o melhor payout para cada par
-                                if asset_name not in best_pairs or payout > best_pairs[asset_name]:
-                                    best_pairs[asset_name] = payout
-                        # else:
-                        #     self.logger('DEBUG', f"Par {asset_name} ignorado (Fechado ou Suspenso).")
+                        if not is_enabled or is_suspended:
+                            continue
+
+                        commission = asset_details.get('option', {}).get('profit', {}).get('commission', 100)
+                        payout = (100 - commission) / 100.0
+                        
+                        if payout >= min_payout:
+                            if asset_name not in best_pairs or payout > best_pairs[asset_name]:
+                                best_pairs[asset_name] = payout
 
             if not best_pairs:
                 self.logger('INFO', "Nenhum par aberto cumpre o requisito de payout mínimo no momento.")
@@ -191,7 +194,8 @@ class TradingBot:
             return [pair[0] for pair in sorted_pairs]
 
         except Exception as e:
-            self.logger('ERROR', f"Erro ao buscar pares automaticamente: {e}")
+            self.logger('ERROR', f"Erro CRÍTICO ao buscar/processar pares automaticamente: {e}")
+            self.logger('ERROR', f"A estrutura de dados recebida da API pode estar incorreta ou mudou.")
             traceback.print_exc()
             return []
 
@@ -206,14 +210,13 @@ class TradingBot:
             assets_to_check = self._get_automatic_pairs(min_payout)
             if assets_to_check:
                 self.logger('INFO', f"Pares encontrados que cumprem os critérios: {assets_to_check}")
-        else:  # MANUAL
+        else:
             assets_to_check = self.bot_config.get('manual_pairs', [])
 
         strategies_to_check = []
         if strategy_mode == 'AUTOMATIC':
             strategies_to_check = list(self.strategy_map.keys())
-            self.logger('INFO', "Modo Automático: Usando todas as estratégias.")
-        else:  # MANUAL
+        else:
             strategies_to_check = self.bot_config.get('manual_strategies', [])
 
         if not assets_to_check or not strategies_to_check:
@@ -229,7 +232,9 @@ class TradingBot:
         try:
             self.logger('INFO', f"A analisar {pair_name}...")
             candles = self.exnova.get_historical_candles(pair_name, 60, 50)
-            if not candles: return
+            if not candles: 
+                self.logger('WARNING', f"Não foi possível obter velas para {pair_name}.")
+                return
             
             for strat_name in strategies_to_run:
                 if self.is_trade_active: break
