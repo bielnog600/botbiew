@@ -6,8 +6,7 @@ class ExnovaService:
         self.email = email
         self.password = password
         self.api = ExnovaAPI(self.email, self.password)
-        self.api.connect()
-
+        
     def connect(self):
         logging.info("A estabelecer ligação websocket com a Exnova...")
         check, reason = self.api.connect()
@@ -69,11 +68,9 @@ class ExnovaService:
             logging.error(f"Erro ao buscar ativos abertos: {e}")
             return []
 
-
     def quit(self):
         logging.info("A encerrar a conexão com a API...")
         try:
             self.api.close()
         except Exception as e:
             logging.error(f"Erro ao fechar a API: {e}")
-
