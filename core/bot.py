@@ -155,10 +155,8 @@ class TradingBot:
             # --- CÓDIGO DE DIAGNÓSTICO TEMPORÁRIO ---
             self.logger('DEBUG', '--- INÍCIO: ESTRUTURA DE DADOS DA API (get_all_init_v2) ---')
             try:
-                # Tenta formatar como JSON para melhor leitura
                 self.logger('DEBUG', json.dumps(init_data, indent=2))
             except Exception:
-                # Se não for um formato que o JSON consiga ler, imprime diretamente
                 self.logger('DEBUG', str(init_data))
             self.logger('DEBUG', '--- FIM: ESTRUTURA DE DADOS DA API ---')
             # --- FIM DO CÓDIGO DE DIAGNÓSTICO ---
@@ -203,8 +201,12 @@ class TradingBot:
             return []
 
     def run_analysis_for_timeframe(self, tf_secs, exp_mins):
-        pair_mode = self.bot_config.get('pair_management_mode', 'MANUAL')
-        strategy_mode = self.bot_config.get('strategy_management_mode', 'MANUAL')
+        # --- MUDANÇA PARA FORÇAR O MODO AUTOMÁTICO ---
+        # Ignora a configuração do painel e força o modo automático para diagnóstico
+        pair_mode = 'AUTOMATIC'
+        strategy_mode = 'AUTOMATIC'
+        self.logger('WARNING', 'MODO DE DIAGNÓSTICO FORÇADO: A executar em modo automático.')
+        # --- FIM DA MUDANÇA ---
         
         assets_to_check = []
         if pair_mode == 'AUTOMATIC':
