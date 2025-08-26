@@ -42,8 +42,6 @@
         .toggle-bg:after { content: ''; position: absolute; top: 2px; left: 2px; background: white; border-radius: 9999px; height: 1.25rem; width: 1.25rem; transition: all 0.2s; }
         input:checked + .toggle-bg:after { transform: translateX(100%); }
         input:checked + .toggle-bg { background-color: var(--accent-primary); }
-        .radio-label { transition: all 0.2s; }
-        input[type="radio"]:checked + .radio-label { background-color: var(--accent-primary); color: var(--bg-dark); border-color: var(--accent-primary); }
         .spinner { border-color: rgba(245, 158, 11, 0.2); border-top-color: var(--accent-primary); animation: spin 1s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
         #splash-screen {
@@ -51,7 +49,6 @@
             display: flex; flex-direction: column; align-items: center; justify-content: center;
             z-index: 9999; transition: opacity 0.5s ease-out;
         }
-        /* Custom range slider styles */
         input[type="range"] { -webkit-appearance: none; appearance: none; width: 100%; height: 8px; background: var(--bg-light); border-radius: 5px; outline: none; }
         input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 20px; height: 20px; background: var(--accent-primary); cursor: pointer; border-radius: 50%; }
         input[type="range"]::-moz-range-thumb { width: 20px; height: 20px; background: var(--accent-primary); cursor: pointer; border-radius: 50%; }
@@ -70,17 +67,13 @@
         const { useState, useEffect, useCallback, useRef, createContext, useContext } = React;
         const { createClient } = supabase;
 
-        // --- CONTEXTO GLOBAL PARA DADOS ---
         const DataContext = createContext();
-
         const SUPABASE_URL = 'https://ioduahwknfsktujthfyc.supabase.co';
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlvZHVhaHdrbmZza3R1anRoZnljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEzMDc0NDcsImV4cCI6MjA2Njg4MzQ0N30.96f8wZO6SvABKFMWjIiw1pSugAB4Isldj7yxLcLJRSE';
         const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-        // --- HOOK PARA USAR O CONTEXTO ---
         const useData = () => useContext(DataContext);
 
-        // --- PROVEDOR DE DADOS ---
         function DataProvider({ children }) {
             const [config, setConfig] = useState(null);
             const [signals, setSignals] = useState([]);
@@ -92,7 +85,11 @@
                 const { data: configData } = await supabaseClient.from('bot_config').select('*').eq('id', 1).single();
                 setConfig(configData);
 
-                const { data: signalsData } = await supabaseClient.from('trade_signals').select('*').order('created_at', { ascending: false }).limit(20);
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                const todayISO = today.toISOString();
+
+                const { data: signalsData } = await supabaseClient.from('trade_signals').select('*').gte('created_at', todayISO).order('created_at', { ascending: false });
                 setSignals(signalsData || []);
 
                 const { data: logsData } = await supabaseClient.from('bot_logs').select('*').order('created_at', { ascending: false }).limit(100);
@@ -103,27 +100,10 @@
 
             useEffect(() => {
                 fetchAllData();
-
-                const configChannel = supabaseClient.channel('bot_config_changes')
-                    .on('postgres_changes', { event: '*', schema: 'public', table: 'bot_config', filter: 'id=eq.1' }, payload => {
-                        setConfig(payload.new);
-                    }).subscribe();
-
-                const signalsChannel = supabaseClient.channel('trade_signals_changes')
-                    .on('postgres_changes', { event: '*', schema: 'public', table: 'trade_signals' }, () => {
-                        fetchAllData(); 
-                    }).subscribe();
-
-                const logsChannel = supabaseClient.channel('bot_logs_changes')
-                    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'bot_logs' }, payload => {
-                        setLogs(current => [...current, payload.new]);
-                    }).subscribe();
-
-                return () => {
-                    supabaseClient.removeChannel(configChannel);
-                    supabaseClient.removeChannel(signalsChannel);
-                    supabaseClient.removeChannel(logsChannel);
-                };
+                const configChannel = supabaseClient.channel('bot_config_changes').on('postgres_changes', { event: '*', schema: 'public', table: 'bot_config', filter: 'id=eq.1' }, payload => setConfig(payload.new)).subscribe();
+                const signalsChannel = supabaseClient.channel('trade_signals_changes').on('postgres_changes', { event: '*', schema: 'public', table: 'trade_signals' }, fetchAllData).subscribe();
+                const logsChannel = supabaseClient.channel('bot_logs_changes').on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'bot_logs' }, payload => setLogs(current => [...current.slice(-99), payload.new])).subscribe();
+                return () => { supabaseClient.removeAllChannels() };
             }, [fetchAllData]);
             
             useEffect(() => {
@@ -133,194 +113,37 @@
                 setScores({ wins, losses, gales });
             }, [signals]);
 
-            const value = { config, signals, logs, scores, loading, setConfig };
-            return <DataContext.Provider value={value}>{children}</DataContext.Provider>;
+            return <DataContext.Provider value={{ config, signals, logs, scores, loading, setConfig }}>{children}</DataContext.Provider>;
         }
 
-        // --- COMPONENTES DA UI ---
         function LoginPage({ onLogin }) {
-            const [email, setEmail] = useState('');
-            const [password, setPassword] = useState('');
-            const [error, setError] = useState('');
-            const [loading, setLoading] = useState(false);
-
-            const handleLogin = async (e) => {
-                e.preventDefault();
-                setLoading(true);
-                setError('');
-                const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
-                if (error) setError(error.message);
-                else if (data.user) onLogin(data.user);
-                setLoading(false);
-            };
-
-            return (
-                <div className="min-h-screen flex items-center justify-center p-4 bg-bg-dark">
-                    <div className="w-full max-w-md p-8 space-y-6 glass-card rounded-2xl shadow-lg">
-                        <div className="text-center">
-                            <i className="fas fa-robot text-4xl text-amber-400 mb-2"></i>
-                            <h2 className="text-3xl font-bold text-white">Admin Login</h2>
-                            <p className="text-text-secondary">MAROMBIEW BOT</p>
-                        </div>
-                        <form className="space-y-6" onSubmit={handleLogin}>
-                            <div className="space-y-4">
-                                <input type="email" required className="form-input w-full px-4 py-3 rounded-lg" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} />
-                                <input type="password" required className="form-input w-full px-4 py-3 rounded-lg" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} />
-                            </div>
-                            {error && <p className="text-red-400 text-sm text-center">{error}</p>}
-                            <button type="submit" className="btn bg-amber-500 hover:bg-amber-600 w-full py-3 rounded-lg text-white font-semibold" disabled={loading}>
-                                {loading ? 'A entrar...' : 'Entrar'}
-                            </button>
-                        </form>
-                    </div>
-                </div>
-            );
+            const [email, setEmail] = useState(''); const [password, setPassword] = useState(''); const [error, setError] = useState(''); const [loading, setLoading] = useState(false);
+            const handleLogin = async (e) => { e.preventDefault(); setLoading(true); setError(''); const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password }); if (error) setError(error.message); else if (data.user) onLogin(data.user); setLoading(false); };
+            return (<div className="min-h-screen flex items-center justify-center p-4 bg-bg-dark"><div className="w-full max-w-md p-8 space-y-6 glass-card rounded-2xl shadow-lg"><div className="text-center"><i className="fas fa-robot text-4xl text-amber-400 mb-2"></i><h2 className="text-3xl font-bold text-white">Admin Login</h2><p className="text-text-secondary">MAROMBIEW BOT</p></div><form className="space-y-6" onSubmit={handleLogin}><div className="space-y-4"><input type="email" required className="form-input w-full px-4 py-3 rounded-lg" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} /><input type="password" required className="form-input w-full px-4 py-3 rounded-lg" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} /></div>{error && <p className="text-red-400 text-sm text-center">{error}</p>}<button type="submit" className="btn bg-amber-500 hover:bg-amber-600 w-full py-3 rounded-lg text-white font-semibold" disabled={loading}>{loading ? 'A entrar...' : 'Entrar'}</button></form></div></div>);
         }
         
         function CountdownTimer() {
             const [countdown, setCountdown] = useState(0);
-
-            useEffect(() => {
-                const interval = setInterval(() => {
-                    const now = new Date();
-                    const seconds = now.getSeconds();
-                    const remaining = 60 - seconds;
-                    setCountdown(remaining);
-                }, 1000);
-                return () => clearInterval(interval);
-            }, []);
-
-            return (
-                <div className="flex items-center space-x-3">
-                    <div className="relative w-10 h-10">
-                        <svg className="w-full h-full -rotate-90" viewBox="0 0 36 36">
-                            <path className="text-gray-700" strokeWidth="3" stroke="currentColor" fill="none"
-                                d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
-                            <path className="text-amber-400" strokeWidth="3" strokeDasharray={`${(countdown / 60) * 100}, 100`}
-                                strokeLinecap="round" stroke="currentColor" fill="none"
-                                d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                                style={{ transition: 'stroke-dasharray 1s linear' }} />
-                        </svg>
-                        <div className="absolute inset-0 flex items-center justify-center text-white font-bold text-sm">
-                            {countdown}s
-                        </div>
-                    </div>
-                    <div>
-                        <p className="font-semibold text-sm">Próxima Análise</p>
-                        <p className="text-xs text-text-secondary">A aguardar fecho da vela M1</p>
-                    </div>
-                </div>
-            );
+            useEffect(() => { const interval = setInterval(() => { setCountdown(60 - new Date().getSeconds()); }, 1000); return () => clearInterval(interval); }, []);
+            return (<div className="flex items-center space-x-3"><div className="relative w-10 h-10"><svg className="w-full h-full -rotate-90" viewBox="0 0 36 36"><path className="text-gray-700" strokeWidth="3" stroke="currentColor" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" /><path className="text-amber-400" strokeWidth="3" strokeDasharray={`${(countdown / 60) * 100}, 100`} strokeLinecap="round" stroke="currentColor" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" style={{ transition: 'stroke-dasharray 1s linear' }} /></svg><div className="absolute inset-0 flex items-center justify-center text-white font-bold text-sm">{countdown}s</div></div><div><p className="font-semibold text-sm">Próxima Análise</p><p className="text-xs text-text-secondary">A aguardar fecho da vela M1</p></div></div>);
         }
 
         function BotStatusControl() {
-            const { config } = useData();
-            const [statusSaving, setStatusSaving] = useState(false);
-
-            const handleStatusToggle = async () => {
-                if (!config || statusSaving) return;
-                setStatusSaving(true);
-                const newStatus = config.status === 'RUNNING' ? 'PAUSED' : 'RUNNING';
-                const { error } = await supabaseClient.from('bot_config').update({ status: newStatus }).eq('id', 1);
-                if (error) alert("Falha ao alterar o estado: " + error.message);
-                setStatusSaving(false);
-            };
-
+            const { config } = useData(); const [statusSaving, setStatusSaving] = useState(false);
+            const handleStatusToggle = async () => { if (!config || statusSaving) return; setStatusSaving(true); const newStatus = config.status === 'RUNNING' ? 'PAUSED' : 'RUNNING'; const { error } = await supabaseClient.from('bot_config').update({ status: newStatus }).eq('id', 1); if (error) alert("Falha ao alterar o estado: " + error.message); setStatusSaving(false); };
             if (!config) return <div className="h-24 bg-bg-light rounded-lg animate-pulse"></div>;
-
             const isRunning = config.status === 'RUNNING';
-
-            return (
-                <div className="glass-card p-4 rounded-xl flex items-center justify-between">
-                    <div className="flex items-center">
-                        <i className={`fas fa-circle mr-3 ${isRunning ? 'text-green-500 animate-pulse' : 'text-gray-500'}`}></i>
-                        <div>
-                            <span className="font-semibold text-white">Estado do Bot</span>
-                            <p className={`font-bold text-sm ${isRunning ? 'text-green-400' : 'text-amber-400'}`}>{config.status}</p>
-                        </div>
-                    </div>
-                    <button onClick={handleStatusToggle} className={`btn ${isRunning ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'} px-5 py-2 rounded-md text-white`} disabled={statusSaving}>
-                        <i className={`fas ${statusSaving ? 'fa-spinner fa-spin' : (isRunning ? 'fa-pause' : 'fa-play')} mr-2`}></i>
-                        {statusSaving ? 'Aguarde' : (isRunning ? 'Pausar' : 'Iniciar')}
-                    </button>
-                </div>
-            );
+            return (<div className="glass-card p-4 rounded-xl flex items-center justify-between"><div className="flex items-center"><i className={`fas fa-circle mr-3 ${isRunning ? 'text-green-500 animate-pulse' : 'text-gray-500'}`}></i><div><span className="font-semibold text-white">Estado do Bot</span><p className={`font-bold text-sm ${isRunning ? 'text-green-400' : 'text-amber-400'}`}>{config.status}</p></div></div><button onClick={handleStatusToggle} className={`btn ${isRunning ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'} px-5 py-2 rounded-md text-white`} disabled={statusSaving}><i className={`fas ${statusSaving ? 'fa-spinner fa-spin' : (isRunning ? 'fa-pause' : 'fa-play')} mr-2`}></i>{statusSaving ? 'Aguarde' : (isRunning ? 'Pausar' : 'Iniciar')}</button></div>);
         }
 
-        // --- VIEWS ---
         function HomeView() {
             const { signals, scores, config } = useData();
-            
             const assertividade = scores.wins + scores.losses > 0 ? (scores.wins / (scores.wins + scores.losses) * 100).toFixed(0) : 0;
             const profit = config ? (config.current_balance - config.daily_initial_balance) : 0;
             const profitColor = profit >= 0 ? 'text-green-400' : 'text-red-400';
             const profitIcon = profit >= 0 ? 'fa-arrow-trend-up' : 'fa-arrow-trend-down';
-            
-            const SignalCard = ({ signal }) => {
-                const isWin = signal.result === 'WIN';
-                const isLoss = signal.result === 'LOSS';
-                const resultColor = isWin ? 'text-green-400' : isLoss ? 'text-red-400' : 'text-gray-400';
-                const resultIcon = isWin ? 'fa-check-circle' : isLoss ? 'fa-times-circle' : 'fa-question-circle';
-
-                return (
-                    <div className="glass-card rounded-xl p-3 flex items-center space-x-4">
-                        <div className="flex-1">
-                            <div className="flex justify-between items-center">
-                                <p className="font-bold text-lg text-white">{signal.pair}</p>
-                                <div className={`px-3 py-1 rounded-full text-xs font-bold ${signal.direction === 'call' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
-                                    <i className={`fas fa-arrow-${signal.direction === 'call' ? 'up' : 'down'} mr-1`}></i>
-                                    {signal.direction.toUpperCase()}
-                                </div>
-                            </div>
-                            <p className="text-xs text-text-secondary">{signal.strategy}</p>
-                        </div>
-                        <div className="w-28 text-right flex-shrink-0">
-                            <p className="text-xs text-gray-400">RESULTADO</p>
-                            <p className={`text-xl font-bold ${resultColor}`}>
-                                {signal.result ? <><i className={`fas ${resultIcon} mr-1`}></i>{signal.result}</> : <span className="animate-pulse">...</span>}
-                            </p>
-                        </div>
-                    </div>
-                );
-            };
-
-            return (
-                <div className="space-y-6">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <BotStatusControl />
-                        <div className="glass-card p-4 rounded-xl flex items-center justify-between">
-                            <CountdownTimer />
-                        </div>
-                    </div>
-                    
-                    <div className="glass-card p-4 rounded-xl">
-                        <div className="grid grid-cols-2 md:grid-cols-4 divide-x divide-border-color text-center">
-                            <div className="px-2"><p className="text-sm text-green-400 font-semibold">WINS</p><p className="text-2xl font-bold">{scores.wins}</p></div>
-                            <div className="px-2"><p className="text-sm text-red-400 font-semibold">LOSS</p><p className="text-2xl font-bold">{scores.losses}</p></div>
-                            <div className="px-2"><p className="text-sm text-amber-400 font-semibold">GALES</p><p className="text-2xl font-bold">{scores.gales}</p></div>
-                            <div className="px-2"><p className="text-sm text-blue-400 font-semibold">%</p><p className="text-2xl font-bold">{assertividade}%</p></div>
-                        </div>
-                    </div>
-                    
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div className="glass-card p-4 rounded-xl text-center">
-                            <p className="text-sm text-text-secondary">SALDO ATUAL</p>
-                            <p className="text-3xl font-bold text-white mt-1">${config ? Number(config.current_balance).toFixed(2) : '0.00'}</p>
-                        </div>
-                        <div className="glass-card p-4 rounded-xl text-center">
-                            <p className="text-sm text-text-secondary">LUCRO/PERDA (DIA)</p>
-                            <p className={`text-3xl font-bold mt-1 ${profitColor}`}>
-                                <i className={`fas ${profitIcon} mr-2`}></i>{profit >= 0 ? '+' : ''}{profit.toFixed(2)}
-                            </p>
-                        </div>
-                    </div>
-
-                    <div className="space-y-4">
-                        <h2 className="text-lg font-bold">Histórico de Sinais Recentes</h2>
-                        {signals.length > 0 ? signals.map(signal => <SignalCard key={signal.id} signal={signal} />) : <p className="text-text-secondary text-center py-8">Nenhum sinal registado para hoje.</p>}
-                    </div>
-                </div>
-            );
+            const SignalCard = ({ signal }) => { const isWin = signal.result === 'WIN'; const isLoss = signal.result === 'LOSS'; const resultColor = isWin ? 'text-green-400' : isLoss ? 'text-red-400' : 'text-gray-400'; const resultIcon = isWin ? 'fa-check-circle' : isLoss ? 'fa-times-circle' : 'fa-question-circle'; return (<div className="glass-card rounded-xl p-3 flex items-center space-x-4"><div className="flex-1"><div className="flex justify-between items-center"><p className="font-bold text-lg text-white">{signal.pair}</p><div className={`px-3 py-1 rounded-full text-xs font-bold ${signal.direction === 'call' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}><i className={`fas fa-arrow-${signal.direction === 'call' ? 'up' : 'down'} mr-1`}></i>{signal.direction.toUpperCase()}</div></div><p className="text-xs text-text-secondary">{signal.strategy}</p></div><div className="w-28 text-right flex-shrink-0"><p className="text-xs text-gray-400">RESULTADO</p><p className={`text-xl font-bold ${resultColor}`}>{signal.result ? <><i className={`fas ${resultIcon} mr-1`}></i>{signal.result}</> : <span className="animate-pulse">...</span>}</p></div></div>); };
+            return (<div className="space-y-6"><div className="grid grid-cols-1 md:grid-cols-2 gap-6"><BotStatusControl /><div className="glass-card p-4 rounded-xl flex items-center justify-between"><CountdownTimer /></div></div><div className="glass-card p-4 rounded-xl"><div className="grid grid-cols-2 md:grid-cols-4 divide-x divide-border-color text-center"><div className="px-2"><p className="text-sm text-green-400 font-semibold">WINS</p><p className="text-2xl font-bold">{scores.wins}</p></div><div className="px-2"><p className="text-sm text-red-400 font-semibold">LOSS</p><p className="text-2xl font-bold">{scores.losses}</p></div><div className="px-2"><p className="text-sm text-amber-400 font-semibold">GALES</p><p className="text-2xl font-bold">{scores.gales}</p></div><div className="px-2"><p className="text-sm text-blue-400 font-semibold">%</p><p className="text-2xl font-bold">{assertividade}%</p></div></div></div><div className="grid grid-cols-1 md:grid-cols-2 gap-6"><div className="glass-card p-4 rounded-xl text-center"><p className="text-sm text-text-secondary">SALDO ATUAL</p><p className="text-3xl font-bold text-white mt-1">${config ? Number(config.current_balance).toFixed(2) : '0.00'}</p></div><div className="glass-card p-4 rounded-xl text-center"><p className="text-sm text-text-secondary">LUCRO/PERDA (DIA)</p><p className={`text-3xl font-bold mt-1 ${profitColor}`}><i className={`fas ${profitIcon} mr-2`}></i>{profit >= 0 ? '+' : ''}{profit.toFixed(2)}</p></div></div><div className="space-y-4"><h2 className="text-lg font-bold">Histórico de Sinais Recentes</h2>{signals.length > 0 ? signals.map(signal => <SignalCard key={signal.id} signal={signal} />) : <p className="text-text-secondary text-center py-8">Nenhum sinal registado para hoje.</p>}</div></div>);
         }
         
         function SettingsView() {
@@ -334,11 +157,8 @@
             const handleSave = async () => {
                 setSaving(true);
                 const { error } = await supabaseClient.from('bot_config').update(config).eq('id', 1);
-                if (error) {
-                    alert("Falha ao guardar: " + error.message);
-                } else {
-                    alert("Configurações guardadas com sucesso!");
-                }
+                if (error) { alert("Falha ao guardar: " + error.message); } 
+                else { alert("Configurações guardadas com sucesso!"); }
                 setSaving(false);
             };
 
@@ -347,19 +167,19 @@
             return (
                 <div className="space-y-8">
                     <h1 className="text-3xl font-bold text-white">Configurações e Controlo</h1>
-                    
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                         <div className="space-y-8">
+                            <BotStatusControl />
                             <div className="glass-card p-6 rounded-xl">
                                 <h2 className="text-xl font-bold mb-4">Gerenciamento de Risco Diário</h2>
                                 <div className="flex items-center justify-center space-x-2 bg-bg-medium p-1 rounded-lg mb-4">
-                                    <button onClick={() => handleUpdate('stop_mode', 'VALUE')} className={`flex-1 py-2 rounded-md font-semibold text-sm ${config.stop_mode === 'VALUE' ? 'bg-amber-500 text-white' : 'bg-transparent text-text-secondary'}`}>Por Valor</button>
-                                    <button onClick={() => handleUpdate('stop_mode', 'PERCENT')} className={`flex-1 py-2 rounded-md font-semibold text-sm ${config.stop_mode === 'PERCENT' ? 'bg-amber-500 text-white' : 'bg-transparent text-text-secondary'}`}>Por % da Banca</button>
+                                    <button onClick={() => handleUpdate('stop_mode', 'VALUE')} className={`flex-1 py-2 rounded-md font-semibold text-sm transition-colors ${config.stop_mode !== 'PERCENT' ? 'bg-amber-500 text-white' : 'bg-transparent text-text-secondary'}`}>Por Operações</button>
+                                    <button onClick={() => handleUpdate('stop_mode', 'PERCENT')} className={`flex-1 py-2 rounded-md font-semibold text-sm transition-colors ${config.stop_mode === 'PERCENT' ? 'bg-amber-500 text-white' : 'bg-transparent text-text-secondary'}`}>Por % da Banca</button>
                                 </div>
-                                {config.stop_mode === 'VALUE' ? (
+                                {config.stop_mode !== 'PERCENT' ? (
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                        <div><label className="block mb-1 text-text-secondary text-sm">Stop Win (Nº de Vitórias)</label><input type="number" step="1" min="0" value={config.stop_win || 0} onChange={e => handleUpdate('stop_win', parseInt(e.target.value))} className="form-input w-full p-2 rounded-md" /></div>
-                                        <div><label className="block mb-1 text-text-secondary text-sm">Stop Loss (Nº de Derrotas)</label><input type="number" step="1" min="0" value={config.stop_loss || 0} onChange={e => handleUpdate('stop_loss', parseInt(e.target.value))} className="form-input w-full p-2 rounded-md" /></div>
+                                        <div><label className="block mb-1 text-text-secondary text-sm">Stop Win (Vitórias)</label><input type="number" step="1" min="0" value={config.stop_win || 0} onChange={e => handleUpdate('stop_win', parseInt(e.target.value))} className="form-input w-full p-2 rounded-md" /></div>
+                                        <div><label className="block mb-1 text-text-secondary text-sm">Stop Loss (Derrotas)</label><input type="number" step="1" min="0" value={config.stop_loss || 0} onChange={e => handleUpdate('stop_loss', parseInt(e.target.value))} className="form-input w-full p-2 rounded-md" /></div>
                                     </div>
                                 ) : (
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -368,183 +188,58 @@
                                     </div>
                                 )}
                             </div>
-
-                            <div className="glass-card p-6 rounded-xl">
-                                <h2 className="text-xl font-bold mb-4">Gestão de Estratégia (Modo Auto)</h2>
-                                <label className="block mb-1 text-text-secondary text-sm">Assertividade Mínima</label>
-                                <p className="text-xs text-gray-400 mb-4">O bot só irá considerar estratégias com taxa de acerto igual ou superior a este valor.</p>
-                                <div className="flex items-center gap-4">
-                                    <input type="range" min="50" max="95" step="1" value={config.min_win_rate || 70} onChange={e => handleUpdate('min_win_rate', parseInt(e.target.value))} className="w-full" />
-                                    <span className="font-bold text-lg text-amber-400">{config.min_win_rate || 70}%</span>
-                                </div>
-                            </div>
                         </div>
                         <div className="space-y-8">
                             <div className="glass-card p-6 rounded-xl space-y-6">
                                 <h2 className="text-xl font-bold">Parâmetros de Negociação</h2>
                                 <div><label className="block mb-1 text-text-secondary text-sm">Tipo de Conta</label><select value={config.account_type || 'PRACTICE'} onChange={e => handleUpdate('account_type', e.target.value)} className="form-select w-full p-2 rounded-md"><option value="PRACTICE">Prática</option><option value="REAL">Real</option></select></div>
-                                <div><label className="block mb-1 text-text-secondary text-sm">Valor de Entrada Padrão ($)</label><input type="number" step="0.01" value={config.entry_value || 1} onChange={e => handleUpdate('entry_value', parseFloat(e.target.value))} className="form-input w-full p-2 rounded-md" /></div>
+                                <div><label className="block mb-1 text-text-secondary text-sm">Valor de Entrada Padrão ($)</label><input type="number" step="0.01" min="1" value={config.entry_value || 1} onChange={e => handleUpdate('entry_value', parseFloat(e.target.value))} className="form-input w-full p-2 rounded-md" /></div>
                             </div>
                             <div className="glass-card p-6 rounded-xl space-y-4">
-                                <div className="flex items-center justify-between">
-                                    <h2 className="text-xl font-bold">Gestão de Martingale</h2>
-                                    <div className="flex items-center">
-                                        <input className="hidden" type="checkbox" id="martingale-toggle" checked={config.use_martingale || false} onChange={() => handleUpdate('use_martingale', !config.use_martingale)} />
-                                        <label htmlFor="martingale-toggle" className="flex items-center cursor-pointer">
-                                            <div className="relative"><div className="toggle-bg block bg-gray-600 w-14 h-8 rounded-full"></div></div>
-                                            <div className="ml-3 text-white font-medium">{config.use_martingale ? 'Ativado' : 'Desativado'}</div>
-                                        </label>
-                                    </div>
+                                <div className="flex items-center justify-between"><h2 className="text-xl font-bold">Gestão de Martingale</h2><div className="flex items-center"><input className="hidden" type="checkbox" id="martingale-toggle" checked={config.use_martingale || false} onChange={() => handleUpdate('use_martingale', !config.use_martingale)} /><label htmlFor="martingale-toggle" className="flex items-center cursor-pointer"><div className="relative"><div className="toggle-bg block bg-gray-600 w-14 h-8 rounded-full"></div></div><div className="ml-3 text-white font-medium">{config.use_martingale ? 'Ativado' : 'Desativado'}</div></label></div></div>
+                                {config.use_martingale && (<div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t border-border-color"><div><label className="block mb-1 text-text-secondary text-sm">Níveis de Martingale</label><input type="number" step="1" min="1" value={config.martingale_levels || 1} onChange={e => handleUpdate('martingale_levels', parseInt(e.target.value))} className="form-input w-full p-2 rounded-md" /></div><div><label className="block mb-1 text-text-secondary text-sm">Fator</label><input type="number" step="0.1" value={config.martingale_factor || 2.3} onChange={e => handleUpdate('martingale_factor', parseFloat(e.target.value))} className="form-input w-full p-2 rounded-md" /></div></div>)}
+                            </div>
+                             <div className="glass-card p-6 rounded-xl">
+                                <h2 className="text-xl font-bold mb-4">Filtro de Payout (Modo Auto)</h2>
+                                <label className="block mb-1 text-text-secondary text-sm">Payout Mínimo</label>
+                                <p className="text-xs text-gray-400 mb-4">O bot só irá operar em pares com payout igual ou superior a este valor.</p>
+                                <div className="flex items-center gap-4">
+                                    <input type="range" min="60" max="95" step="1" value={config.min_payout || 80} onChange={e => handleUpdate('min_payout', parseInt(e.target.value))} className="w-full" />
+                                    <span className="font-bold text-lg text-amber-400">{config.min_payout || 80}%</span>
                                 </div>
-                                {config.use_martingale && (
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t border-border-color">
-                                        <div><label className="block mb-1 text-text-secondary text-sm">Níveis de Martingale</label><input type="number" step="1" value={config.martingale_levels || 2} onChange={e => handleUpdate('martingale_levels', parseInt(e.target.value))} className="form-input w-full p-2 rounded-md" /></div>
-                                        <div><label className="block mb-1 text-text-secondary text-sm">Fator de Multiplicação</label><input type="number" step="0.1" value={config.martingale_factor || 2.3} onChange={e => handleUpdate('martingale_factor', parseFloat(e.target.value))} className="form-input w-full p-2 rounded-md" /></div>
-                                    </div>
-                                )}
                             </div>
                         </div>
                     </div>
-                    <button onClick={handleSave} className="btn bg-amber-500 hover:bg-amber-600 w-full py-3 rounded-lg text-white font-semibold" disabled={saving}>
-                        <i className="fas fa-save mr-2"></i>{saving ? 'A guardar...' : 'Guardar Alterações'}
-                    </button>
+                    <button onClick={handleSave} className="btn bg-amber-500 hover:bg-amber-600 w-full py-3 rounded-lg text-white font-semibold" disabled={saving}><i className="fas fa-save mr-2"></i>{saving ? 'A guardar...' : 'Guardar Alterações'}</button>
                 </div>
             );
         }
 
         function LogsView() {
-            const { logs } = useData();
-            const endOfLogsRef = useRef(null);
-
-            useEffect(() => {
-                endOfLogsRef.current?.scrollIntoView({ behavior: "smooth" });
-            }, [logs]);
-
-            const LogLine = ({ log }) => {
-                const colors = { SUCCESS: 'text-accent-win', ERROR: 'text-accent-loss', INFO: 'text-accent-info', WARNING: 'text-amber-400', CRITICAL: 'bg-red-800 text-white p-1 rounded' };
-                const icons = { SUCCESS: 'fa-check-circle', ERROR: 'fa-times-circle', INFO: 'fa-info-circle', WARNING: 'fa-exclamation-triangle', CRITICAL: 'fa-skull-crossbones' };
-                return (
-                    <div className="flex items-start">
-                        <span className="text-gray-500 mr-3">{new Date(log.created_at).toLocaleTimeString()}</span>
-                        <i className={`fas ${icons[log.level] || 'fa-question-circle'} ${colors[log.level] || 'text-gray-400'} mt-1 mr-2 w-4 text-center`}></i>
-                        <p className="flex-1 break-words">{log.message}</p>
-                    </div>
-                );
-            };
-
-            return (
-                <div className="flex flex-col h-full">
-                    <h1 className="text-3xl font-bold text-white mb-6 flex-shrink-0">Logs em Tempo Real</h1>
-                    <div className="glass-card font-mono text-xs p-4 rounded-xl flex-1 overflow-y-auto space-y-2">
-                        {logs.length > 0 ? logs.map(log => <LogLine key={log.id} log={log} />) : <p className="text-gray-400 text-center py-8">A aguardar logs...</p>}
-                        <div ref={endOfLogsRef} />
-                    </div>
-                </div>
-            );
+            const { logs } = useData(); const endOfLogsRef = useRef(null);
+            useEffect(() => { endOfLogsRef.current?.scrollIntoView({ behavior: "smooth" }); }, [logs]);
+            const LogLine = ({ log }) => { const colors = { SUCCESS: 'text-accent-win', ERROR: 'text-accent-loss', INFO: 'text-accent-info', WARNING: 'text-amber-400', CRITICAL: 'bg-red-800 text-white p-1 rounded' }; const icons = { SUCCESS: 'fa-check-circle', ERROR: 'fa-times-circle', INFO: 'fa-info-circle', WARNING: 'fa-exclamation-triangle', CRITICAL: 'fa-skull-crossbones' }; return (<div className="flex items-start"><span className="text-gray-500 mr-3">{new Date(log.created_at).toLocaleTimeString()}</span><i className={`fas ${icons[log.level] || 'fa-question-circle'} ${colors[log.level] || 'text-gray-400'} mt-1 mr-2 w-4 text-center`}></i><p className="flex-1 break-words">{log.message}</p></div>); };
+            return (<div className="flex flex-col h-full"><h1 className="text-3xl font-bold text-white mb-6 flex-shrink-0">Logs em Tempo Real</h1><div className="glass-card font-mono text-xs p-4 rounded-xl flex-1 overflow-y-auto space-y-2">{logs.length > 0 ? logs.map(log => <LogLine key={log.id} log={log} />) : <p className="text-gray-400 text-center py-8">A aguardar logs...</p>}<div ref={endOfLogsRef} /></div></div>);
         }
         
         function AdminDashboard() {
-            const [view, setView] = useState('home');
-            const { loading } = useData();
-            
+            const [view, setView] = useState('home'); const { loading } = useData();
             const handleLogout = async () => { await supabaseClient.auth.signOut(); };
-            
-            const NavLink = ({ viewName, icon, text, isMobile = false }) => (
-                <a href="#" onClick={(e) => {e.preventDefault(); setView(viewName);}} className={`flex items-center rounded-lg text-sm font-semibold transition-colors ${ isMobile ? `flex-1 flex-col py-2 text-xs ${view === viewName ? 'text-amber-400' : 'text-text-secondary'}` : `space-x-3 px-4 py-3 ${view === viewName ? 'nav-link-active' : 'hover:bg-bg-light'}`}`}>
-                    <i className={`fa-solid ${icon} text-xl ${isMobile ? 'mb-1' : 'w-6 text-center'}`}></i>
-                    <span className={isMobile ? '' : 'hidden lg:inline'}>{text}</span>
-                </a>
-            );
-
-            const renderView = () => {
-                if (loading) return <div className="text-center p-10"><div className="spinner w-8 h-8 mx-auto"></div></div>;
-                switch (view) {
-                    case 'home': return <HomeView />;
-                    case 'settings': return <SettingsView />;
-                    case 'logs': return <LogsView />;
-                    default: return <HomeView />;
-                }
-            };
-
-            return (
-                <div className="flex h-screen bg-bg-dark">
-                    <aside className="hidden md:flex w-20 lg:w-64 bg-bg-medium text-white flex-col p-4 border-r border-border-color">
-                        <div className="h-16 flex items-center px-2 text-xl font-bold">
-                            <i className="fas fa-robot text-amber-400 mr-3"></i>
-                            <span className="hidden lg:inline">MAROMBIEW</span>
-                        </div>
-                        <nav className="flex-1 space-y-2">
-                            <NavLink viewName="home" icon="fa-home" text="Home" />
-                            <NavLink viewName="settings" icon="fa-sliders" text="Configurações" />
-                            <NavLink viewName="logs" icon="fa-terminal" text="Logs do Bot" />
-                        </nav>
-                        <div className="p-2">
-                            <button onClick={handleLogout} className="w-full flex items-center space-x-3 px-4 py-3 rounded-lg text-sm font-semibold hover:bg-red-500/80">
-                                <i className="fa-solid fa-right-from-bracket text-lg w-6 text-center"></i>
-                                <span className="hidden lg:inline">Sair</span>
-                            </button>
-                        </div>
-                    </aside>
-                    <div className="flex-1 flex flex-col overflow-hidden">
-                        <main className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-8">{renderView()}</main>
-                        <nav className="md:hidden w-full bg-bg-medium border-t border-border-color flex justify-around">
-                            <NavLink viewName="home" icon="fa-home" text="Home" isMobile={true} />
-                            <NavLink viewName="settings" icon="fa-sliders" text="Config" isMobile={true} />
-                            <NavLink viewName="logs" icon="fa-terminal" text="Logs" isMobile={true} />
-                            <a href="#" onClick={handleLogout} className="flex-1 flex flex-col items-center py-2 text-xs text-text-secondary">
-                                <i className="fa-solid fa-right-from-bracket text-xl mb-1"></i>Sair
-                            </a>
-                        </nav>
-                    </div>
-                </div>
-            );
+            const NavLink = ({ viewName, icon, text, isMobile = false }) => ( <a href="#" onClick={(e) => {e.preventDefault(); setView(viewName);}} className={`flex items-center rounded-lg text-sm font-semibold transition-colors ${ isMobile ? `flex-1 flex-col py-2 text-xs ${view === viewName ? 'text-amber-400' : 'text-text-secondary'}` : `space-x-3 px-4 py-3 ${view === viewName ? 'nav-link-active' : 'hover:bg-bg-light'}`}`}><i className={`fa-solid ${icon} text-xl ${isMobile ? 'mb-1' : 'w-6 text-center'}`}></i><span className={isMobile ? '' : 'hidden lg:inline'}>{text}</span></a> );
+            const renderView = () => { if (loading) return <div className="text-center p-10"><div className="spinner w-8 h-8 mx-auto"></div></div>; switch (view) { case 'home': return <HomeView />; case 'settings': return <SettingsView />; case 'logs': return <LogsView />; default: return <HomeView />; } };
+            return (<div className="flex h-screen bg-bg-dark"><aside className="hidden md:flex w-20 lg:w-64 bg-bg-medium text-white flex-col p-4 border-r border-border-color"><div className="h-16 flex items-center px-2 text-xl font-bold"><i className="fas fa-robot text-amber-400 mr-3"></i><span className="hidden lg:inline">MAROMBIEW</span></div><nav className="flex-1 space-y-2"><NavLink viewName="home" icon="fa-home" text="Home" /><NavLink viewName="settings" icon="fa-sliders" text="Configurações" /><NavLink viewName="logs" icon="fa-terminal" text="Logs do Bot" /></nav><div className="p-2"><button onClick={handleLogout} className="w-full flex items-center space-x-3 px-4 py-3 rounded-lg text-sm font-semibold hover:bg-red-500/80"><i className="fa-solid fa-right-from-bracket text-lg w-6 text-center"></i><span className="hidden lg:inline">Sair</span></button></div></aside><div className="flex-1 flex flex-col overflow-hidden"><main className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-8">{renderView()}</main><nav className="md:hidden w-full bg-bg-medium border-t border-border-color flex justify-around"><NavLink viewName="home" icon="fa-home" text="Home" isMobile={true} /><NavLink viewName="settings" icon="fa-sliders" text="Config" isMobile={true} /><NavLink viewName="logs" icon="fa-terminal" text="Logs" isMobile={true} /><a href="#" onClick={handleLogout} className="flex-1 flex flex-col items-center py-2 text-xs text-text-secondary"><i className="fa-solid fa-right-from-bracket text-xl mb-1"></i>Sair</a></nav></div></div>);
         }
 
         function App() {
-            const [session, setSession] = useState(null);
-            const [loading, setLoading] = useState(true);
-
-            useEffect(() => {
-                supabaseClient.auth.getSession().then(({ data: { session } }) => {
-                    setSession(session);
-                    setLoading(false);
-                });
-
-                const { data: { subscription } } = supabaseClient.auth.onAuthStateChange((_event, session) => {
-                    setSession(session);
-                });
-
-                return () => subscription.unsubscribe();
-            }, []);
-
-            useEffect(() => {
-                if (!loading) {
-                    const splash = document.getElementById('splash-screen');
-                    if (splash) {
-                        splash.style.opacity = '0';
-                        setTimeout(() => splash.remove(), 500);
-                    }
-                }
-            }, [loading]);
-
+            const [session, setSession] = useState(null); const [loading, setLoading] = useState(true);
+            useEffect(() => { supabaseClient.auth.getSession().then(({ data: { session } }) => { setSession(session); setLoading(false); }); const { data: { subscription } } = supabaseClient.auth.onAuthStateChange((_event, session) => { setSession(session); }); return () => subscription.unsubscribe(); }, []);
+            useEffect(() => { if (!loading) { const splash = document.getElementById('splash-screen'); if (splash) { splash.style.opacity = '0'; setTimeout(() => splash.remove(), 500); } } }, [loading]);
             if (loading) return null;
-
-            return (
-                <React.Fragment>
-                    {!session ? (
-                        <LoginPage onLogin={() => {}} />
-                    ) : (
-                        <DataProvider>
-                            <AdminDashboard />
-                        </DataProvider>
-                    )}
-                </React.Fragment>
-            );
+            return (<React.Fragment>{!session ? (<LoginPage onLogin={() => {}} />) : (<DataProvider><AdminDashboard /></DataProvider>)}</React.Fragment>);
         }
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<App />);
-
     </script>
 </body>
 </html>
