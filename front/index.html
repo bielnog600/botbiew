@@ -51,6 +51,10 @@
             display: flex; flex-direction: column; align-items: center; justify-content: center;
             z-index: 9999; transition: opacity 0.5s ease-out;
         }
+        /* Custom range slider styles */
+        input[type="range"] { -webkit-appearance: none; appearance: none; width: 100%; height: 8px; background: var(--bg-light); border-radius: 5px; outline: none; }
+        input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 20px; height: 20px; background: var(--accent-primary); cursor: pointer; border-radius: 50%; }
+        input[type="range"]::-moz-range-thumb { width: 20px; height: 20px; background: var(--accent-primary); cursor: pointer; border-radius: 50%; }
     </style>
 </head>
 <body>
@@ -107,7 +111,7 @@
 
                 const signalsChannel = supabaseClient.channel('trade_signals_changes')
                     .on('postgres_changes', { event: '*', schema: 'public', table: 'trade_signals' }, () => {
-                        fetchAllData(); // Recarrega tudo para manter placar e sinais sincronizados
+                        fetchAllData(); 
                     }).subscribe();
 
                 const logsChannel = supabaseClient.channel('bot_logs_changes')
@@ -129,11 +133,7 @@
                 setScores({ wins, losses, gales });
             }, [signals]);
 
-            const updateConfig = (newConfig) => {
-                setConfig(prev => ({ ...prev, ...newConfig }));
-            };
-
-            const value = { config, signals, logs, scores, loading, updateConfig };
+            const value = { config, signals, logs, scores, loading, setConfig };
             return <DataContext.Provider value={value}>{children}</DataContext.Provider>;
         }
 
@@ -193,13 +193,13 @@
             return (
                 <div className="flex items-center space-x-3">
                     <div className="relative w-10 h-10">
-                        <svg className="w-full h-full" viewBox="0 0 36 36">
+                        <svg className="w-full h-full -rotate-90" viewBox="0 0 36 36">
                             <path className="text-gray-700" strokeWidth="3" stroke="currentColor" fill="none"
                                 d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
                             <path className="text-amber-400" strokeWidth="3" strokeDasharray={`${(countdown / 60) * 100}, 100`}
                                 strokeLinecap="round" stroke="currentColor" fill="none"
                                 d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                                style={{ transition: 'stroke-dasharray 0.5s ease-in-out' }} />
+                                style={{ transition: 'stroke-dasharray 1s linear' }} />
                         </svg>
                         <div className="absolute inset-0 flex items-center justify-center text-white font-bold text-sm">
                             {countdown}s
@@ -207,7 +207,7 @@
                     </div>
                     <div>
                         <p className="font-semibold text-sm">Próxima Análise</p>
-                        <p className="text-xs text-text-secondary">A aguardar o fecho da vela M1</p>
+                        <p className="text-xs text-text-secondary">A aguardar fecho da vela M1</p>
                     </div>
                 </div>
             );
@@ -223,7 +223,6 @@
                 const newStatus = config.status === 'RUNNING' ? 'PAUSED' : 'RUNNING';
                 const { error } = await supabaseClient.from('bot_config').update({ status: newStatus }).eq('id', 1);
                 if (error) alert("Falha ao alterar o estado: " + error.message);
-                // O estado será atualizado automaticamente pelo listener do Supabase
                 setStatusSaving(false);
             };
 
@@ -325,8 +324,92 @@
         }
         
         function SettingsView() {
-            // Implementação da página de configurações
-            return <div className="text-white">Página de Configurações em construção.</div>;
+            const { config, setConfig } = useData();
+            const [saving, setSaving] = useState(false);
+
+            const handleUpdate = (key, value) => {
+                setConfig(prev => ({ ...prev, [key]: value }));
+            };
+
+            const handleSave = async () => {
+                setSaving(true);
+                const { error } = await supabaseClient.from('bot_config').update(config).eq('id', 1);
+                if (error) {
+                    alert("Falha ao guardar: " + error.message);
+                } else {
+                    alert("Configurações guardadas com sucesso!");
+                }
+                setSaving(false);
+            };
+
+            if (!config) return <div className="text-center p-10"><div className="spinner w-8 h-8 mx-auto"></div></div>;
+
+            return (
+                <div className="space-y-8">
+                    <h1 className="text-3xl font-bold text-white">Configurações e Controlo</h1>
+                    
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                        <div className="space-y-8">
+                            <div className="glass-card p-6 rounded-xl">
+                                <h2 className="text-xl font-bold mb-4">Gerenciamento de Risco Diário</h2>
+                                <div className="flex items-center justify-center space-x-2 bg-bg-medium p-1 rounded-lg mb-4">
+                                    <button onClick={() => handleUpdate('stop_mode', 'VALUE')} className={`flex-1 py-2 rounded-md font-semibold text-sm ${config.stop_mode === 'VALUE' ? 'bg-amber-500 text-white' : 'bg-transparent text-text-secondary'}`}>Por Valor</button>
+                                    <button onClick={() => handleUpdate('stop_mode', 'PERCENT')} className={`flex-1 py-2 rounded-md font-semibold text-sm ${config.stop_mode === 'PERCENT' ? 'bg-amber-500 text-white' : 'bg-transparent text-text-secondary'}`}>Por % da Banca</button>
+                                </div>
+                                {config.stop_mode === 'VALUE' ? (
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                        <div><label className="block mb-1 text-text-secondary text-sm">Stop Win (Nº de Vitórias)</label><input type="number" step="1" min="0" value={config.stop_win || 0} onChange={e => handleUpdate('stop_win', parseInt(e.target.value))} className="form-input w-full p-2 rounded-md" /></div>
+                                        <div><label className="block mb-1 text-text-secondary text-sm">Stop Loss (Nº de Derrotas)</label><input type="number" step="1" min="0" value={config.stop_loss || 0} onChange={e => handleUpdate('stop_loss', parseInt(e.target.value))} className="form-input w-full p-2 rounded-md" /></div>
+                                    </div>
+                                ) : (
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                        <div><label className="block mb-1 text-text-secondary text-sm">Stop Win (% da Banca)</label><input type="number" step="1" min="0" value={config.stop_win_percent || 0} onChange={e => handleUpdate('stop_win_percent', parseInt(e.target.value))} className="form-input w-full p-2 rounded-md" /></div>
+                                        <div><label className="block mb-1 text-text-secondary text-sm">Stop Loss (% da Banca)</label><input type="number" step="1" min="0" value={config.stop_loss_percent || 0} onChange={e => handleUpdate('stop_loss_percent', parseInt(e.target.value))} className="form-input w-full p-2 rounded-md" /></div>
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="glass-card p-6 rounded-xl">
+                                <h2 className="text-xl font-bold mb-4">Gestão de Estratégia (Modo Auto)</h2>
+                                <label className="block mb-1 text-text-secondary text-sm">Assertividade Mínima</label>
+                                <p className="text-xs text-gray-400 mb-4">O bot só irá considerar estratégias com taxa de acerto igual ou superior a este valor.</p>
+                                <div className="flex items-center gap-4">
+                                    <input type="range" min="50" max="95" step="1" value={config.min_win_rate || 70} onChange={e => handleUpdate('min_win_rate', parseInt(e.target.value))} className="w-full" />
+                                    <span className="font-bold text-lg text-amber-400">{config.min_win_rate || 70}%</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="space-y-8">
+                            <div className="glass-card p-6 rounded-xl space-y-6">
+                                <h2 className="text-xl font-bold">Parâmetros de Negociação</h2>
+                                <div><label className="block mb-1 text-text-secondary text-sm">Tipo de Conta</label><select value={config.account_type || 'PRACTICE'} onChange={e => handleUpdate('account_type', e.target.value)} className="form-select w-full p-2 rounded-md"><option value="PRACTICE">Prática</option><option value="REAL">Real</option></select></div>
+                                <div><label className="block mb-1 text-text-secondary text-sm">Valor de Entrada Padrão ($)</label><input type="number" step="0.01" value={config.entry_value || 1} onChange={e => handleUpdate('entry_value', parseFloat(e.target.value))} className="form-input w-full p-2 rounded-md" /></div>
+                            </div>
+                            <div className="glass-card p-6 rounded-xl space-y-4">
+                                <div className="flex items-center justify-between">
+                                    <h2 className="text-xl font-bold">Gestão de Martingale</h2>
+                                    <div className="flex items-center">
+                                        <input className="hidden" type="checkbox" id="martingale-toggle" checked={config.use_martingale || false} onChange={() => handleUpdate('use_martingale', !config.use_martingale)} />
+                                        <label htmlFor="martingale-toggle" className="flex items-center cursor-pointer">
+                                            <div className="relative"><div className="toggle-bg block bg-gray-600 w-14 h-8 rounded-full"></div></div>
+                                            <div className="ml-3 text-white font-medium">{config.use_martingale ? 'Ativado' : 'Desativado'}</div>
+                                        </label>
+                                    </div>
+                                </div>
+                                {config.use_martingale && (
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t border-border-color">
+                                        <div><label className="block mb-1 text-text-secondary text-sm">Níveis de Martingale</label><input type="number" step="1" value={config.martingale_levels || 2} onChange={e => handleUpdate('martingale_levels', parseInt(e.target.value))} className="form-input w-full p-2 rounded-md" /></div>
+                                        <div><label className="block mb-1 text-text-secondary text-sm">Fator de Multiplicação</label><input type="number" step="0.1" value={config.martingale_factor || 2.3} onChange={e => handleUpdate('martingale_factor', parseFloat(e.target.value))} className="form-input w-full p-2 rounded-md" /></div>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                    <button onClick={handleSave} className="btn bg-amber-500 hover:bg-amber-600 w-full py-3 rounded-lg text-white font-semibold" disabled={saving}>
+                        <i className="fas fa-save mr-2"></i>{saving ? 'A guardar...' : 'Guardar Alterações'}
+                    </button>
+                </div>
+            );
         }
 
         function LogsView() {
@@ -360,7 +443,6 @@
             );
         }
         
-        // --- DASHBOARD PRINCIPAL ---
         function AdminDashboard() {
             const [view, setView] = useState('home');
             const { loading } = useData();
@@ -418,7 +500,6 @@
             );
         }
 
-        // --- APP PRINCIPAL ---
         function App() {
             const [session, setSession] = useState(null);
             const [loading, setLoading] = useState(true);
