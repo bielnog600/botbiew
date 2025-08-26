@@ -3,7 +3,6 @@ import os
 import asyncio
 import time
 import traceback
-import json # Importado para o diagnóstico
 from datetime import datetime, timedelta
 from typing import Dict, Optional, List
 from threading import Thread
@@ -116,6 +115,7 @@ class TradingBot:
                 if new_config: self.bot_config = new_config
                 
                 current_status = self.bot_config.get('status', 'PAUSED')
+                # LÓGICA DE REINÍCIO SUAVE AO INICIAR
                 if current_status == 'RUNNING' and self.previous_status == 'PAUSED': 
                     self._soft_restart()
                 
@@ -131,6 +131,7 @@ class TradingBot:
                     if not self.is_trade_active:
                         self.trading_cycle()
                 else:
+                    # Se estiver pausado, aguarda antes de verificar novamente
                     time.sleep(5)
                 time.sleep(1)
             except Exception as e:
@@ -150,42 +151,26 @@ class TradingBot:
     
     def _get_automatic_pairs(self, min_payout):
         try:
+            best_pairs = {}
             init_data = self.exnova.api.get_all_init_v2()
 
-            # --- CÓDIGO DE DIAGNÓSTICO TEMPORÁRIO ---
-            self.logger('DEBUG', '--- INÍCIO: ESTRUTURA DE DADOS DA API (get_all_init_v2) ---')
-            try:
-                self.logger('DEBUG', json.dumps(init_data, indent=2))
-            except Exception:
-                self.logger('DEBUG', str(init_data))
-            self.logger('DEBUG', '--- FIM: ESTRUTURA DE DADOS DA API ---')
-            # --- FIM DO CÓDIGO DE DIAGNÓSTICO ---
-
-            best_pairs = {}
             if not init_data:
                 self.logger('WARNING', "Não foi possível obter os dados de inicialização da corretora.")
                 return []
 
             for option_type in ['binary', 'turbo']:
-                if option_type in init_data:
-                    actives = init_data[option_type].get('actives')
-                    if not actives:
-                        continue
+                if option_type in init_data and init_data[option_type].get('actives'):
+                    for asset_id, asset_details in init_data[option_type]['actives'].items():
+                        asset_name = asset_details.get('name', '').split('.')[-1]
+                        if not asset_name: continue
                         
-                    for asset_id, asset_details in actives.items():
-                        asset_name = asset_details.get('name', f'ID_{asset_id}').split('.')[-1]
-                        is_enabled = asset_details.get('enabled', False)
-                        is_suspended = asset_details.get('is_suspended', False)
-                        
-                        if not is_enabled or is_suspended:
-                            continue
-
-                        commission = asset_details.get('option', {}).get('profit', {}).get('commission', 100)
-                        payout = (100 - commission) / 100.0
-                        
-                        if payout >= min_payout:
-                            if asset_name not in best_pairs or payout > best_pairs[asset_name]:
-                                best_pairs[asset_name] = payout
+                        if asset_details.get('enabled', False) and not asset_details.get('is_suspended', False):
+                            commission = asset_details.get('option', {}).get('profit', {}).get('commission', 100)
+                            payout = (100 - commission) / 100.0
+                            
+                            if payout >= min_payout:
+                                if asset_name not in best_pairs or payout > best_pairs[asset_name]:
+                                    best_pairs[asset_name] = payout
 
             if not best_pairs:
                 self.logger('INFO', "Nenhum par aberto cumpre o requisito de payout mínimo no momento.")
@@ -195,18 +180,14 @@ class TradingBot:
             return [pair[0] for pair in sorted_pairs]
 
         except Exception as e:
-            self.logger('ERROR', f"Erro CRÍTICO ao buscar/processar pares automaticamente: {e}")
-            self.logger('ERROR', f"A estrutura de dados recebida da API pode estar incorreta ou mudou.")
+            self.logger('ERROR', f"Erro ao buscar pares automaticamente: {e}")
             traceback.print_exc()
             return []
 
     def run_analysis_for_timeframe(self, tf_secs, exp_mins):
-        # --- MUDANÇA PARA FORÇAR O MODO AUTOMÁTICO ---
-        # Ignora a configuração do painel e força o modo automático para diagnóstico
-        pair_mode = 'AUTOMATIC'
-        strategy_mode = 'AUTOMATIC'
-        self.logger('WARNING', 'MODO DE DIAGNÓSTICO FORÇADO: A executar em modo automático.')
-        # --- FIM DA MUDANÇA ---
+        # O bot agora usa o modo "manual_mode_enabled" para decidir. Por simplicidade, vamos assumir que o painel controla os modos de pares e estratégias.
+        pair_mode = self.bot_config.get('pair_management_mode', 'AUTOMATIC')
+        strategy_mode = self.bot_config.get('strategy_management_mode', 'AUTOMATIC')
         
         assets_to_check = []
         if pair_mode == 'AUTOMATIC':
@@ -214,7 +195,7 @@ class TradingBot:
             self.logger('INFO', f"Modo Automático: Buscando pares com payout mínimo de {min_payout*100:.0f}%.")
             assets_to_check = self._get_automatic_pairs(min_payout)
             if assets_to_check:
-                self.logger('INFO', f"Pares encontrados que cumprem os critérios: {assets_to_check}")
+                self.logger('INFO', f"Pares encontrados: {assets_to_check}")
         else:
             assets_to_check = self.bot_config.get('manual_pairs', [])
 
@@ -231,7 +212,6 @@ class TradingBot:
         for pair in assets_to_check:
             if self.is_trade_active: break
             self._analyze_asset(pair, tf_secs, exp_mins, strategies_to_check)
-
 
     def _analyze_asset(self, pair_name, tf_secs, exp_mins, strategies_to_run: List[str]):
         try:
@@ -274,14 +254,13 @@ class TradingBot:
     def _execute_and_wait(self, signal: TradeSignal, full_name: str, exp_mins: int):
         self.is_trade_active = True
         try:
-            is_mg = "Martingale" in signal.strategy
-            value = self._get_entry_value(signal.pair, is_mg)
+            value = self._get_entry_value(signal.pair)
             bal_before = self.exnova.get_current_balance()
             if bal_before is None: return
             
             order_id = self.exnova.execute_trade(value, full_name, signal.direction.lower(), exp_mins)
             if not order_id: 
-                self.supabase.insert_trade_signal(signal)
+                self.supabase.insert_trade_signal(signal, result='ERROR')
                 return
             
             sid = self.supabase.insert_trade_signal(signal)
@@ -308,7 +287,7 @@ class TradingBot:
             if not self.martingale_state.get(signal.pair, {}).get('is_active', False):
                 self.is_trade_active = False
 
-    def _get_entry_value(self, asset, is_mg):
+    def _get_entry_value(self, asset):
         base = self.bot_config.get('entry_value', 1.0)
         if not self.bot_config.get('use_martingale', False): return base
         level = self.martingale_state.get(asset, {}).get('level', 0)
@@ -326,27 +305,18 @@ class TradingBot:
             self.daily_losses += 1
             if self.bot_config.get('use_martingale', False):
                 level = self.martingale_state.get(pair, {}).get('level', 0)
-                max_levels = self.bot_config.get('martingale_levels', 2)
+                max_levels = self.bot_config.get('martingale_levels', 1)
                 if level < max_levels:
                     self.martingale_state[pair] = {'level': level + 1, 'is_active': True}
-                    
-                    mg_value = self._get_entry_value(pair, True)
+                    mg_value = self._get_entry_value(pair)
                     current_balance = self.exnova.get_current_balance()
                     if current_balance is not None and mg_value > current_balance:
                         self.logger('ERROR', f"MARTINGALE CANCELADO: Saldo insuficiente.")
                         self.martingale_state[pair] = {'level': 0, 'is_active': False}
                         return
-
-                    candles = self.exnova.get_historical_candles(pair, 60, 1)
-                    if not candles:
-                        self.is_trade_active = False
-                        return
-                    
-                    strat_name = f"{signal.strategy.split('_MG_')[0]}_MG_{level + 1}"
-                    mg_signal = TradeSignal(pair=pair, direction=signal.direction, strategy=strat_name, **candles[-1])
                     
                     self.logger('SUCCESS', f"EXECUTANDO MARTINGALE NÍVEL {level + 1}!")
-                    self._execute_and_wait(mg_signal, full_name, exp_mins)
+                    self._execute_and_wait(signal, full_name, exp_mins) # Re-executa o mesmo sinal
                     return
                 else:
                     self.logger('ERROR', f"Nível máximo de Martingale atingido.")
@@ -355,20 +325,45 @@ class TradingBot:
         self.martingale_state.setdefault(pair, {})['is_active'] = False
         self._check_stop_limits()
 
+    # FUNÇÃO DE STOP TOTALMENTE REFEITA
     def _check_stop_limits(self) -> bool:
-        stop_win = self.bot_config.get('stop_win') or 0
-        stop_loss = self.bot_config.get('stop_loss') or 0
-        
+        stop_mode = self.bot_config.get('stop_mode', 'VALUE')
         limit_hit = False
         message = ""
 
-        if stop_win > 0 and self.daily_wins >= stop_win:
-            limit_hit = True
-            message = f"META DE STOP WIN ATINGIDA ({self.daily_wins}/{stop_win})!"
-        
-        if not limit_hit and stop_loss > 0 and self.daily_losses >= stop_loss:
-            limit_hit = True
-            message = f"META DE STOP LOSS ATINGIDA ({self.daily_losses}/{stop_loss})!"
+        if stop_mode == 'PERCENT':
+            # Lógica de Stop por Percentagem
+            stop_win_percent = self.bot_config.get('stop_win_percent', 0)
+            stop_loss_percent = self.bot_config.get('stop_loss_percent', 0)
+            initial_balance = self.bot_config.get('daily_initial_balance', 0)
+            current_balance = self.bot_config.get('current_balance', 0)
+
+            if initial_balance > 0:
+                profit = current_balance - initial_balance
+                
+                if stop_win_percent > 0:
+                    target_profit = initial_balance * (stop_win_percent / 100.0)
+                    if profit >= target_profit:
+                        limit_hit = True
+                        message = f"META DE STOP WIN ATINGIDA ({profit:.2f} >= {target_profit:.2f})!"
+
+                if not limit_hit and stop_loss_percent > 0:
+                    max_loss = initial_balance * (stop_loss_percent / 100.0)
+                    if profit <= -max_loss:
+                        limit_hit = True
+                        message = f"META DE STOP LOSS ATINGIDA ({profit:.2f} <= {-max_loss:.2f})!"
+        else:
+            # Lógica de Stop por Valor (Número de Operações)
+            stop_win = self.bot_config.get('stop_win', 0)
+            stop_loss = self.bot_config.get('stop_loss', 0)
+            
+            if stop_win > 0 and self.daily_wins >= stop_win:
+                limit_hit = True
+                message = f"META DE STOP WIN ATINGIDA ({self.daily_wins}/{stop_win})!"
+            
+            if not limit_hit and stop_loss > 0 and self.daily_losses >= stop_loss:
+                limit_hit = True
+                message = f"META DE STOP LOSS ATINGIDA ({self.daily_losses}/{stop_loss})!"
 
         if limit_hit:
             if self.bot_config.get('status') == 'RUNNING':
@@ -380,10 +375,11 @@ class TradingBot:
         return False
 
     def _daily_reset_if_needed(self):
-        if self.last_daily_reset_date != datetime.utcnow().date():
-            self.logger('INFO', f"NOVO DIA DETETADO.")
+        now_utc = datetime.utcnow().date()
+        if self.last_daily_reset_date != now_utc:
+            self.logger('INFO', f"NOVO DIA DETETADO ({now_utc}). A zerar contadores.")
             self.daily_wins, self.daily_losses = 0, 0
-            self.last_daily_reset_date = datetime.utcnow().date()
+            self.last_daily_reset_date = now_utc
             bal = self.exnova.get_current_balance()
             if bal:
                 self.supabase.update_config({'daily_initial_balance': bal, 'current_balance': bal})
