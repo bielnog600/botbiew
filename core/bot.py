@@ -19,7 +19,7 @@ from core.data_models import TradeSignal
 class TradingBot:
     def __init__(self):
         self.supabase: Optional[SupabaseService] = None
-        self.exnova: Optional[ExnovaService] = None # Conexão principal para trading
+        self.exnova: Optional[ExnovaService] = None
         self.is_running = True
         self.bot_config: Dict = {}
         self.strategy_map: Dict[str, callable] = {
@@ -54,35 +54,39 @@ class TradingBot:
         self._daily_reset_if_needed()
         self.logger('INFO', "Estado interno limpo. O bot está pronto para operar.")
 
+    def run_cataloging_cycle(self, exnova_instance: ExnovaService):
+        try:
+            self.logger('INFO', "[CATALOGER] A iniciar novo ciclo de catalogação...")
+            all_open_assets = exnova_instance.get_all_open_assets()
+            self.logger('INFO', f"[CATALOGER] {len(all_open_assets)} pares abertos encontrados para análise.")
+
+            for asset in all_open_assets:
+                if not self.is_running: break
+                candles = exnova_instance.get_historical_candles(asset, 60, 200)
+                if not candles or len(candles) < 100: continue
+
+                best_strategy, highest_win_rate, best_stats = None, 0, {'wins': 0, 'losses': 0}
+                for strat_name, strat_func in self.strategy_map.items():
+                    wins, losses, _ = backtest_strategy(candles, strat_func)
+                    total_ops = wins + losses
+                    if total_ops > 5:
+                        win_rate = (wins / total_ops) * 100
+                        if win_rate > highest_win_rate:
+                            highest_win_rate, best_strategy, best_stats = win_rate, strat_name, {'wins': wins, 'losses': losses}
+                
+                if best_strategy: self.supabase.upsert_cataloged_asset({'pair': asset, 'win_rate': highest_win_rate, 'best_strategy': best_strategy, 'wins': best_stats['wins'], 'losses': best_stats['losses']})
+            self.logger('SUCCESS', "[CATALOGER] Ciclo de catalogação concluído.")
+        except Exception as e:
+            self.logger('ERROR', f"[CATALOGER] Erro no ciclo de catalogação: {e}")
+            traceback.print_exc()
+
     def cataloging_loop_sync(self):
-        self.logger('INFO', "Thread de catalogação iniciada.")
+        self.logger('INFO', "Thread de catalogação periódica iniciada.")
         catalog_exnova = ExnovaService(settings.EXNOVA_EMAIL, settings.EXNOVA_PASSWORD)
-        
         while self.is_running:
-            try:
-                self.logger('INFO', "[CATALOGER] A iniciar novo ciclo de catalogação...")
-                all_open_assets = catalog_exnova.get_all_open_assets()
-                self.logger('INFO', f"[CATALOGER] {len(all_open_assets)} pares abertos encontrados para análise.")
-
-                for asset in all_open_assets:
-                    if not self.is_running: break
-                    candles = catalog_exnova.get_historical_candles(asset, 60, 200)
-                    if not candles or len(candles) < 100: continue
-
-                    best_strategy, highest_win_rate, best_stats = None, 0, {'wins': 0, 'losses': 0}
-                    for strat_name, strat_func in self.strategy_map.items():
-                        wins, losses, _ = backtest_strategy(candles, strat_func)
-                        total_ops = wins + losses
-                        if total_ops > 5:
-                            win_rate = (wins / total_ops) * 100
-                            if win_rate > highest_win_rate:
-                                highest_win_rate, best_strategy, best_stats = win_rate, strat_name, {'wins': wins, 'losses': losses}
-                    
-                    if best_strategy: self.supabase.upsert_cataloged_asset({'pair': asset, 'win_rate': highest_win_rate, 'best_strategy': best_strategy, 'wins': best_stats['wins'], 'losses': best_stats['losses']})
-                self.logger('SUCCESS', "[CATALOGER] Ciclo de catalogação concluído.")
-            except Exception as e: self.logger('ERROR', f"[CATALOGER] Erro no loop: {e}"); traceback.print_exc()
-            time.sleep(15 * 60)
-        
+            time.sleep(120 * 60) # Espera primeiro
+            if self.is_running:
+                self.run_cataloging_cycle(catalog_exnova)
         catalog_exnova.quit()
 
     def trading_loop_sync(self):
@@ -157,6 +161,17 @@ class TradingBot:
 
     async def run(self):
         self.supabase = SupabaseService(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+        
+        # --- NOVO ARRANQUE INTELIGENTE ---
+        self.logger('INFO', "A realizar a catalogação inicial. O bot iniciará em breve. Este processo pode demorar alguns minutos...")
+        try:
+            initial_catalog_exnova = ExnovaService(settings.EXNOVA_EMAIL, settings.EXNOVA_PASSWORD)
+            self.run_cataloging_cycle(initial_catalog_exnova)
+            initial_catalog_exnova.quit()
+            self.logger('SUCCESS', "Catalogação inicial concluída.")
+        except Exception as e:
+            self.logger('ERROR', f"Falha na catalogação inicial: {e}")
+
         trading_thread = Thread(target=self.trading_loop_sync, daemon=True)
         cataloging_thread = Thread(target=self.cataloging_loop_sync, daemon=True)
         trading_thread.start()
