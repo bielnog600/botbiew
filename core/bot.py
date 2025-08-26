@@ -109,7 +109,6 @@ class TradingBot:
 
         while self.is_running:
             try:
-                # Puxa a configuração mais recente a cada ciclo do loop principal
                 new_config = self.supabase.get_bot_config()
                 if new_config: self.bot_config = new_config
                 
@@ -131,7 +130,7 @@ class TradingBot:
                     if not self.is_trade_active:
                         self.trading_cycle()
                 else:
-                    time.sleep(5) # Aguarda em modo PAUSED
+                    time.sleep(5)
                 time.sleep(1)
             except Exception as e:
                 self.logger('ERROR', f"Loop principal falhou: {e}")
@@ -139,7 +138,6 @@ class TradingBot:
                 self.exnova.reconnect()
 
     def trading_cycle(self):
-        # VERIFICAÇÃO DE SEGURANÇA #1: Antes de iniciar o ciclo de trading
         if self.bot_config.get('status') != 'RUNNING' or self._check_stop_limits():
             return
 
@@ -209,14 +207,12 @@ class TradingBot:
             return
 
         for pair in assets_to_check:
-            # VERIFICAÇÃO DE SEGURANÇA #2: Antes de analisar CADA par
-            # Puxa a configuração mais recente do banco de dados para garantir que não foi pausado
             current_config = self.supabase.get_bot_config()
             if current_config: self.bot_config = current_config
             
             if self.bot_config.get('status') != 'RUNNING' or self._check_stop_limits():
                 self.logger('WARNING', f"Paragem detectada. A interromper análise de pares.")
-                break # Sai do loop de pares
+                break
 
             if self.is_trade_active: break
             self._analyze_asset(pair, tf_secs, exp_mins, strategies_to_check)
@@ -230,10 +226,9 @@ class TradingBot:
                 return
             
             for strat_name in strategies_to_run:
-                # VERIFICAÇÃO DE SEGURANÇA #3: Antes de executar CADA estratégia
                 if self.bot_config.get('status') != 'RUNNING' or self._check_stop_limits():
                     self.logger('WARNING', f"Paragem detectada. A interromper análise de estratégias.")
-                    return # Sai da função de análise
+                    return
 
                 if self.is_trade_active: break
                 
@@ -249,7 +244,7 @@ class TradingBot:
                     
                     signal = TradeSignal(pair=pair_name, direction=direction, strategy=strat_name, **candles[-1])
                     self._execute_and_wait(signal, pair_name, exp_mins)
-                    return # Sai após encontrar um sinal para não abrir múltiplos trades
+                    return
 
         except Exception as e:
             self.logger('ERROR', f"Erro em _analyze_asset({pair_name}): {e}")
@@ -271,31 +266,36 @@ class TradingBot:
         try:
             value = self._get_entry_value(signal.pair)
             bal_before = self.exnova.get_current_balance()
-            if bal_before is None: return
+            if bal_before is None: 
+                self.is_trade_active = False
+                return
             
             order_id = self.exnova.execute_trade(value, full_name, signal.direction.lower(), exp_mins)
+            
+            # CORREÇÃO DO ERRO DE LOGGING
             if not order_id: 
-                self.supabase.insert_trade_signal(signal, result='ERROR')
+                self.logger('ERROR', f"A operação em {full_name} falhou ao ser executada na corretora.")
+                sid = self.supabase.insert_trade_signal(signal)
+                if sid:
+                    self.supabase.update_trade_result(sid, 'ERROR', 0)
+                self.is_trade_active = False
                 return
             
             sid = self.supabase.insert_trade_signal(signal)
             
-            # Lógica de espera pelo resultado sem usar time.sleep() longo
+            # LÓGICA DE ESPERA MELHORADA
             expiration_timestamp = time.time() + exp_mins * 60
             result = 'UNKNOWN'
-            profit = 0
             
-            while time.time() < expiration_timestamp + 10: # Espera até 10s após a expiração
+            while time.time() < expiration_timestamp + 15: # Espera até 15s após a expiração
                 bal_after = self.exnova.get_current_balance()
                 if bal_after is not None and bal_after != bal_before:
                     profit = round(bal_after - bal_before, 2)
-                    if profit > 0: result = 'WIN'
-                    elif profit < 0: result = 'LOSS'
-                    else: result = 'DRAW'
+                    result = 'WIN' if profit > 0 else 'LOSS' if profit < 0 else 'DRAW'
                     break
-                time.sleep(2) # Verifica o saldo a cada 2 segundos
+                time.sleep(2)
 
-            self.logger('SUCCESS' if result == 'WIN' else 'ERROR', f"Resultado: {result} | Lucro: {profit}")
+            self.logger('SUCCESS' if result == 'WIN' else 'ERROR', f"Resultado: {result}")
             
             if sid:
                 self.supabase.update_trade_result(sid, result, self.martingale_state.get(signal.pair, {}).get('level', 0))
@@ -347,17 +347,15 @@ class TradingBot:
             stop_win_percent = self.bot_config.get('stop_win_percent', 0)
             stop_loss_percent = self.bot_config.get('stop_loss_percent', 0)
             initial_balance = self.bot_config.get('daily_initial_balance', 0)
-            current_balance = self.exnova.get_current_balance() # Pega o saldo mais recente
+            current_balance = self.exnova.get_current_balance()
 
             if initial_balance > 0 and current_balance is not None:
                 profit = current_balance - initial_balance
-                
                 if stop_win_percent > 0:
                     target_profit = initial_balance * (stop_win_percent / 100.0)
                     if profit >= target_profit:
                         limit_hit = True
                         message = f"META DE STOP WIN ATINGIDA ({profit:.2f} >= {target_profit:.2f})!"
-
                 if not limit_hit and stop_loss_percent > 0:
                     max_loss = initial_balance * (stop_loss_percent / 100.0)
                     if profit <= -max_loss:
