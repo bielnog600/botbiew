@@ -161,8 +161,9 @@
           const { data: signalsData, error: sigErr } = await supabaseClient
             .from('trade_signals')
             .select('*')
-            .gte('created_at', todayISO)
-            .order('created_at', { ascending: false });
+            .gte('created_at', startOfTodayUTC())
+            .order('created_at', { ascending: false })
+            .limit(200);
           if (sigErr) console.error('Erro a buscar sinais:', sigErr);
           setSignals(Array.isArray(signalsData) ? signalsData : []);
 
