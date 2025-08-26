@@ -79,7 +79,7 @@
             const [scores, setScores] = useState({ wins: 0, losses: 0, gales: 0 });
             const [loading, setLoading] = useState(true);
 
-            const fetchAllData = useCallback(async () => {
+            const fetchInitialData = useCallback(async () => {
                 const { data: configData } = await supabaseClient.from('bot_config').select('*').eq('id', 1).single();
                 setConfig(configData);
 
@@ -97,19 +97,21 @@
             }, []);
 
             useEffect(() => {
-                fetchAllData();
-                // Fallback polling
-                const pollInterval = setInterval(fetchAllData, 5000);
-
+                fetchInitialData();
                 const configChannel = supabaseClient.channel('bot_config_realtime').on('postgres_changes', { event: '*', schema: 'public', table: 'bot_config', filter: 'id=eq.1' }, payload => setConfig(payload.new)).subscribe();
-                const signalsChannel = supabaseClient.channel('trade_signals_realtime').on('postgres_changes', { event: '*', schema: 'public', table: 'trade_signals' }, fetchAllData).subscribe();
+                const signalsChannel = supabaseClient.channel('trade_signals_realtime').on('postgres_changes', { event: '*', schema: 'public', table: 'trade_signals' }, payload => {
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+                    if (new Date(payload.new.created_at) < today) return;
+
+                    if (payload.eventType === 'INSERT') setSignals(current => [payload.new, ...current].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)));
+                    if (payload.eventType === 'UPDATE') setSignals(current => current.map(s => s.id === payload.new.id ? payload.new : s));
+                    if (payload.eventType === 'DELETE') setSignals(current => current.filter(s => s.id !== payload.old.id));
+                }).subscribe();
                 const logsChannel = supabaseClient.channel('bot_logs_realtime').on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'bot_logs' }, payload => setLogs(current => [...current.slice(-99), payload.new])).subscribe();
                 
-                return () => {
-                    clearInterval(pollInterval);
-                    supabaseClient.removeAllChannels();
-                };
-            }, [fetchAllData]);
+                return () => supabaseClient.removeAllChannels();
+            }, [fetchInitialData]);
             
             useEffect(() => {
                 const wins = signals.filter(s => s.result === 'WIN').length;
