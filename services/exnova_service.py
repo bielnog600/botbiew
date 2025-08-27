@@ -51,8 +51,7 @@ class ExnovaService:
         open_assets = []
         try:
             init_data = self.api.get_all_init_v2()
-            if not init_data:
-                return []
+            if not init_data: return []
 
             for option_type in ['binary', 'turbo']:
                 if option_type in init_data and init_data[option_type].get('actives'):
