@@ -31,13 +31,11 @@ class SupabaseService:
         try:
             self.supabase.table('bot_logs').insert({'level': level, 'message': message}).execute()
         except Exception as e:
-            # Evita loop infinito de logs de erro
             print(f"Falha ao inserir log no Supabase: {e}")
 
     def insert_trade_signal(self, signal_dict: dict):
         if not self.supabase: return None
         try:
-            # Garante que o resultado inicial é 'PENDENTE'
             signal_dict['result'] = 'PENDENTE'
             response = self.supabase.table('trade_signals').insert(signal_dict).execute()
             return response.data[0]['id']
@@ -58,7 +56,6 @@ class SupabaseService:
     def upsert_cataloged_asset(self, asset_data: dict):
         if not self.supabase: return
         try:
-            # 'upsert' insere um novo registo ou atualiza um existente se o 'pair' já existir
             self.supabase.table('cataloged_assets').upsert(asset_data, on_conflict='pair').execute()
         except Exception as e:
             logging.error(f"Erro ao salvar ativo catalogado ({asset_data.get('pair')}): {e}")
