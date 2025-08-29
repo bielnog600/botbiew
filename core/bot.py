@@ -71,10 +71,14 @@ class TradingBot:
                     total_ops = wins + losses
                     if total_ops > 5:
                         win_rate = (wins / total_ops) * 100
+                        # --- NOVO LOG DETALHADO ---
+                        self.logger('INFO', f"[CATALOGER] -> {asset}: {strat_name} -> {win_rate:.1f}% ({wins}W/{losses}L)")
                         if win_rate > highest_win_rate:
                             highest_win_rate, best_strategy, best_stats = win_rate, strat_name, {'wins': wins, 'losses': losses}
                 
-                if best_strategy: self.supabase.upsert_cataloged_asset({'pair': asset, 'win_rate': highest_win_rate, 'best_strategy': best_strategy, 'wins': best_stats['wins'], 'losses': best_stats['losses']})
+                if best_strategy:
+                    self.logger('SUCCESS', f"[CATALOGER] Melhor estratégia para {asset}: {best_strategy} com {highest_win_rate:.1f}%")
+                    self.supabase.upsert_cataloged_asset({'pair': asset, 'win_rate': highest_win_rate, 'best_strategy': best_strategy, 'wins': best_stats['wins'], 'losses': best_stats['losses']})
             self.logger('SUCCESS', "[CATALOGER] Ciclo de catalogação concluído.")
         except Exception as e:
             self.logger('ERROR', f"[CATALOGER] Erro no ciclo de catalogação: {e}")
@@ -84,7 +88,7 @@ class TradingBot:
         self.logger('INFO', "Thread de catalogação periódica iniciada.")
         catalog_exnova = ExnovaService(settings.EXNOVA_EMAIL, settings.EXNOVA_PASSWORD)
         while self.is_running:
-            time.sleep(120 * 60) # Espera primeiro
+            time.sleep(15 * 60)
             if self.is_running:
                 self.run_cataloging_cycle(catalog_exnova)
         catalog_exnova.quit()
@@ -162,7 +166,6 @@ class TradingBot:
     async def run(self):
         self.supabase = SupabaseService(settings.SUPABASE_URL, settings.SUPABASE_KEY)
         
-        # --- NOVO ARRANQUE INTELIGENTE ---
         self.logger('INFO', "A realizar a catalogação inicial. O bot iniciará em breve. Este processo pode demorar alguns minutos...")
         try:
             initial_catalog_exnova = ExnovaService(settings.EXNOVA_EMAIL, settings.EXNOVA_PASSWORD)
