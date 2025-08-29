@@ -1,8 +1,11 @@
-import time
 import logging
 from exnovaapi.stable_api import Exnova
 
 class ExnovaService:
+    """
+    Serviço para interagir com a API da Exnova de forma segura.
+    Cada instância desta classe representa uma conexão independente.
+    """
     def __init__(self, email, password):
         self.email = email
         self.password = password
@@ -14,56 +17,49 @@ class ExnovaService:
         check, reason = self.api.connect()
         if check:
             logging.info("Conectado com sucesso. A atualizar a lista de ativos...")
-            # --- LÓGICA CORRIGIDA: ATUALIZA OS ATIVOS DEPOIS DE CONECTAR ---
             self.api.update_actives()
+            logging.info(f"{len(self.api.active_opcodes)} ativos carregados dinamicamente.")
             self.connection_successful = True
-            return True, None
         else:
             logging.error(f"Falha ao conectar: {reason}")
             self.connection_successful = False
-            return False, reason
+        return check, reason
 
-    def check_connection(self):
-        return self.api.check_connect()
+    def is_connected(self):
+        return self.connection_successful and self.api.check_connect()
 
     def get_all_open_assets(self):
         try:
             init_data = self.api.get_all_init_v2()
+            open_assets = []
             if not init_data:
                 return []
             
-            open_assets = []
             for option_type in ['binary', 'turbo']:
-                if option_type in init_data and init_data.get(option_type):
-                    for details in init_data[option_type].get('actives', {}).values():
+                if option_type in init_data and init_data[option_type].get('actives'):
+                    for asset_id, details in init_data[option_type]['actives'].items():
                         if details.get('enabled') and not details.get('is_suspended'):
-                            asset_name = details.get('name', '').split('.')[-1]
-                            if asset_name:
-                                open_assets.append(asset_name)
-            return list(set(open_assets)) # Retorna lista sem duplicados
+                            asset_name = details['name'].split('.')[-1]
+                            open_assets.append(asset_name)
+            
+            # Remove duplicados e retorna a lista
+            return list(set(open_assets))
         except Exception as e:
             logging.error(f"Erro ao buscar ativos abertos: {e}")
             return []
+            
+    def get_historical_candles(self, pair_name, interval, count):
+        return self.api.get_candles(pair_name, interval, count, self.api.get_server_timestamp())
 
-    def get_historical_candles(self, asset, interval, count):
-        return self.api.get_candles(asset, interval, count, time.time())
+    def execute_trade(self, value, pair, direction, exp_mins):
+        return self.api.buy(value, pair, direction, exp_mins)
 
-    def execute_trade(self, value, asset, direction, expiration_minutes):
-        logging.info(f"A executar operação: {direction.upper()} {value} em {asset} por {expiration_minutes} min.")
-        success, order_id_or_message = self.api.buy(value, asset, direction, expiration_minutes)
-        return success, order_id_or_message
-
+    def check_win(self, order_id):
+        return self.api.check_win_v4(order_id)
+        
     def get_current_balance(self):
         return self.api.get_balance()
     
-    def change_balance(self, balance_type):
-        logging.info(f"A mudar de conta para: {balance_type}")
-        self.api.change_balance(balance_type)
-        logging.info(f"Conta mudada com sucesso para {balance_type}.")
-    
-    def quit(self):
-        try:
-            self.api.close()
-            logging.info("Conexão da API Exnova encerrada.")
-        except Exception as e:
-            logging.error(f"Erro ao fechar a conexão da API: {e}")
+    # --- NOVO: Função para fechar a conexão ---
+    def close(self):
+        self.api.close()
