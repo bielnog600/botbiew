@@ -36,7 +36,9 @@ class SupabaseService:
     def insert_trade_signal(self, signal_dict: dict):
         if not self.supabase: return None
         try:
+            # Garante que o resultado inicial é 'PENDENTE'
             signal_dict['result'] = 'PENDENTE'
+            # CORREÇÃO: Remove a chamada .to_dict() duplicada
             response = self.supabase.table('trade_signals').insert(signal_dict).execute()
             return response.data[0]['id']
         except Exception as e:
