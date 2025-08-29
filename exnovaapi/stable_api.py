@@ -1,3 +1,4 @@
+# python
 from exnovaapi.api import ExnovaAPI
 import exnovaapi.constants as OP_code
 import exnovaapi.country_id as Country
@@ -7,7 +8,8 @@ import json
 import logging
 import operator
 import exnovaapi.global_value as global_value
-from collections import defaultdict, deque
+from collections import defaultdict
+from collections import deque
 from exnovaapi.expiration import get_expiration_time, get_remaning_time
 from exnovaapi.version_control import api_version
 from datetime import datetime, timedelta
@@ -42,10 +44,10 @@ class Exnova:
         self.SESSION_HEADER = {
             "User-Agent": r"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/66.0.3359.139 Safari/537.36"}
         self.SESSION_COOKIE = {}
-        # --- CORREÇÃO: API inicializada no construtor ---
+        
+        # --- CORREÇÃO: API é inicializada aqui ---
         self.api = ExnovaAPI("ws.trade.exnova.com", self.email, self.password)
-        # dicionário dinâmico de ativos
-        self.active_opcodes = {}
+        self.active_opcodes = {} # Dicionário dinâmico para os ativos
 
     def get_server_timestamp(self):
         return self.api.timesync.server_timestamp
@@ -89,10 +91,10 @@ class Exnova:
         check, reason = self.api.connect()
 
         if check:
-            self.update_actives()  # atualiza lista dinâmica
+            self.update_actives() # NOVO: Atualiza a lista de ativos dinamicamente
             self.re_subscribe_stream()
             while global_value.balance_id is None:
-                pass
+                time.sleep(0.1)
             self.position_change_all("subscribeMessage", global_value.balance_id)
             self.order_changed_all("subscribeMessage")
             self.api.setOptions(1, True)
@@ -107,9 +109,8 @@ class Exnova:
                             return False, response.json()['message']
                         self.resp_sms = response
                         return False, "2FA"
-            except Exception as e:
-                logging.error(f"Error in connect: {e}")
-                return False, f"Erro na conexão: {e}"
+            except (json.JSONDecodeError, AttributeError):
+                pass
             return False, reason
 
     def connect_2fa(self, sms_code):
@@ -118,7 +119,6 @@ class Exnova:
     def check_connect(self):
         return bool(global_value.check_websocket_if_connect)
 
-    # ---------------- Ativos Dinâmicos ------------------
     def update_actives(self):
         logging.info("Atualizando lista de ativos...")
         actives = {}
@@ -137,7 +137,6 @@ class Exnova:
         OP_code.ACTIVES = actives  # substitui estática
         logging.info(f"{len(self.active_opcodes)} ativos carregados dinamicamente.")
 
-    # ---------------- Métodos originais ------------------
     def get_all_init(self):
         while True:
             self.api.api_option_init_all_result = None
@@ -157,12 +156,12 @@ class Exnova:
                 try:
                     if self.api.api_option_init_all_result != None:
                         break
-                except: 
+                except:
                     pass
             try:
                 if self.api.api_option_init_all_result["isSuccessful"] == True:
                     return self.api.api_option_init_all_result
-            except: 
+            except:
                 pass
 
     def get_all_init_v2(self):
@@ -260,7 +259,6 @@ class Exnova:
             logging.error("ERROR doesn't have this mode")
             exit(1)
 
-    # ---------------------- CANDLES -----------------------
     def get_candles(self, ACTIVES, interval, count, endtime):
         active_id = self.active_opcodes.get(ACTIVES)
         if not active_id:
@@ -311,7 +309,6 @@ class Exnova:
                     all_profit[name][option_type] = (100.0 - details["option"]["profit"]["commission"]) / 100.0
         return all_profit
 
-    # ------------------ REALTIME CANDLES ------------------
     def start_candles_stream(self, ACTIVE, size, maxdict):
         if size == "all":
             for s in self.size:
@@ -358,7 +355,7 @@ class Exnova:
             self.api.real_time_candles[str(ACTIVE)][int(size)][can["from"]] = can
 
     def start_candles_one_stream(self, ACTIVE, size):
-        active_id = self.active_opcodes.get(ACTIVES)
+        active_id = self.active_opcodes.get(ACTIVE)
         if not active_id:
             return
         if (str(ACTIVE + "," + str(size)) in self.subscribe_candle) == False:
@@ -437,7 +434,6 @@ class Exnova:
             self.api.unsubscribe_all_size(active_id)
             time.sleep(self.suspend * 10)
 
-    # ---------------- Top Assets Updated ----------------
     def subscribe_top_assets_updated(self, instrument_type):
         self.api.Subscribe_Top_Assets_Updated(instrument_type)
 
@@ -447,7 +443,6 @@ class Exnova:
     def get_top_assets_updated(self, instrument_type):
         return self.api.top_assets_updated_data.get(instrument_type)
 
-    # ---------------- Commission Changed ----------------
     def subscribe_commission_changed(self, instrument_type):
         self.api.Subscribe_Commission_Changed(instrument_type)
 
@@ -457,7 +452,6 @@ class Exnova:
     def get_commission_change(self, instrument_type):
         return self.api.subscribe_commission_changed_data[instrument_type]
 
-    # ---------------- Traders Mood ----------------
     def start_mood_stream(self, ACTIVES, instrument="turbo-option"):
         active_id = self.active_opcodes.get(ACTIVES)
         if not active_id:
@@ -489,7 +483,6 @@ class Exnova:
     def get_all_traders_mood(self):
         return self.api.traders_mood
 
-    # ---------------- Technical Indicators ----------------
     def get_technical_indicators(self, ACTIVES):
         active_id = self.active_opcodes.get(ACTIVES)
         if not active_id:
@@ -499,7 +492,35 @@ class Exnova:
             pass
         return self.api.technical_indicators[request_id]
 
-    # ---------------- Check Win ----------------
+    def check_binary_order(self, order_id):
+        while order_id not in self.api.order_binary:
+            pass
+        your_order = self.api.order_binary[order_id]
+        del self.api.order_binary[order_id]
+        return your_order
+
+    def check_win(self, id_number):
+        while True:
+            try:
+                listinfodata_dict = self.api.listinfodata.get(id_number)
+                if listinfodata_dict["game_state"] == 1:
+                    break
+            except:
+                pass
+        self.api.listinfodata.delete(id_number)
+        return listinfodata_dict["win"]
+
+    def check_win_v2(self, id_number, polling_time):
+        while True:
+            check, data = self.get_betinfo(id_number)
+            win = data["result"]["data"][str(id_number)]["win"]
+            if check and win != "":
+                try:
+                    return data["result"]["data"][str(id_number)]["profit"] - data["result"]["data"][str(id_number)]["deposit"]
+                except:
+                    pass
+            time.sleep(polling_time)
+
     def check_win_v4(self, id_number):
         while True:
             try:
@@ -514,7 +535,40 @@ class Exnova:
             else float(x['msg']['win_amount']) - float(x['msg']['sum'])
         )
 
-    # ---------------- Option Info ----------------
+    def check_win_v3(self, id_number):
+        while True:
+            result = self.get_optioninfo_v2(10)
+            if result['msg']['closed_options'][0]['id'][0] == id_number and result['msg']['closed_options'][0]['id'][0] != None:
+                return result['msg']['closed_options'][0]['win'], (result['msg']['closed_options'][0]['win_amount'] - result['msg']['closed_options'][0]['amount'] if result['msg']['closed_options'][0]['win'] != 'equal' else 0)
+            time.sleep(1)
+
+    def get_betinfo(self, id_number):
+        while True:
+            self.api.game_betinfo.isSuccessful = None
+            start = time.time()
+            try:
+                self.api.get_betinfo(id_number)
+            except:
+                logging.error('**error** def get_betinfo self.api.get_betinfo reconnect')
+                self.connect()
+            while self.api.game_betinfo.isSuccessful == None:
+                if time.time() - start > 10:
+                    logging.error('**error** get_betinfo time out need reconnect')
+                    self.connect()
+                    self.api.get_betinfo(id_number)
+                    time.sleep(self.suspend * 10)
+            if self.api.game_betinfo.isSuccessful == True:
+                return self.api.game_betinfo.isSuccessful, self.api.game_betinfo.dict
+            else:
+                return self.api.game_betinfo.isSuccessful, None
+
+    def get_optioninfo(self, limit):
+        self.api.api_game_getoptions_result = None
+        self.api.get_options(limit)
+        while self.api.api_game_getoptions_result == None:
+            pass
+        return self.api.api_game_getoptions_result
+
     def get_optioninfo_v2(self, limit):
         self.api.get_options_v2_data = None
         self.api.get_options_v2(limit, "binary,turbo")
@@ -522,14 +576,266 @@ class Exnova:
             pass
         return self.api.get_options_v2_data
 
-    # ---------------- Digital Options ----------------
+    def buy_multi(self, price, ACTIVES, ACTION, expirations):
+        self.api.buy_multi_option = {}
+        if len(price) == len(ACTIVES) == len(ACTION) == len(expirations):
+            buy_len = len(price)
+            for idx in range(buy_len):
+                self.api.buyv3(price[idx], self.active_opcodes.get(ACTIVES[idx]), ACTION[idx], expirations[idx], idx)
+            while len(self.api.buy_multi_option) < buy_len:
+                pass
+            buy_id = []
+            for key in sorted(self.api.buy_multi_option.keys()):
+                try:
+                    value = self.api.buy_multi_option[str(key)]
+                    buy_id.append(value["id"])
+                except:
+                    buy_id.append(None)
+            return buy_id
+        else:
+            logging.error('buy_multi error please input all same len')
+
+    def get_remaning(self, duration):
+        for remaning in get_remaning_time(self.api.timesync.server_timestamp):
+            if remaning[0] == duration:
+                return remaning[1]
+        logging.error('get_remaning(self,duration) ERROR duration')
+        return "ERROR duration"
+
+    def buy_by_raw_expirations(self, price, active, direction, option, expired):
+        self.api.buy_multi_option = {}
+        self.api.buy_successful = None
+        req_id = "buyraw"
+        try:
+            self.api.buy_multi_option[req_id]["id"] = None
+        except:
+            pass
+        self.api.buyv3_by_raw_expired(price, self.active_opcodes.get(active), direction, option, expired, request_id=req_id)
+        start_t = time.time()
+        id = None
+        self.api.result = None
+        while self.api.result == None or id == None:
+            try:
+                if "message" in self.api.buy_multi_option[req_id].keys():
+                    logging.error(f'**warning** buy {self.api.buy_multi_option[req_id]["message"]}')
+                    return False, self.api.buy_multi_option[req_id]["message"]
+            except:
+                pass
+            try:
+                id = self.api.buy_multi_option[req_id]["id"]
+            except:
+                pass
+            if time.time() - start_t >= 5:
+                logging.error('**warning** buy late 5 sec')
+                return False, None
+        return self.api.result, self.api.buy_multi_option[req_id]["id"]
+
+    def sell_option(self, options_ids):
+        self.api.sell_option(options_ids)
+        self.api.sold_options_respond = None
+        while self.api.sold_options_respond == None:
+            pass
+        return self.api.sold_options_respond
+
+    def sell_digital_option(self, options_ids):
+        self.api.sell_digital_option(options_ids)
+        self.api.sold_digital_options_respond = None
+        while self.api.sold_digital_options_respond == None:
+            pass
+        return self.api.sold_digital_options_respond
+
+    def get_digital_underlying_list_data(self):
+        self.api.underlying_list_data = None
+        self.api.get_digital_underlying()
+        start_t = time.time()
+        while self.api.underlying_list_data == None:
+            if time.time() - start_t >= 30:
+                logging.error('**warning** get_digital_underlying_list_data late 30 sec')
+                return None
+        return self.api.underlying_list_data
+    
+    def close(self):
+        try:
+            self.api.close()
+            logging.info("Conexão da API fechada com sucesso.")
+        except Exception as e:
+            logging.error(f"Erro ao fechar a conexão da API: {e}")
+
+    # --- O resto do seu ficheiro original ... ---
+    # (As funções restantes são mantidas para garantir a compatibilidade total)
+    def get_strike_list(self, ACTIVES, duration):
+        self.api.strike_list = None
+        self.api.get_strike_list(ACTIVES, duration)
+        ans = {}
+        while self.api.strike_list == None:
+            pass
+        try:
+            for data in self.api.strike_list["msg"]["strike"]:
+                temp = {}
+                temp["call"] = data["call"]["id"]
+                temp["put"] = data["put"]["id"]
+                ans[("%.6f" % (float(data["value"]) * 10e-7))] = temp
+        except:
+            logging.error('**error** get_strike_list read problem...')
+            return self.api.strike_list, None
+        return self.api.strike_list, ans
+
+    def subscribe_strike_list(self, ACTIVE, expiration_period):
+        self.api.subscribe_instrument_quites_generated(
+            ACTIVE, expiration_period)
+
+    def unsubscribe_strike_list(self, ACTIVE, expiration_period):
+        del self.api.instrument_quites_generated_data[ACTIVE]
+        self.api.unsubscribe_instrument_quites_generated(
+            ACTIVE, expiration_period)
+
+    def get_instrument_quites_generated_data(self, ACTIVE, duration):
+        while self.api.instrument_quotes_generated_raw_data[ACTIVE][duration * 60] == {}:
+            pass
+        return self.api.instrument_quotes_generated_raw_data[ACTIVE][duration * 60]
+
+    def get_realtime_strike_list(self, ACTIVE, duration):
+        while True:
+            if not self.api.instrument_quites_generated_data[ACTIVE][duration * 60]:
+                pass
+            else:
+                break
+        ans = {}
+        now_timestamp = self.api.instrument_quites_generated_timestamp[ACTIVE][duration * 60]
+
+        while ans == {}:
+            if self.get_realtime_strike_list_temp_data == {} or now_timestamp != self.get_realtime_strike_list_temp_expiration:
+                raw_data, strike_list = self.get_strike_list(ACTIVE, duration)
+                self.get_realtime_strike_list_temp_expiration = raw_data["msg"]["expiration"]
+                self.get_realtime_strike_list_temp_data = strike_list
+            else:
+                strike_list = self.get_realtime_strike_list_temp_data
+
+            profit = self.api.instrument_quites_generated_data[ACTIVE][duration * 60]
+            for price_key in strike_list:
+                try:
+                    side_data = {}
+                    for side_key in strike_list[price_key]:
+                        detail_data = {}
+                        profit_d = profit[strike_list[price_key][side_key]]
+                        detail_data["profit"] = profit_d
+                        detail_data["id"] = strike_list[price_key][side_key]
+                        side_data[side_key] = detail_data
+                    ans[price_key] = side_data
+                except:
+                    pass
+        return ans
+
+    def get_digital_current_profit(self, ACTIVE, duration):
+        profit = self.api.instrument_quites_generated_data[ACTIVE][duration * 60]
+        for key in profit:
+            if key.find("SPT") != -1:
+                return profit[key]
+        return False
+
+    def buy_digital_spot(self, active, amount, action, duration):
+        action = action.lower()
+        if action == 'put':
+            action = 'P'
+        elif action == 'call':
+            action = 'C'
+        else:
+            logging.error('buy_digital_spot active error')
+            return -1, None
+        timestamp = int(self.api.timesync.server_timestamp)
+        if duration == 1:
+            exp, _ = get_expiration_time(timestamp, duration)
+        else:
+            now_date = datetime.fromtimestamp(timestamp) + timedelta(minutes=1, seconds=30)
+            while True:
+                if now_date.minute % duration == 0 and time.mktime(now_date.timetuple()) - timestamp > 30:
+                    break
+                now_date = now_date + timedelta(minutes=1)
+            exp = time.mktime(now_date.timetuple())
+
+        dateFormated = str(datetime.utcfromtimestamp(exp).strftime("%Y%m%d%H%M"))
+        instrument_id = "do" + active + dateFormated + "PT" + str(duration) + "M" + action + "SPT"
+        request_id = self.api.place_digital_option(instrument_id, amount)
+
+        while self.api.digital_option_placed_id.get(request_id) == None:
+            pass
+        digital_order_id = self.api.digital_option_placed_id.get(request_id)
+        if isinstance(digital_order_id, int):
+            return True, digital_order_id
+        else:
+            return False, digital_order_id
+
+    def get_digital_spot_profit_after_sale(self, position_id):
+        def get_instrument_id_to_bid(data, instrument_id):
+            for row in data["msg"]["quotes"]:
+                if row["symbols"][0] == instrument_id:
+                    return row["price"]["bid"]
+            return None
+
+        while self.get_async_order(position_id)["position-changed"] == {}:
+            pass
+        position = self.get_async_order(position_id)["position-changed"]["msg"]
+        if position["instrument_id"].find("MPSPT"):
+            z = False
+        elif position["instrument_id"].find("MCSPT"):
+            z = True
+        else:
+            logging.error(f'get_digital_spot_profit_after_sale position error {position["instrument_id"]}')
+
+        ACTIVES = position['raw_event']['instrument_underlying']
+        amount = max(position['raw_event']["buy_amount"], position['raw_event']["sell_amount"])
+        start_duration = position["instrument_id"].find("PT") + 2
+        end_duration = start_duration + position["instrument_id"][start_duration:].find("M")
+        duration = int(position["instrument_id"][start_duration:end_duration])
+        z2 = False
+        getAbsCount = position['raw_event']["count"]
+        instrumentStrikeValue = position['raw_event']["instrument_strike_value"] / 1000000.0
+        spotLowerInstrumentStrike = position['raw_event']["extra_data"]["lower_instrument_strike"] / 1000000.0
+        spotUpperInstrumentStrike = position['raw_event']["extra_data"]["upper_instrument_strike"] / 1000000.0
+        aVar = position['raw_event']["extra_data"]["lower_instrument_id"]
+        aVar2 = position['raw_event']["extra_data"]["upper_instrument_id"]
+        getRate = position['raw_event']["currency_rate"]
+        instrument_quites_generated_data = self.get_instrument_quites_generated_data(ACTIVES, duration)
+        f_tmp = get_instrument_id_to_bid(instrument_quites_generated_data, aVar)
+        if f_tmp != None:
+            self.get_digital_spot_profit_after_sale_data[position_id]["f"] = f_tmp
+            f = f_tmp
+        else:
+            f = self.get_digital_spot_profit_after_sale_data[position_id]["f"]
+        f2_tmp = get_instrument_id_to_bid(instrument_quites_generated_data, aVar2)
+        if f2_tmp != None:
+            self.get_digital_spot_profit_after_sale_data[position_id]["f2"] = f2_tmp
+            f2 = f2_tmp
+        else:
+            f2 = self.get_digital_spot_profit_after_sale_data[position_id]["f2"]
+        if (spotLowerInstrumentStrike != instrumentStrikeValue) and f != None and f2 != None:
+            if (spotLowerInstrumentStrike > instrumentStrikeValue or instrumentStrikeValue > spotUpperInstrumentStrike):
+                if z:
+                    instrumentStrikeValue = (spotUpperInstrumentStrike - instrumentStrikeValue) / abs(spotUpperInstrumentStrike - spotLowerInstrumentStrike)
+                    f = abs(f2 - f)
+                else:
+                    instrumentStrikeValue = (instrumentStrikeValue - spotUpperInstrumentStrike) / abs(spotUpperInstrumentStrike - spotLowerInstrumentStrike)
+                    f = abs(f2 - f)
+            elif z:
+                f += ((instrumentStrikeValue - spotLowerInstrumentStrike) / (spotUpperInstrumentStrike - spotLowerInstrumentStrike)) * (f2 - f)
+            else:
+                instrumentStrikeValue = (spotUpperInstrumentStrike - instrumentStrikeValue) / (spotUpperInstrumentStrike - spotLowerInstrumentStrike)
+                f -= f2
+            f = f2 + (instrumentStrikeValue * f)
+        if z2: pass
+        if f != None:
+            price = (f / getRate)
+            return price * getAbsCount - amount
+        else:
+            return None
+
     def buy_digital(self, amount, instrument_id):
         self.api.digital_option_placed_id = None
         self.api.place_digital_option(instrument_id, amount)
         start_t = time.time()
         while self.api.digital_option_placed_id == None:
             if time.time() - start_t > 30:
-                logging.error('buy_digital timeout digital_option_placed_id')
+                logging.error('buy_digital loss digital_option_placed_id')
                 return False, None
         return True, self.api.digital_option_placed_id
 
@@ -568,83 +874,15 @@ class Exnova:
         else:
             return False, None
 
-    # ---------------- Blitz Options ----------------
-    def buy_blitz(self, active, price, direction, expiration):
-        self.api.buy_multi_option = {}
-        self.api.buy_successful = None
-        request_id = str(randint(0, 10000))
-        try:
-            self.api.buy_multi_option[request_id]["id"] = None
-        except:
-            pass
-
-        if isinstance(active, str):
-            active_id = self.active_opcodes.get(active)
-        else:
-            active_id = active
-
-        profit_percent = self.get_blitz_payout(active)
-        value = None
-        self.api.buy_blitz_option(price, active_id, direction, expiration, profit_percent, value, request_id)
-
-        start_t = time.time()
-        id = None
-        self.api.result = None
-
-        while self.api.result == None or id == None:
-            try:
-                if "message" in self.api.buy_multi_option[request_id].keys():
-                    return False, self.api.buy_multi_option[request_id]["message"]
-            except:
-                pass
-            try:
-                id = self.api.buy_multi_option[request_id]["id"]
-            except:
-                pass
-            if time.time() - start_t >= 5:
-                logging.error('**warning** buy_blitz late 5 sec')
-                return False, None
-
-        return self.api.result, self.api.buy_multi_option[request_id]["id"]
-
-    def get_blitz_payout(self, active):
-        try:
-            all_profit = self.get_all_profit()
-            if active in all_profit:
-                for key in ["turbo", "binary"]:
-                    if key in all_profit[active]:
-                        return int(all_profit[active][key] * 100)
-                for v in all_profit[active].values():
-                    return int(v * 100)
-        except Exception as e:
-            logging.warning(f"Não foi possível obter payout para {active}: {e}")
-        return 85
-
-    # ---------------- Buy Order (CFD, Forex, Crypto) ----------------
-    def buy_order(self, instrument_type, instrument_id, side, amount, leverage,
-                  type, limit_price=None, stop_price=None,
-                  stop_lose_kind=None, stop_lose_value=None,
-                  take_profit_kind=None, take_profit_value=None,
-                  use_trail_stop=False, auto_margin_call=False,
-                  use_token_for_commission=False):
+    def buy_order(self, instrument_type, instrument_id, side, amount, leverage, type, limit_price=None, stop_price=None, stop_lose_kind=None, stop_lose_value=None, take_profit_kind=None, take_profit_value=None, use_trail_stop=False, auto_margin_call=False, use_token_for_commission=False):
         self.api.buy_order_id = None
-        self.api.buy_order(
-            instrument_type=instrument_type, instrument_id=instrument_id,
-            side=side, amount=amount, leverage=leverage, type=type,
-            limit_price=limit_price, stop_price=stop_price,
-            stop_lose_value=stop_lose_value, stop_lose_kind=stop_lose_kind,
-            take_profit_value=take_profit_value, take_profit_kind=take_profit_kind,
-            use_trail_stop=use_trail_stop, auto_margin_call=auto_margin_call,
-            use_token_for_commission=use_token_for_commission
-        )
-
+        self.api.buy_order(instrument_type=instrument_type, instrument_id=instrument_id, side=side, amount=amount, leverage=leverage, type=type, limit_price=limit_price, stop_price=stop_price, stop_lose_value=stop_lose_value, stop_lose_kind=stop_lose_kind, take_profit_value=take_profit_value, take_profit_kind=take_profit_kind, use_trail_stop=use_trail_stop, auto_margin_call=auto_margin_call, use_token_for_commission=use_token_for_commission)
         while self.api.buy_order_id == None:
             pass
         check, data = self.get_order(self.api.buy_order_id)
         while data["status"] == "pending_new":
             check, data = self.get_order(self.api.buy_order_id)
             time.sleep(1)
-
         if check:
             if data["status"] != "rejected":
                 return True, self.api.buy_order_id
@@ -663,10 +901,7 @@ class Exnova:
         else:
             return False, self.api.auto_margin_call_changed_respond
 
-    def change_order(self, ID_Name, order_id,
-                     stop_lose_kind, stop_lose_value,
-                     take_profit_kind, take_profit_value,
-                     use_trail_stop, auto_margin_call):
+    def change_order(self, ID_Name, order_id, stop_lose_kind, stop_lose_value, take_profit_kind, take_profit_value, use_trail_stop, auto_margin_call):
         check = True
         if ID_Name == "position_id":
             check, order_data = self.get_order(order_id)
@@ -676,14 +911,9 @@ class Exnova:
             ID = order_id
         else:
             logging.error('change_order input error ID_Name')
-
         if check:
             self.api.tpsl_changed_respond = None
-            self.api.change_order(
-                ID_Name=ID_Name, ID=ID,
-                stop_lose_kind=stop_lose_kind, stop_lose_value=stop_lose_value,
-                take_profit_kind=take_profit_kind, take_profit_value=take_profit_value,
-                use_trail_stop=use_trail_stop)
+            self.api.change_order(ID_Name=ID_Name, ID=ID, stop_lose_kind=stop_lose_kind, stop_lose_value=stop_lose_value, take_profit_kind=take_profit_kind, take_profit_value=take_profit_value, use_trail_stop=use_trail_stop)
             self.change_auto_margin_call(ID_Name=ID_Name, ID=ID, auto_margin_call=auto_margin_call)
             while self.api.tpsl_changed_respond == None:
                 pass
@@ -695,7 +925,6 @@ class Exnova:
             logging.error('change_order fail to get position_id')
             return False, None
 
-    # ---------------- Orders & Positions ----------------
     def get_async_order(self, buy_order_id):
         return self.api.order_async[buy_order_id]
 
@@ -758,7 +987,6 @@ class Exnova:
             pass
         return self.api.position
 
-    # ---------------- Position History ----------------
     def get_position_history(self, instrument_type):
         self.api.position_history = None
         self.api.get_position_history(instrument_type)
@@ -781,10 +1009,8 @@ class Exnova:
 
     def get_available_leverages(self, instrument_type, actives=""):
         self.api.available_leverages = None
-        if actives == "":
-            self.api.get_available_leverages(instrument_type, "")
-        else:
-            self.api.get_available_leverages(instrument_type, self.active_opcodes.get(actives))
+        active_id = self.active_opcodes.get(actives, "")
+        self.api.get_available_leverages(instrument_type, active_id)
         while self.api.available_leverages == None:
             pass
         if self.api.available_leverages["status"] == 2000:
@@ -797,10 +1023,7 @@ class Exnova:
         self.api.cancel_order(buy_order_id)
         while self.api.order_canceled == None:
             pass
-        if self.api.order_canceled["status"] == 2000:
-            return True
-        else:
-            return False
+        return self.api.order_canceled["status"] == 2000
 
     def close_position(self, position_id):
         check, data = self.get_order(position_id)
@@ -809,10 +1032,7 @@ class Exnova:
             self.api.close_position(data["position_id"])
             while self.api.close_position_data == None:
                 pass
-            if self.api.close_position_data["status"] == 2000:
-                return True
-            else:
-                return False
+            return self.api.close_position_data["status"] == 2000
         else:
             return False
 
@@ -823,14 +1043,13 @@ class Exnova:
         self.api.close_position(position_changed["id"])
         while self.api.close_position_data == None:
             pass
-        if self.api.close_position_data["status"] == 2000:
-            return True
-        else:
-            return False
+        return self.api.close_position_data["status"] == 2000
 
     def get_overnight_fee(self, instrument_type, active):
         self.api.overnight_fee = None
-        self.api.get_overnight_fee(instrument_type, self.active_opcodes.get(active))
+        active_id = self.active_opcodes.get(active)
+        if not active_id: return False, None
+        self.api.get_overnight_fee(instrument_type, active_id)
         while self.api.overnight_fee == None:
             pass
         if self.api.overnight_fee["status"] == 2000:
@@ -838,17 +1057,26 @@ class Exnova:
         else:
             return False, None
 
-    # ---------------- Live Deals ----------------
-    def subscribe_live_deal(self, name, active, _type):
+    def get_option_open_by_other_pc(self):
+        return self.api.socket_option_opened
+
+    def del_option_open_by_other_pc(self, id):
+        del self.api.socket_option_opened[id]
+
+    def opcode_to_name(self, opcode):
+        for name, id in self.active_opcodes.items():
+            if id == opcode:
+                return name
+        return None
+
+    def subscribe_live_deal(self, name, active, _type, buffersize):
         active_id = self.active_opcodes.get(active)
-        if not active_id:
-            return
+        if not active_id: return
         self.api.Subscribe_Live_Deal(name, active_id, _type)
 
     def unscribe_live_deal(self, name, active, _type):
         active_id = self.active_opcodes.get(active)
-        if not active_id:
-            return
+        if not active_id: return
         self.api.Unscribe_Live_Deal(name, active_id, _type)
 
     def set_digital_live_deal_cb(self, cb):
@@ -866,7 +1094,6 @@ class Exnova:
     def clear_live_deal(self, name, active, _type, buffersize):
         self.api.live_deal_data[name][active][_type] = deque(list(), buffersize)
 
-    # ---------------- User Profile & Leaderboard ----------------
     def get_user_profile_client(self, user_id):
         self.api.user_profile_client = None
         self.api.Get_User_Profile_Client(user_id)
@@ -880,8 +1107,7 @@ class Exnova:
             try:
                 if self.api.leaderboard_userinfo_deals_client["isSuccessful"] == True:
                     break
-            except:
-                pass
+            except: pass
             self.api.Request_Leaderboard_Userinfo_Deals_Client(user_id, country_id)
             time.sleep(0.2)
         return self.api.leaderboard_userinfo_deals_client
@@ -893,14 +1119,93 @@ class Exnova:
             time.sleep(0.2)
         return self.api.users_availability
 
-    # ---------------- Logout ----------------
+    def get_digital_payout(self, active, seconds=0):
+        self.api.digital_payout = None
+        active_id = self.active_opcodes.get(active)
+        if not active_id: return 0
+        self.api.subscribe_digital_price_splitter(active_id)
+        start = time.time()
+        while self.api.digital_payout is None:
+            if seconds and int(time.time() - start) > seconds:
+                break
+        self.api.unsubscribe_digital_price_splitter(active_id)
+        return self.api.digital_payout if self.api.digital_payout else 0
+
     def logout(self):
         self.api.logout()
 
-    # ---------------- Close Connection ----------------
+    def buy_digital_spot_v2(self, active, amount, action, duration):
+        action = action.lower()
+        if action not in ['put', 'call']:
+            logging.error('buy_digital_spot_v2 active error')
+            return -1, None
+        action = 'P' if action == 'put' else 'C'
+        timestamp = int(self.api.timesync.server_timestamp)
+        if duration == 1:
+            exp, _ = get_expiration_time(timestamp, duration)
+        else:
+            now_date = datetime.fromtimestamp(timestamp) + timedelta(minutes=1, seconds=30)
+            while True:
+                if now_date.minute % duration == 0 and time.mktime(now_date.timetuple()) - timestamp > 30:
+                    break
+                now_date = now_date + timedelta(minutes=1)
+            exp = time.mktime(now_date.timetuple())
+        date_formated = str(datetime.utcfromtimestamp(exp).strftime("%Y%m%d%H%M"))
+        active_id = str(self.active_opcodes.get(active))
+        instrument_id = f"do{active_id}A{date_formated[:8]}D{date_formated[8:]}00T{duration}M{action}SPT"
+        request_id = self.api.place_digital_option_v2(instrument_id, active_id, amount)
+        while self.api.digital_option_placed_id.get(request_id) is None:
+            pass
+        digital_order_id = self.api.digital_option_placed_id.get(request_id)
+        if isinstance(digital_order_id, int):
+            return True, digital_order_id
+        else:
+            return False, digital_order_id
+
+    def buy_blitz(self, active, price, direction, expiration):
+        self.api.buy_multi_option = {}
+        self.api.buy_successful = None
+        request_id = str(randint(0, 10000))
+        try: self.api.buy_multi_option[request_id]["id"] = None
+        except: pass
+        if isinstance(active, str):
+            active_id = self.active_opcodes.get(active)
+        else:
+            active_id = active
+        profit_percent = self.get_blitz_payout(active)
+        value = None
+        self.api.buy_blitz_option(price, active_id, direction, expiration, profit_percent, value, request_id)
+        start_t = time.time()
+        id = None
+        self.api.result = None
+        while self.api.result == None or id == None:
+            try:
+                if "message" in self.api.buy_multi_option[request_id].keys():
+                    return False, self.api.buy_multi_option[request_id]["message"]
+            except: pass
+            try: id = self.api.buy_multi_option[request_id]["id"]
+            except: pass
+            if time.time() - start_t >= 5:
+                logging.error('**warning** buy_blitz late 5 sec')
+                return False, None
+        return self.api.result, self.api.buy_multi_option[request_id]["id"]
+
+    def get_blitz_payout(self, active):
+        try:
+            all_profit = self.get_all_profit()
+            if active in all_profit:
+                for key in ["turbo", "binary"]:
+                    if key in all_profit[active]:
+                        return int(all_profit[active][key] * 100)
+                for v in all_profit[active].values():
+                    return int(v * 100)
+        except Exception as e:
+            logging.warning(f"Não foi possível obter payout para {active}: {e}")
+        return 85
+
     def close(self):
         try:
             self.api.close()
             logging.info("Conexão da API fechada com sucesso.")
         except Exception as e:
-            logging.error(f"Erro ao fechar conexão da API: {e}")
+            logging.error(f"Erro ao fechar a conexão da API: {e}")
