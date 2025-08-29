@@ -384,3 +384,4 @@ class TradingBot:
             if self.exnova_operator: self.exnova_operator.close()
             if self.exnova_cataloger: self.exnova_cataloger.close()
             self.logger("INFO", "Bot encerrado.")
+
