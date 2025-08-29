@@ -1,36 +1,25 @@
-import sys
-import os
 import asyncio
 import logging
-import traceback # <-- IMPORTAÇÃO ADICIONADA
-from dotenv import load_dotenv
-
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-
 from core.bot import TradingBot
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s:%(name)s:%(message)s'
-)
+# Configuração básica de logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s:%(name)s:%(message)s')
 
 def main():
-    load_dotenv()
+    """
+    Função principal para inicializar e executar o bot.
+    """
     bot = TradingBot()
-    
     try:
         logging.info("A iniciar o bot...")
         asyncio.run(bot.run())
     except KeyboardInterrupt:
-        logging.info("Bot interrompido pelo utilizador. A encerrar...")
+        logging.info("Bot interrompido pelo utilizador.")
     except Exception as e:
-        logging.critical(f"Ocorreu um erro fatal no arranque do bot: {e}")
-        traceback.print_exc() # Agora funciona
+        logging.critical(f"Ocorreu um erro fatal no arranque do bot: {e}", exc_info=True)
     finally:
-        bot.is_running = False
-        if bot.exnova and hasattr(bot.exnova, 'quit'):
-            bot.exnova.quit()
-        logging.info("Bot encerrado.")
+        # A lógica de encerramento agora está dentro do próprio bot (bot.run)
+        logging.info("Aplicação principal a terminar.")
 
 if __name__ == "__main__":
     main()
