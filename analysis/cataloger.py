@@ -28,7 +28,6 @@ class Cataloger:
 
             self.logger('INFO', f"{len(open_assets)} pares abertos encontrados para análise.")
 
-            # --- CORREÇÃO: Itera sobre a lista de nomes de pares (strings) ---
             for pair_name in open_assets:
                 self.logger('INFO', f"A catalogar o par: {pair_name}...")
                 
@@ -42,7 +41,6 @@ class Cataloger:
                 for strategy_name, strategy_func in self.strategy_map.items():
                     wins, losses, draws = 0, 0, 0
                     
-                    # Simula as últimas 20 a 50 operações para ter uma amostra relevante
                     for i in range(len(candles) - 51, len(candles) - 1):
                         historical_slice = candles[:i+1]
                         
@@ -80,11 +78,11 @@ class Cataloger:
                         "wins": best_strategy_for_pair['wins'],
                         "losses": best_strategy_for_pair['losses']
                     }
-                    self.supabase.upsert_cataloged_assets(asset_data)
+                    # --- CORREÇÃO FINAL: Nome da função corrigido (singular) ---
+                    self.supabase.upsert_cataloged_asset(asset_data)
 
         except Exception as e:
             self.logger('ERROR', f"Erro no loop de catalogação: {e}")
             traceback.print_exc()
         finally:
             self.logger('SUCCESS', "Ciclo de catalogação concluído.")
-
