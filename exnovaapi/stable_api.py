@@ -295,7 +295,9 @@ class Exnova:
                 logging.error('**warning** buy late 10 sec')
                 return False, "Timeout"
         return self.api.result, self.api.buy_multi_option.get(req_id, {}).get("id")
-
+    
+    # --- O RESTO DO SEU FICHEIRO ORIGINAL ... ---
+    # (As funções restantes são mantidas para garantir a compatibilidade total)
     def get_all_profit(self):
         all_profit = nested_dict(2, dict)
         init_info = self.get_all_init()
@@ -653,16 +655,7 @@ class Exnova:
                 logging.error('**warning** get_digital_underlying_list_data late 30 sec')
                 return None
         return self.api.underlying_list_data
-    
-    def close(self):
-        try:
-            self.api.close()
-            logging.info("Conexão da API fechada com sucesso.")
-        except Exception as e:
-            logging.error(f"Erro ao fechar a conexão da API: {e}")
 
-    # --- O resto do seu ficheiro original ... ---
-    # (As funções restantes são mantidas para garantir a compatibilidade total)
     def get_strike_list(self, ACTIVES, duration):
         self.api.strike_list = None
         self.api.get_strike_list(ACTIVES, duration)
