@@ -1,6 +1,5 @@
 import time
 import traceback
-from collections import defaultdict
 import logging
 
 class Cataloger:
@@ -11,7 +10,6 @@ class Cataloger:
         self.logger = self._get_logger()
 
     def _get_logger(self):
-        # Função auxiliar para loggar com o prefixo [CATALOGER]
         def logger(level, message):
             log_message = f"[CATALOGER] {message}"
             print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] [{level.upper()}] {log_message}", flush=True)
@@ -29,8 +27,8 @@ class Cataloger:
 
             self.logger('INFO', f"{len(open_assets)} pares abertos encontrados para análise.")
 
-            for pair_info in open_assets:
-                pair_name = pair_info['name']
+            # --- CORREÇÃO: Itera sobre a lista de nomes de pares ---
+            for pair_name in open_assets:
                 self.logger('INFO', f"A catalogar o par: {pair_name}...")
                 
                 candles = self.exnova.get_historical_candles(pair_name, 60, 200)
@@ -43,7 +41,6 @@ class Cataloger:
                 for strategy_name, strategy_func in self.strategy_map.items():
                     wins, losses, draws = 0, 0, 0
                     
-                    # Simula as últimas 20 a 50 operações para ter uma amostra relevante
                     for i in range(len(candles) - 51, len(candles) - 1):
                         historical_slice = candles[:i+1]
                         
