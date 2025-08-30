@@ -7,7 +7,6 @@ from datetime import datetime
 from threading import Thread, Lock
 import logging
 
-# Adiciona o diretório pai ao sys.path para importações relativas
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import settings
@@ -19,25 +18,19 @@ from analysis.cataloger import Cataloger
 
 class TradingBot:
     def __init__(self):
-        # --- Serviços ---
         self.supabase: SupabaseService | None = None
         self.exnova_operator: ExnovaService | None = None
         self.exnova_cataloger: ExnovaService | None = None
-        
-        # --- Configurações e Estado ---
         self.bot_config: dict = {}
         self.is_running = True
         self.is_trade_active = False
         self.trade_lock = Lock()
         self.last_analysis_minute = -1
         self.martingale_state: dict = {}
-        
-        # --- Contadores Diários ---
         self.daily_wins = 0
         self.daily_losses = 0
         self.last_daily_reset_date = None
         
-        # --- Mapeamento de Estratégias ---
         self.strategy_map = {
             'Pullback MQL': ti.strategy_mql_pullback, 'Padrão de Reversão': ti.strategy_reversal_pattern,
             'Fluxo de Tendência': ti.strategy_trend_flow, 'Reversão por Exaustão': ti.strategy_exhaustion_reversal,
@@ -58,9 +51,8 @@ class TradingBot:
         if self.supabase:
             self.supabase.insert_log(level, log_message)
 
-    # --- LÓGICA DE CATALOGAÇÃO ---
     def _perform_initial_cataloging(self):
-        self.logger('INFO', "A realizar a catalogação inicial. O bot iniciará em breve. Este processo pode demorar alguns minutos...")
+        self.logger('INFO', "A realizar a catalogação inicial. Este processo pode demorar alguns minutos...")
         temp_exnova_service = None
         try:
             temp_exnova_service = ExnovaService(settings.EXNOVA_EMAIL, settings.EXNOVA_PASSWORD)
@@ -78,7 +70,6 @@ class TradingBot:
         finally:
             if temp_exnova_service:
                 temp_exnova_service.close()
-                self.logger('INFO', "Conexão temporária de catalogação fechada.")
 
     def cataloging_loop_sync(self):
         self.logger('INFO', "Thread de catalogação periódica iniciada.")
@@ -88,26 +79,21 @@ class TradingBot:
                     cataloger = Cataloger(self.exnova_cataloger, self.supabase, self.strategy_map)
                     cataloger.run_cataloging_cycle()
                 else:
-                    self.logger('WARNING', "Serviço de catalogação não está conectado, a pular ciclo.", "CATALOGER")
-                    if self.exnova_cataloger:
-                        self.logger('INFO', "A tentar reconectar o serviço de catalogação...", "CATALOGER")
-                        self.exnova_cataloger.connect()
-
+                    self.logger('WARNING', "Serviço de catalogação não conectado, a pular ciclo.", "CATALOGER")
+                    if self.exnova_cataloger: self.exnova_cataloger.connect()
             except Exception as e:
                 self.logger('ERROR', f"Erro no loop de catalogação periódica: {e}", "CATALOGER")
                 traceback.print_exc()
             
-            time.sleep(15 * 60) # Espera 15 minutos
+            time.sleep(15 * 60)
 
-    # --- LÓGICA PRINCIPAL DE OPERAÇÃO ---
     def trading_loop_sync(self):
         previous_status = 'PAUSED'
-        
         while self.is_running:
             try:
                 new_config = self.supabase.get_bot_config()
                 if new_config: self.bot_config = new_config
-                else: self.logger('WARNING', "Não foi possível carregar a configuração."); time.sleep(10); continue
+                else: self.logger('WARNING', "Não foi possível carregar config."); time.sleep(10); continue
 
                 current_status = self.bot_config.get('status', 'PAUSED')
 
@@ -115,25 +101,23 @@ class TradingBot:
                     self.logger('WARNING', "--- REINÍCIO SUAVE ATIVADO ---")
                     self._daily_reset_if_needed(force=True)
                     self.martingale_state.clear()
-                    self.logger('INFO', "Estado interno limpo. O bot está pronto para operar.")
+                    self.logger('INFO', "Estado interno limpo.")
 
                 previous_status = current_status
                 
                 if current_status == 'RUNNING' and not self.exnova_operator.is_connected():
-                    self.logger('INFO', "Operador desconectado. A tentar reconectar...", "OPERATOR")
+                    self.logger('INFO', "Operador desconectado. A reconectar...", "OPERATOR")
                     self.exnova_operator.connect()
                     time.sleep(5)
                     continue
 
                 if current_status == 'RUNNING':
                     self._daily_reset_if_needed()
-                    if self._check_stop_limits():
-                        continue
+                    if self._check_stop_limits(): continue
                     if not self.is_trade_active:
                         self.trading_cycle()
                 else:
                     time.sleep(5)
-                
                 time.sleep(1)
 
             except Exception as e:
@@ -154,22 +138,15 @@ class TradingBot:
         self.logger('INFO', f"A procurar sinais com assertividade mínima de {min_win_rate}%.")
         
         qualified_assets = self.supabase.get_cataloged_assets(min_win_rate)
-        
         if not qualified_assets:
-            self.logger('INFO', "Nenhum par catalogado cumpre os critérios de assertividade.")
+            self.logger('INFO', "Nenhum par catalogado cumpre os critérios.")
             return
             
         self.logger('INFO', f"Pares qualificados: {[asset['pair'] for asset in qualified_assets]}")
-
         for asset in qualified_assets:
             with self.trade_lock:
                 if self.is_trade_active: break
-            
-            pair_name = asset['pair']
-            best_strategy = asset['best_strategy']
-            self.logger('INFO', f"A analisar {pair_name} com sua melhor estratégia: {best_strategy}...")
-            
-            self._analyze_asset(pair_name, tf_secs, exp_mins, best_strategy)
+            self._analyze_asset(asset['pair'], tf_secs, exp_mins, asset['best_strategy'])
 
     def _analyze_asset(self, pair_name, tf_secs, exp_mins, strategy_name):
         try:
@@ -182,7 +159,7 @@ class TradingBot:
             direction = strategy_function(candles)
             if direction:
                 now = datetime.utcnow()
-                wait_time = (59 - now.second - 1) + (1 - now.microsecond / 1e6) + 0.2
+                wait_time = max(0, (59 - now.second - 1) + (1 - now.microsecond / 1e6) + 0.2)
                 
                 self.logger('SUCCESS', f"SINAL ENCONTRADO! {pair_name} | {strategy_name} | {direction.upper()}")
                 
@@ -194,44 +171,33 @@ class TradingBot:
                     return
 
                 if wait_time > 0: time.sleep(wait_time)
-
                 self._execute_and_wait(signal, signal_id, pair_name, exp_mins)
-
         except Exception as e:
             self.logger('ERROR', f"Erro em _analyze_asset({pair_name}): {e}")
             traceback.print_exc()
             
-    # --- LÓGICA DE EXECUÇÃO E VERIFICAÇÃO DE RESULTADO PELO SALDO ---
     def _execute_and_wait(self, signal: TradeSignal, signal_id: int, full_name: str, exp_mins: int):
         with self.trade_lock:
             if self.is_trade_active:
-                self.supabase.update_trade_result(signal_id, 'CANCELLED', details="Outra operação já estava ativa.")
-                self.logger('WARNING', f"Operação para {signal.pair} cancelada.")
+                self.supabase.update_trade_result(signal_id, 'CANCELLED')
                 return
             self.is_trade_active = True
 
         try:
             balance_before = self.exnova_operator.get_current_balance()
             if balance_before is None:
-                self.logger('ERROR', "Não foi possível obter o saldo inicial para a operação.")
-                self.supabase.update_trade_result(signal_id, 'ERROR', details="Falha ao obter saldo inicial.")
-                return
+                raise ValueError("Não foi possível obter o saldo inicial.")
 
             entry_value = self._get_entry_value(signal.pair)
             success, order_id_or_message = self.exnova_operator.execute_trade(entry_value, full_name, signal.direction, exp_mins)
             
             if not success:
-                self.logger('ERROR', f"Falha na execução da operação: {order_id_or_message}")
-                self.supabase.update_trade_result(signal_id, 'ERROR', details=str(order_id_or_message))
-                return
+                raise Exception(f"Falha na execução: {order_id_or_message}")
             
-            order_id = order_id_or_message
-            self.supabase.update_trade_order_id(signal_id, order_id)
-            self.logger('SUCCESS', f"Operação executada. ID: {order_id}. A aguardar resultado...")
+            self.supabase.update_trade_order_id(signal_id, order_id_or_message)
+            self.logger('SUCCESS', f"Operação executada. ID: {order_id_or_message}. A aguardar...")
             
-            # Pausa para a operação expirar + buffer
             time.sleep(exp_mins * 60 + 5)
-
             balance_after = self.exnova_operator.get_current_balance()
             
             result, pnl = 'ERROR', 0.0
@@ -241,22 +207,21 @@ class TradingBot:
                 elif pnl < 0: result = 'LOSS'
                 else: result = 'DRAW'
             else:
-                self.logger('ERROR', "Não foi possível obter o saldo final para apurar o resultado.")
+                self.logger('ERROR', "Não foi possível obter o saldo final.")
                 
             self.logger('SUCCESS' if result == 'WIN' else 'ERROR', f"Resultado para {signal.pair}: {result} | P/L: ${pnl:.2f}")
 
-            self.supabase.update_trade_result(signal_id, result, pnl=pnl, details="Finalizado por verificação de saldo.")
-            self._update_stats_and_martingale(result, signal, full_name, exp_mins, signal_id)
-
+            self.supabase.update_trade_result(signal_id, result, pnl=pnl)
+            self._update_stats_and_martingale(result, signal, full_name, exp_mins)
         except Exception as e:
-            self.logger('ERROR', f"Erro crítico durante a execução da operação: {e}")
+            self.logger('ERROR', f"Erro crítico durante a execução: {e}")
             traceback.print_exc()
             if signal_id: self.supabase.update_trade_result(signal_id, 'ERROR', details=str(e))
         finally:
             with self.trade_lock:
                 self.is_trade_active = False
 
-    def _update_stats_and_martingale(self, result, signal, full_name, exp_mins, original_signal_id):
+    def _update_stats_and_martingale(self, result, signal, full_name, exp_mins):
         if result == 'WIN':
             self.daily_wins += 1
             self.martingale_state[signal.pair] = {'level': 0}
@@ -270,13 +235,12 @@ class TradingBot:
                     self.logger('WARNING', f"A iniciar Martingale Nível {level + 1} para {signal.pair}...")
                     
                     candles = self.exnova_operator.get_historical_candles(signal.pair, 60, 1)
-                    if not candles: self.logger('ERROR', f"Não foi possível obter velas para o Martingale em {signal.pair}."); return
+                    if not candles: return
                     
-                    mg_strategy_name = f"{signal.strategy}_MG_{level + 1}"
-                    mg_signal = TradeSignal(pair=signal.pair, direction=signal.direction, strategy=mg_strategy_name, **candles[-1])
-                    
+                    mg_strategy = f"{signal.strategy}_MG_{level + 1}"
+                    mg_signal = TradeSignal(pair=signal.pair, direction=signal.direction, strategy=mg_strategy, **candles[-1])
                     mg_signal_id = self.supabase.insert_trade_signal(mg_signal.to_dict(), status='PENDENTE', martingale_level=level+1)
-                    if not mg_signal_id: self.logger('ERROR', "Falha ao registar sinal de Martingale na DB."); return
+                    if not mg_signal_id: return
 
                     self._execute_and_wait(mg_signal, mg_signal_id, full_name, exp_mins)
                 else:
@@ -302,20 +266,19 @@ class TradingBot:
 
         if stop_mode == 'operations':
             if stop_win > 0 and self.daily_wins >= stop_win:
-                limit_hit, message = True, f"STOP WIN por operações atingido ({self.daily_wins}/{stop_win})."
+                limit_hit, message = True, f"STOP WIN ({self.daily_wins}/{stop_win})."
             if not limit_hit and stop_loss > 0 and self.daily_losses >= stop_loss:
-                limit_hit, message = True, f"STOP LOSS por operações atingido ({self.daily_losses}/{stop_loss})."
+                limit_hit, message = True, f"STOP LOSS ({self.daily_losses}/{stop_loss})."
         elif stop_mode == 'percentage' and initial_balance > 0 and current_balance is not None:
-            profit_loss = current_balance - initial_balance
-            profit_loss_percent = (profit_loss / initial_balance) * 100
-            if stop_win > 0 and profit_loss_percent >= stop_win:
-                limit_hit, message = True, f"STOP WIN por percentagem atingido ({profit_loss_percent:.2f}%/{stop_win}%)."
-            if not limit_hit and stop_loss > 0 and profit_loss_percent <= -stop_loss:
-                 limit_hit, message = True, f"STOP LOSS por percentagem atingido ({profit_loss_percent:.2f}%/-{stop_loss}%)."
+            pnl_percent = ((current_balance - initial_balance) / initial_balance) * 100
+            if stop_win > 0 and pnl_percent >= stop_win:
+                limit_hit, message = True, f"STOP WIN % ({pnl_percent:.2f}%/{stop_win}%)."
+            if not limit_hit and stop_loss > 0 and pnl_percent <= -stop_loss:
+                 limit_hit, message = True, f"STOP LOSS % ({pnl_percent:.2f}%/-{stop_loss}%)."
 
         if limit_hit:
             self.logger('SUCCESS' if 'WIN' in message else 'ERROR', message)
-            self.logger('WARNING', "O BOT FOI PAUSADO AUTOMATICAMENTE.")
+            self.logger('WARNING', "BOT PAUSADO AUTOMATICAMENTE.")
             self.supabase.update_config({'status': 'PAUSED'})
             self.bot_config['status'] = 'PAUSED'
             return True
@@ -324,30 +287,29 @@ class TradingBot:
     def _daily_reset_if_needed(self, force=False):
         today = datetime.utcnow().date()
         if self.last_daily_reset_date != today or force:
-            self.logger('INFO', f"NOVO DIA DETETADO ({today}). A zerar contadores diários.")
+            self.logger('INFO', f"NOVO DIA ({today}). Zerando contadores.")
             self.daily_wins, self.daily_losses = 0, 0
             self.last_daily_reset_date = today
             if self.exnova_operator and self.exnova_operator.is_connected():
                 bal = self.exnova_operator.get_current_balance()
-                if bal:
-                    self.supabase.update_config({'daily_initial_balance': bal})
+                if bal: self.supabase.update_config({'daily_initial_balance': bal})
 
     async def run(self):
         self.supabase = SupabaseService(settings.SUPABASE_URL, settings.SUPABASE_KEY)
-        self.logger('INFO', "Conexão com o Supabase estabelecida com sucesso.")
+        self.logger('INFO', "Conexão com Supabase estabelecida.")
         self._perform_initial_cataloging()
         
         self.logger('INFO', "A iniciar o bot...")
         self.exnova_operator = ExnovaService(settings.EXNOVA_EMAIL, settings.EXNOVA_PASSWORD)
         self.exnova_cataloger = ExnovaService(settings.EXNOVA_EMAIL, settings.EXNOVA_PASSWORD)
         
-        self.logger('INFO', "A estabelecer conexão principal do operador...", "OPERATOR")
+        self.logger('INFO', "Conectando operador...", "OPERATOR")
         op_check, _ = self.exnova_operator.connect()
-        if not op_check: self.logger('CRITICAL', "Falha fatal ao conectar operador. O bot será encerrado.", "OPERATOR"); return
+        if not op_check: self.logger('CRITICAL', "Falha fatal ao conectar operador.", "OPERATOR"); return
         
-        self.logger('INFO', "A estabelecer conexão do catalogador...", "CATALOGER")
+        self.logger('INFO', "Conectando catalogador...", "CATALOGER")
         cat_check, _ = self.exnova_cataloger.connect()
-        if not cat_check: self.logger('CRITICAL', "Falha ao conectar catalogador. Continuará sem catalogação periódica.", "CATALOGER")
+        if not cat_check: self.logger('CRITICAL', "Falha ao conectar catalogador.", "CATALOGER")
         
         operator_thread = Thread(target=self.trading_loop_sync, daemon=True)
         cataloging_thread = Thread(target=self.cataloging_loop_sync, daemon=True)
@@ -360,7 +322,7 @@ class TradingBot:
                 await asyncio.sleep(1)
         finally:
             self.is_running = False
-            self.logger("INFO", "A encerrar o bot e as conexões...")
+            self.logger("INFO", "A encerrar o bot...")
             if self.exnova_operator: self.exnova_operator.close()
             if self.exnova_cataloger: self.exnova_cataloger.close()
             self.logger("INFO", "Bot encerrado.")
