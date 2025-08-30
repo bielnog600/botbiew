@@ -91,3 +91,4 @@ class SupabaseService:
         except Exception as e:
             logging.error(f"Erro ao buscar ativos catalogados: {e}")
             return []
+
