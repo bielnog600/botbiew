@@ -7,6 +7,7 @@ from datetime import datetime
 from threading import Thread, Lock
 import logging
 
+# Adiciona o diretório pai ao sys.path para importações relativas
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import settings
@@ -18,19 +19,25 @@ from analysis.cataloger import Cataloger
 
 class TradingBot:
     def __init__(self):
+        # --- Serviços ---
         self.supabase: SupabaseService | None = None
         self.exnova_operator: ExnovaService | None = None
         self.exnova_cataloger: ExnovaService | None = None
+        
+        # --- Configurações e Estado ---
         self.bot_config: dict = {}
         self.is_running = True
         self.is_trade_active = False
         self.trade_lock = Lock()
         self.last_analysis_minute = -1
         self.martingale_state: dict = {}
+        
+        # --- Contadores Diários ---
         self.daily_wins = 0
         self.daily_losses = 0
         self.last_daily_reset_date = None
         
+        # --- Mapeamento de Estratégias ---
         self.strategy_map = {
             'Pullback MQL': ti.strategy_mql_pullback, 'Padrão de Reversão': ti.strategy_reversal_pattern,
             'Fluxo de Tendência': ti.strategy_trend_flow, 'Reversão por Exaustão': ti.strategy_exhaustion_reversal,
@@ -256,25 +263,31 @@ class TradingBot:
         return round(base * (factor ** level), 2)
 
     def _check_stop_limits(self) -> bool:
-        stop_win = self.bot_config.get('stop_win', 0)
-        stop_loss = self.bot_config.get('stop_loss', 0)
         stop_mode = self.bot_config.get('stop_mode', 'operations')
-        initial_balance = self.bot_config.get('daily_initial_balance', 0)
-        current_balance = self.exnova_operator.get_current_balance() if self.exnova_operator and self.exnova_operator.is_connected() else initial_balance
-        
         limit_hit, message = False, ""
 
         if stop_mode == 'operations':
+            stop_win = self.bot_config.get('stop_win', 0)
+            stop_loss = self.bot_config.get('stop_loss', 0)
             if stop_win > 0 and self.daily_wins >= stop_win:
                 limit_hit, message = True, f"STOP WIN ({self.daily_wins}/{stop_win})."
             if not limit_hit and stop_loss > 0 and self.daily_losses >= stop_loss:
                 limit_hit, message = True, f"STOP LOSS ({self.daily_losses}/{stop_loss})."
-        elif stop_mode == 'percentage' and initial_balance > 0 and current_balance is not None:
-            pnl_percent = ((current_balance - initial_balance) / initial_balance) * 100
-            if stop_win > 0 and pnl_percent >= stop_win:
-                limit_hit, message = True, f"STOP WIN % ({pnl_percent:.2f}%/{stop_win}%)."
-            if not limit_hit and stop_loss > 0 and pnl_percent <= -stop_loss:
-                 limit_hit, message = True, f"STOP LOSS % ({pnl_percent:.2f}%/-{stop_loss}%)."
+        
+        elif stop_mode == 'percentage':
+            stop_win_percent = self.bot_config.get('stop_win_percent', 0)
+            stop_loss_percent = self.bot_config.get('stop_loss_percent', 0)
+            initial_balance = self.bot_config.get('daily_initial_balance', 0)
+            
+            if initial_balance > 0:
+                current_balance = self.exnova_operator.get_current_balance() if self.exnova_operator and self.exnova_operator.is_connected() else initial_balance
+                if current_balance is not None:
+                    pnl_percent = ((current_balance - initial_balance) / initial_balance) * 100
+                    
+                    if stop_win_percent > 0 and pnl_percent >= stop_win_percent:
+                        limit_hit, message = True, f"STOP WIN % ({pnl_percent:.2f}%/{stop_win_percent}%)."
+                    if not limit_hit and stop_loss_percent > 0 and pnl_percent <= -stop_loss_percent:
+                         limit_hit, message = True, f"STOP LOSS % ({pnl_percent:.2f}%/-{stop_loss_percent}%)."
 
         if limit_hit:
             self.logger('SUCCESS' if 'WIN' in message else 'ERROR', message)
