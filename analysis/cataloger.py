@@ -10,7 +10,6 @@ class Cataloger:
         self.logger = self._get_logger()
 
     def _get_logger(self):
-        # Função auxiliar para loggar com o prefixo [CATALOGER]
         def logger(level, message):
             log_message = f"[CATALOGER] {message}"
             print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] [{level.upper()}] {log_message}", flush=True)
@@ -21,6 +20,14 @@ class Cataloger:
     def run_cataloging_cycle(self):
         self.logger('INFO', "A iniciar novo ciclo de catalogação...")
         try:
+            # --- NOVO: Verifica a conexão antes de começar ---
+            if not self.exnova.is_connected():
+                self.logger('WARNING', "Conexão do catalogador inativa. A tentar reconectar...")
+                check, reason = self.exnova.connect()
+                if not check:
+                    self.logger('ERROR', f"Falha ao reconectar o catalogador: {reason}. A abortar ciclo.")
+                    return
+
             open_assets = self.exnova.get_all_open_assets()
             if not open_assets:
                 self.logger('WARNING', "Não foi possível obter a lista de pares abertos.")
@@ -29,6 +36,11 @@ class Cataloger:
             self.logger('INFO', f"{len(open_assets)} pares abertos encontrados para análise.")
 
             for pair_name in open_assets:
+                # --- NOVO: Verifica a conexão a cada par para ciclos longos ---
+                if not self.exnova.is_connected():
+                    self.logger('ERROR', "Conexão perdida durante a catalogação. A abortar ciclo.")
+                    break
+                
                 self.logger('INFO', f"A catalogar o par: {pair_name}...")
                 
                 candles = self.exnova.get_historical_candles(pair_name, 60, 200)
@@ -78,7 +90,6 @@ class Cataloger:
                         "wins": best_strategy_for_pair['wins'],
                         "losses": best_strategy_for_pair['losses']
                     }
-                    # --- CORREÇÃO FINAL: Nome da função corrigido (singular) ---
                     self.supabase.upsert_cataloged_asset(asset_data)
 
         except Exception as e:
