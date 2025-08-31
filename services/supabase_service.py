@@ -36,20 +36,18 @@ class SupabaseService:
         except Exception as e:
             print(f"ERRO CRÍTICO: Falha ao inserir log no Supabase: {e}")
 
-    # --- FUNÇÃO CORRIGIDA ---
-    # Agora aceita os parâmetros 'status' e 'martingale_level'
+    # --- FUNÇÃO CORRIGIDA COM A SINTAXE MODERNA ---
     def insert_trade_signal(self, signal_data: dict, status: str = 'PENDENTE', martingale_level: int = 0) -> int | None:
         if not self.client: return None
         try:
-            # Garante que a coluna 'result' tem um valor inicial
-            # e adiciona os novos campos ao payload que será inserido
             payload = {
                 **signal_data,
                 'status': status,
                 'martingale_level': martingale_level,
                 'result': 'PENDENTE' 
             }
-            response = self.client.from_('trade_signals').insert(payload).select('id').execute()
+            # A sintaxe correta é executar o insert e depois extrair os dados da resposta.
+            response = self.client.from_('trade_signals').insert(payload).execute()
             if response.data:
                 return response.data[0]['id']
             return None
@@ -60,7 +58,7 @@ class SupabaseService:
     def update_trade_order_id(self, signal_id: int, order_id: str):
         if not self.client: return
         try:
-            self.client.from_('trade_signals').update({'order_id': order_id}).eq('id', signal_id).execute()
+            self.client.from_('trade_signals').update({'order_id': str(order_id)}).eq('id', signal_id).execute()
         except Exception as e:
             logging.error(f"Erro ao atualizar ID da ordem: {e}")
             
@@ -91,4 +89,3 @@ class SupabaseService:
         except Exception as e:
             logging.error(f"Erro ao buscar ativos catalogados: {e}")
             return []
-
