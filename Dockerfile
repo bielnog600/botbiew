@@ -1,8 +1,8 @@
 # ----------------------------------------
 # FASE 1: Build
 # ----------------------------------------
-# Define a imagem base do Python. A versão 'slim' é mais leve.
-FROM python:3.10-slim AS builder
+# Define a imagem base do Python, especificando a versão estável do Debian (Bookworm).
+FROM python:3.10-slim-bookworm AS builder
 
 # Define o diretório de trabalho dentro do contêiner.
 WORKDIR /app
@@ -25,8 +25,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # ----------------------------------------
 # FASE 2: Final
 # ----------------------------------------
-# Define a imagem final, mais leve que a de build.
-FROM python:3.10-slim
+# Define a imagem final, baseada na mesma versão estável.
+FROM python:3.10-slim-bookworm
 
 WORKDIR /app
 
