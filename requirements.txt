@@ -1,18 +1,17 @@
 # Dependências da aplicação principal
+
 pydantic
 pydantic-settings
 python-dotenv
 supabase==2.5.0
 
-# Dependências da API (IQ Option)
+# Dependências da API
+
 requests
 websocket-client
 
 # Dependências de análise técnica
-pandas==2.2.2
-pandas-ta==0.3.14b0
-numpy==1.26.4
 
-# Dependências de teste (opcional para produção)
-pytest
-pytest-asyncio
+pandas==2.2.2
+pandas-ta
+numpy==1.26.4
