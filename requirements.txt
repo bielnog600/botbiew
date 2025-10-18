@@ -15,5 +15,5 @@ websocket-client
 # Versões ajustadas para garantir compatibilidade no ambiente de build.
 
 pandas~=1.5.3
-pandas-ta==0.3.14b0
+pandas-ta
 numpy
