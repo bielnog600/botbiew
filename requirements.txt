@@ -12,6 +12,8 @@ websocket-client
 
 # Dependências de análise técnica
 
-pandas==2.2.2
-pandas-ta
-numpy==1.26.4
+# Versões ajustadas para garantir compatibilidade no ambiente de build.
+
+pandas~=1.5.3
+pandas-ta==0.3.14b0
+numpy
