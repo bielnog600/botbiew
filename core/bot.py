@@ -3,7 +3,7 @@ import os
 import asyncio
 import time
 import traceback
-from datetime import datetime
+from datetime import datetime, timedelta
 from threading import Thread, Lock
 import logging
 
@@ -31,6 +31,10 @@ class TradingBot:
         self.trade_lock = Lock()
         self.last_analysis_minute = -1
         self.martingale_state: dict = {}
+
+        # --- Cache de Configuração ---
+        self.last_config_fetch_time: datetime | None = None
+        self.config_cache_duration = timedelta(seconds=15) # Busca a config a cada 15 segundos
         
         # --- Contadores Diários ---
         self.daily_wins = 0
@@ -94,13 +98,28 @@ class TradingBot:
             
             time.sleep(15 * 60)
 
+    def _fetch_config_with_cache(self):
+        """Busca a configuração do Supabase, utilizando um cache para evitar chamadas excessivas."""
+        now = datetime.utcnow()
+        if not self.bot_config or not self.last_config_fetch_time or (now - self.last_config_fetch_time > self.config_cache_duration):
+            try:
+                new_config = self.supabase.get_bot_config()
+                if new_config:
+                    self.bot_config = new_config
+                    self.last_config_fetch_time = now
+                else:
+                    self.logger('WARNING', "Não foi possível carregar a configuração do Supabase.")
+            except Exception as e:
+                self.logger('ERROR', f"Falha ao buscar configuração: {e}")
+                
     def trading_loop_sync(self):
         previous_status = 'PAUSED'
         while self.is_running:
             try:
-                new_config = self.supabase.get_bot_config()
-                if new_config: self.bot_config = new_config
-                else: self.logger('WARNING', "Não foi possível carregar config."); time.sleep(10); continue
+                self._fetch_config_with_cache()
+                if not self.bot_config:
+                    time.sleep(10)
+                    continue
 
                 current_status = self.bot_config.get('status', 'PAUSED')
 
@@ -124,6 +143,7 @@ class TradingBot:
                     if not self.is_trade_active:
                         self.trading_cycle()
                 else:
+                    # Quando pausado, espera mais tempo para reduzir o uso de CPU
                     time.sleep(5)
                 time.sleep(1)
 
@@ -166,7 +186,8 @@ class TradingBot:
             direction = strategy_function(candles)
             if direction:
                 now = datetime.utcnow()
-                wait_time = max(0, (59 - now.second - 1) + (1 - now.microsecond / 1e6) + 0.2)
+                # Ajuste de tempo para entrar precisamente no início da próxima vela
+                wait_time = max(0, (60 - now.second) - (now.microsecond / 1e6) + 0.1)
                 
                 self.logger('SUCCESS', f"SINAL ENCONTRADO! {pair_name} | {strategy_name} | {direction.upper()}")
                 
@@ -219,7 +240,7 @@ class TradingBot:
             self.logger('SUCCESS' if result == 'WIN' else 'ERROR', f"Resultado para {signal.pair}: {result} | P/L: ${pnl:.2f}")
 
             self.supabase.update_trade_result(signal_id, result, pnl=pnl)
-            self._update_stats_and_martingale(result, signal, full_name, exp_mins)
+            self._handle_trade_result(result, signal, full_name, exp_mins)
         except Exception as e:
             self.logger('ERROR', f"Erro crítico durante a execução: {e}")
             traceback.print_exc()
@@ -228,31 +249,56 @@ class TradingBot:
             with self.trade_lock:
                 self.is_trade_active = False
 
-    def _update_stats_and_martingale(self, result, signal, full_name, exp_mins):
+    def _handle_trade_result(self, result: str, signal: TradeSignal, full_name: str, exp_mins: int):
+        """Lógica centralizada para lidar com o resultado de uma operação, incluindo Martingale."""
         if result == 'WIN':
             self.daily_wins += 1
             self.martingale_state[signal.pair] = {'level': 0}
-        elif result == 'LOSS':
+            return
+
+        if result == 'LOSS':
             self.daily_losses += 1
             if self.bot_config.get('use_martingale', False):
-                level = self.martingale_state.get(signal.pair, {}).get('level', 0)
-                max_levels = self.bot_config.get('martingale_levels', 2)
-                if level < max_levels:
-                    self.martingale_state[signal.pair] = {'level': level + 1}
-                    self.logger('WARNING', f"A iniciar Martingale Nível {level + 1} para {signal.pair}...")
-                    
-                    candles = self.exnova_operator.get_historical_candles(signal.pair, 60, 1)
-                    if not candles: return
-                    
-                    mg_strategy = f"{signal.strategy}_MG_{level + 1}"
-                    mg_signal = TradeSignal(pair=signal.pair, direction=signal.direction, strategy=mg_strategy, **candles[-1])
-                    mg_signal_id = self.supabase.insert_trade_signal(mg_signal.to_dict(), status='PENDENTE', martingale_level=level+1)
-                    if not mg_signal_id: return
+                self._attempt_martingale(signal, full_name, exp_mins)
+            else:
+                self.martingale_state[signal.pair] = {'level': 0}
 
-                    self._execute_and_wait(mg_signal, mg_signal_id, full_name, exp_mins)
-                else:
-                    self.logger('ERROR', f"Nível máximo de Martingale atingido para {signal.pair}.")
-                    self.martingale_state[signal.pair] = {'level': 0}
+    def _attempt_martingale(self, original_signal: TradeSignal, full_name: str, exp_mins: int):
+        """Tenta executar uma operação de Martingale."""
+        level = self.martingale_state.get(original_signal.pair, {}).get('level', 0)
+        max_levels = self.bot_config.get('martingale_levels', 2)
+
+        if level >= max_levels:
+            self.logger('ERROR', f"Nível máximo de Martingale atingido para {original_signal.pair}.")
+            self.martingale_state[original_signal.pair] = {'level': 0}
+            return
+
+        next_level = level + 1
+        self.martingale_state[original_signal.pair] = {'level': next_level}
+        self.logger('WARNING', f"A iniciar Martingale Nível {next_level} para {original_signal.pair}...")
+        
+        # Pausa para o início da próxima vela
+        time.sleep(1) 
+
+        candles = self.exnova_operator.get_historical_candles(original_signal.pair, 60, 1)
+        if not candles:
+            self.logger('ERROR', f"Não foi possível obter candles para o Martingale de {original_signal.pair}.")
+            self.martingale_state[original_signal.pair] = {'level': 0} # Reseta em caso de falha
+            return
+
+        mg_strategy = f"{original_signal.strategy}_MG_{next_level}"
+        mg_signal = TradeSignal(pair=original_signal.pair, direction=original_signal.direction, strategy=mg_strategy, **candles[-1])
+        
+        mg_signal_id = self.supabase.insert_trade_signal(mg_signal.to_dict(), status='PENDENTE', martingale_level=next_level)
+        if not mg_signal_id:
+            self.logger('ERROR', "Falha ao registar sinal de Martingale no banco de dados.")
+            self.martingale_state[original_signal.pair] = {'level': 0} # Reseta em caso de falha
+            return
+        
+        # O Martingale é uma nova execução, não uma chamada recursiva.
+        # A flag is_trade_active será liberada e o loop principal continuará.
+        # Para garantir que o MG execute imediatamente, chamamos diretamente.
+        self._execute_and_wait(mg_signal, mg_signal_id, full_name, exp_mins)
 
     def _get_entry_value(self, asset: str) -> float:
         base = self.bot_config.get('entry_value', 1.0)
@@ -293,7 +339,7 @@ class TradingBot:
             self.logger('SUCCESS' if 'WIN' in message else 'ERROR', message)
             self.logger('WARNING', "BOT PAUSADO AUTOMATICAMENTE.")
             self.supabase.update_config({'status': 'PAUSED'})
-            self.bot_config['status'] = 'PAUSED'
+            self.bot_config['status'] = 'PAUSED' # Atualiza o estado local para evitar mais operações
             return True
         return False
 
