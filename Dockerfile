@@ -1,31 +1,24 @@
 # ----------------------------------------
-# FASE 1: Build
+# FASE 1: Build - Usa a imagem completa para garantir as ferramentas de compilação
 # ----------------------------------------
-# Define a imagem base do Python, especificando a versão estável do Debian (Bookworm).
-FROM python:3.10-slim-bookworm AS builder
+FROM python:3.10 AS builder
 
-# Define o diretório de trabalho dentro do contêiner.
+# Define o diretório de trabalho.
 WORKDIR /app
 
-# Instala as dependências do sistema, incluindo as ferramentas de compilação
-# e os cabeçalhos de desenvolvimento para a versão exata do Python (3.10).
-RUN apt-get update -y && \
-    apt-get install -y --no-install-recommends \
-    tini \
-    build-essential \
-    python3.10-dev && \
-    rm -rf /var/lib/apt/lists/*
+# Instala apenas o Tini, pois as ferramentas de build já estão incluídas.
+RUN apt-get update -y && apt-get install -y --no-install-recommends tini && rm -rf /var/lib/apt/lists/*
 
-# Copia o arquivo de dependências para o contêiner.
+# Copia o arquivo de dependências.
 COPY requirements.txt .
 
 # Instala as dependências Python.
+# Esta etapa agora funcionará, pois o ambiente tem todas as ferramentas necessárias.
 RUN pip install --no-cache-dir -r requirements.txt
 
 # ----------------------------------------
-# FASE 2: Final
+# FASE 2: Final - Usa a imagem 'slim' para um resultado leve
 # ----------------------------------------
-# Define a imagem final, baseada na mesma versão estável.
 FROM python:3.10-slim-bookworm
 
 WORKDIR /app
@@ -33,15 +26,15 @@ WORKDIR /app
 # Copia as bibliotecas Python instaladas da fase de build.
 COPY --from=builder /usr/local/lib/python3.10/site-packages /usr/local/lib/python3.10/site-packages
 
-# Copia o Tini para ser o entrypoint.
+# Copia o Tini da fase de build.
 COPY --from=builder /usr/bin/tini /usr/bin/tini
 
-# Copia todo o código do projeto para o diretório de trabalho.
+# Copia todo o código do projeto.
 COPY . .
 
-# Define o entrypoint para usar o Tini, que gerencia processos zumbis.
+# Define o entrypoint para usar o Tini.
 ENTRYPOINT ["/usr/bin/tini", "--"]
 
-# Comando para executar a aplicação quando o contêiner iniciar.
+# Comando para executar a aplicação.
 CMD ["python", "main.py"]
 
