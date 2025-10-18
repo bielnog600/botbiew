@@ -7,13 +7,13 @@ FROM python:3.10-slim AS builder
 # Define o diretório de trabalho dentro do contêiner.
 WORKDIR /app
 
-# Instala as dependências mínimas do sistema, incluindo as ferramentas de compilação
-# e os cabeçalhos de desenvolvimento do Python para instalar pacotes.
+# Instala as dependências do sistema, incluindo as ferramentas de compilação
+# e os cabeçalhos de desenvolvimento para a versão exata do Python (3.10).
 RUN apt-get update -y && \
     apt-get install -y --no-install-recommends \
     tini \
     build-essential \
-    python3-dev && \
+    python3.10-dev && \
     rm -rf /var/lib/apt/lists/*
 
 # Copia o arquivo de dependências para o contêiner.
