@@ -1,387 +1,330 @@
-import sys
-import os
 import asyncio
 import time
 import traceback
 from datetime import datetime, timedelta
-from threading import Thread, Lock
-import logging
-
-# Adiciona o diretório pai ao sys.path para importações relativas
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from typing import Dict, Optional
 
 from config import settings
-from services.exnova_service import ExnovaService
+from services.exnova_service import AsyncExnovaService
 from services.supabase_service import SupabaseService
-import analysis.technical_indicators as ti
+from analysis.technical import get_m15_sr_zones, get_h1_sr_zones
+from analysis import technical_indicators as ti
 from core.data_models import TradeSignal
-from analysis.cataloger import Cataloger
 
 class TradingBot:
     def __init__(self):
-        # --- Serviços ---
-        self.supabase: SupabaseService | None = None
-        self.exnova_operator: ExnovaService | None = None
-        self.exnova_cataloger: ExnovaService | None = None
-        
-        # --- Configurações e Estado ---
-        self.bot_config: dict = {}
+        self.supabase = SupabaseService(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+        self.exnova = AsyncExnovaService(settings.EXNOVA_EMAIL, settings.EXNOVA_PASSWORD)
         self.is_running = True
+        self.bot_config: Dict = {}
+        self.martingale_state: Dict[str, Dict] = {}
         self.is_trade_active = False
-        self.trade_lock = Lock()
+        self.asset_performance: Dict[str, Dict[str, int]] = {}
+        self.consecutive_losses: Dict[str, int] = {}
+        self.blacklisted_assets: set = set()
+        self.last_reset_time: datetime = datetime.utcnow()
         self.last_analysis_minute = -1
-        self.martingale_state: dict = {}
-
-        # --- Cache de Configuração ---
-        self.last_config_fetch_time: datetime | None = None
-        self.config_cache_duration = timedelta(seconds=15) # Busca a config a cada 15 segundos
-        
-        # --- Contadores Diários ---
         self.daily_wins = 0
         self.daily_losses = 0
         self.last_daily_reset_date = None
+        self.pending_martingale_trade: Optional[Dict] = None
+
+    async def logger(self, level: str, message: str):
+        ts = datetime.utcnow().isoformat()
+        print(f"[{ts}] [{level.upper()}] {message}", flush=True)
+        await self.supabase.insert_log(level, message)
+
+    async def _hourly_cycle_reset(self):
+        await self.logger('INFO', "CICLO HORÁRIO CONCLUÍDO. A zerar performance de ativos e lista negra.")
+        self.asset_performance.clear()
+        self.consecutive_losses.clear()
+        self.blacklisted_assets.clear()
+        self.last_reset_time = datetime.utcnow()
+        await self.logger('SUCCESS', "Estatísticas de ativos zeradas.")
         
-        # --- Mapeamento de Estratégias ---
-        self.strategy_map = {
-            'Pullback MQL': ti.strategy_mql_pullback, 'Padrão de Reversão': ti.strategy_reversal_pattern,
-            'Fluxo de Tendência': ti.strategy_trend_flow, 'Reversão por Exaustão': ti.strategy_exhaustion_reversal,
-            'Bandas de Bollinger': ti.strategy_bollinger_bands, 'Cruzamento MACD': ti.strategy_macd_crossover,
-            'Tripla Confirmação': ti.strategy_triple_confirmation, 'Fuga Bollinger + EMA': ti.strategy_bb_ema_filter,
-            'MACD + RSI': ti.strategy_macd_rsi_confirm, 'Rejeição RSI + Pavio': ti.strategy_rejection_rsi_wick,
-            'EMA Cross + Volume': ti.strategy_ema_volume_crossover, 'Rompimento Falso': ti.strategy_fake_breakout,
-            'Inside Bar + RSI': ti.strategy_inside_bar_rsi, 'Engolfo + Tendência': ti.strategy_engulfing_trend,
-            'Compressão Bollinger': ti.strategy_bollinger_squeeze, 'Scalping StochRSI': ti.strategy_stochrsi_scalp,
-            'Pires Awesome': ti.strategy_awesome_saucer, 'Reversão Keltner': ti.strategy_keltner_reversion,
-            'Tendência Heikin-Ashi': ti.strategy_heikinashi_trend, 'Cruzamento Vortex': ti.strategy_vortex_cross,
-            'Reversão de Fractal': ti.strategy_fractal_reversal, 'Bollinger + Fractal + Stoch': ti.strategy_bollinger_fractal_stoch,
-        }
-
-    def logger(self, level: str, message: str, service: str = "BOT"):
-        log_message = f"[{service}] {message}"
-        print(f"[{datetime.utcnow().isoformat()}] [{level.upper()}] {log_message}", flush=True)
-        if self.supabase:
-            self.supabase.insert_log(level, log_message)
-
-    def _perform_initial_cataloging(self):
-        self.logger('INFO', "A realizar a catalogação inicial. Este processo pode demorar alguns minutos...")
-        temp_exnova_service = None
-        try:
-            temp_exnova_service = ExnovaService(settings.EXNOVA_EMAIL, settings.EXNOVA_PASSWORD)
-            check, reason = temp_exnova_service.connect()
-            if not check:
-                self.logger('ERROR', f"Falha ao conectar para catalogação inicial: {reason}")
-                return
-
-            cataloger = Cataloger(temp_exnova_service, self.supabase, self.strategy_map)
-            cataloger.run_cataloging_cycle()
-            self.logger('SUCCESS', "Catalogação inicial concluída.")
-        except Exception as e:
-            self.logger('ERROR', f"Erro crítico na catalogação inicial: {e}")
-            traceback.print_exc()
-        finally:
-            if temp_exnova_service:
-                temp_exnova_service.close()
-
-    def cataloging_loop_sync(self):
-        self.logger('INFO', "Thread de catalogação periódica iniciada.")
-        while self.is_running:
-            try:
-                if self.exnova_cataloger and self.exnova_cataloger.is_connected():
-                    cataloger = Cataloger(self.exnova_cataloger, self.supabase, self.strategy_map)
-                    cataloger.run_cataloging_cycle()
-                else:
-                    self.logger('WARNING', "Serviço de catalogação não conectado, a pular ciclo.", "CATALOGER")
-                    if self.exnova_cataloger: self.exnova_cataloger.connect()
-            except Exception as e:
-                self.logger('ERROR', f"Erro no loop de catalogação periódica: {e}", "CATALOGER")
-                traceback.print_exc()
+    async def _daily_reset_if_needed(self):
+        """Verifica se um novo dia começou (baseado em UTC) e zera as metas diárias."""
+        current_date_utc = datetime.utcnow().date()
+        if self.last_daily_reset_date != current_date_utc:
+            await self.logger('INFO', f"NOVO DIA DETETADO ({current_date_utc}). A zerar metas de Stop Win/Loss e saldo diário.")
+            self.daily_wins = 0
+            self.daily_losses = 0
+            self.last_daily_reset_date = current_date_utc
             
-            time.sleep(15 * 60)
-
-    def _fetch_config_with_cache(self):
-        """Busca a configuração do Supabase, utilizando um cache para evitar chamadas excessivas."""
-        now = datetime.utcnow()
-        if not self.bot_config or not self.last_config_fetch_time or (now - self.last_config_fetch_time > self.config_cache_duration):
-            try:
-                new_config = self.supabase.get_bot_config()
-                if new_config:
-                    self.bot_config = new_config
-                    self.last_config_fetch_time = now
-                else:
-                    self.logger('WARNING', "Não foi possível carregar a configuração do Supabase.")
-            except Exception as e:
-                self.logger('ERROR', f"Falha ao buscar configuração: {e}")
-                
-    def trading_loop_sync(self):
-        previous_status = 'PAUSED'
-        while self.is_running:
-            try:
-                self._fetch_config_with_cache()
-                if not self.bot_config:
-                    time.sleep(10)
-                    continue
-
-                current_status = self.bot_config.get('status', 'PAUSED')
-
-                if current_status == 'RUNNING' and previous_status == 'PAUSED':
-                    self.logger('WARNING', "--- REINÍCIO SUAVE ATIVADO ---")
-                    self._daily_reset_if_needed(force=True)
-                    self.martingale_state.clear()
-                    self.logger('INFO', "Estado interno limpo.")
-
-                previous_status = current_status
-                
-                if current_status == 'RUNNING' and not self.exnova_operator.is_connected():
-                    self.logger('INFO', "Operador desconectado. A reconectar...", "OPERATOR")
-                    self.exnova_operator.connect()
-                    time.sleep(5)
-                    continue
-
-                if current_status == 'RUNNING':
-                    self._daily_reset_if_needed()
-                    if self._check_stop_limits(): continue
-                    if not self.is_trade_active:
-                        self.trading_cycle()
-                else:
-                    # Quando pausado, espera mais tempo para reduzir o uso de CPU
-                    time.sleep(5)
-                time.sleep(1)
-
-            except Exception as e:
-                self.logger('ERROR', f"Loop principal falhou: {e}")
-                traceback.print_exc()
-                if self.exnova_operator: self.exnova_operator.connect()
-                time.sleep(15)
-
-    def trading_cycle(self):
-        now = datetime.utcnow()
-        if now.second >= 58 and now.minute != self.last_analysis_minute:
-            self.last_analysis_minute = now.minute
-            self.logger('INFO', "Janela de análise M1 ATIVADA.")
-            self.run_analysis_for_timeframe(60, 1)
-
-    def run_analysis_for_timeframe(self, tf_secs, exp_mins):
-        min_win_rate = self.bot_config.get('min_win_rate', 70)
-        self.logger('INFO', f"A procurar sinais com assertividade mínima de {min_win_rate}%.")
-        
-        qualified_assets = self.supabase.get_cataloged_assets(min_win_rate)
-        if not qualified_assets:
-            self.logger('INFO', "Nenhum par catalogado cumpre os critérios.")
-            return
-            
-        self.logger('INFO', f"Pares qualificados: {[asset['pair'] for asset in qualified_assets]}")
-        for asset in qualified_assets:
-            with self.trade_lock:
-                if self.is_trade_active: break
-            self._analyze_asset(asset['pair'], tf_secs, exp_mins, asset['best_strategy'])
-
-    def _analyze_asset(self, pair_name, tf_secs, exp_mins, strategy_name):
-        try:
-            strategy_function = self.strategy_map.get(strategy_name)
-            if not strategy_function: return
-
-            candles = self.exnova_operator.get_historical_candles(pair_name, tf_secs, 200)
-            if not candles or len(candles) < 50: return
-
-            direction = strategy_function(candles)
-            if direction:
-                now = datetime.utcnow()
-                # Ajuste de tempo para entrar precisamente no início da próxima vela
-                wait_time = max(0, (60 - now.second) - (now.microsecond / 1e6) + 0.1)
-                
-                self.logger('SUCCESS', f"SINAL ENCONTRADO! {pair_name} | {strategy_name} | {direction.upper()}")
-                
-                signal = TradeSignal(pair=pair_name, direction=direction.lower(), strategy=strategy_name, **candles[-1])
-                
-                signal_id = self.supabase.insert_trade_signal(signal.to_dict(), status='PENDENTE')
-                if not signal_id:
-                    self.logger('ERROR', "Falha ao registar sinal PENDENTE na base de dados.")
-                    return
-
-                if wait_time > 0: time.sleep(wait_time)
-                self._execute_and_wait(signal, signal_id, pair_name, exp_mins)
-        except Exception as e:
-            self.logger('ERROR', f"Erro em _analyze_asset({pair_name}): {e}")
-            traceback.print_exc()
-            
-    def _execute_and_wait(self, signal: TradeSignal, signal_id: int, full_name: str, exp_mins: int):
-        with self.trade_lock:
-            if self.is_trade_active:
-                self.supabase.update_trade_result(signal_id, 'CANCELLED')
-                return
-            self.is_trade_active = True
-
-        try:
-            balance_before = self.exnova_operator.get_current_balance()
-            if balance_before is None:
-                raise ValueError("Não foi possível obter o saldo inicial.")
-
-            entry_value = self._get_entry_value(signal.pair)
-            success, order_id_or_message = self.exnova_operator.execute_trade(entry_value, full_name, signal.direction, exp_mins)
-            
-            if not success:
-                raise Exception(f"Falha na execução: {order_id_or_message}")
-            
-            self.supabase.update_trade_order_id(signal_id, order_id_or_message)
-            self.logger('SUCCESS', f"Operação executada. ID: {order_id_or_message}. A aguardar...")
-            
-            time.sleep(exp_mins * 60 + 5)
-            balance_after = self.exnova_operator.get_current_balance()
-            
-            result, pnl = 'ERROR', 0.0
-            if balance_after is not None:
-                pnl = round(balance_after - balance_before, 2)
-                if pnl > 0: result = 'WIN'
-                elif pnl < 0: result = 'LOSS'
-                else: result = 'DRAW'
-            else:
-                self.logger('ERROR', "Não foi possível obter o saldo final.")
-                
-            self.logger('SUCCESS' if result == 'WIN' else 'ERROR', f"Resultado para {signal.pair}: {result} | P/L: ${pnl:.2f}")
-
-            self.supabase.update_trade_result(signal_id, result, pnl=pnl)
-            self._handle_trade_result(result, signal, full_name, exp_mins)
-        except Exception as e:
-            self.logger('ERROR', f"Erro crítico durante a execução: {e}")
-            traceback.print_exc()
-            if signal_id: self.supabase.update_trade_result(signal_id, 'ERROR', details=str(e))
-        finally:
-            with self.trade_lock:
-                self.is_trade_active = False
-
-    def _handle_trade_result(self, result: str, signal: TradeSignal, full_name: str, exp_mins: int):
-        """Lógica centralizada para lidar com o resultado de uma operação, incluindo Martingale."""
-        if result == 'WIN':
-            self.daily_wins += 1
-            self.martingale_state[signal.pair] = {'level': 0}
-            return
-
-        if result == 'LOSS':
-            self.daily_losses += 1
-            if self.bot_config.get('use_martingale', False):
-                self._attempt_martingale(signal, full_name, exp_mins)
-            else:
-                self.martingale_state[signal.pair] = {'level': 0}
-
-    def _attempt_martingale(self, original_signal: TradeSignal, full_name: str, exp_mins: int):
-        """Tenta executar uma operação de Martingale."""
-        level = self.martingale_state.get(original_signal.pair, {}).get('level', 0)
-        max_levels = self.bot_config.get('martingale_levels', 2)
-
-        if level >= max_levels:
-            self.logger('ERROR', f"Nível máximo de Martingale atingido para {original_signal.pair}.")
-            self.martingale_state[original_signal.pair] = {'level': 0}
-            return
-
-        next_level = level + 1
-        self.martingale_state[original_signal.pair] = {'level': next_level}
-        self.logger('WARNING', f"A iniciar Martingale Nível {next_level} para {original_signal.pair}...")
-        
-        # Pausa para o início da próxima vela
-        time.sleep(1) 
-
-        candles = self.exnova_operator.get_historical_candles(original_signal.pair, 60, 1)
-        if not candles:
-            self.logger('ERROR', f"Não foi possível obter candles para o Martingale de {original_signal.pair}.")
-            self.martingale_state[original_signal.pair] = {'level': 0} # Reseta em caso de falha
-            return
-
-        mg_strategy = f"{original_signal.strategy}_MG_{next_level}"
-        mg_signal = TradeSignal(pair=original_signal.pair, direction=original_signal.direction, strategy=mg_strategy, **candles[-1])
-        
-        mg_signal_id = self.supabase.insert_trade_signal(mg_signal.to_dict(), status='PENDENTE', martingale_level=next_level)
-        if not mg_signal_id:
-            self.logger('ERROR', "Falha ao registar sinal de Martingale no banco de dados.")
-            self.martingale_state[original_signal.pair] = {'level': 0} # Reseta em caso de falha
-            return
-        
-        # O Martingale é uma nova execução, não uma chamada recursiva.
-        # A flag is_trade_active será liberada e o loop principal continuará.
-        # Para garantir que o MG execute imediatamente, chamamos diretamente.
-        self._execute_and_wait(mg_signal, mg_signal_id, full_name, exp_mins)
-
-    def _get_entry_value(self, asset: str) -> float:
-        base = self.bot_config.get('entry_value', 1.0)
-        if not self.bot_config.get('use_martingale', False): return base
-        level = self.martingale_state.get(asset, {}).get('level', 0)
-        if level == 0: return base
-        factor = self.bot_config.get('martingale_factor', 2.3)
-        return round(base * (factor ** level), 2)
-
-    def _check_stop_limits(self) -> bool:
-        stop_mode = self.bot_config.get('stop_mode', 'operations')
-        limit_hit, message = False, ""
-
-        if stop_mode == 'operations':
-            stop_win = self.bot_config.get('stop_win', 0)
-            stop_loss = self.bot_config.get('stop_loss', 0)
-            if stop_win > 0 and self.daily_wins >= stop_win:
-                limit_hit, message = True, f"STOP WIN ({self.daily_wins}/{stop_win})."
-            if not limit_hit and stop_loss > 0 and self.daily_losses >= stop_loss:
-                limit_hit, message = True, f"STOP LOSS ({self.daily_losses}/{stop_loss})."
-        
-        elif stop_mode == 'percentage':
-            stop_win_percent = self.bot_config.get('stop_win_percent', 0)
-            stop_loss_percent = self.bot_config.get('stop_loss_percent', 0)
-            initial_balance = self.bot_config.get('daily_initial_balance', 0)
-            
-            if initial_balance > 0:
-                current_balance = self.exnova_operator.get_current_balance() if self.exnova_operator and self.exnova_operator.is_connected() else initial_balance
-                if current_balance is not None:
-                    pnl_percent = ((current_balance - initial_balance) / initial_balance) * 100
-                    
-                    if stop_win_percent > 0 and pnl_percent >= stop_win_percent:
-                        limit_hit, message = True, f"STOP WIN % ({pnl_percent:.2f}%/{stop_win_percent}%)."
-                    if not limit_hit and stop_loss_percent > 0 and pnl_percent <= -stop_loss_percent:
-                         limit_hit, message = True, f"STOP LOSS % ({pnl_percent:.2f}%/-{stop_loss_percent}%)."
-
-        if limit_hit:
-            self.logger('SUCCESS' if 'WIN' in message else 'ERROR', message)
-            self.logger('WARNING', "BOT PAUSADO AUTOMATICAMENTE.")
-            self.supabase.update_config({'status': 'PAUSED'})
-            self.bot_config['status'] = 'PAUSED' # Atualiza o estado local para evitar mais operações
-            return True
-        return False
-
-    def _daily_reset_if_needed(self, force=False):
-        today = datetime.utcnow().date()
-        if self.last_daily_reset_date != today or force:
-            self.logger('INFO', f"NOVO DIA ({today}). Zerando contadores.")
-            self.daily_wins, self.daily_losses = 0, 0
-            self.last_daily_reset_date = today
-            if self.exnova_operator and self.exnova_operator.is_connected():
-                bal = self.exnova_operator.get_current_balance()
-                if bal: self.supabase.update_config({'daily_initial_balance': bal})
+            bal = await self.exnova.get_current_balance()
+            if bal is not None:
+                await self.supabase.update_config({'daily_initial_balance': bal, 'current_balance': bal})
 
     async def run(self):
-        self.supabase = SupabaseService(settings.SUPABASE_URL, settings.SUPABASE_KEY)
-        self.logger('INFO', "Conexão com Supabase estabelecida.")
-        self._perform_initial_cataloging()
-        
-        self.logger('INFO', "A iniciar o bot...")
-        self.exnova_operator = ExnovaService(settings.EXNOVA_EMAIL, settings.EXNOVA_PASSWORD)
-        self.exnova_cataloger = ExnovaService(settings.EXNOVA_EMAIL, settings.EXNOVA_PASSWORD)
-        
-        self.logger('INFO', "Conectando operador...", "OPERATOR")
-        op_check, _ = self.exnova_operator.connect()
-        if not op_check: self.logger('CRITICAL', "Falha fatal ao conectar operador.", "OPERATOR"); return
-        
-        self.logger('INFO', "Conectando catalogador...", "CATALOGER")
-        cat_check, _ = self.exnova_cataloger.connect()
-        if not cat_check: self.logger('CRITICAL', "Falha ao conectar catalogador.", "CATALOGER")
-        
-        operator_thread = Thread(target=self.trading_loop_sync, daemon=True)
-        cataloging_thread = Thread(target=self.cataloging_loop_sync, daemon=True)
-        
-        operator_thread.start()
-        cataloging_thread.start()
+        await self.logger('INFO', 'Bot a iniciar com GESTÃO DE RISCO ADAPTATIVA...')
+        await self.exnova.connect()
+        await self._daily_reset_if_needed()
 
-        try:
-            while self.is_running and operator_thread.is_alive():
+        while self.is_running:
+            try:
+                await self._daily_reset_if_needed()
+                if (datetime.utcnow() - self.last_reset_time).total_seconds() >= 3600:
+                    await self._hourly_cycle_reset()
+
+                self.bot_config = await self.supabase.get_bot_config()
+                status = self.bot_config.get('status', 'PAUSED')
+
+                if status == 'RUNNING':
+                    if self.pending_martingale_trade and not self.is_trade_active:
+                        await self._execute_martingale_trade()
+                    elif not self.is_trade_active:
+                        await self.trading_cycle()
+                
+                if status != 'RUNNING':
+                    await self.logger('INFO', "Bot PAUSADO. Aguardando status 'RUNNING'.")
+                elif self.is_trade_active:
+                     await self.logger('INFO', "Operação em andamento. Aguardando resultado...")
+                
                 await asyncio.sleep(1)
+
+            except Exception as e:
+                await self.logger('ERROR', f"Loop principal falhou: {e}")
+                traceback.print_exc()
+                await asyncio.sleep(30)
+
+    async def trading_cycle(self):
+        now = datetime.utcnow()
+        if now.second >= 50:
+            if now.minute != self.last_analysis_minute:
+                self.last_analysis_minute = now.minute
+                
+                if (now.minute + 1) % 5 == 0:
+                    await self.logger('INFO', f"Janela de análise M5 aberta...")
+                    await self.run_analysis_for_timeframe(300, 5)
+                else:
+                    await self.logger('INFO', f"Janela de análise M1 aberta...")
+                    await self.run_analysis_for_timeframe(60, 1)
+
+    async def run_analysis_for_timeframe(self, timeframe_seconds: int, expiration_minutes: int):
+        await self.exnova.change_balance(self.bot_config.get('account_type', 'PRACTICE'))
+        assets = await self.exnova.get_open_assets()
+        
+        available_assets = [asset for asset in assets if asset.split('-')[0] not in self.blacklisted_assets]
+
+        def get_asset_score(asset_name):
+            pair = asset_name.split('-')[0]
+            stats = self.asset_performance.get(pair, {'wins': 0, 'losses': 0})
+            total_trades = stats['wins'] + stats['losses']
+            if total_trades == 0: return 0.5
+            return stats['wins'] / total_trades
+
+        prioritized_assets = sorted(available_assets, key=get_asset_score, reverse=True)
+        
+        for asset in prioritized_assets[:settings.MAX_ASSETS_TO_MONITOR]:
+            if self.is_trade_active:
+                break
+            await self._analyze_asset(asset, timeframe_seconds, expiration_minutes)
+
+    async def _analyze_asset(self, full_name: str, timeframe_seconds: int, expiration_minutes: int):
+        try:
+            if self.is_trade_active: return
+            base = full_name.split('-')[0]
+            
+            if expiration_minutes == 1:
+                analysis_candles, sr_candles = await asyncio.gather(self.exnova.get_historical_candles(base, 60, 200), self.exnova.get_historical_candles(base, 900, 100))
+                if not analysis_candles or not sr_candles: return
+                res, sup = get_m15_sr_zones(sr_candles)
+            elif expiration_minutes == 5:
+                analysis_candles, sr_candles = await asyncio.gather(self.exnova.get_historical_candles(base, 300, 200), self.exnova.get_historical_candles(base, 3600, 100))
+                if not analysis_candles or not sr_candles: return
+                res, sup = get_h1_sr_zones(sr_candles)
+            else: return
+
+            volatility_profile = self.bot_config.get('volatility_profile', 'EQUILIBRADO')
+            atr_limits = {
+                'ULTRA_CONSERVADOR': (0.00015, 0.00500),
+                'CONSERVADOR':       (0.00008, 0.01500),
+                'EQUILIBRADO':       (0.00005, 0.05000),
+                'AGRESSIVO':         (0.00001, 0.15000),
+                'ULTRA_AGRESSIVO':   (0.00001, 0.50000),
+            }
+            if volatility_profile != 'DESATIVADO':
+                min_atr, max_atr = atr_limits.get(volatility_profile, (0.00005, 0.05000))
+                atr_value = ti.calculate_atr(analysis_candles, period=14)
+                if atr_value is None or not (min_atr < atr_value < max_atr):
+                    await self.logger('DEBUG', f"[{base}-M{expiration_minutes}] Filtro de volatilidade ({volatility_profile}): Fora dos limites (ATR={atr_value}). Ativo ignorado.")
+                    return
+
+            signal_candle = analysis_candles[-1]
+            final_direction = None
+            confluences = []
+            zones = {'resistance': res, 'support': sup}
+            confirmation_threshold = self.bot_config.get('confirmation_threshold') or 2
+
+            if expiration_minutes == 1:
+                sr_signal_type = ti.check_price_near_sr(signal_candle, zones)
+                if sr_signal_type == 'call':
+                    confluences.append("SR_Zone")
+                    if ti.check_candlestick_pattern(analysis_candles) == 'call': confluences.append("Candle_Pattern")
+                    if ti.check_rsi_condition(analysis_candles) == 'call': confluences.append("RSI_Condition")
+                    if len(confluences) >= confirmation_threshold: final_direction = 'call'
+                elif sr_signal_type == 'put':
+                    confluences.append("SR_Zone")
+                    if ti.check_candlestick_pattern(analysis_candles) == 'put': confluences.append("Candle_Pattern")
+                    if ti.check_rsi_condition(analysis_candles) == 'put': confluences.append("RSI_Condition")
+                    if len(confluences) >= confirmation_threshold: final_direction = 'put'
+            elif expiration_minutes == 5:
+                m5_signal = ti.check_m5_price_action(analysis_candles, zones)
+                if m5_signal:
+                    temp_confluences = m5_signal['confluences']
+                    if ti.check_rsi_condition(analysis_candles) == m5_signal['direction']:
+                        temp_confluences.append("RSI_Condition")
+                    if len(temp_confluences) >= confirmation_threshold:
+                        final_direction = m5_signal['direction']
+                        confluences = temp_confluences
+            
+            if final_direction:
+                if not ti.validate_reversal_candle(signal_candle, final_direction): return
+                if self.is_trade_active: return
+                
+                now = datetime.utcnow()
+                wait_seconds = (60 - now.second - 1) + (1 - now.microsecond / 1000000) + 0.2
+                await self.logger('INFO', f"Sinal encontrado em {base}. Aguardando {wait_seconds:.2f}s para entrada precisa.")
+                await asyncio.sleep(wait_seconds)
+                self.is_trade_active = True
+
+                strategy_name = f"M{expiration_minutes}_" + ', '.join(confluences)
+                await self.logger('SUCCESS', f"EXECUTANDO SINAL! Dir: {final_direction.upper()}. Conf: {strategy_name}")
+                
+                signal = TradeSignal(pair=base, direction=final_direction, strategy=strategy_name,
+                                     setup_candle_open=signal_candle.open, setup_candle_high=signal_candle.max,
+                                     setup_candle_low=signal_candle.min, setup_candle_close=signal_candle.close)
+                
+                trade_expiration = 4 if expiration_minutes == 5 else expiration_minutes
+                await self._execute_and_wait(signal, full_name, trade_expiration)
+
+        except Exception as e:
+            await self.logger('ERROR', f"Erro em _analyze_asset({full_name}, M{expiration_minutes}): {e}")
+            traceback.print_exc()
+
+    async def _execute_martingale_trade(self):
+        trade_info = self.pending_martingale_trade
+        if not trade_info: return
+        self.pending_martingale_trade = None
+        
+        now = datetime.utcnow()
+        next_minute_ts = (now.timestamp() // 60 + 1) * 60
+        wait_seconds = next_minute_ts - now.timestamp() + 0.2
+        
+        current_level = self.martingale_state.get(trade_info['pair'], {}).get('level', 1)
+        await self.logger('WARNING', f"MARTINGALE NÍVEL {current_level} PREPARADO para {trade_info['pair']}. Aguardando {wait_seconds:.2f}s para entrada na próxima vela.")
+        await asyncio.sleep(wait_seconds)
+
+        self.is_trade_active = True
+        strategy_name = f"M{trade_info['expiration_minutes']}_Martingale_{current_level}"
+        
+        signal = TradeSignal(
+            pair=trade_info['pair'], 
+            direction=trade_info['direction'], 
+            strategy=strategy_name
+        )
+        
+        await self.logger('SUCCESS', f"EXECUTANDO MARTINGALE! Dir: {signal.direction.upper()}.")
+        
+        trade_expiration = 4 if trade_info['expiration_minutes'] == 5 else trade_info['expiration_minutes']
+        await self._execute_and_wait(signal, trade_info['full_name'], trade_expiration)
+
+    def _get_entry_value(self, asset: str, is_martingale: bool = False) -> float:
+        base_value = self.bot_config.get('entry_value', 1.0)
+        if not self.bot_config.get('use_martingale', False):
+            return base_value
+            
+        mg_level = self.martingale_state.get(asset, {}).get('level', 0)
+        
+        # Se for a primeira entrada de Martingale, o nível será 1
+        if is_martingale:
+             mg_level_to_calc = mg_level
+        # Se for uma entrada normal, mg_level é 0, então o valor é o base.
+        else:
+             mg_level_to_calc = mg_level
+
+        if mg_level_to_calc == 0:
+            return base_value
+        
+        factor = self.bot_config.get('martingale_factor', 2.3)
+        mg_value = base_value * (factor ** mg_level_to_calc)
+        return round(mg_value, 2)
+
+    async def _execute_and_wait(self, signal: TradeSignal, full_name: str, expiration_minutes: int):
+        try:
+            is_martingale_trade = "Martingale" in signal.strategy
+            entry_value = self._get_entry_value(signal.pair, is_martingale=is_martingale_trade)
+            
+            order_id = await self.exnova.execute_trade(entry_value, full_name, signal.direction.lower(), expiration_minutes)
+            
+            if not order_id:
+                await self.logger('ERROR', f"Falha ao executar a ordem para {full_name}. A corretora pode ter rejeitado a entrada.")
+                if is_martingale_trade: self.martingale_state[signal.pair] = {'level': 0}
+                self.is_trade_active = False
+                return
+
+            await self.logger('INFO', f"Ordem {order_id} enviada com sucesso. Valor: {entry_value}. Exp: {expiration_minutes} min. Aguardando...")
+            sid = await self.supabase.insert_trade_signal(signal)
+            
+            await asyncio.sleep(expiration_minutes * 60 + 15)
+
+            result = await self.exnova.check_win(order_id)
+            if result is None:
+                result = 'UNKNOWN'
+            
+            await self.logger('SUCCESS' if result == 'win' else 'ERROR', f"Resultado: {result.upper()}")
+
+            if sid:
+                mg_lv = self.martingale_state.get(signal.pair, {}).get('level', 0)
+                await self.supabase.update_trade_result(sid, result.upper(), mg_lv)
+            
+            bal_after = await self.exnova.get_current_balance()
+            if bal_after is not None:
+                await self.supabase.update_current_balance(bal_after)
+
+            pair = signal.pair
+            self.asset_performance.setdefault(pair, {'wins': 0, 'losses': 0})
+            self.consecutive_losses.setdefault(pair, 0)
+
+            if result == 'win':
+                self.daily_wins += 1
+                self.asset_performance[pair]['wins'] += 1
+                self.consecutive_losses[pair] = 0
+                self.martingale_state[pair] = {'level': 0}
+                if pair in self.blacklisted_assets:
+                    self.blacklisted_assets.remove(pair)
+                    await self.logger('INFO', f"O par {pair} foi redimido e REMOVIDO da lista negra.")
+            elif result == 'loss':
+                self.daily_losses += 1
+                self.asset_performance[pair]['losses'] += 1
+                self.consecutive_losses[pair] += 1
+                if self.consecutive_losses[pair] >= 2:
+                    self.blacklisted_assets.add(pair)
+                    await self.logger('ERROR', f"O par {pair} atingiu 2 derrotas consecutivas e foi COLOCADO na lista negra.")
+
+                if self.bot_config.get('use_martingale', False):
+                    current_level = self.martingale_state.get(pair, {}).get('level', 0)
+                    max_levels = self.bot_config.get('martingale_levels', 2)
+                    if current_level < max_levels:
+                        self.martingale_state[pair] = {'level': current_level + 1}
+                        self.pending_martingale_trade = {
+                            "full_name": full_name, "direction": signal.direction,
+                            "expiration_minutes": expiration_minutes, "pair": pair
+                        }
+                    else:
+                        self.martingale_state[pair] = {'level': 0}
+                        await self.logger('ERROR', f"Nível máximo de Martingale atingido para {pair}. Ciclo de Martingale encerrado.")
+            
+            stop_win = self.bot_config.get('stop_win') or 0
+            stop_loss = self.bot_config.get('stop_loss') or 0
+            
+            if (stop_win > 0 and self.daily_wins >= stop_win) or \
+               (stop_loss > 0 and self.daily_losses >= stop_loss):
+                msg = f"META DE STOP WIN ({self.daily_wins}/{stop_win}) ATINGIDA!" if self.daily_wins >= stop_win else f"META DE STOP LOSS ({self.daily_losses}/{stop_loss}) ATINGIDA!"
+                await self.logger('SUCCESS' if result == 'win' else 'ERROR', f"{msg} A pausar o bot.")
+                await self.supabase.update_config({'status': 'PAUSED'})
+
         finally:
-            self.is_running = False
-            self.logger("INFO", "A encerrar o bot...")
-            if self.exnova_operator: self.exnova_operator.close()
-            if self.exnova_cataloger: self.exnova_cataloger.close()
-            self.logger("INFO", "Bot encerrado.")
+            if not self.pending_martingale_trade:
+                self.is_trade_active = False
+                await self.logger('INFO', 'Ciclo de operação concluído. Pronto para nova análise.')
