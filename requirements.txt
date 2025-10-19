@@ -5,15 +5,18 @@ pydantic-settings
 python-dotenv
 supabase==2.5.0
 
-# Dependências da API
+# Dependências da biblioteca local exnovaapi
 
 requests
 websocket-client
 
-# Dependências de análise técnica
+# Dependências de teste
 
-# Versões ajustadas para garantir compatibilidade no ambiente de build.
+pytest
+pytest-asyncio
 
-pandas~=1.5.3
-pandas-ta
-numpy
+# Dependências de análise com versões fixas para Python 3.10
+
+numpy==1.26.4
+pandas==1.5.3
+pandas-ta==0.3.14b0
