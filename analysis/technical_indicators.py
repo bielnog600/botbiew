@@ -2,490 +2,128 @@ import pandas as pd
 import pandas_ta as ta
 from typing import List, Dict, Optional
 
-# =========================
-# Helpers
-# =========================
+# Classe auxiliar para lidar com os dados das velas
+class Candle:
+    def __init__(self, data):
+        self.open = data.get('open')
+        self.max = data.get('max')
+        self.min = data.get('min')
+        self.close = data.get('close')
 
-def _create_and_validate_dataframe(candles: List[Dict], required_columns: List[str]) -> Optional[pd.DataFrame]:
-    """Cria DF e valida colunas essenciais; converte para numérico; elimina NaN nas essenciais."""
-    if not candles:
-        return None
-    df = pd.DataFrame(candles)
-    for col in required_columns:
+def _convert_candles_to_dataframe(candles: List[Candle]) -> pd.DataFrame:
+    """Converte uma lista de objetos Candle para um DataFrame do Pandas."""
+    if not candles: return pd.DataFrame()
+    df = pd.DataFrame([vars(c) for c in candles])
+    df.rename(columns={'max': 'high', 'min': 'low'}, inplace=True)
+    for col in ['open', 'high', 'low', 'close']:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce')
-        else:
-            return None
-    df.dropna(subset=required_columns, inplace=True)
-    return df if not df.empty else None
+    return df
 
-def _col_like(df: pd.DataFrame, prefix: str) -> Optional[str]:
-    """
-    Retorna o primeiro nome de coluna que 'começa com' prefix.
-    Útil para lidar com sufixos que podem variar (ex.: 2 vs 2.0).
-    """
-    for c in df.columns:
-        if c.startswith(prefix):
-            return c
+# --- Funções dos Indicadores ---
+
+def calculate_ema(candles: List[Candle], period: int) -> Optional[float]:
+    if not candles or len(candles) < period: return None
+    df = _convert_candles_to_dataframe(candles)
+    if df.empty or 'close' not in df.columns or df['close'].isnull().any(): return None
+    return ta.ema(df['close'], length=period).iloc[-1]
+
+def calculate_atr(candles: List[Candle], period: int) -> Optional[float]:
+    if not candles or len(candles) < period: return None
+    df = _convert_candles_to_dataframe(candles)
+    if df.empty or 'high' not in df.columns or df['high'].isnull().any(): return None
+    return ta.atr(df['high'], df['low'], df['close'], length=period).iloc[-1]
+
+def check_rsi_condition(candles: List[Candle], overbought=70, oversold=30, period=14) -> Optional[str]:
+    if not candles or len(candles) < period: return None
+    df = _convert_candles_to_dataframe(candles)
+    if df.empty or 'close' not in df.columns or df['close'].isnull().any(): return None
+    rsi_value = ta.rsi(df['close'], length=period).iloc[-1]
+    if rsi_value > overbought: return 'put'
+    if rsi_value < oversold: return 'call'
     return None
 
-# =========================
-# Indicadores isolados
-# =========================
+def validate_reversal_candle(candle: Candle, direction: str) -> bool:
+    """Verifica se a vela de sinal tem corpo forte e não tem pavios contrários."""
+    if not all([candle.open, candle.close, candle.max, candle.min]): return False
+    body_size = abs(candle.close - candle.open)
+    total_range = candle.max - candle.min
+    if total_range == 0: return False
+    
+    # Regra 1: Corpo deve ser pelo menos 50% do range total da vela
+    if (body_size / total_range) < 0.5: return False
+    
+    upper_wick = candle.max - max(candle.open, candle.close)
+    lower_wick = min(candle.open, candle.close) - candle.min
+    
+    # Regra 2: Rejeita sinais com forte pressão contrária
+    if direction == 'call' and upper_wick > body_size: return False
+    if direction == 'put' and lower_wick > body_size: return False
+    
+    return True
 
-def calculate_atr(candles: List[Dict]) -> Optional[float]:
-    df = _create_and_validate_dataframe(candles, ['high', 'low', 'close'])
-    if df is None or len(df) < 15:
-        return None
-    atr = ta.atr(df['high'], df['low'], df['close'], length=14)
-    if atr is None or atr.empty or pd.isna(atr.iloc[-1]):
-        return None
-    return float(atr.iloc[-1])
+def check_candlestick_pattern(candles: List[Candle]) -> Optional[str]:
+    """Identifica um conjunto de padrões de vela de reversão."""
+    if len(candles) < 3: return None
+    
+    df = _convert_candles_to_dataframe(candles)
+    if df.empty: return None
 
-# =========================
-# Estratégias
-# =========================
-
-def strategy_mql_pullback(candles: List[Dict]) -> Optional[str]:
-    df = _create_and_validate_dataframe(candles, ['close', 'low', 'high'])
-    if df is None or len(df) < 51:
-        return None
-    df['ema21'] = ta.ema(df['close'], length=21)
-    df['ema50'] = ta.ema(df['close'], length=50)
-    df.dropna(inplace=True)
-    if len(df) < 2:
-        return None
-    last, prev = df.iloc[-1], df.iloc[-2]
-    if last['ema21'] > last['ema50'] and prev['ema21'] > prev['ema50']:
-        if prev['close'] > prev['ema21'] and last['low'] <= last['ema21'] and last['close'] > last['ema21']:
-            return 'call'
-    if last['ema21'] < last['ema50'] and prev['ema21'] < prev['ema50']:
-        if prev['close'] < prev['ema21'] and last['high'] >= last['ema21'] and last['close'] < last['ema21']:
-            return 'put'
-    return None
-
-def strategy_reversal_pattern(candles: List[Dict]) -> Optional[str]:
-    df = _create_and_validate_dataframe(candles, ['high', 'low', 'open', 'close'])
-    if df is None:
-        return None
+    # Usa a extensão 'ta' do pandas_ta para analisar os padrões
+    df.ta.cdl_pattern(name=["engulfing", "hammer", "shootingstar", "doji", "morningstar", "eveningstar", "piercing", "darkcloud", "tweezertop", "tweezerbottom"], append=True)
+    
+    # Pega os resultados da última vela analisada
     last = df.iloc[-1]
-    body = abs(last['open'] - last['close'])
-    if body == 0:
-        return None
-    upper_wick = last['high'] - max(last['open'], last['close'])
-    lower_wick = min(last['open'], last['close']) - last['low']
-    if upper_wick > 2 * body and lower_wick < 0.5 * body:
-        return 'put'
-    if lower_wick > 2 * body and upper_wick < 0.5 * body:
+
+    # Sinais de Compra (CALL)
+    if last.get('CDL_ENGULFING', 0) == 100 or \
+       last.get('CDL_HAMMER', 0) == 100 or \
+       last.get('CDL_MORNINGSTAR', 0) == 100 or \
+       last.get('CDL_PIERCING', 0) == 100 or \
+       last.get('CDL_TWEEZERBOTTOM', 0) == 100 or \
+       last.get('CDL_DOJI', 0) != 0: # Doji é sinal de indecisão, pode ser usado para ambos
         return 'call'
+        
+    # Sinais de Venda (PUT)
+    if last.get('CDL_ENGULFING', 0) == -100 or \
+       last.get('CDL_SHOOTINGSTAR', 0) == 100 or \
+       last.get('CDL_EVENINGSTAR', 0) == 100 or \
+       last.get('CDL_DARKCLOUD', 0) == 100 or \
+       last.get('CDL_TWEEZERTOP', 0) == 100 or \
+       last.get('CDL_DOJI', 0) != 0:
+        return 'put'
+        
     return None
 
-def strategy_trend_flow(candles: List[Dict]) -> Optional[str]:
-    df = _create_and_validate_dataframe(candles, ['close'])
-    if df is None or len(df) < 101:
-        return None
-    df['ema100'] = ta.ema(df['close'], length=100)
-    df['rsi'] = ta.rsi(df['close'], length=14)
-    df.dropna(inplace=True)
-    if df.empty:
-        return None
-    last = df.iloc[-1]
-    if last['close'] > last['ema100'] and last['rsi'] > 55:
-        return 'call'
-    if last['close'] < last['ema100'] and last['rsi'] < 45:
-        return 'put'
+def check_price_near_sr(last_candle: Candle, zones: Dict, tolerance=0.0005) -> Optional[str]:
+    if last_candle is None or last_candle.close is None: return None
+    price = last_candle.close
+    for r in zones.get('resistance', []):
+        if r is None: continue
+        if abs(price - r) / r < tolerance: return 'put'
+    for s in zones.get('support', []):
+        if s is None: continue
+        if abs(price - s) / s < tolerance: return 'call'
     return None
 
-def strategy_exhaustion_reversal(candles: List[Dict]) -> Optional[str]:
-    df = _create_and_validate_dataframe(candles, ['close'])
-    if df is None or len(df) < 8:
-        return None
-    df['rsi'] = ta.rsi(df['close'], length=7)
-    df.dropna(inplace=True)
-    if df.empty:
-        return None
-    last = df.iloc[-1]
-    if last['rsi'] > 90:
-        return 'put'
-    if last['rsi'] < 10:
-        return 'call'
-    return None
+def check_m5_price_action(candles: List[Candle], zones: Dict) -> Optional[Dict]:
+    """Analisa a vela anterior em busca de um sinal de Pinbar em zonas de S/R."""
+    if len(candles) < 2: return None
+    signal_candle = candles[-2]
 
-def strategy_bollinger_bands(candles: List[Dict]) -> Optional[str]:
-    df = _create_and_validate_dataframe(candles, ['close'])
-    if df is None or len(df) < 21:
-        return None
-    bb = ta.bbands(df['close'], length=20, std=2)
-    if bb is None:
-        return None
-    df = pd.concat([df, bb], axis=1).dropna()
-    last = df.iloc[-1]
-    bbu = _col_like(df, 'BBU_20_2')
-    bbl = _col_like(df, 'BBL_20_2')
-    if bbu is None or bbl is None:
-        return None
-    if last['close'] > last[bbu]:
-        return 'put'
-    if last['close'] < last[bbl]:
-        return 'call'
-    return None
+    # Análise para COMPRA (CALL) em Suporte
+    if check_price_near_sr(signal_candle, {'support': zones.get('support', [])}) == 'call':
+        body_size = abs(signal_candle.close - signal_candle.open)
+        if body_size > 0:
+            lower_wick = min(signal_candle.open, signal_candle.close) - signal_candle.min
+            if lower_wick >= 1.5 * body_size:
+                return {'direction': 'call', 'confluences': ['SR_Zone_Support', 'Pinbar_Bullish']}
 
-def strategy_macd_crossover(candles: List[Dict]) -> Optional[str]:
-    df = _create_and_validate_dataframe(candles, ['close'])
-    if df is None or len(df) < 27:
-        return None
-    macd = ta.macd(df['close'])
-    if macd is None:
-        return None
-    df = pd.concat([df, macd], axis=1).dropna()
-    if len(df) < 2:
-        return None
-    last, prev = df.iloc[-1], df.iloc[-2]
-    macd_line = _col_like(df, 'MACD_12_26_9')
-    signal = _col_like(df, 'MACDs_12_26_9')
-    if macd_line is None or signal is None:
-        return None
-    if prev[macd_line] < prev[signal] and last[macd_line] > last[signal]:
-        return 'call'
-    if prev[macd_line] > prev[signal] and last[macd_line] < last[signal]:
-        return 'put'
-    return None
-
-def strategy_triple_confirmation(candles: List[Dict]) -> Optional[str]:
-    df = _create_and_validate_dataframe(candles, ['high', 'low', 'close'])
-    if df is None or len(df) < 51:
-        return None
-    df['ema50'] = ta.ema(df['close'], length=50)
-    df['rsi'] = ta.rsi(df['close'], length=14)
-    stoch = ta.stoch(df['high'], df['low'], df['close'], k=14, d=3, smooth_k=3)
-    if stoch is None:
-        return None
-    df = pd.concat([df, stoch], axis=1).dropna()
-    last = df.iloc[-1]
-    k = _col_like(df, 'STOCHk_14_3_3')
-    if k is None:
-        return None
-    if last['close'] > last['ema50'] and last['rsi'] < 30 and last[k] < 20:
-        return 'call'
-    if last['close'] < last['ema50'] and last['rsi'] > 70 and last[k] > 80:
-        return 'put'
-    return None
-
-def strategy_bb_ema_filter(candles: List[Dict]) -> Optional[str]:
-    df = _create_and_validate_dataframe(candles, ['close'])
-    if df is None or len(df) < 51:
-        return None
-    df['ema50'] = ta.ema(df['close'], length=50)
-    bb = ta.bbands(df['close'], length=20, std=2)
-    if bb is None:
-        return None
-    df = pd.concat([df, bb], axis=1).dropna()
-    last = df.iloc[-1]
-    bbu = _col_like(df, 'BBU_20_2')
-    bbl = _col_like(df, 'BBL_20_2')
-    if bbu is None or bbl is None:
-        return None
-    if last['close'] > last['ema50'] and last['close'] < last[bbl]:
-        return 'call'
-    if last['close'] < last['ema50'] and last['close'] > last[bbu]:
-        return 'put'
-    return None
-
-def strategy_macd_rsi_confirm(candles: List[Dict]) -> Optional[str]:
-    df = _create_and_validate_dataframe(candles, ['close'])
-    if df is None or len(df) < 30:
-        return None
-    df['rsi'] = ta.rsi(df['close'], length=14)
-    macd = ta.macd(df['close'])
-    if macd is None:
-        return None
-    df = pd.concat([df, macd], axis=1).dropna()
-    if len(df) < 2:
-        return None
-    last, prev = df.iloc[-1], df.iloc[-2]
-    macd_line = _col_like(df, 'MACD_12_26_9')
-    signal = _col_like(df, 'MACDs_12_26_9')
-    if macd_line is None or signal is None:
-        return None
-    if prev[macd_line] < prev[signal] and last[macd_line] > last[signal] and last['rsi'] < 55:
-        return 'call'
-    if prev[macd_line] > prev[signal] and last[macd_line] < last[signal] and last['rsi'] > 45:
-        return 'put'
-    return None
-
-def strategy_rejection_rsi_wick(candles: List[Dict]) -> Optional[str]:
-    df = _create_and_validate_dataframe(candles, ['high', 'low', 'open', 'close'])
-    if df is None or len(df) < 15:
-        return None
-    df['rsi'] = ta.rsi(df['close'], length=14)
-    df.dropna(inplace=True)
-    last = df.iloc[-1]
-    body = abs(last['open'] - last['close'])
-    if body == 0:
-        return None
-    upper_wick = last['high'] - max(last['open'], last['close'])
-    lower_wick = min(last['open'], last['close']) - last['low']
-    if last['rsi'] > 75 and upper_wick > 2 * body and lower_wick < 0.7 * body:
-        return 'put'
-    if last['rsi'] < 25 and lower_wick > 2 * body and upper_wick < 0.7 * body:
-        return 'call'
-    return None
-
-def strategy_ema_volume_crossover(candles: List[Dict]) -> Optional[str]:
-    df = _create_and_validate_dataframe(candles, ['close', 'volume'])
-    if df is None or len(df) < 22:
-        return None
-    df['ema_fast'] = ta.ema(df['close'], length=9)
-    df['ema_slow'] = ta.ema(df['close'], length=21)
-    df['volume_sma'] = ta.sma(df['volume'], length=20)
-    df.dropna(inplace=True)
-    if len(df) < 2:
-        return None
-    last, prev = df.iloc[-1], df.iloc[-2]
-    volume_confirmed = last['volume'] > last['volume_sma'] * 1.2
-    if prev['ema_fast'] < prev['ema_slow'] and last['ema_fast'] > last['ema_slow'] and volume_confirmed:
-        return 'call'
-    if prev['ema_fast'] > prev['ema_slow'] and last['ema_fast'] < last['ema_slow'] and volume_confirmed:
-        return 'put'
-    return None
-
-def strategy_fake_breakout(candles: List[Dict]) -> Optional[str]:
-    df = _create_and_validate_dataframe(candles, ['high', 'low', 'open', 'close'])
-    if df is None or len(df) < 22:
-        return None
-    df['rsi'] = ta.rsi(df['close'], length=14)
-    df.dropna(inplace=True)
-    if len(df) < 3:
-        return None
-    last, prev = df.iloc[-1], df.iloc[-2]
-    lookback_df = df.iloc[-21:-1]
-    support = lookback_df['low'].min()
-    resistance = lookback_df['high'].max()
-    rsi_is_neutral = 40 < last['rsi'] < 60
-    if prev['high'] > resistance and last['close'] < prev['high'] and rsi_is_neutral:
-        return 'put'
-    if prev['low'] < support and last['close'] > prev['low'] and rsi_is_neutral:
-        return 'call'
-    return None
-
-def strategy_inside_bar_rsi(candles: List[Dict]) -> Optional[str]:
-    df = _create_and_validate_dataframe(candles, ['high', 'low', 'close'])
-    if df is None or len(df) < 15:
-        return None
-    df['rsi'] = ta.rsi(df['close'], length=14)
-    df.dropna(inplace=True)
-    if len(df) < 2:
-        return None
-    last, prev = df.iloc[-1], df.iloc[-2]
-    is_inside_bar = last['high'] < prev['high'] and last['low'] > prev['low']
-    if not is_inside_bar:
-        return None
-    if last['rsi'] > 70:
-        return 'put'
-    if last['rsi'] < 30:
-        return 'call'
-    return None
-
-def strategy_engulfing_trend(candles: List[Dict]) -> Optional[str]:
-    df = _create_and_validate_dataframe(candles, ['open', 'close'])
-    if df is None or len(df) < 22:
-        return None
-    df['ema9'] = ta.ema(df['close'], length=9)
-    df['ema21'] = ta.ema(df['close'], length=21)
-    df['rsi'] = ta.rsi(df['close'], length=14)
-    df.dropna(inplace=True)
-    if len(df) < 2:
-        return None
-    last, prev = df.iloc[-1], df.iloc[-2]
-    is_bullish_engulfing = (last['close'] > prev['open'] and last['open'] < prev['close'] and
-                            last['close'] > prev['close'] and last['open'] < prev['open'])
-    is_bearish_engulfing = (last['open'] > prev['close'] and last['close'] < prev['open'] and
-                            last['close'] < prev['close'] and last['open'] > prev['open'])
-    is_uptrend = last['ema9'] > last['ema21']
-    is_downtrend = last['ema9'] < last['ema21']
-    rsi_confirms_up = 50 < last['rsi'] < 70
-    rsi_confirms_down = 30 < last['rsi'] < 50
-    if is_bullish_engulfing and is_uptrend and rsi_confirms_up:
-        return 'call'
-    if is_bearish_engulfing and is_downtrend and rsi_confirms_down:
-        return 'put'
-    return None
-
-def strategy_bollinger_squeeze(candles: List[Dict]) -> Optional[str]:
-    df = _create_and_validate_dataframe(candles, ['close', 'open', 'high', 'low'])
-    if df is None or len(df) < 40:
-        # precisa de janela maior para detectar squeeze com rolling 20
-        return None
-    bb = ta.bbands(df['close'], length=20, std=2)
-    if bb is None:
-        return None
-    df = pd.concat([df, bb], axis=1).dropna()
-    bbw_col = _col_like(df, 'BBB_20_2')
-    bbu = _col_like(df, 'BBU_20_2')
-    bbl = _col_like(df, 'BBL_20_2')
-    if bbw_col is None or bbu is None or bbl is None:
-        return None
-
-    # Squeeze: largura atual perto do mínimo dos últimos 20 (exclui a barra atual)
-    if len(df) < 22:
-        return None
-    last = df.iloc[-1]
-    prior = df.iloc[-21:-1]
-    prior_min_bbw = prior[bbw_col].min()
-    is_squeezed = last[bbw_col] <= prior_min_bbw * 1.1  # 10% acima do mínimo recente
-
-    if not is_squeezed:
-        return None
-
-    body = abs(last['open'] - last['close'])
-    candle_range = last['high'] - last['low']
-    is_strong_candle = candle_range > 0 and (body / candle_range) >= 0.6
-
-    if is_strong_candle and last['close'] > last[bbu]:
-        return 'call'
-    if is_strong_candle and last['close'] < last[bbl]:
-        return 'put'
-    return None
-
-def strategy_stochrsi_scalp(candles: List[Dict]) -> Optional[str]:
-    df = _create_and_validate_dataframe(candles, ['close'])
-    if df is None or len(df) < 30:
-        return None
-    srsi = ta.stochrsi(df['close'], length=14, rsi_length=14, k=3, d=3)
-    if srsi is None:
-        return None
-    df = pd.concat([df, srsi], axis=1).dropna()
-    if len(df) < 2:
-        return None
-    last, prev = df.iloc[-1], df.iloc[-2]
-    k = _col_like(df, 'STOCHRSIk_14_14_3_3')
-    if k is None:
-        return None
-    if prev[k] < 20 and last[k] > 20:
-        return 'call'
-    if prev[k] > 80 and last[k] < 80:
-        return 'put'
-    return None
-
-def strategy_awesome_saucer(candles: List[Dict]) -> Optional[str]:
-    df = _create_and_validate_dataframe(candles, ['high', 'low'])
-    if df is None or len(df) < 35:
-        return None
-    df['ao'] = ta.ao(df['high'], df['low'])
-    df.dropna(inplace=True)
-    if len(df) < 3:
-        return None
-    c1, c2, c3 = df['ao'].iloc[-3], df['ao'].iloc[-2], df['ao'].iloc[-1]
-    if c1 > 0 and c2 > 0 and c3 > 0 and c1 > c2 and c3 > c2:
-        return 'call'
-    if c1 < 0 and c2 < 0 and c3 < 0 and c1 < c2 and c3 < c2:
-        return 'put'
-    return None
-
-def strategy_keltner_reversion(candles: List[Dict]) -> Optional[str]:
-    df = _create_and_validate_dataframe(candles, ['high', 'low', 'close'])
-    if df is None or len(df) < 21:
-        return None
-    kc = ta.kc(df['high'], df['low'], df['close'], length=20)
-    if kc is None:
-        return None
-    df = pd.concat([df, kc], axis=1).dropna()
-    kcl = _col_like(df, 'KCL_20_2') or _col_like(df, 'KCL_20_2.0')
-    kcu = _col_like(df, 'KCU_20_2') or _col_like(df, 'KCU_20_2.0')
-    if kcl is None or kcu is None:
-        return None
-    last = df.iloc[-1]
-    if last['close'] < last[kcl]:
-        return 'call'
-    if last['close'] > last[kcu]:
-        return 'put'
-    return None
-
-def strategy_heikinashi_trend(candles: List[Dict]) -> Optional[str]:
-    df = _create_and_validate_dataframe(candles, ['open', 'high', 'low', 'close'])
-    if df is None:
-        return None
-    ha_df = ta.ha(df['open'], df['high'], df['low'], df['close'])
-    if ha_df is None:
-        return None
-    df = pd.concat([df, ha_df], axis=1).dropna()
-    if len(df) < 3:
-        return None
-    last, prev = df.iloc[-1], df.iloc[-2]
-    is_green = last['HA_close'] > last['HA_open']
-    is_red = last['HA_close'] < last['HA_open']
-    prev_is_green = prev['HA_close'] > prev['HA_open']
-    prev_is_red = prev['HA_close'] < prev['HA_open']
-    if is_green and prev_is_green and last['HA_open'] == last['HA_low']:
-        return 'call'
-    if is_red and prev_is_red and last['HA_open'] == last['HA_high']:
-        return 'put'
-    return None
-
-def strategy_vortex_cross(candles: List[Dict]) -> Optional[str]:
-    df = _create_and_validate_dataframe(candles, ['high', 'low', 'close'])
-    if df is None or len(df) < 15:
-        return None
-    vortex = ta.vortex(df['high'], df['low'], df['close'], length=14)
-    if vortex is None:
-        return None
-    df = pd.concat([df, vortex], axis=1).dropna()
-    if len(df) < 2:
-        return None
-    last, prev = df.iloc[-1], df.iloc[-2]
-    vp = _col_like(df, 'VTXP_14')
-    vm = _col_like(df, 'VTXM_14')
-    if vp is None or vm is None:
-        return None
-    if prev[vp] < prev[vm] and last[vp] > last[vm]:
-        return 'call'
-    if prev[vp] > prev[vm] and last[vp] < last[vm]:
-        return 'put'
-    return None
-
-def strategy_fractal_reversal(candles: List[Dict]) -> Optional[str]:
-    df = _create_and_validate_dataframe(candles, ['high', 'low'])
-    if df is None or len(df) < 5:
-        return None
-    window = df.iloc[-5:]
-    mid = window.iloc[2]
-    if mid['high'] == window['high'].max():
-        return 'put'
-    if mid['low'] == window['low'].min():
-        return 'call'
-    return None
-
-def strategy_bollinger_fractal_stoch(candles: List[Dict]) -> Optional[str]:
-    df = _create_and_validate_dataframe(candles, ['high', 'low', 'close'])
-    if df is None or len(df) < 21:
-        return None
-    bb = ta.bbands(df['close'], length=20, std=2)
-    st = ta.stoch(df['high'], df['low'], df['close'], k=14, d=3, smooth_k=3)
-    if bb is None or st is None:
-        return None
-    df = pd.concat([df, bb, st], axis=1).dropna()
-    if len(df) < 5:
-        return None
-    bbu = _col_like(df, 'BBU_20_2')
-    bbl = _col_like(df, 'BBL_20_2')
-    k = _col_like(df, 'STOCHk_14_3_3')
-    if bbu is None or bbl is None or k is None:
-        return None
-
-    last = df.iloc[-1]
-    # fractal dos últimos 5, pegando o do meio (-3 relativo ao fim)
-    w5 = df.iloc[-5:]
-    mid = w5.iloc[2]
-    is_sell_fractal = mid['high'] == w5['high'].max()
-    is_buy_fractal = mid['low'] == w5['low'].min()
-
-    is_bb_oversold = last['close'] < last[bbl]
-    is_stoch_oversold = last[k] < 20
-    if is_buy_fractal and is_bb_oversold and is_stoch_oversold:
-        return 'call'
-
-    is_bb_overbought = last['close'] > last[bbu]
-    is_stoch_overbought = last[k] > 80
-    if is_sell_fractal and is_bb_overbought and is_stoch_overbought:
-        return 'put'
+    # Análise para VENDA (PUT) em Resistência
+    if check_price_near_sr(signal_candle, {'resistance': zones.get('resistance', [])}) == 'put':
+        body_size = abs(signal_candle.close - signal_candle.open)
+        if body_size > 0:
+            upper_wick = signal_candle.max - max(signal_candle.open, signal_candle.close)
+            if upper_wick >= 1.5 * body_size:
+                return {'direction': 'put', 'confluences': ['SR_Zone_Resistance', 'Pinbar_Bearish']}
     return None
