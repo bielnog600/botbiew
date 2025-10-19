@@ -1,40 +1,17 @@
-# ----------------------------------------
-# FASE 1: Build - Usa a imagem completa para garantir as ferramentas de compilação
-# ----------------------------------------
-FROM python:3.10 AS builder
+# 1. Usa uma imagem base oficial do Python 3.10.
+FROM python:3.10-slim
 
-# Define o diretório de trabalho.
+# 2. Define o diretório de trabalho dentro do container.
 WORKDIR /app
 
-# Instala apenas o Tini, pois as ferramentas de build já estão incluídas.
-RUN apt-get update -y && apt-get install -y --no-install-recommends tini && rm -rf /var/lib/apt/lists/*
-
-# Copia o arquivo de dependências.
+# 3. Copia o arquivo de dependências primeiro para otimizar o cache.
 COPY requirements.txt .
 
-# Instala as dependências Python.
-# Esta etapa agora funcionará, pois o ambiente tem todas as ferramentas necessárias.
+# 4. Instala as dependências.
 RUN pip install --no-cache-dir -r requirements.txt
 
-# ----------------------------------------
-# FASE 2: Final - Usa a imagem 'slim' para um resultado leve
-# ----------------------------------------
-FROM python:3.10-slim-bookworm
-
-WORKDIR /app
-
-# Copia as bibliotecas Python instaladas da fase de build.
-COPY --from=builder /usr/local/lib/python3.10/site-packages /usr/local/lib/python3.10/site-packages
-
-# Copia o Tini da fase de build.
-COPY --from=builder /usr/bin/tini /usr/bin/tini
-
-# Copia todo o código do projeto.
+# 5. Copia todo o código do projeto para o diretório de trabalho.
 COPY . .
 
-# Define o entrypoint para usar o Tini.
-ENTRYPOINT ["/usr/bin/tini", "--"]
-
-# Comando para executar a aplicação.
+# 6. Comando para executar o bot quando o container iniciar.
 CMD ["python", "main.py"]
-
