@@ -15,3 +15,4 @@ COPY . .
 
 # 6. Comando para executar o bot quando o container iniciar.
 CMD ["python", "main.py"]
+
