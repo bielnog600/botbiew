@@ -1,7 +1,6 @@
 git add Dockerfile requirements.txt
 git commit -m "Fix Dockerfile with multi-stage build"
 git push
-5.  Vá ao **Coolify** e clique no botão **Deploy** (ou Redeploy).
 
 # ----------------------------------------
 # FASE 1: Build - Usa a imagem completa para garantir as ferramentas de compilação
