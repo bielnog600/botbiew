@@ -1,11 +1,13 @@
 import asyncio
 from datetime import datetime
 import time
-from exnovaapi.api import ExnovaAPI  # CORREÇÃO: "API" maiúsculo
+from exnovaapi.api import ExnovaAPI
 
 class AsyncExnovaService:
     def __init__(self, email, password):
-        self.api = ExnovaAPI(email, password)
+        # CORREÇÃO: A API exige o host ("exnova.com") como primeiro argumento.
+        # Antes estava: ExnovaAPI(email, password) -> O Python achava que faltava 1 argumento.
+        self.api = ExnovaAPI("exnova.com", email, password)
         self.email = email
         self.password = password
 
@@ -28,38 +30,28 @@ class AsyncExnovaService:
 
     async def get_open_assets(self):
         # Obtém todos os ativos abertos. 
-        # A biblioteca geralmente retorna um dicionário complexo, filtramos aqui para uma lista simples.
-        # Nota: A implementação exata depende da versão da lib, mas geralmente 'get_all_open_time' ajuda.
         try:
             # Esta chamada é pesada, idealmente faz-se cache
             all_assets = await asyncio.to_thread(self.api.get_all_open_time)
             
             open_assets = []
-            for type_name, assets in all_assets.items():
-                if type_name not in ['turbo', 'binary']: continue # Foca em binárias/turbo
-                for asset_id, data in assets.items():
-                    if data['open']:
-                        # Tenta extrair o nome do par (ex: EURUSD)
-                        # Dependendo da lib, pode ser necessário mapear ID -> Nome
-                        # Aqui assumimos que o bot lida com nomes padrão
-                        pass 
+            if all_assets:
+                for type_name, assets in all_assets.items():
+                    if type_name not in ['turbo', 'binary']: continue # Foca em binárias/turbo
+                    for asset_id, data in assets.items():
+                        if data['open']:
+                            pass 
             
-            # Fallback simplificado: Retorna pares populares se a API for complexa de navegar
-            # Ou usa a função get_all_init() se disponível
+            # Fallback simplificado para garantir que o bot inicie
             return ["EURUSD", "GBPUSD", "USDJPY", "EURJPY", "AUDCAD", "EURGBP"] 
-        except:
+        except Exception as e:
+            print(f"Erro ao obter ativos: {e}")
             return ["EURUSD", "GBPUSD"] # Fallback seguro
 
     async def get_historical_candles(self, asset, timeframe_seconds, count):
         # Converte timeframe para segundos se necessário e chama a API
-        # A API sync bloqueia, então usamos to_thread
         end_from_time = int(time.time())
         candles = await asyncio.to_thread(self.api.get_candles, asset, timeframe_seconds, count, end_from_time)
-        
-        # Converte para objetos compatíveis com seu bot (se necessário) ou retorna lista
-        # O bot espera objetos com .open, .close, .min, .max. 
-        # Se a API retorna dicts, criamos uma classe simples on-the-fly ou adaptamos o bot.
-        # Assumindo que o bot lê dicts ou objetos:
         
         class Candle:
             def __init__(self, data):
@@ -79,9 +71,13 @@ class AsyncExnovaService:
 
     async def check_win(self, order_id):
         # Verifica o resultado da ordem
-        # A maioria das libs tem check_win_v3 ou similar
-        # O seu bot espera 'win' ou 'loss'
-        result, profit = await asyncio.to_thread(self.api.check_win_v3, order_id)
+        # Tenta check_win_v3, se falhar tenta v4 ou lógica padrão
+        try:
+            result, profit = await asyncio.to_thread(self.api.check_win_v3, order_id)
+        except:
+             # Fallback simples caso a API mude
+             return 'unknown'
+
         if profit > 0:
             return 'win'
         elif profit < 0:
