@@ -1,40 +1,32 @@
-# ----------------------------------------
-# FASE 1: Build - Usa a imagem completa para garantir as ferramentas de compilação
-# ----------------------------------------
-FROM python:3.10 AS builder
-
-# Define o diretório de trabalho.
-WORKDIR /app
-
-# Instala apenas o Tini, pois as ferramentas de build já estão incluídas.
-RUN apt-get update -y && apt-get install -y --no-install-recommends tini && rm -rf /var/lib/apt/lists/*
-
-# Copia o arquivo de dependências.
-COPY requirements.txt .
-
-# Instala as dependências Python.
-# Esta etapa agora funcionará, pois o ambiente tem todas as ferramentas necessárias.
-RUN pip install --no-cache-dir -r requirements.txt
-
-# ----------------------------------------
-# FASE 2: Final - Usa a imagem 'slim' para um resultado leve
-# ----------------------------------------
+# Usa a mesma imagem base leve que você já estava usando
 FROM python:3.10-slim-bookworm
 
+# Define o diretório de trabalho
 WORKDIR /app
 
-# Copia as bibliotecas Python instaladas da fase de build.
-COPY --from=builder /usr/local/lib/python3.10/site-packages /usr/local/lib/python3.10/site-packages
+# 1. Instala dependências do sistema operacional
+# git: necessário caso alguma lib precise ser baixada do GitHub
+# build-essential: necessário para compilar bibliotecas C/C++ (comum em data science)
+# tini: gerenciador de processos para containers (evita zumbis)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    build-essential \
+    curl \
+    tini \
+    && rm -rf /var/lib/apt/lists/*
 
-# Copia o Tini da fase de build.
-COPY --from=builder /usr/bin/tini /usr/bin/tini
+# 2. Atualiza o pip para a versão mais recente (ajuda a resolver problemas de 'no matching distribution')
+RUN pip install --upgrade pip
 
-# Copia todo o código do projeto.
+# 3. Copia e instala as dependências
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# 4. Copia o restante do código
 COPY . .
 
-# Define o entrypoint para usar o Tini.
+# 5. Configura o ponto de entrada usando Tini
 ENTRYPOINT ["/usr/bin/tini", "--"]
 
-# Comando para executar a aplicação.
+# 6. Comando para iniciar o bot
 CMD ["python", "main.py"]
-
