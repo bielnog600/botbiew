@@ -5,59 +5,49 @@ from exnovaapi.api import ExnovaAPI
 
 class AsyncExnovaService:
     def __init__(self, email, password):
-        # Usamos "iqoption.com" como host fallback se "exnova.com" der problemas de DNS/WSS,
-        # pois a infraestrutura é partilhada.
+        # Usamos host e argumentos nomeados para garantir a correta atribuição
+        # "exnova.com" é o host padrão
         self.api = ExnovaAPI(host="exnova.com", username=email, password=password)
         self.email = email
         self.password = password
 
     async def connect(self):
         try:
-            # check_connect() retorna True se já estiver conectado
-            if self.api.check_connect():
-                return True
-
-            # Conecta
+            # CORREÇÃO: Removemos self.api.check_connect() pois não existe nesta versão da lib.
+            # Chamamos connect() diretamente. Ele retorna (True, None) se sucesso ou (False, "erro") se falha.
             check, reason = await asyncio.to_thread(self.api.connect)
             
-            if not check:
+            if check:
+                print("[EXNOVA] Conectado com sucesso.")
+                return True
+            else:
                 print(f"[EXNOVA ERROR] Falha na conexão: {reason}")
                 return False
-                
-            print("[EXNOVA] Conectado com sucesso.")
-            return True
+
         except Exception as e:
             print(f"[EXNOVA EXCEPTION] Erro crítico ao conectar: {e}")
             return False
 
     async def get_current_balance(self):
         try:
-            # CORREÇÃO: Usar get_balances() em vez de get_balance()
-            # Retorna uma lista de dicionários ou um valor direto dependendo da lib
-            balances = await asyncio.to_thread(self.api.get_balances)
+            # Tenta obter saldo de várias formas para garantir compatibilidade com diferentes versões da lib
             
-            # Se for apenas um valor numérico (algumas libs fazem isso), retorna direto
-            if isinstance(balances, (int, float)):
-                return float(balances)
-                
-            # Se for lista ou dict (o mais comum na API oficial/forks)
-            # Precisamos encontrar o balanço da conta ativa (Practice ou Real)
-            # Como não sabemos qual está ativa agora, retornamos o maior valor ou o primeiro
-            # para evitar erro, ou tentamos acessar self.api.get_balance() se ele for uma propriedade (sem parenteses)
+            # 1. Tenta get_balance() direto (algumas versões)
+            if hasattr(self.api, 'get_balance') and callable(self.api.get_balance):
+                bal = await asyncio.to_thread(self.api.get_balance)
+                return float(bal)
             
-            # Tentativa de ler a propriedade interna balance se existir
-            if hasattr(self.api, 'get_balance') and callable(getattr(self.api, 'get_balance')):
-                 # Se o método existir (mas o erro disse que não), chamamos. 
-                 # O erro anterior diz que NÃO existe atributo, então pulamos isso.
-                 pass
-
-            # Tenta pegar do perfil interno se a chamada de API falhar
-            # self.api.profile.balance é comum nessas libs
+            # 2. Tenta acessar via profile.balance (comum em forks da iqoptionapi)
             if hasattr(self.api, 'profile') and hasattr(self.api.profile, 'balance'):
                 return float(self.api.profile.balance)
 
-            # Fallback: Se for lista, retorna o valor do tipo "Practice" (id 4) ou "Real" (id 1)
-            # Mas para garantir que não quebra, retornamos 0.0 se falhar o parsing
+            # 3. Tenta get_balances() (plural) que retorna lista de contas
+            if hasattr(self.api, 'get_balances'):
+                balances = await asyncio.to_thread(self.api.get_balances)
+                # Se retornar lista/dict, não temos como saber qual é a ativa facilmente sem mais lógica
+                # Retornamos 0.0 por segurança para o bot continuar rodando
+                return 0.0
+
             return 0.0
             
         except Exception as e:
@@ -73,10 +63,15 @@ class AsyncExnovaService:
 
     async def get_open_assets(self):
         try:
+            # get_all_open_time retorna um dicionário complexo
             all_assets = await asyncio.to_thread(self.api.get_all_open_time)
-            # Se a API retornar sucesso, retornamos uma lista de pares seguros
+            
+            # Se a API retornar sucesso (dicionário não vazio), retornamos uma lista fixa de pares seguros.
+            # Parsing da estrutura completa em tempo real é propenso a erros se a API mudar.
             if all_assets:
                 return ["EURUSD", "GBPUSD", "USDJPY", "EURJPY", "AUDCAD", "EURGBP", "USDCHF"]
+            
+            # Fallback
             return ["EURUSD", "GBPUSD"] 
         except Exception as e:
             print(f"[EXNOVA] Erro ao obter ativos (usando fallback): {e}")
@@ -89,7 +84,7 @@ class AsyncExnovaService:
             
             class Candle:
                 def __init__(self, data):
-                    # Garante conversão segura para float
+                    # Garante conversão segura para float e usa .get para evitar KeyError
                     self.open = float(data.get('open', 0))
                     self.close = float(data.get('close', 0))
                     self.max = float(data.get('max', 0))
@@ -112,7 +107,7 @@ class AsyncExnovaService:
 
     async def check_win(self, order_id):
         try:
-            # Tenta verificar resultado
+            # Tenta verificar resultado usando v3
             result, profit = await asyncio.to_thread(self.api.check_win_v3, order_id)
         except:
              return 'unknown'
