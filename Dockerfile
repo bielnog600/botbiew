@@ -1,11 +1,8 @@
-# Usa a imagem base leve do Python
 FROM python:3.10-slim-bookworm
 
-# Define o diretório de trabalho
 WORKDIR /app
 
-# 1. Instala dependências do sistema
-# Mantemos git/build-essential, curl e tini
+# Instala dependências do sistema (git, curl, etc)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     build-essential \
@@ -13,21 +10,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tini \
     && rm -rf /var/lib/apt/lists/*
 
-# 2. Atualiza o pip para evitar erros antigos
+# Atualiza o pip
 RUN pip install --upgrade pip
 
-# 3. Copia o arquivo de dependências
+# Copia e instala as dependências
 COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-# 4. Instala as dependências
-# A flag '--pre' é OBRIGATÓRIA para o pandas-ta funcionar via PyPI
-RUN pip install --no-cache-dir --pre -r requirements.txt
-
-# 5. Copia o código do bot
+# Copia o código
 COPY . .
 
-# 6. Configura o inicializador de processos
+# Comando de entrada
 ENTRYPOINT ["/usr/bin/tini", "--"]
-
-# 7. Comando para iniciar o bot
 CMD ["python", "main.py"]
