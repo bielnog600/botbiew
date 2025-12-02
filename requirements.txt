@@ -1,5 +1,5 @@
 pandas>=2.1.0
-numpy<2.0.0
+numpy>=2.1.0
 https://www.pandas-ta.dev/assets/zip/pandas_ta-0.4.25b0.tar.gz
 supabase
 python-dotenv
