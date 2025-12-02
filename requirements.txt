@@ -1,22 +1,11 @@
-# Dependências da aplicação principal
-
 pydantic
 pydantic-settings
 python-dotenv
 supabase==2.5.0
-
-# Dependências da biblioteca local exnovaapi
-
 requests
 websocket-client
-
-# Dependências de teste
-
 pytest
 pytest-asyncio
-
-# Dependências de análise com versões fixas para Python 3.10
-
 numpy==1.26.4
 pandas==1.5.3
-pandas-ta==0.3.14b0
+pandas-ta
