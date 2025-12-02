@@ -1,6 +1,6 @@
 pandas==1.5.3
 numpy
-pandas-ta
+pandas-ta==0.3.14b0
 supabase
 python-dotenv
 websocket-client
