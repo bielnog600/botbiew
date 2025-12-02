@@ -1,24 +1,27 @@
 import asyncio
-from datetime import datetime
 import time
-from exnovaapi.api import ExnovaAPI
+from datetime import datetime
+# Importamos a classe Wrapper 'Exnova' da stable_api
+# Ela já gere o host correto e a reconexão automática
+from exnovaapi.stable_api import Exnova
 
 class AsyncExnovaService:
     def __init__(self, email, password):
-        # Usamos host e argumentos nomeados para garantir a correta atribuição
-        # "exnova.com" é o host padrão
-        self.api = ExnovaAPI(host="exnova.com", username=email, password=password)
+        # Inicializa a classe Exnova (wrapper estável)
+        # Ela já define internamente o host "ws.trade.exnova.com" ou "iqoption.com"
+        # dependendo da versão, garantindo a conexão correta.
+        self.api = Exnova(email=email, password=password)
         self.email = email
         self.password = password
 
     async def connect(self):
         try:
-            # CORREÇÃO: Removemos self.api.check_connect() pois não existe nesta versão da lib.
-            # Chamamos connect() diretamente. Ele retorna (True, None) se sucesso ou (False, "erro") se falha.
+            # O método connect da stable_api retorna uma tupla (Sucesso, Razão/None)
+            # Usamos to_thread para rodar a operação síncrona sem bloquear o bot
             check, reason = await asyncio.to_thread(self.api.connect)
             
             if check:
-                print("[EXNOVA] Conectado com sucesso.")
+                print("[EXNOVA] Conectado com sucesso (Stable API).")
                 return True
             else:
                 print(f"[EXNOVA ERROR] Falha na conexão: {reason}")
@@ -30,61 +33,52 @@ class AsyncExnovaService:
 
     async def get_current_balance(self):
         try:
-            # Tenta obter saldo de várias formas para garantir compatibilidade com diferentes versões da lib
-            
-            # 1. Tenta get_balance() direto (algumas versões)
-            if hasattr(self.api, 'get_balance') and callable(self.api.get_balance):
-                bal = await asyncio.to_thread(self.api.get_balance)
-                return float(bal)
-            
-            # 2. Tenta acessar via profile.balance (comum em forks da iqoptionapi)
-            if hasattr(self.api, 'profile') and hasattr(self.api.profile, 'balance'):
-                return float(self.api.profile.balance)
-
-            # 3. Tenta get_balances() (plural) que retorna lista de contas
-            if hasattr(self.api, 'get_balances'):
-                balances = await asyncio.to_thread(self.api.get_balances)
-                # Se retornar lista/dict, não temos como saber qual é a ativa facilmente sem mais lógica
-                # Retornamos 0.0 por segurança para o bot continuar rodando
+            # A stable_api tem um método get_balance() que trata da lógica de IDs
+            bal = await asyncio.to_thread(self.api.get_balance)
+            # Garante que retorna um float, mesmo que seja None ou string
+            if bal is None:
                 return 0.0
-
-            return 0.0
-            
+            return float(bal)
         except Exception as e:
-            print(f"[EXNOVA] Erro ao ler saldo (retornando 0.0): {e}")
+            print(f"[EXNOVA] Erro ao ler saldo: {e}")
             return 0.0
 
     async def change_balance(self, balance_type="PRACTICE"):
         try:
-            # Tenta mudar o balanço. Se falhar, segue o jogo.
+            # A stable_api aceita "PRACTICE", "REAL", "TOURNAMENT"
             await asyncio.to_thread(self.api.change_balance, balance_type)
         except Exception as e:
             print(f"[EXNOVA] Erro ao trocar tipo de saldo: {e}")
 
     async def get_open_assets(self):
         try:
-            # get_all_open_time retorna um dicionário complexo
-            all_assets = await asyncio.to_thread(self.api.get_all_open_time)
+            # A stable_api carrega ativos na inicialização dentro de self.api.active_opcodes
+            # Se a lista estiver vazia, tentamos forçar uma atualização chamando update_actives()
+            # (Nota: update_actives é síncrono na stable_api)
+            if not self.api.active_opcodes:
+                await asyncio.to_thread(self.api.update_actives)
+
+            if self.api.active_opcodes:
+                # Retorna os nomes dos ativos (chaves do dicionário de ativos)
+                return list(self.api.active_opcodes.keys())
             
-            # Se a API retornar sucesso (dicionário não vazio), retornamos uma lista fixa de pares seguros.
-            # Parsing da estrutura completa em tempo real é propenso a erros se a API mudar.
-            if all_assets:
-                return ["EURUSD", "GBPUSD", "USDJPY", "EURJPY", "AUDCAD", "EURGBP", "USDCHF"]
-            
-            # Fallback
-            return ["EURUSD", "GBPUSD"] 
+            # Fallback seguro caso a lista dinâmica falhe
+            return ["EURUSD", "GBPUSD", "USDJPY", "EURJPY", "AUDCAD", "EURGBP"]
         except Exception as e:
-            print(f"[EXNOVA] Erro ao obter ativos (usando fallback): {e}")
+            print(f"[EXNOVA] Erro ao obter ativos: {e}")
             return ["EURUSD", "GBPUSD"]
 
     async def get_historical_candles(self, asset, timeframe_seconds, count):
+        # A stable_api.get_candles espera (ativo, intervalo, quantidade, timestamp_fim)
         end_from_time = int(time.time())
         try:
+            # Chama o método da stable_api
             candles = await asyncio.to_thread(self.api.get_candles, asset, timeframe_seconds, count, end_from_time)
             
+            # Classe auxiliar para padronizar o retorno para o bot
             class Candle:
                 def __init__(self, data):
-                    # Garante conversão segura para float e usa .get para evitar KeyError
+                    # A stable_api retorna dicionários. Convertemos com segurança.
                     self.open = float(data.get('open', 0))
                     self.close = float(data.get('close', 0))
                     self.max = float(data.get('max', 0))
@@ -97,23 +91,44 @@ class AsyncExnovaService:
 
     async def execute_trade(self, amount, asset, direction, duration_minutes):
         try:
-            check, order_id = await asyncio.to_thread(self.api.buy, amount, asset, direction, duration_minutes)
-            if check:
+            # Mapeia a direção do bot ("call"/"put") para o formato esperado ("call"/"put" ou "C"/"P")
+            # A função buy da stable_api converte internamente se necessário
+            action = direction.lower()
+            
+            # A função buy da stable_api tem a assinatura: buy(price, ACTIVES, ACTION, expirations)
+            # E retorna: (resultado_api, order_id)
+            result, order_id = await asyncio.to_thread(
+                self.api.buy, 
+                float(amount), 
+                asset, 
+                action, 
+                int(duration_minutes)
+            )
+            
+            # Verifica se retornou um ID válido (int)
+            if order_id and isinstance(order_id, int):
                 return order_id
+            
+            print(f"[EXNOVA] Erro na API ao executar trade: {order_id} (msg de erro)")
             return None
+            
         except Exception as e:
-            print(f"[EXNOVA] Erro ao executar ordem: {e}")
+            print(f"[EXNOVA] Exceção ao executar ordem: {e}")
             return None
 
     async def check_win(self, order_id):
         try:
-            # Tenta verificar resultado usando v3
-            result, profit = await asyncio.to_thread(self.api.check_win_v3, order_id)
-        except:
+            # A stable_api possui check_win_v3 que retorna (status, lucro)
+            # O status pode ser 'win', 'loose' ou 'equal'
+            status, profit = await asyncio.to_thread(self.api.check_win_v3, order_id)
+            
+            if status == 'equal':
+                return 'draw' # Bot pode tratar como loss ou draw dependendo da lógica
+            elif status == 'loose':
+                return 'loss'
+            elif status == 'win':
+                return 'win'
+            return 'unknown'
+        except Exception as e:
+             print(f"[EXNOVA] Erro ao checar resultado: {e}")
              return 'unknown'
-
-        if profit > 0:
-            return 'win'
-        elif profit < 0:
-            return 'loss'
-        return 'draw'
