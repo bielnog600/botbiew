@@ -5,23 +5,19 @@ from exnovaapi.stable_api import Exnova
 
 class AsyncExnovaService:
     def __init__(self, email, password):
-        # Inicializa a API (Wrapper Estável)
         self.api = Exnova(email=email, password=password)
         self.email = email
         self.password = password
 
     async def connect(self):
         try:
-            # Conecta de forma assíncrona para não bloquear o bot
             check, reason = await asyncio.to_thread(self.api.connect)
-            
             if check:
                 print("[EXNOVA] Conectado com sucesso (Stable API).")
                 return True
             else:
                 print(f"[EXNOVA ERROR] Falha na conexão: {reason}")
                 return False
-
         except Exception as e:
             print(f"[EXNOVA EXCEPTION] Erro crítico ao conectar: {e}")
             return False
@@ -30,8 +26,7 @@ class AsyncExnovaService:
         try:
             bal = await asyncio.to_thread(self.api.get_balance)
             return float(bal) if bal is not None else 0.0
-        except Exception as e:
-            print(f"[EXNOVA] Erro ao ler saldo: {e}")
+        except Exception:
             return 0.0
 
     async def change_balance(self, balance_type="PRACTICE"):
@@ -49,17 +44,16 @@ class AsyncExnovaService:
         try:
             candles = await asyncio.to_thread(self.api.get_candles, asset, timeframe_seconds, count, end_from_time)
             
-            # --- CORREÇÃO CRÍTICA ---
-            # A classe Candle HERDA de dict. 
-            # Isso permite que bibliotecas como Pandas convertam a lista de velas em DataFrame.
+            # --- CLASSE HÍBRIDA (Dict + Objeto) ---
+            # Resolve o erro "Candle is not iterable"
             class Candle(dict):
                 def __init__(self, data):
-                    # Normaliza os dados
+                    # Normaliza dados (float e chaves padrão)
                     safe_data = {
                         'open': float(data.get('open', 0)),
                         'close': float(data.get('close', 0)),
-                        'high': float(data.get('max', 0)), # Renomeia max -> high
-                        'low': float(data.get('min', 0)),  # Renomeia min -> low
+                        'high': float(data.get('max', 0)), # Vital para Pandas (high)
+                        'low': float(data.get('min', 0)),  # Vital para Pandas (low)
                         'max': float(data.get('max', 0)),
                         'min': float(data.get('min', 0)),
                         'volume': float(data.get('volume', 0)),
@@ -68,18 +62,13 @@ class AsyncExnovaService:
                         'to': data.get('to', 0),
                         'id': data.get('id', 0)
                     }
-                    # 1. Inicializa como dicionário (para o Pandas ler)
+                    
+                    # 1. Inicializa como Dicionário (para análise técnica/Pandas)
                     super().__init__(safe_data)
                     
-                    # 2. Define atributos (para o bot ler: candle.close)
-                    self.open = safe_data['open']
-                    self.close = safe_data['close']
-                    self.high = safe_data['high']
-                    self.low = safe_data['low']
-                    self.max = safe_data['max']
-                    self.min = safe_data['min']
-                    self.volume = safe_data['volume']
-            
+                    # 2. Inicializa como Objeto (para o Bot acessar via ponto)
+                    self.__dict__.update(safe_data)
+
             return [Candle(c) for c in candles] if candles else []
         except Exception as e:
             print(f"[EXNOVA] Erro ao obter velas para {asset}: {e}")
@@ -88,7 +77,6 @@ class AsyncExnovaService:
     async def execute_trade(self, amount, asset, direction, duration_minutes):
         try:
             action = direction.lower()
-            
             result, order_id = await asyncio.to_thread(
                 self.api.buy, 
                 float(amount), 
@@ -99,12 +87,8 @@ class AsyncExnovaService:
             
             if order_id and isinstance(order_id, int):
                 return order_id
-            
-            print(f"[EXNOVA] Erro ao executar trade: {order_id}")
             return None
-            
-        except Exception as e:
-            print(f"[EXNOVA] Exceção ao executar ordem: {e}")
+        except Exception:
             return None
 
     async def check_win(self, order_id):
