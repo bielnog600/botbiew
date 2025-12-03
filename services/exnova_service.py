@@ -36,7 +36,6 @@ class AsyncExnovaService:
             pass
 
     async def get_open_assets(self):
-        # Retorna lista estática para evitar erro de atributo inexistente na lib
         return ["EURUSD", "GBPUSD", "USDJPY", "EURJPY", "AUDCAD", "EURGBP", "USDCHF"]
 
     async def get_historical_candles(self, asset, timeframe_seconds, count):
@@ -44,16 +43,15 @@ class AsyncExnovaService:
         try:
             candles = await asyncio.to_thread(self.api.get_candles, asset, timeframe_seconds, count, end_from_time)
             
-            # --- CLASSE HÍBRIDA (Dict + Objeto) ---
-            # Resolve o erro "Candle is not iterable"
+            # --- CORREÇÃO DEFINITIVA PARA PANDAS E BOT ---
             class Candle(dict):
                 def __init__(self, data):
-                    # Normaliza dados (float e chaves padrão)
-                    safe_data = {
+                    # Normaliza e define os dados diretamente no dicionário
+                    super().__init__({
                         'open': float(data.get('open', 0)),
                         'close': float(data.get('close', 0)),
-                        'high': float(data.get('max', 0)), # Vital para Pandas (high)
-                        'low': float(data.get('min', 0)),  # Vital para Pandas (low)
+                        'high': float(data.get('max', 0)),
+                        'low': float(data.get('min', 0)),
                         'max': float(data.get('max', 0)),
                         'min': float(data.get('min', 0)),
                         'volume': float(data.get('volume', 0)),
@@ -61,13 +59,10 @@ class AsyncExnovaService:
                         'from': data.get('from', 0),
                         'to': data.get('to', 0),
                         'id': data.get('id', 0)
-                    }
-                    
-                    # 1. Inicializa como Dicionário (para análise técnica/Pandas)
-                    super().__init__(safe_data)
-                    
-                    # 2. Inicializa como Objeto (para o Bot acessar via ponto)
-                    self.__dict__.update(safe_data)
+                    })
+                    # HACK MÁGICO: Redireciona o dicionário de atributos para o próprio objeto (que é um dict)
+                    # Isso permite candle.open (Bot) E candle['open'] (Pandas) simultaneamente sem conflitos.
+                    self.__dict__ = self
 
             return [Candle(c) for c in candles] if candles else []
         except Exception as e:
