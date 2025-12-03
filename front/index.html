@@ -10,308 +10,378 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="MarombiewBot">
-    <link rel="apple-touch-icon" href="/icons/apple-touch-icon-180x180.png">
-
+    
+    <!-- Scripts e Estilos -->
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+    
+    <!-- React & Supabase -->
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
     <style>
         :root {
             --bg-dark: #111827; --bg-medium: #1f2937; --border-color: #374151;
             --text-primary: #f9fafb; --text-secondary: #9ca3af; --accent-primary: #f59e0b;
-            --accent-primary-hover: #fbbF24; --accent-red: #ef4444; --accent-loss: #f87171;
-            --accent-win: #22c55e; --accent-info: #3b82f6;
+            --accent-primary-hover: #fbbf24; --accent-red: #ef4444; 
+            --accent-win: #22c55e; --accent-loss: #f87171; --accent-info: #3b82f6;
         }
-        html { scroll-behavior: smooth; }
         body { background-color: var(--bg-dark); color: var(--text-primary); font-family: 'Poppins', sans-serif; overflow: hidden; }
-        .glass-card { background: rgba(31, 41, 55, 0.8); backdrop-filter: blur(12px); border: 1px solid var(--border-color); }
+        
+        /* Glassmorphism */
+        .glass-card { background: rgba(31, 41, 55, 0.7); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid var(--border-color); }
+        
+        /* Form Elements */
         .form-input, .form-select { background-color: var(--bg-dark); border: 1px solid var(--border-color); color: var(--text-primary); transition: all 0.2s; }
-        .form-input:focus, .form-select:focus { outline: none; border-color: var(--accent-primary); box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.3); }
-        .btn { transition: all 0.2s; border: none; font-weight: 600; }
+        .form-input:focus, .form-select:focus { outline: none; border-color: var(--accent-primary); box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.2); }
+        
+        /* Utility */
+        .btn { transition: all 0.2s; border: none; font-weight: 600; cursor: pointer; }
         .btn:active { transform: scale(0.98); }
         .nav-link-active { background-color: var(--accent-primary); color: var(--bg-dark); }
+        
+        /* Toggles */
         .toggle-bg:after { content: ''; position: absolute; top: 2px; left: 2px; background: white; border-radius: 9999px; height: 1.25rem; width: 1.25rem; transition: all 0.2s; }
         input:checked + .toggle-bg:after { transform: translateX(100%); }
         input:checked + .toggle-bg { background-color: var(--accent-primary); }
-        .radio-label { transition: all 0.2s; }
-        input[type="radio"]:checked + .radio-label { background-color: var(--accent-primary); color: var(--bg-dark); border-color: var(--accent-primary); }
-        .spinner { border-color: rgba(245, 158, 11, 0.2); border-top-color: var(--accent-primary); animation: spin 1s linear infinite; }
+        
+        /* Radios */
+        .radio-label { transition: all 0.2s; user-select: none; }
+        input[type="radio"]:checked + .radio-label { background-color: var(--accent-primary); color: var(--bg-dark); border-color: var(--accent-primary); font-weight: 600; }
+        
+        /* Loading */
+        .spinner { border: 3px solid rgba(245, 158, 11, 0.2); border-top-color: var(--accent-primary); border-radius: 50%; width: 1.5rem; height: 1.5rem; animation: spin 1s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
-        #static-splash { position: fixed; inset: 0; background-color: var(--bg-dark); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 9999; transition: opacity 0.3s ease-out; }
+        
+        /* Splash Screen */
+        #static-splash { position: fixed; inset: 0; background-color: var(--bg-dark); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 9999; transition: opacity 0.4s ease-out; }
+
+        /* Toast Notifications */
+        .toast-container { position: fixed; top: 1rem; right: 1rem; z-index: 50; display: flex; flex-direction: column; gap: 0.5rem; }
+        .toast { animation: slideIn 0.3s ease-out forwards; }
+        @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
     </style>
 </head>
 <body>
     <div id="static-splash">
         <i class="fas fa-robot" style="color: #f59e0b; font-size: 60px; margin-bottom: 1rem;"></i>
         <h1 style="font-size: 1.875rem; font-weight: 700; color: white; margin-bottom: 0.5rem;">MAROMBIEW BOT</h1>
-        <div class="spinner" style="width: 2rem; height: 2rem; border-width: 4px; border-radius: 9999px;"></div>
+        <div class="spinner"></div>
     </div>
 
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect, useCallback, Fragment, useRef } = React;
+        const { useState, useEffect, useCallback, useMemo, useRef, createContext, useContext } = React;
         const { createClient } = supabase;
 
+        // Configuração Supabase
         const SUPABASE_URL = 'https://ioduahwknfsktujthfyc.supabase.co';
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlvZHVhaHdrbmZza3R1anRoZnljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEzMDc0NDcsImV4cCI6MjA2Njg4MzQ0N30.96f8wZO6SvABKFMWjIiw1pSugAB4Isldj7yxLcLJRSE';
         const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+        // --- Contexto de Toast (Notificações) ---
+        const ToastContext = createContext();
+        const useToast = () => useContext(ToastContext);
+
+        const ToastProvider = ({ children }) => {
+            const [toasts, setToasts] = useState([]);
+            const addToast = (msg, type = 'info') => {
+                const id = Date.now();
+                setToasts(prev => [...prev, { id, msg, type }]);
+                setTimeout(() => removeToast(id), 3000);
+            };
+            const removeToast = (id) => setToasts(prev => prev.filter(t => t.id !== id));
+
+            return (
+                <ToastContext.Provider value={{ addToast }}>
+                    {children}
+                    <div className="toast-container">
+                        {toasts.map(t => (
+                            <div key={t.id} className={`toast px-4 py-3 rounded-lg shadow-lg text-sm font-medium flex items-center gap-2 ${
+                                t.type === 'error' ? 'bg-red-600 text-white' : 
+                                t.type === 'success' ? 'bg-green-600 text-white' : 'bg-gray-800 text-white border border-gray-700'
+                            }`}>
+                                <i className={`fas ${t.type === 'error' ? 'fa-exclamation-circle' : t.type === 'success' ? 'fa-check-circle' : 'fa-info-circle'}`}></i>
+                                {t.msg}
+                            </div>
+                        ))}
+                    </div>
+                </ToastContext.Provider>
+            );
+        };
+
+        // --- Componentes Utilitários ---
+        function CountdownTimer() {
+            const [countdown, setCountdown] = useState(60 - new Date().getSeconds());
+            useEffect(() => {
+                const timer = setInterval(() => setCountdown(60 - new Date().getSeconds()), 1000);
+                return () => clearInterval(timer);
+            }, []);
+            return (
+                <div className="text-center">
+                    <p className="text-[10px] uppercase tracking-wider text-gray-400">Próxima Vela</p>
+                    <p className="text-2xl font-bold text-amber-400 font-mono">{String(countdown).padStart(2, '0')}s</p>
+                </div>
+            );
+        }
+
+        const NavLink = ({ viewName, currentView, setView, icon, text, isMobile = false }) => {
+            const isActive = currentView === viewName;
+            return (
+                <button 
+                    onClick={() => setView(viewName)} 
+                    className={`flex items-center transition-all duration-200 ${
+                        isMobile 
+                        ? `flex-1 flex-col py-3 text-[10px] ${isActive ? 'text-amber-400' : 'text-gray-500 hover:text-gray-300'}` 
+                        : `w-full space-x-3 px-4 py-3 rounded-lg text-sm font-medium ${isActive ? 'nav-link-active shadow-lg shadow-amber-500/20' : 'text-gray-400 hover:bg-gray-800 hover:text-white'}`
+                    }`}
+                >
+                    <i className={`fa-solid ${icon} text-lg ${isMobile ? 'mb-1 text-xl' : 'w-6 text-center'}`}></i>
+                    <span className={isMobile ? '' : ''}>{text}</span>
+                </button>
+            );
+        };
+
+        // --- Páginas ---
+
         function LoginPage({ onLogin }) {
             const [email, setEmail] = useState('');
             const [password, setPassword] = useState('');
-            const [error, setError] = useState('');
             const [loading, setLoading] = useState(false);
+            const { addToast } = useToast();
 
             const handleLogin = async (e) => {
                 e.preventDefault();
                 setLoading(true);
-                setError('');
                 const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
-                if (error) setError(error.message);
-                else if (data.user) onLogin(data.user);
+                if (error) addToast(error.message, 'error');
+                else if (data.user) {
+                    addToast('Bem-vindo de volta!', 'success');
+                    onLogin(data.user);
+                }
                 setLoading(false);
             };
 
             return (
-                <div className="min-h-screen flex items-center justify-center p-4">
-                    <div className="w-full max-w-md p-8 space-y-6 glass-card rounded-2xl shadow-lg">
-                        <div className="text-center">
-                            <i className="fas fa-robot text-4xl text-amber-400 mb-2"></i>
-                            <h2 className="text-3xl font-bold text-white">Admin Login</h2>
-                            <p className="text-gray-400">MAROMBIEW BOT</p>
-                        </div>
-                        <form className="space-y-6" onSubmit={handleLogin}>
-                            <div className="space-y-4">
-                                <div><input type="email" required className="form-input w-full px-4 py-3 rounded-lg" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} /></div>
-                                <div><input type="password" required className="form-input w-full px-4 py-3 rounded-lg" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} /></div>
+                <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-gray-900 to-black">
+                    <div className="w-full max-w-md p-8 glass-card rounded-2xl shadow-2xl">
+                        <div className="text-center mb-8">
+                            <div className="w-16 h-16 bg-amber-500/10 rounded-full flex items-center justify-center mx-auto mb-4">
+                                <i className="fas fa-robot text-3xl text-amber-400"></i>
                             </div>
-                            {error && <p className="text-red-400 text-sm text-center">{error}</p>}
-                            <div><button type="submit" className="btn bg-amber-500 hover:bg-amber-600 w-full py-3 rounded-lg text-white font-semibold" disabled={loading}>{loading ? 'A entrar...' : 'Entrar'}</button></div>
+                            <h2 className="text-2xl font-bold text-white">Acesso Admin</h2>
+                            <p className="text-gray-400 text-sm mt-1">Marombiew Bot Control</p>
+                        </div>
+                        <form className="space-y-5" onSubmit={handleLogin}>
+                            <div><input type="email" required className="form-input w-full px-4 py-3 rounded-xl" placeholder="admin@exemplo.com" value={email} onChange={e => setEmail(e.target.value)} /></div>
+                            <div><input type="password" required className="form-input w-full px-4 py-3 rounded-xl" placeholder="••••••••" value={password} onChange={e => setPassword(e.target.value)} /></div>
+                            <button type="submit" className="btn bg-amber-500 hover:bg-amber-600 w-full py-3 rounded-xl text-white shadow-lg shadow-amber-500/20 flex justify-center items-center gap-2" disabled={loading}>
+                                {loading && <div className="spinner w-4 h-4 border-2"></div>}
+                                {loading ? 'Autenticando...' : 'Entrar no Sistema'}
+                            </button>
                         </form>
                     </div>
                 </div>
             );
         }
 
-        function CountdownTimer() {
-            const [countdown, setCountdown] = useState(60);
-            useEffect(() => {
-                const timer = setInterval(() => {
-                    const seconds = new Date().getSeconds();
-                    setCountdown(60 - seconds);
-                }, 1000);
-                return () => clearInterval(timer);
-            }, []);
-            return (
-                <div className="text-center">
-                    <p className="text-sm text-gray-400">PRÓXIMA VELA EM</p>
-                    <p className="text-3xl font-bold text-amber-400 font-mono">{String(countdown).padStart(2, '0')}s</p>
-                </div>
-            );
-        }
-
         function HomeView() {
             const [signals, setSignals] = useState([]);
-            const [scores, setScores] = useState({ wins: 0, losses: 0 });
             const [balanceInfo, setBalanceInfo] = useState({ current: 0, initial: 0 });
             const [isResetting, setIsResetting] = useState(false);
+            const { addToast } = useToast();
 
-            const calculateScores = (signals) => {
+            // Cálculo otimizado de scores
+            const scores = useMemo(() => {
                 const wins = signals.filter(s => s.result === 'WIN').length;
                 const losses = signals.filter(s => s.result === 'LOSS').length;
-                setScores({ wins, losses });
-            };
+                return { wins, losses, total: wins + losses };
+            }, [signals]);
+
+            const assertividade = scores.total > 0 ? ((scores.wins / scores.total) * 100).toFixed(0) : 0;
+            const profit = balanceInfo.current - balanceInfo.initial;
 
             const handleResetScores = async () => {
-                if (!confirm("Tem a certeza que quer ZERAR O PLACAR E O HISTÓRICO DO DIA?")) return;
+                if (!confirm("Confirmar reset do histórico diário?")) return;
                 setIsResetting(true);
                 const { error } = await supabaseClient.rpc('reset_daily_stats');
-                if (error) alert("Erro ao zerar o placar: " + error.message);
+                if (error) addToast("Erro ao zerar: " + error.message, 'error');
                 else {
                     setSignals([]);
-                    setScores({ wins: 0, losses: 0 });
+                    addToast("Placar zerado com sucesso", 'success');
                 }
                 setIsResetting(false);
             };
             
             useEffect(() => {
-                const fetchInitialData = async () => {
-                    const { data: signalsData } = await supabaseClient.from('trade_signals').select('*').order('created_at', { ascending: false }).limit(50);
-                    if (signalsData) {
-                        setSignals(signalsData);
-                        calculateScores(signalsData);
-                    }
-                    const { data: configData } = await supabaseClient.from('bot_config').select('current_balance, daily_initial_balance').eq('id', 1).single();
-                    if (configData) {
-                        setBalanceInfo({ current: configData.current_balance || 0, initial: configData.daily_initial_balance || 0 });
-                    }
+                const fetchData = async () => {
+                    const { data: sData } = await supabaseClient.from('trade_signals').select('*').order('created_at', { ascending: false }).limit(50);
+                    if (sData) setSignals(sData);
+                    
+                    const { data: cData } = await supabaseClient.from('bot_config').select('current_balance, daily_initial_balance').eq('id', 1).single();
+                    if (cData) setBalanceInfo({ current: cData.current_balance || 0, initial: cData.daily_initial_balance || 0 });
                 };
-                fetchInitialData();
+                fetchData();
 
-                const signalsChannel = supabaseClient.channel('trade_signals_home')
+                const subSignals = supabaseClient.channel('signals_realtime')
                     .on('postgres_changes', { event: '*', schema: 'public', table: 'trade_signals' }, (payload) => {
-                        if (payload.eventType === 'INSERT') {
-                            setSignals(current => [payload.new, ...current]);
-                        }
-                        if (payload.eventType === 'UPDATE') {
-                            setSignals(current => current.map(s => s.id === payload.new.id ? payload.new : s));
-                        }
-                    })
-                    .subscribe((status) => {
-                         if (status === 'SUBSCRIBED') {
-                             setTimeout(fetchInitialData, 1000);
-                         }
-                    });
+                        if (payload.eventType === 'INSERT') setSignals(prev => [payload.new, ...prev]);
+                        else if (payload.eventType === 'UPDATE') setSignals(prev => prev.map(s => s.id === payload.new.id ? payload.new : s));
+                    }).subscribe();
 
-                const configChannel = supabaseClient.channel('bot_config_home')
+                const subConfig = supabaseClient.channel('config_realtime')
                     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'bot_config' }, (payload) => {
                         setBalanceInfo({ current: payload.new.current_balance || 0, initial: payload.new.daily_initial_balance || 0 });
                     }).subscribe();
 
-                return () => {
-                    supabaseClient.removeChannel(signalsChannel);
-                    supabaseClient.removeChannel(configChannel);
-                };
+                return () => { supabaseClient.removeChannel(subSignals); supabaseClient.removeChannel(subConfig); };
             }, []);
 
-            useEffect(() => {
-                calculateScores(signals);
-            }, [signals]);
-
-            const assertividade = scores.wins + scores.losses > 0 ? (scores.wins / (scores.wins + scores.losses) * 100).toFixed(0) : 0;
-            const profit = balanceInfo.current - balanceInfo.initial;
-            const profitColor = profit >= 0 ? 'text-green-400' : 'text-red-400';
-            const profitIcon = profit >= 0 ? 'fa-arrow-trend-up' : 'fa-arrow-trend-down';
-
-            const ResultBadge = ({ signal }) => {
-                let color, icon, text;
-                switch (signal.result) {
-                    case 'WIN': color = 'text-green-400'; icon = 'fa-check-circle'; text = 'WIN'; break;
-                    case 'LOSS': color = 'text-red-400'; icon = 'fa-times-circle'; text = 'LOSS'; break;
-                    case 'DRAW': color = 'text-gray-400'; icon = 'fa-minus-circle'; text = 'EMPATE'; break;
-                    case 'PENDENTE': color = 'text-amber-400 animate-pulse'; icon = 'fa-spinner fa-spin'; text = 'A OPERAR'; break;
-                    default: color = 'text-gray-500'; icon = 'fa-question-circle'; text = signal.result || '...'; break;
-                }
-                return <div className="text-center"><p className={`text-xl font-bold ${color}`}><i className={`fas ${icon} mr-2`}></i>{text}</p></div>;
-            };
-
             return (
-                <div className="space-y-6">
+                <div className="space-y-6 pb-20 md:pb-0">
                     <div className="flex justify-between items-center">
-                        <h1 className="text-3xl font-bold text-white">Dashboard</h1>
-                        <button onClick={handleResetScores} className="btn bg-red-600 hover:bg-red-700 px-4 py-2 rounded-lg text-white text-sm" disabled={isResetting}>
-                            <i className="fas fa-undo mr-2"></i>{isResetting ? 'Aguarde...' : 'Zerar Placar'}
+                        <div>
+                            <h1 className="text-2xl font-bold text-white">Dashboard</h1>
+                            <p className="text-xs text-gray-400">Visão geral do dia</p>
+                        </div>
+                        <button onClick={handleResetScores} className="btn bg-gray-800 hover:bg-gray-700 border border-gray-600 text-white px-3 py-2 rounded-lg text-xs flex items-center gap-2" disabled={isResetting}>
+                            <i className={`fas fa-undo ${isResetting ? 'fa-spin' : ''}`}></i> Reset
                         </button>
                     </div>
                     
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div className="glass-card p-4 rounded-xl text-center"><p className="text-sm text-gray-400">SALDO ATUAL</p><p className="text-3xl font-bold text-white mt-1">${Number(balanceInfo.current).toFixed(2)}</p></div>
-                        <div className="glass-card p-4 rounded-xl text-center"><p className="text-sm text-gray-400">LUCRO/PREJUÍZO DO DIA</p><p className={`text-3xl font-bold mt-1 ${profitColor}`}><i className={`fas ${profitIcon} mr-2`}></i>{profit >= 0 ? '+' : ''}${profit.toFixed(2)}</p></div>
+                    {/* Cards Topo */}
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="glass-card p-4 rounded-xl relative overflow-hidden">
+                            <div className="absolute top-0 right-0 p-2 opacity-10"><i className="fas fa-wallet text-6xl"></i></div>
+                            <p className="text-xs text-gray-400 font-medium">SALDO ATUAL</p>
+                            <p className="text-2xl font-bold text-white mt-1">${Number(balanceInfo.current).toFixed(2)}</p>
+                        </div>
+                        <div className="glass-card p-4 rounded-xl relative overflow-hidden">
+                            <div className={`absolute top-0 right-0 p-2 opacity-10 ${profit >= 0 ? 'text-green-500' : 'text-red-500'}`}><i className="fas fa-chart-line text-6xl"></i></div>
+                            <p className="text-xs text-gray-400 font-medium">RESULTADO DO DIA</p>
+                            <p className={`text-2xl font-bold mt-1 ${profit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                {profit >= 0 ? '+' : ''}${profit.toFixed(2)}
+                            </p>
+                        </div>
                     </div>
 
+                    {/* Placar */}
                     <div className="glass-card p-4 rounded-xl">
-                        <div className="grid grid-cols-2 md:grid-cols-4 divide-x divide-gray-700 text-center">
-                            <div className="px-2"><p className="text-sm text-green-400 font-semibold">WINS</p><p className="text-2xl font-bold">{scores.wins}</p></div>
-                            <div className="px-2"><p className="text-sm text-red-400 font-semibold">LOSS</p><p className="text-2xl font-bold">{scores.losses}</p></div>
-                            <div className="px-2"><p className="text-sm text-blue-400 font-semibold">ASSERTIVIDADE</p><p className="text-2xl font-bold">{assertividade}%</p></div>
-                            <div className="px-2"><CountdownTimer /></div>
+                        <div className="flex justify-between items-center text-center divide-x divide-gray-700">
+                            <div className="flex-1 px-2">
+                                <p className="text-xs text-green-500 font-bold mb-1">WINS</p>
+                                <span className="text-2xl font-bold text-white">{scores.wins}</span>
+                            </div>
+                            <div className="flex-1 px-2">
+                                <p className="text-xs text-red-500 font-bold mb-1">LOSS</p>
+                                <span className="text-2xl font-bold text-white">{scores.losses}</span>
+                            </div>
+                            <div className="flex-1 px-2">
+                                <p className="text-xs text-blue-400 font-bold mb-1">ASSERT.</p>
+                                <span className="text-2xl font-bold text-white">{assertividade}%</span>
+                            </div>
+                            <div className="flex-1 px-2">
+                                <CountdownTimer />
+                            </div>
                         </div>
                     </div>
                     
-                    <div className="space-y-4">
-                        <h2 className="text-lg font-bold">Histórico de Sinais</h2>
-                        <div className="glass-card rounded-xl p-4 max-h-96 overflow-y-auto space-y-3">
-                        {signals.length > 0 ? signals.map(signal => (
-                            <div key={signal.id} className="bg-gray-900/50 p-3 rounded-lg flex items-center space-x-4">
-                                <div className="flex-1">
-                                    <div className="flex justify-between items-center">
-                                        <p className="font-bold text-lg">{signal.pair}</p>
-                                        <div className={`px-3 py-1 rounded-full text-xs font-bold ${signal.direction === 'call' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}><i className={`fas fa-arrow-${signal.direction === 'call' ? 'up' : 'down'} mr-1`}></i>{signal.direction.toUpperCase()}</div>
+                    {/* Lista de Sinais */}
+                    <div>
+                        <h2 className="text-sm font-bold text-gray-400 mb-3 uppercase tracking-wide">Últimos Sinais</h2>
+                        <div className="space-y-3">
+                            {signals.length > 0 ? signals.map(signal => (
+                                <div key={signal.id} className="glass-card p-3 rounded-lg flex items-center justify-between border-l-4" style={{borderLeftColor: signal.direction === 'call' ? '#22c55e' : '#ef4444'}}>
+                                    <div className="flex items-center gap-3">
+                                        <div className={`w-8 h-8 rounded-full flex items-center justify-center ${signal.direction === 'call' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                                            <i className={`fas fa-arrow-${signal.direction === 'call' ? 'up' : 'down'}`}></i>
+                                        </div>
+                                        <div>
+                                            <p className="font-bold text-white text-sm">{signal.pair}</p>
+                                            <p className="text-[10px] text-gray-400">{new Date(signal.created_at).toLocaleTimeString()} • {signal.strategy}</p>
+                                        </div>
                                     </div>
-                                    <p className="text-xs text-gray-400">{signal.strategy}</p>
+                                    <div className="text-right">
+                                        {signal.result === 'WIN' && <span className="text-green-400 font-bold text-sm"><i className="fas fa-check mr-1"></i>WIN</span>}
+                                        {signal.result === 'LOSS' && <span className="text-red-400 font-bold text-sm"><i className="fas fa-times mr-1"></i>LOSS</span>}
+                                        {signal.result === 'DRAW' && <span className="text-gray-400 font-bold text-sm">EMPATE</span>}
+                                        {(!signal.result || signal.result === 'PENDING') && <span className="text-amber-400 text-xs font-medium animate-pulse"><i className="fas fa-circle-notch fa-spin mr-1"></i>Em curso</span>}
+                                        {signal.martingale_level > 0 && <span className="block text-[9px] text-orange-400">Gale {signal.martingale_level}</span>}
+                                    </div>
                                 </div>
-                                <div className="w-40 text-right flex-shrink-0"><ResultBadge signal={signal} /></div>
-                            </div>
-                        )) : <p className="text-gray-500 text-center py-8">Nenhum sinal registado para hoje.</p>}
+                            )) : (
+                                <div className="text-center py-10 glass-card rounded-xl">
+                                    <i className="fas fa-radar text-gray-600 text-4xl mb-3"></i>
+                                    <p className="text-gray-500 text-sm">A aguardar sinais...</p>
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>
             );
         }
-        
+
         function StrategiesView() {
             const [config, setConfig] = useState(null);
             const [catalog, setCatalog] = useState([]);
-            const [loading, setLoading] = useState(true);
+            const { addToast } = useToast();
             const [saving, setSaving] = useState(false);
 
             useEffect(() => {
-                const fetchInitialData = async () => {
-                    const { data: configData } = await supabaseClient.from('bot_config').select('min_win_rate').eq('id', 1).single();
-                    if (configData) setConfig(configData);
-
-                    const { data: catalogData } = await supabaseClient.from('cataloged_assets').select('*').order('win_rate', { ascending: false });
-                    if (catalogData) setCatalog(catalogData);
-                    setLoading(false);
+                const fetch = async () => {
+                    const { data: cfg } = await supabaseClient.from('bot_config').select('min_win_rate').eq('id', 1).single();
+                    if (cfg) setConfig(cfg);
+                    const { data: cat } = await supabaseClient.from('cataloged_assets').select('*').order('win_rate', { ascending: false });
+                    if (cat) setCatalog(cat);
                 };
-                fetchInitialData();
-                
-                const catalogChannel = supabaseClient.channel('cataloged_assets_view')
-                    .on('postgres_changes', { event: '*', schema: 'public', table: 'cataloged_assets' }, (payload) => {
-                         fetchInitialData();
-                    }).subscribe();
-
-                return () => supabaseClient.removeChannel(catalogChannel);
+                fetch();
+                // Assinatura real-time opcional aqui se necessário
             }, []);
 
-            const handleSave = async () => {
+            const saveWinRate = async () => {
                 setSaving(true);
                 const { error } = await supabaseClient.from('bot_config').update({ min_win_rate: config.min_win_rate }).eq('id', 1);
-                if (error) alert("Falha ao guardar: " + error.message);
-                else alert("Assertividade mínima guardada!");
+                if (error) addToast("Erro ao salvar: " + error.message, 'error');
+                else addToast("Assertividade mínima atualizada!", 'success');
                 setSaving(false);
             };
 
-            if (loading || !config) return <div className="text-center p-8"><div className="spinner w-8 h-8 mx-auto"></div></div>;
+            if (!config) return <div className="flex justify-center p-10"><div className="spinner"></div></div>;
 
             return (
-                <div className="space-y-8">
-                    <h1 className="text-3xl font-bold text-white">Estratégias e Catalogação</h1>
-                    <div className="glass-card p-6 rounded-xl">
-                        <h2 className="text-xl font-bold mb-2">Assertividade Mínima (Modo Auto)</h2>
-                        <p className="text-xs text-gray-400 mb-4">O bot só irá operar em pares cuja melhor estratégia tenha uma taxa de acerto igual ou superior a este valor.</p>
-                        <div className="flex items-center gap-4">
-                            <input type="range" min="50" max="95" step="1" value={config.min_win_rate || 70} onChange={e => setConfig({...config, min_win_rate: parseInt(e.target.value)})} className="w-full" />
-                            <span className="font-bold text-lg text-amber-400">{config.min_win_rate}%</span>
+                <div className="space-y-6 pb-20 md:pb-0">
+                    <h1 className="text-2xl font-bold text-white">Catalogador</h1>
+                    
+                    <div className="glass-card p-5 rounded-xl">
+                        <div className="flex justify-between items-center mb-4">
+                            <h2 className="text-sm font-bold text-gray-300">Assertividade Mínima</h2>
+                            <span className="text-amber-400 font-bold text-xl">{config.min_win_rate}%</span>
                         </div>
-                         <button onClick={handleSave} className="btn bg-amber-500 hover:bg-amber-600 w-full py-2 rounded-lg mt-4 text-white font-semibold text-sm" disabled={saving}>
-                            <i className="fas fa-save mr-2"></i>{saving ? 'A guardar...' : 'Guardar Assertividade'}
+                        <input type="range" min="50" max="95" value={config.min_win_rate} onChange={e => setConfig({...config, min_win_rate: parseInt(e.target.value)})} className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-amber-500" />
+                        <button onClick={saveWinRate} className="btn bg-gray-700 hover:bg-gray-600 w-full mt-4 py-2 rounded-lg text-sm text-white" disabled={saving}>
+                            {saving ? 'Salvando...' : 'Atualizar Filtro'}
                         </button>
                     </div>
 
-                    <div className="glass-card p-6 rounded-xl">
-                        <h2 className="text-xl font-bold mb-4">Resultados da Catalogação em Tempo Real</h2>
-                         <div className="space-y-3 max-h-96 overflow-y-auto pr-2">
-                            {catalog.length > 0 ? catalog.map(asset => (
-                                <div key={asset.pair} className="bg-gray-900/50 p-3 rounded-lg">
-                                    <div className="flex items-center justify-between">
-                                        <p className="font-bold text-white">{asset.pair}</p>
-                                        <div className={`font-bold text-lg ${asset.win_rate >= 75 ? 'text-green-400' : asset.win_rate >= 60 ? 'text-amber-400' : 'text-orange-400'}`}>
-                                            {asset.win_rate.toFixed(1)}%
-                                        </div>
-                                    </div>
-                                    <div className="flex items-center justify-between text-xs text-gray-400 mt-1">
-                                        <span>{asset.best_strategy}</span>
-                                        <span>({asset.wins}W / {asset.losses}L)</span>
-                                    </div>
+                    <div className="space-y-3">
+                        <h2 className="text-sm font-bold text-gray-400 uppercase tracking-wide">Melhores Ativos (M5/M1)</h2>
+                        {catalog.length > 0 ? catalog.map(asset => (
+                            <div key={asset.pair} className="glass-card p-3 rounded-lg flex items-center justify-between">
+                                <div>
+                                    <p className="font-bold text-white">{asset.pair}</p>
+                                    <p className="text-xs text-gray-400">{asset.best_strategy} • <span className="text-green-400">{asset.wins}W</span> / <span className="text-red-400">{asset.losses}L</span></p>
                                 </div>
-                            )) : <p className="text-center text-gray-500 pt-16">Nenhum ativo catalogado ainda. Aguarde o ciclo do bot.</p>}
-                        </div>
+                                <div className={`text-lg font-bold ${asset.win_rate >= 80 ? 'text-green-400' : asset.win_rate >= 60 ? 'text-amber-400' : 'text-red-400'}`}>
+                                    {asset.win_rate.toFixed(1)}%
+                                </div>
+                            </div>
+                        )) : (
+                            <p className="text-center text-gray-500 py-10">Nenhum dado catalogado ainda.</p>
+                        )}
                     </div>
                 </div>
             );
@@ -319,219 +389,186 @@
 
         function SettingsView() {
             const [config, setConfig] = useState(null);
-            const [loading, setLoading] = useState(true);
+            const { addToast } = useToast();
             const [saving, setSaving] = useState(false);
-            const [statusSaving, setStatusSaving] = useState(false);
-
-            const fetchConfig = useCallback(async () => {
-                const { data } = await supabaseClient.from('bot_config').select('*').eq('id', 1).single();
-                if (data) setConfig(data);
-                setLoading(false);
-            }, []);
+            
+            // Timeout para debounce
+            const debounceRef = useRef(null);
 
             useEffect(() => {
-                fetchConfig();
-                const configChannel = supabaseClient.channel('bot_config_settings')
-                    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'bot_config' }, (payload) => {
-                        setConfig(payload.new);
-                    }).subscribe();
-                return () => supabaseClient.removeChannel(configChannel);
-            }, [fetchConfig]);
+                const fetch = async () => {
+                    const { data } = await supabaseClient.from('bot_config').select('*').eq('id', 1).single();
+                    if (data) setConfig(data);
+                };
+                fetch();
+            }, []);
 
-            const handleUpdate = (key, value) => {
-                setConfig(prev => ({ ...prev, [key]: value }));
+            const updateField = (field, value) => {
+                setConfig(prev => ({ ...prev, [field]: value }));
+                // Opcional: Auto-save com debounce para inputs numéricos poderia ser implementado aqui
             };
 
-            const handleStatusToggle = async () => {
-                if (!config || statusSaving) return;
-                setStatusSaving(true);
+            const toggleBotStatus = async () => {
                 const newStatus = config.status === 'RUNNING' ? 'PAUSED' : 'RUNNING';
                 if (newStatus === 'RUNNING') {
-                    if (confirm("Iniciar uma nova sessão irá ZERAR O PLACAR E O HISTÓRICO DO DIA. Deseja continuar?")) {
-                         await supabaseClient.rpc('reset_daily_stats');
-                    } else {
-                        setStatusSaving(false);
-                        return;
-                    }
+                    if (!confirm("Iniciar o bot irá resetar o placar diário. Continuar?")) return;
+                    await supabaseClient.rpc('reset_daily_stats');
                 }
                 const { error } = await supabaseClient.from('bot_config').update({ status: newStatus }).eq('id', 1);
-                if (error) alert("Falha ao alterar o estado: " + error.message);
-                setStatusSaving(false);
+                if (error) addToast("Erro: " + error.message, 'error');
+                else {
+                    setConfig(prev => ({ ...prev, status: newStatus }));
+                    addToast(`Bot ${newStatus === 'RUNNING' ? 'INICIADO' : 'PAUSADO'}`, newStatus === 'RUNNING' ? 'success' : 'info');
+                }
             };
 
-            const handleSave = async () => {
+            const saveSettings = async () => {
                 setSaving(true);
-                const { 
-                    entry_value, account_type, 
-                    use_martingale, martingale_levels, martingale_factor, 
-                    stop_mode, stop_win, stop_loss, stop_win_percent, stop_loss_percent 
-                } = config;
-                const { error } = await supabaseClient.from('bot_config').update({ 
-                    entry_value, account_type, use_martingale, martingale_levels, martingale_factor,
-                    stop_mode, stop_win, stop_loss, stop_win_percent, stop_loss_percent
-                }).eq('id', 1);
-                if (error) alert("Falha ao guardar: " + error.message);
-                else alert("Configurações guardadas com sucesso!");
+                const { error } = await supabaseClient.from('bot_config').update(config).eq('id', 1);
+                if (error) addToast("Erro ao salvar: " + error.message, 'error');
+                else addToast("Configurações atualizadas!", 'success');
                 setSaving(false);
             };
 
-            if (loading || !config) return <div className="text-center p-8"><div className="spinner w-8 h-8 mx-auto"></div></div>;
+            if (!config) return <div className="flex justify-center p-10"><div className="spinner"></div></div>;
 
             return (
-                <div className="space-y-8">
-                    <h1 className="text-3xl font-bold text-white">Configurações e Controlo</h1>
-                     <div className="glass-card p-6 rounded-xl">
-                        <h2 className="text-xl font-bold mb-4">Controlo Geral</h2>
-                        <div className="flex items-center justify-between bg-gray-900 p-4 rounded-lg">
-                            <div className="flex items-center">
-                                <i className={`fas fa-circle mr-3 ${config.status === 'RUNNING' ? 'text-green-500 animate-pulse' : 'text-gray-500'}`}></i>
+                <div className="space-y-6 pb-20 md:pb-0">
+                    <h1 className="text-2xl font-bold text-white">Configurações</h1>
+
+                    {/* Status Card */}
+                    <div className="glass-card p-5 rounded-xl flex items-center justify-between border border-gray-700">
+                        <div>
+                            <p className="text-sm text-gray-400 font-medium">STATUS DO SISTEMA</p>
+                            <p className={`text-xl font-bold ${config.status === 'RUNNING' ? 'text-green-400' : 'text-amber-400'}`}>
+                                {config.status === 'RUNNING' ? 'ONLINE' : 'PAUSADO'}
+                            </p>
+                        </div>
+                        <button onClick={toggleBotStatus} className={`btn w-12 h-12 rounded-full flex items-center justify-center shadow-lg ${config.status === 'RUNNING' ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'}`}>
+                            <i className={`fas ${config.status === 'RUNNING' ? 'fa-pause' : 'fa-play'} text-white text-lg`}></i>
+                        </button>
+                    </div>
+
+                    <div className="glass-card p-6 rounded-xl space-y-6">
+                        <h2 className="text-sm font-bold text-amber-400 uppercase tracking-wide mb-4">Gerenciamento de Risco</h2>
+                        
+                        <div>
+                            <label className="block text-xs text-gray-400 mb-2 uppercase">Modo de Stop</label>
+                            <div className="grid grid-cols-2 gap-2 bg-gray-900 p-1 rounded-lg">
+                                <button onClick={() => updateField('stop_mode', 'operations')} className={`py-2 text-xs font-bold rounded-md transition-all ${config.stop_mode === 'operations' ? 'bg-gray-700 text-white shadow' : 'text-gray-500 hover:text-gray-300'}`}>POR SINAIS</button>
+                                <button onClick={() => updateField('stop_mode', 'percentage')} className={`py-2 text-xs font-bold rounded-md transition-all ${config.stop_mode === 'percentage' ? 'bg-gray-700 text-white shadow' : 'text-gray-500 hover:text-gray-300'}`}>PORCENTAGEM</button>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-xs text-gray-400 mb-1">Stop Win ({config.stop_mode === 'operations' ? 'Qtd' : '%'})</label>
+                                <input type="number" className="form-input w-full p-3 rounded-lg text-green-400 font-bold" value={config.stop_mode === 'operations' ? config.stop_win : config.stop_win_percent} onChange={e => updateField(config.stop_mode === 'operations' ? 'stop_win' : 'stop_win_percent', Number(e.target.value))} />
+                            </div>
+                            <div>
+                                <label className="block text-xs text-gray-400 mb-1">Stop Loss ({config.stop_mode === 'operations' ? 'Qtd' : '%'})</label>
+                                <input type="number" className="form-input w-full p-3 rounded-lg text-red-400 font-bold" value={config.stop_mode === 'operations' ? config.stop_loss : config.stop_loss_percent} onChange={e => updateField(config.stop_mode === 'operations' ? 'stop_loss' : 'stop_loss_percent', Number(e.target.value))} />
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="glass-card p-6 rounded-xl space-y-6">
+                        <div className="flex justify-between items-center">
+                            <h2 className="text-sm font-bold text-amber-400 uppercase tracking-wide">Estratégia & Martingale</h2>
+                            <label className="flex items-center cursor-pointer">
+                                <span className="text-xs mr-2 text-gray-400">{config.use_martingale ? 'Gale ON' : 'Gale OFF'}</span>
+                                <div className="relative">
+                                    <input type="checkbox" className="hidden" checked={config.use_martingale} onChange={() => updateField('use_martingale', !config.use_martingale)} />
+                                    <div className="toggle-bg w-10 h-6 bg-gray-700 rounded-full shadow-inner"></div>
+                                </div>
+                            </label>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-xs text-gray-400 mb-1">Valor Entrada ($)</label>
+                                <input type="number" className="form-input w-full p-3 rounded-lg font-bold" value={config.entry_value} onChange={e => updateField('entry_value', Number(e.target.value))} />
+                            </div>
+                            <div>
+                                <label className="block text-xs text-gray-400 mb-1">Conta</label>
+                                <select className="form-select w-full p-3 rounded-lg font-bold" value={config.account_type} onChange={e => updateField('account_type', e.target.value)}>
+                                    <option value="PRACTICE">DEMO</option>
+                                    <option value="REAL">REAL</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        {config.use_martingale && (
+                            <div className="grid grid-cols-2 gap-4 p-4 bg-gray-900/50 rounded-lg border border-gray-800">
                                 <div>
-                                    <span className="font-semibold">Estado do Bot</span>
-                                    <p className={`font-bold ${config.status === 'RUNNING' ? 'text-green-400' : 'text-amber-400'}`}>{config.status}</p>
+                                    <label className="block text-xs text-gray-500 mb-1">Níveis</label>
+                                    <input type="number" className="form-input w-full p-2 rounded text-sm" value={config.martingale_levels} onChange={e => updateField('martingale_levels', Number(e.target.value))} />
+                                </div>
+                                <div>
+                                    <label className="block text-xs text-gray-500 mb-1">Fator</label>
+                                    <input type="number" step="0.1" className="form-input w-full p-2 rounded text-sm" value={config.martingale_factor} onChange={e => updateField('martingale_factor', Number(e.target.value))} />
                                 </div>
                             </div>
-                            <button onClick={handleStatusToggle} className={`btn ${config.status === 'RUNNING' ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'} px-5 py-2 rounded-md text-white`} disabled={statusSaving}>
-                                <i className={`fas ${statusSaving ? 'fa-spinner fa-spin' : (config.status === 'RUNNING' ? 'fa-pause' : 'fa-play')} mr-2`}></i>
-                                {statusSaving ? 'Aguarde...' : (config.status === 'RUNNING' ? 'Pausar' : 'Iniciar')}
-                            </button>
-                        </div>
+                        )}
                     </div>
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                        <div className="space-y-8">
-                            <div className="glass-card p-6 rounded-xl">
-                                <h2 className="text-xl font-bold mb-4">Gerenciamento de Risco Diário</h2>
-                                <div className="space-y-4">
-                                    <div>
-                                        <label className="block mb-2 text-gray-400">Modo de Stop</label>
-                                        <div className="grid grid-cols-2 gap-2">
-                                            <input type="radio" id="stop-ops" name="stop-mode" value="operations" checked={config.stop_mode === 'operations'} onChange={() => handleUpdate('stop_mode', 'operations')} className="hidden" />
-                                            <label htmlFor="stop-ops" className="radio-label text-center p-3 rounded-lg cursor-pointer border border-gray-700">Por Operações</label>
-                                            <input type="radio" id="stop-percent" name="stop-mode" value="percentage" checked={config.stop_mode === 'percentage'} onChange={() => handleUpdate('stop_mode', 'percentage')} className="hidden" />
-                                            <label htmlFor="stop-percent" className="radio-label text-center p-3 rounded-lg cursor-pointer border border-gray-700">% da Banca</label>
-                                        </div>
-                                    </div>
-                                    {config.stop_mode === 'operations' ? (
-                                        <div className="grid grid-cols-2 gap-4 pt-4">
-                                            <div><label className="block mb-1 text-gray-400">Stop Win (Vitórias)</label><input type="number" value={config.stop_win || 0} onChange={e => handleUpdate('stop_win', parseInt(e.target.value))} className="form-input w-full p-2 rounded-md" /></div>
-                                            <div><label className="block mb-1 text-gray-400">Stop Loss (Derrotas)</label><input type="number" value={config.stop_loss || 0} onChange={e => handleUpdate('stop_loss', parseInt(e.target.value))} className="form-input w-full p-2 rounded-md" /></div>
-                                        </div>
-                                    ) : (
-                                        <div className="grid grid-cols-2 gap-4 pt-4">
-                                            <div><label className="block mb-1 text-gray-400">Stop Win (% de Lucro)</label><input type="number" value={config.stop_win_percent || 0} onChange={e => handleUpdate('stop_win_percent', parseInt(e.target.value))} className="form-input w-full p-2 rounded-md" /></div>
-                                            <div><label className="block mb-1 text-gray-400">Stop Loss (% de Perda)</label><input type="number" value={config.stop_loss_percent || 0} onChange={e => handleUpdate('stop_loss_percent', parseInt(e.target.value))} className="form-input w-full p-2 rounded-md" /></div>
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                        </div>
-                        <div className="space-y-8">
-                             <div className="glass-card p-6 rounded-xl space-y-6">
-                                <h2 className="text-xl font-bold">Parâmetros de Negociação</h2>
-                                <div><label className="block mb-1 text-gray-400">Tipo de Conta</label><select value={config.account_type || 'PRACTICE'} onChange={e => handleUpdate('account_type', e.target.value)} className="form-select w-full p-2 rounded-md"><option value="PRACTICE">Prática</option><option value="REAL">Real</option></select></div>
-                                <div><label className="block mb-1 text-gray-400">Valor de Entrada ($)</label><input type="number" step="0.01" value={config.entry_value || 1} onChange={e => handleUpdate('entry_value', parseFloat(e.target.value))} className="form-input w-full p-2 rounded-md" /></div>
-                            </div>
-                            <div className="glass-card p-6 rounded-xl space-y-6">
-                                <div className="flex items-center justify-between">
-                                    <h2 className="text-xl font-bold">Gestão de Martingale</h2>
-                                    <div className="flex items-center">
-                                        <input className="hidden" type="checkbox" id="martingale-toggle" checked={config.use_martingale || false} onChange={() => handleUpdate('use_martingale', !config.use_martingale)} />
-                                        <label htmlFor="martingale-toggle" className="flex items-center cursor-pointer"><div className="relative"><div className="toggle-bg block bg-gray-600 w-14 h-8 rounded-full"></div></div><div className="ml-3 text-white font-medium">{config.use_martingale ? 'Ativado' : 'Desativado'}</div></label>
-                                    </div>
-                                </div>
-                                {config.use_martingale && (
-                                    <div className="grid grid-cols-2 gap-6 pt-4 border-t border-gray-700">
-                                        <div><label className="block mb-1 text-gray-400">Níveis de Martingale</label><input type="number" step="1" value={config.martingale_levels || 2} onChange={e => handleUpdate('martingale_levels', parseInt(e.target.value))} className="form-input w-full p-2 rounded-md" /></div>
-                                        <div><label className="block mb-1 text-gray-400">Fator de Multiplicação</label><input type="number" step="0.1" value={config.martingale_factor || 2.3} onChange={e => handleUpdate('martingale_factor', parseFloat(e.target.value))} className="form-input w-full p-2 rounded-md" /></div>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                    </div>
-                    <button onClick={handleSave} className="btn bg-amber-500 hover:bg-amber-600 w-full py-3 rounded-lg text-white font-semibold" disabled={saving}><i className="fas fa-save mr-2"></i>{saving ? 'A guardar...' : 'Guardar Alterações'}</button>
+
+                    <button onClick={saveSettings} className="btn w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-4 rounded-xl shadow-lg shadow-amber-500/20 flex justify-center items-center gap-2" disabled={saving}>
+                        {saving ? <div className="spinner w-5 h-5 border-white"></div> : <i className="fas fa-save"></i>}
+                        {saving ? 'Salvando...' : 'Salvar Alterações'}
+                    </button>
                 </div>
             );
         }
-        
+
         function LogsView() {
             const [logs, setLogs] = useState([]);
-            const endOfLogsRef = useRef(null);
+            const endRef = useRef(null);
 
             useEffect(() => {
-                const fetchInitialLogs = async () => {
-                    const { data } = await supabaseClient.from('bot_logs').select('*').order('created_at', { ascending: false }).limit(100);
+                const fetch = async () => {
+                    const { data } = await supabaseClient.from('logs').select('*').order('created_at', { ascending: false }).limit(100);
                     if (data) setLogs(data.reverse());
                 };
-                fetchInitialLogs();
-                const channel = supabaseClient.channel('bot_logs_view')
-                    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'bot_logs' }, payload => {
-                        setLogs(current => [...current, payload.new]);
-                    }).subscribe();
-                return () => supabaseClient.removeChannel(channel);
+                fetch();
+                const sub = supabaseClient.channel('logs_rt').on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'logs' }, payload => {
+                    setLogs(prev => [...prev.slice(-99), payload.new]);
+                }).subscribe();
+                return () => supabaseClient.removeChannel(sub);
             }, []);
 
-            useEffect(() => {
-                endOfLogsRef.current?.scrollIntoView({ behavior: "smooth" });
-            }, [logs]);
-
-            const LogLine = ({ log }) => {
-                const colors = { SUCCESS: 'text-accent-win', ERROR: 'text-accent-loss', INFO: 'text-accent-info', WARNING: 'text-amber-400', CRITICAL: 'bg-red-800 text-white p-1 rounded' };
-                const icons = { SUCCESS: 'fa-check-circle', ERROR: 'fa-times-circle', INFO: 'fa-info-circle', WARNING: 'fa-exclamation-triangle', CRITICAL: 'fa-skull-crossbones' };
-                return (<div className="flex items-start"><span className="text-gray-500 mr-3">{new Date(log.created_at).toLocaleTimeString()}</span><i className={`fas ${icons[log.level] || 'fa-question-circle'} ${colors[log.level] || 'text-gray-400'} mt-1 mr-2`}></i><p className="flex-1">{log.message}</p></div>);
-            };
+            useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [logs]);
 
             return (
-                <div className="flex flex-col h-full"><h1 className="text-3xl font-bold text-white mb-6 flex-shrink-0">Logs em Tempo Real</h1><div className="glass-card font-mono text-sm p-4 rounded-xl flex-1 overflow-y-auto space-y-2">{logs.length > 0 ? logs.map(log => <LogLine key={log.id} log={log} />) : <p className="text-gray-400 text-center py-8">A aguardar logs...</p>}<div ref={endOfLogsRef} /></div></div>
+                <div className="flex flex-col h-full pb-20 md:pb-0">
+                    <h1 className="text-2xl font-bold text-white mb-4">Terminal de Logs</h1>
+                    <div className="flex-1 glass-card rounded-xl p-4 overflow-y-auto font-mono text-xs space-y-2 border border-gray-700 bg-black/40">
+                        {logs.length === 0 && <p className="text-gray-500 text-center mt-10">Aguardando logs do sistema...</p>}
+                        {logs.map(log => (
+                            <div key={log.id} className="flex gap-2">
+                                <span className="text-gray-500 shrink-0">[{new Date(log.created_at).toLocaleTimeString()}]</span>
+                                <span className={`${log.level === 'ERROR' ? 'text-red-400' : log.level === 'WARNING' ? 'text-amber-400' : log.level === 'SUCCESS' ? 'text-green-400' : 'text-blue-300'}`}>
+                                    {log.level}:
+                                </span>
+                                <span className="text-gray-300 break-all">{log.message}</span>
+                            </div>
+                        ))}
+                        <div ref={endRef}></div>
+                    </div>
+                </div>
             );
         }
 
-        function AdminDashboard() {
-            const [view, setView] = useState('home');
-            const handleLogout = async () => { await supabaseClient.auth.signOut(); };
-            
-            // --- CORREÇÃO DO ERRO DE SINTAXE AQUI ---
-            const NavLink = ({ viewName, icon, text, isMobile = false }) => {
-                const linkClasses = `flex items-center rounded-lg text-sm font-semibold transition-colors ${
-                    isMobile 
-                    ? `flex-1 flex-col py-2 text-xs ${view === viewName ? 'text-amber-400' : 'text-gray-400'}` 
-                    : `space-x-3 px-4 py-3 ${view === viewName ? 'nav-link-active' : 'hover:bg-gray-800'}`
-                }`;
-                const iconClasses = `fa-solid ${icon} text-xl ${isMobile ? 'mb-1' : 'w-6 text-center'}`;
-                const spanClasses = isMobile ? '' : 'hidden md:inline';
-
-                return (
-                    <a href="#" onClick={(e) => { e.preventDefault(); setView(viewName); }} className={linkClasses}>
-                        <i className={iconClasses}></i>
-                        <span className={spanClasses}>{text}</span>
-                    </a>
-                );
-            };
-
-            const renderView = () => {
-                switch (view) {
-                    case 'home': return <HomeView />;
-                    case 'strategies': return <StrategiesView />;
-                    case 'settings': return <SettingsView />;
-                    case 'logs': return <LogsView />;
-                    default: return <HomeView />;
-                }
-            };
-            return (<div className="flex h-screen bg-bg-dark"><aside className="hidden md:flex w-64 bg-bg-medium text-white flex-col p-4 border-r border-border-color"><div className="h-16 flex items-center px-2 text-xl font-bold"><i className="fas fa-robot text-amber-400 mr-3"></i> MAROMBIEW</div><nav className="flex-1 space-y-2"><NavLink viewName="home" icon="fa-home" text="Home" /><NavLink viewName="strategies" icon="fa-cogs" text="Estratégias" /><NavLink viewName="settings" icon="fa-sliders" text="Configurações" /><NavLink viewName="logs" icon="fa-terminal" text="Logs" /></nav><div className="p-2"><button onClick={handleLogout} className="w-full flex items-center space-x-3 px-4 py-3 rounded-lg text-sm font-semibold hover:bg-red-500/80"><i className="fa-solid fa-right-from-bracket text-lg w-6 text-center"></i><span>Sair</span></button></div></aside><div className="flex-1 flex flex-col overflow-hidden"><main className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-8">{renderView()}</main><nav className="md:hidden w-full bg-bg-medium border-t border-border-color flex justify-around"><NavLink viewName="home" icon="fa-home" text="Home" isMobile={true} /><NavLink viewName="strategies" icon="fa-cogs" text="Estratégias" isMobile={true} /><NavLink viewName="settings" icon="fa-sliders" text="Config" isMobile={true} /><NavLink viewName="logs" icon="fa-terminal" text="Logs" isMobile={true} /><a href="#" onClick={handleLogout} className="flex-1 flex flex-col items-center py-2 text-xs text-gray-400"><i className="fa-solid fa-right-from-bracket text-xl mb-1"></i>Sair</a></nav></div></div>);
-        }
-        
         function App() {
             const [session, setSession] = useState(null);
             const [loading, setLoading] = useState(true);
-            
+            const [view, setView] = useState('home');
+
             useEffect(() => {
                 supabaseClient.auth.getSession().then(({ data: { session } }) => {
                     setSession(session);
                     setLoading(false);
                 });
-                
-                const { data: { subscription } } = supabaseClient.auth.onAuthStateChange((_event, session) => {
-                    setSession(session);
-                });
-                
+                const { data: { subscription } } = supabaseClient.auth.onAuthStateChange((_event, session) => setSession(session));
                 return () => subscription.unsubscribe();
             }, []);
 
@@ -540,20 +577,74 @@
                     const splash = document.getElementById('static-splash');
                     if (splash) {
                         splash.style.opacity = '0';
-                        setTimeout(() => splash.remove(), 300);
+                        setTimeout(() => splash.remove(), 400);
                     }
                 }
             }, [loading]);
-            
+
             if (loading) return null;
-            if (!session) return <LoginPage onLogin={() => {}} />;
-            return <AdminDashboard />;
+            if (!session) return (
+                <ToastProvider>
+                    <LoginPage onLogin={() => {}} />
+                </ToastProvider>
+            );
+
+            const handleLogout = () => supabaseClient.auth.signOut();
+
+            return (
+                <ToastProvider>
+                    <div className="flex h-screen bg-bg-dark text-text-primary overflow-hidden">
+                        {/* Sidebar Desktop */}
+                        <aside className="hidden md:flex w-64 bg-bg-medium border-r border-border-color flex-col">
+                            <div className="h-20 flex items-center px-6 border-b border-gray-800">
+                                <i className="fas fa-robot text-amber-400 text-2xl mr-3"></i>
+                                <span className="font-bold text-lg tracking-wider">MAROMBIEW</span>
+                            </div>
+                            <nav className="flex-1 p-4 space-y-2">
+                                <NavLink viewName="home" currentView={view} setView={setView} icon="fa-chart-pie" text="Dashboard" />
+                                <NavLink viewName="strategies" currentView={view} setView={setView} icon="fa-layer-group" text="Estratégias" />
+                                <NavLink viewName="settings" currentView={view} setView={setView} icon="fa-sliders" text="Configurações" />
+                                <NavLink viewName="logs" currentView={view} setView={setView} icon="fa-terminal" text="Logs do Sistema" />
+                            </nav>
+                            <div className="p-4 border-t border-gray-800">
+                                <button onClick={handleLogout} className="w-full flex items-center px-4 py-3 text-sm text-red-400 hover:bg-red-500/10 rounded-lg transition-colors">
+                                    <i className="fa-solid fa-right-from-bracket w-6"></i> Sair
+                                </button>
+                            </div>
+                        </aside>
+
+                        {/* Conteúdo Principal */}
+                        <main className="flex-1 flex flex-col h-full overflow-hidden relative">
+                            <div className="flex-1 overflow-y-auto p-4 md:p-8 scroll-smooth">
+                                {view === 'home' && <HomeView />}
+                                {view === 'strategies' && <StrategiesView />}
+                                {view === 'settings' && <SettingsView />}
+                                {view === 'logs' && <LogsView />}
+                            </div>
+                        </main>
+
+                        {/* Menu Mobile (Fixo em baixo) */}
+                        <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-bg-medium/95 backdrop-blur-lg border-t border-gray-800 flex justify-around px-2 pb-safe z-40 h-16">
+                            <NavLink viewName="home" currentView={view} setView={setView} icon="fa-chart-pie" text="Dash" isMobile={true} />
+                            <NavLink viewName="strategies" currentView={view} setView={setView} icon="fa-layer-group" text="Estrat." isMobile={true} />
+                            <div className="relative -top-5">
+                                <button onClick={() => setView('settings')} className={`w-14 h-14 rounded-full flex items-center justify-center shadow-lg border-4 border-bg-dark ${view === 'settings' ? 'bg-amber-500 text-white' : 'bg-gray-700 text-gray-300'}`}>
+                                    <i className="fas fa-sliders text-xl"></i>
+                                </button>
+                            </div>
+                            <NavLink viewName="logs" currentView={view} setView={setView} icon="fa-terminal" text="Logs" isMobile={true} />
+                            <button onClick={handleLogout} className="flex-1 flex flex-col items-center justify-center py-2 text-[10px] text-gray-500">
+                                <i className="fa-solid fa-power-off text-lg mb-1"></i>
+                                <span>Sair</span>
+                            </button>
+                        </nav>
+                    </div>
+                </ToastProvider>
+            );
         }
-        
+
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<App />);
-
     </script>
 </body>
 </html>
-
