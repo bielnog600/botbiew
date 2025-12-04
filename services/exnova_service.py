@@ -22,6 +22,14 @@ class AsyncExnovaService:
             print(f"[EXNOVA EXCEPTION] Erro crítico ao conectar: {e}")
             return False
 
+    async def is_connected(self):
+        try:
+            if hasattr(self.api, 'check_connect'):
+                return self.api.check_connect()
+            return True 
+        except Exception:
+            return False
+
     async def get_current_balance(self):
         try:
             bal = await asyncio.to_thread(self.api.get_balance)
@@ -43,34 +51,25 @@ class AsyncExnovaService:
         try:
             candles = await asyncio.to_thread(self.api.get_candles, asset, timeframe_seconds, count, end_from_time)
             
-            # --- CORREÇÃO DEFINITIVA (Candle como Subclasse de Dict) ---
+            # --- CORREÇÃO DEFINITIVA PARA PANDAS/TA-LIB ---
             class Candle(dict):
                 def __init__(self, data):
-                    # Garante conversão para float
+                    # Normalização
                     safe_data = {
                         'open': float(data.get('open', 0)),
                         'close': float(data.get('close', 0)),
-                        'high': float(data.get('max', data.get('high', 0))),
-                        'low': float(data.get('min', data.get('low', 0))),
-                        'max': float(data.get('max', data.get('high', 0))),
-                        'min': float(data.get('min', data.get('low', 0))),
+                        'high': float(data.get('max', 0)),
+                        'low': float(data.get('min', 0)),
+                        'max': float(data.get('max', 0)),
+                        'min': float(data.get('min', 0)),
                         'volume': float(data.get('volume', 0)),
                         'at': data.get('at', 0),
-                        'from': data.get('from', 0),
-                        'to': data.get('to', 0),
                         'id': data.get('id', 0)
                     }
-                    # Inicializa o dicionário (Crucial para o Pandas)
+                    # Inicializa o dicionário (Vital para Pandas)
                     super().__init__(safe_data)
-                    # Define atributos para acesso via ponto (Crucial para o Bot)
+                    # Atualiza o objeto (Vital para o Bot)
                     self.__dict__.update(safe_data)
-
-                # Fallback para garantir acesso a atributos dinâmicos
-                def __getattr__(self, name):
-                    try:
-                        return self[name]
-                    except KeyError:
-                        raise AttributeError(name)
 
             return [Candle(c) for c in candles] if candles else []
         except Exception as e:
