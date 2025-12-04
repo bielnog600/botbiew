@@ -12,39 +12,27 @@ from core.data_models import TradeSignal
 
 class TradingBot:
     def __init__(self):
-        # Inicializa os serviços
         self.supabase = SupabaseService(settings.SUPABASE_URL, settings.SUPABASE_KEY)
         self.exnova = AsyncExnovaService(settings.EXNOVA_EMAIL, settings.EXNOVA_PASSWORD)
-        
         self.is_running = True
         self.bot_config: Dict = {}
-        
-        # Gestão de Estado
         self.martingale_state: Dict[str, Dict] = {} 
         self.pending_martingale_trades: Dict[str, Dict] = {} 
         self.active_trading_pairs: Set[str] = set() 
-        
-        # Estatísticas
         self.asset_performance: Dict[str, Dict[str, int]] = {}
         self.consecutive_losses: Dict[str, int] = {}
         self.blacklisted_assets: set = set()
-        
-        # Controlo de Tempo
         self.last_reset_time: datetime = datetime.utcnow()
         self.last_analysis_minute = -1
         self.last_daily_reset_date = None
-        
-        # Metas
         self.daily_wins = 0
         self.daily_losses = 0
 
     async def logger(self, level: str, message: str):
-        """Logs para console e Supabase (via thread separada para não bloquear)"""
+        """Logs para console e Supabase"""
         ts = datetime.utcnow().isoformat()
-        # Imprime no console sempre
         print(f"[{ts}] [{level.upper()}] {message}", flush=True)
         try:
-            # Envia para o banco sem travar o bot
             await asyncio.to_thread(self.supabase.insert_log, level, message)
         except Exception:
             pass
@@ -78,18 +66,16 @@ class TradingBot:
 
         while self.is_running:
             try:
-                # --- AUTO-RECONEXÃO ---
-                # Verifica se a API ainda está conectada
+                # --- AUTO-RECONNECT ---
                 connected = True
                 try:
-                    # Verifica de forma segura se o método existe
                     if hasattr(self.exnova, 'is_connected'):
                          connected = await self.exnova.is_connected()
                 except:
-                    connected = True # Fallback
+                    connected = True
 
                 if not connected:
-                    print("[AVISO] Conexão perdida. Reconectando...")
+                    print("[AVISO] Conexão perdida detetada pelo loop principal. Reconectando...")
                     if await self.exnova.connect():
                         await self.logger('SUCCESS', 'Conexão restabelecida.')
                     else:
@@ -99,22 +85,20 @@ class TradingBot:
 
                 await self._daily_reset_if_needed()
                 
-                # Reset Horário
                 if (datetime.utcnow() - self.last_reset_time).total_seconds() >= 3600:
                     await self._hourly_cycle_reset()
 
-                # Atualiza config
                 self.bot_config = await asyncio.to_thread(self.supabase.get_bot_config)
                 status = self.bot_config.get('status', 'PAUSED')
 
                 if status == 'RUNNING':
-                    # 1. Martingales Pendentes (Prioridade)
+                    # Martingales
                     pending_pairs = list(self.pending_martingale_trades.keys())
                     for pair in pending_pairs:
                         if pair not in self.active_trading_pairs:
                             asyncio.create_task(self._execute_martingale_trade(pair))
 
-                    # 2. Análise Normal
+                    # Análise Normal
                     await self.trading_cycle()
                 
                 elif status != 'RUNNING':
@@ -130,6 +114,12 @@ class TradingBot:
                 await asyncio.sleep(5)
 
     async def trading_cycle(self):
+        # Verifica conexão ANTES de tentar qualquer coisa
+        try:
+            if hasattr(self.exnova, 'is_connected') and not await self.exnova.is_connected():
+                return # Aborta ciclo se desconectado
+        except: pass
+
         now = datetime.utcnow()
         if now.second >= 50:
             if now.minute != self.last_analysis_minute:
@@ -145,13 +135,18 @@ class TradingBot:
                     asyncio.create_task(self.run_analysis_for_timeframe(60, 1))
 
     async def run_analysis_for_timeframe(self, timeframe_seconds: int, expiration_minutes: int):
+        # Proteção extra contra execução offline
+        try:
+            if hasattr(self.exnova, 'is_connected') and not await self.exnova.is_connected():
+                print("[SKIP] Varredura abortada: Sem conexão.")
+                return
+        except: pass
+
         await self.exnova.change_balance(self.bot_config.get('account_type', 'PRACTICE'))
         
         assets = await self.exnova.get_open_assets()
-        # Filtra blacklist
         available_assets = [asset for asset in assets if asset.split('-')[0] not in self.blacklisted_assets]
 
-        # Prioridade por performance
         def get_asset_score(asset_name):
             pair = asset_name.split('-')[0]
             stats = self.asset_performance.get(pair, {'wins': 0, 'losses': 0})
@@ -183,7 +178,6 @@ class TradingBot:
                 t1, t2, res_func = 300, 3600, get_h1_sr_zones
             else: return
 
-            # Busca velas
             candles_tuple = await asyncio.gather(
                 self.exnova.get_historical_candles(base, t1, 200),
                 self.exnova.get_historical_candles(base, t2, 100)
@@ -191,9 +185,9 @@ class TradingBot:
             analysis_candles, sr_candles = candles_tuple
             
             if not analysis_candles or not sr_candles:
+                # Se não vieram velas, pode ser falha de conexão silenciosa
                 return
 
-            # --- LÓGICA DE DEBUG TAGARELA ---
             res, sup = res_func(sr_candles)
             signal_candle = analysis_candles[-1]
             final_direction, confluences = None, []
@@ -203,10 +197,9 @@ class TradingBot:
             if expiration_minutes == 1:
                 sr_signal = ti.check_price_near_sr(signal_candle, zones)
                 
-                # DEBUG PARA O UTILIZADOR VER PORQUE NÃO ENTRA
                 if not sr_signal:
-                    if base == "EURUSD": # Limita output para 1 par para não spammar
-                        print(f"[DEBUG M1] {base}: Sem SR. Preço: {signal_candle.close} | Suporte/Resistência Distantes")
+                    if base == "EURUSD": 
+                        print(f"[DEBUG M1] {base}: Sem SR. Preço: {signal_candle.close} | S: {sup} R: {res}")
                 else:
                     print(f"[SINAL M1] {base}: Toque em SR detetado ({sr_signal})! Verificando filtros...")
                     confluences.append("SR_Zone")
@@ -247,10 +240,9 @@ class TradingBot:
                 else:
                     if base == "EURUSD": print(f"[DEBUG M5] {base}: Sem padrão de Price Action.")
             
-            # Execução
             if final_direction:
                 if not ti.validate_reversal_candle(signal_candle, final_direction): 
-                    print(f"[{base}] Vela de reversão inválida (muito grande/pequena).")
+                    print(f"[{base}] Vela de reversão inválida.")
                     return
                 
                 max_trades = self.bot_config.get('max_simultaneous_trades', 1)
@@ -278,8 +270,8 @@ class TradingBot:
 
         except Exception as e:
             if base in self.active_trading_pairs: self.active_trading_pairs.remove(base)
-            # Log de erro resumido para não poluir
             print(f"[ERRO ANÁLISE] {base}: {e}")
+            traceback.print_exc()
 
     async def _execute_martingale_trade(self, pair: str):
         trade_info = self.pending_martingale_trades.pop(pair, None)
