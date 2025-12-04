@@ -58,7 +58,6 @@ class TradingBot:
     async def run(self):
         await self.logger('INFO', 'Bot a iniciar no modo DEBUG (Tagarela)...')
         
-        # Conexão inicial
         if not await self.exnova.connect():
             await self.logger('ERROR', 'Falha na conexão inicial. Entrando em loop de recuperação.')
 
@@ -75,7 +74,7 @@ class TradingBot:
                     connected = True
 
                 if not connected:
-                    print("[AVISO] Conexão perdida detetada pelo loop principal. Reconectando...")
+                    print("[AVISO] Conexão perdida. Reconectando...")
                     if await self.exnova.connect():
                         await self.logger('SUCCESS', 'Conexão restabelecida.')
                     else:
@@ -92,13 +91,11 @@ class TradingBot:
                 status = self.bot_config.get('status', 'PAUSED')
 
                 if status == 'RUNNING':
-                    # Martingales
                     pending_pairs = list(self.pending_martingale_trades.keys())
                     for pair in pending_pairs:
                         if pair not in self.active_trading_pairs:
                             asyncio.create_task(self._execute_martingale_trade(pair))
 
-                    # Análise Normal
                     await self.trading_cycle()
                 
                 elif status != 'RUNNING':
@@ -114,10 +111,9 @@ class TradingBot:
                 await asyncio.sleep(5)
 
     async def trading_cycle(self):
-        # Verifica conexão ANTES de tentar qualquer coisa
         try:
             if hasattr(self.exnova, 'is_connected') and not await self.exnova.is_connected():
-                return # Aborta ciclo se desconectado
+                return
         except: pass
 
         now = datetime.utcnow()
@@ -135,13 +131,6 @@ class TradingBot:
                     asyncio.create_task(self.run_analysis_for_timeframe(60, 1))
 
     async def run_analysis_for_timeframe(self, timeframe_seconds: int, expiration_minutes: int):
-        # Proteção extra contra execução offline
-        try:
-            if hasattr(self.exnova, 'is_connected') and not await self.exnova.is_connected():
-                print("[SKIP] Varredura abortada: Sem conexão.")
-                return
-        except: pass
-
         await self.exnova.change_balance(self.bot_config.get('account_type', 'PRACTICE'))
         
         assets = await self.exnova.get_open_assets()
@@ -185,9 +174,9 @@ class TradingBot:
             analysis_candles, sr_candles = candles_tuple
             
             if not analysis_candles or not sr_candles:
-                # Se não vieram velas, pode ser falha de conexão silenciosa
                 return
 
+            # --- DEBUG LOGIC ---
             res, sup = res_func(sr_candles)
             signal_candle = analysis_candles[-1]
             final_direction, confluences = None, []
@@ -199,7 +188,8 @@ class TradingBot:
                 
                 if not sr_signal:
                     if base == "EURUSD": 
-                        print(f"[DEBUG M1] {base}: Sem SR. Preço: {signal_candle.close} | S: {sup} R: {res}")
+                        # CORREÇÃO: Removemos a formatação :.5f que causava crash
+                        print(f"[DEBUG M1] {base}: Sem SR. Preço: {signal_candle.close} | Zonas Carregadas.")
                 else:
                     print(f"[SINAL M1] {base}: Toque em SR detetado ({sr_signal})! Verificando filtros...")
                     confluences.append("SR_Zone")
