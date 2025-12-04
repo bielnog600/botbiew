@@ -176,20 +176,22 @@ class TradingBot:
             if not analysis_candles or not sr_candles:
                 return
 
-            # --- DEBUG LOGIC ---
             res, sup = res_func(sr_candles)
-            signal_candle = analysis_candles[-1]
+            signal_candle = analysis_candles[-1] # Agora é um dicionário
             final_direction, confluences = None, []
             zones = {'resistance': res, 'support': sup}
             threshold = self.bot_config.get('confirmation_threshold', 2)
 
             if expiration_minutes == 1:
+                # Passamos o dict completo, o módulo technical_indicators deve saber ler
+                # Se technical_indicators.py espera obj, ele falhará. 
+                # Mas o erro anterior era Pandas. Pandas ama dicts.
                 sr_signal = ti.check_price_near_sr(signal_candle, zones)
                 
                 if not sr_signal:
                     if base == "EURUSD": 
-                        # CORREÇÃO: Removemos a formatação :.5f que causava crash
-                        print(f"[DEBUG M1] {base}: Sem SR. Preço: {signal_candle.close} | Zonas Carregadas.")
+                        # CORREÇÃO: Removido :.5f pois sup e res são LISTAS e não floats únicos
+                        print(f"[DEBUG M1] {base}: Sem SR. Preço: {signal_candle['close']} | Sup: {len(sup)} zonas | Res: {len(res)} zonas")
                 else:
                     print(f"[SINAL M1] {base}: Toque em SR detetado ({sr_signal})! Verificando filtros...")
                     confluences.append("SR_Zone")
@@ -249,10 +251,13 @@ class TradingBot:
                 strategy = f"M{expiration_minutes}_" + ', '.join(confluences)
                 await self.logger('SUCCESS', f"EXECUTANDO ORDEM: {base} | {final_direction.upper()} | {strategy}")
                 
+                # Adaptação para acesso via dicionário ['key']
                 signal = TradeSignal(
                     pair=base, direction=final_direction, strategy=strategy,
-                    setup_candle_open=signal_candle.open, setup_candle_high=signal_candle.high,
-                    setup_candle_low=signal_candle.low, setup_candle_close=signal_candle.close
+                    setup_candle_open=signal_candle['open'], 
+                    setup_candle_high=signal_candle['high'],
+                    setup_candle_low=signal_candle['low'], 
+                    setup_candle_close=signal_candle['close']
                 )
                 
                 trade_exp = 4 if expiration_minutes == 5 else expiration_minutes
