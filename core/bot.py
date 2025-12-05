@@ -12,7 +12,7 @@ from analysis.technical import get_m15_sr_zones, get_h1_sr_zones
 from analysis import technical_indicators as ti
 from core.data_models import TradeSignal
 
-# --- MONKEY PATCH CORRECTIONS ---
+# --- MONKEY PATCH CORRECTIONS (CORREÇÕES INJETADAS) ---
 
 # 1. Correção para conversão de DataFrame (Mantida)
 def _convert_candles_to_dataframe_fix(candles):
@@ -57,7 +57,7 @@ def _validate_reversal_candle_fix(candle, direction):
         print(f"[DEBUG] Erro validação candle: {e}")
         return False
 
-# 3. Reconhecimento de Padrões Manual (Sem TA-Lib) - (Mantida)
+# 3. Reconhecimento de Padrões Manual (Mantida)
 def _check_candlestick_pattern_fix(candles):
     if len(candles) < 2: return None
     
@@ -68,47 +68,97 @@ def _check_candlestick_pattern_fix(candles):
         if isinstance(c, dict): return float(c[attr])
         return float(getattr(c, attr))
 
-    l_open = get_val(last, 'open')
-    l_close = get_val(last, 'close')
-    l_high = get_val(last, 'high')
-    l_low = get_val(last, 'low')
-    
-    p_open = get_val(prev, 'open')
-    p_close = get_val(prev, 'close')
-    
-    l_body = abs(l_close - l_open)
-    l_upper_wick = l_high - max(l_close, l_open)
-    l_lower_wick = min(l_close, l_open) - l_low
-    
-    is_l_green = l_close > l_open
-    is_l_red = l_close < l_open
-    is_p_green = p_close > p_open
-    is_p_red = p_close < p_open
+    try:
+        l_open = get_val(last, 'open')
+        l_close = get_val(last, 'close')
+        l_high = get_val(last, 'high')
+        l_low = get_val(last, 'low')
+        
+        p_open = get_val(prev, 'open')
+        p_close = get_val(prev, 'close')
+        
+        l_body = abs(l_close - l_open)
+        l_upper_wick = l_high - max(l_close, l_open)
+        l_lower_wick = min(l_close, l_open) - l_low
+        
+        is_l_green = l_close > l_open
+        is_l_red = l_close < l_open
+        is_p_green = p_close > p_open
+        is_p_red = p_close < p_open
 
-    # Engolfo de Alta
-    if is_p_red and is_l_green:
-        if l_close > p_open and l_open < p_close:
+        # Engolfo de Alta
+        if is_p_red and is_l_green:
+            if l_close > p_open and l_open < p_close:
+                return 'call'
+
+        # Engolfo de Baixa
+        if is_p_green and is_l_red:
+            if l_close < p_open and l_open > p_close:
+                return 'put'
+
+        # Pinbar (Alta)
+        if l_lower_wick >= (2 * l_body) and l_upper_wick <= l_body:
             return 'call'
 
-    # Engolfo de Baixa
-    if is_p_green and is_l_red:
-        if l_close < p_open and l_open > p_close:
+        # Shooting Star (Baixa)
+        if l_upper_wick >= (2 * l_body) and l_lower_wick <= l_body:
             return 'put'
-
-    # Pinbar/Hammer (Alta)
-    if l_lower_wick >= (2 * l_body) and l_upper_wick <= l_body:
-        return 'call'
-
-    # Shooting Star/Pinbar (Baixa)
-    if l_upper_wick >= (2 * l_body) and l_lower_wick <= l_body:
-        return 'put'
+    except Exception:
+        return None
 
     return None
+
+# 4. NOVA CORREÇÃO: Cálculo de RSI Manual (Substitui TA-Lib)
+def _calculate_rsi_pandas(series, period=14):
+    delta = series.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+    
+    rs = gain / loss
+    return 100 - (100 / (1 + rs))
+
+def _check_rsi_condition_fix(candles, period=14, overbought=70, oversold=30):
+    """
+    Calcula RSI manualmente e verifica condições de sobrecompra/sobrevenda.
+    """
+    try:
+        # Usa a nossa função de conversão corrigida
+        df = _convert_candles_to_dataframe_fix(candles)
+        if df.empty or len(df) < period + 1:
+            return None
+            
+        # Cálculo manual do RSI (Exponencial para simular Wilder/TA-Lib)
+        close_delta = df['close'].diff()
+        
+        # Make two series: gains and losses
+        up = close_delta.clip(lower=0)
+        down = -1 * close_delta.clip(upper=0)
+        
+        # Use exponential moving average
+        ma_up = up.ewm(com=period - 1, adjust=True, min_periods=period).mean()
+        ma_down = down.ewm(com=period - 1, adjust=True, min_periods=period).mean()
+        
+        rsi = ma_up / ma_down
+        rsi = 100 - (100 / (1 + rsi))
+        
+        last_rsi = rsi.iloc[-1]
+        
+        # Logica de sinal
+        if last_rsi >= overbought:
+            return 'put' # Sobrecomprado -> Vender
+        elif last_rsi <= oversold:
+            return 'call' # Sobrevendido -> Comprar
+            
+        return None
+    except Exception as e:
+        print(f"[DEBUG] Erro RSI: {e}")
+        return None
 
 # Aplica TODOS os patches
 ti._convert_candles_to_dataframe = _convert_candles_to_dataframe_fix
 ti.validate_reversal_candle = _validate_reversal_candle_fix
 ti.check_candlestick_pattern = _check_candlestick_pattern_fix
+ti.check_rsi_condition = _check_rsi_condition_fix # Injeta o novo patch de RSI
 
 # --- FIM DOS PATCHES ---
 
@@ -307,22 +357,21 @@ class TradingBot:
                 sr_signal = ti.check_price_near_sr(signal_candle_obj, zones)
                 
                 if not sr_signal:
-                    if base == "EURUSD": 
-                        pass # Reduzi o spam de "Sem SR"
+                    pass
                 else:
                     print(f"[SINAL M1] {base}: SR {sr_signal} detetado. Analisando...")
                     confluences.append("SR_Zone")
                     
-                    # Funções manuais
+                    # Funções manuais (Monkey Patched)
                     pattern = ti.check_candlestick_pattern(analysis_candles_objs)
                     if pattern == sr_signal: confluences.append("Candle_Pattern")
 
                     rsi_sig = ti.check_rsi_condition(analysis_candles_objs)
                     if rsi_sig == sr_signal: confluences.append("RSI_Condition")
                     
-                    # --- DEBUG DETALHADO ADICIONADO ---
+                    # --- DEBUG DETALHADO ---
                     print(f"   >>> {base} Detalhes: Padrão={pattern}, RSI={rsi_sig} (Esperado: {sr_signal}). Confluências={len(confluences)}/{threshold}")
-                    # ----------------------------------
+                    # -----------------------
 
                     if len(confluences) >= threshold: final_direction = sr_signal
 
@@ -340,7 +389,7 @@ class TradingBot:
                         confluences = temp_conf
             
             if final_direction:
-                # Usa validação simplificada
+                # Usa validação simplificada (Monkey Patched)
                 if not ti.validate_reversal_candle(signal_candle_obj, final_direction): 
                     print(f"[{base}] Vela inválida (Filtro de cor).")
                     return
