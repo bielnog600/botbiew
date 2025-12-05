@@ -1,6 +1,5 @@
 import asyncio
 import time
-import pandas as pd
 from datetime import datetime
 from exnovaapi.stable_api import Exnova
 
@@ -45,7 +44,6 @@ class AsyncExnovaService:
             pass
 
     async def get_open_assets(self):
-        # Lista estática para evitar erros de carregamento
         return ["EURUSD", "GBPUSD", "USDJPY", "EURJPY", "AUDCAD", "EURGBP", "USDCHF"]
 
     async def get_historical_candles(self, asset, timeframe_seconds, count):
@@ -56,24 +54,21 @@ class AsyncExnovaService:
             if not candles:
                 return []
 
-            # --- CORREÇÃO BALA DE PRATA: Pandas Series ---
-            # O Pandas Series funciona como Dicionário E como Objeto.
-            # É o formato nativo que a análise técnica espera.
+            # --- CORREÇÃO DEFINITIVA: LISTA DE DICIONÁRIOS PUROS ---
+            # Pandas converte Lista de Dicts em DataFrame automaticamente e sem erros.
             formatted_candles = []
             for c in candles:
-                data = {
+                formatted_candles.append({
                     'open': float(c.get('open', 0)),
                     'close': float(c.get('close', 0)),
-                    'high': float(c.get('max', c.get('high', 0))), # Garante 'high'
-                    'low': float(c.get('min', c.get('low', 0))),   # Garante 'low'
-                    'max': float(c.get('max', 0)),
-                    'min': float(c.get('min', 0)),
+                    'high': float(c.get('max', 0)), # Standard name
+                    'low': float(c.get('min', 0)),  # Standard name
+                    'max': float(c.get('max', 0)),  # Legacy support
+                    'min': float(c.get('min', 0)),  # Legacy support
                     'volume': float(c.get('volume', 0)),
                     'at': c.get('at', 0),
                     'id': c.get('id', 0)
-                }
-                # Cria uma Series do Pandas para cada vela
-                formatted_candles.append(pd.Series(data))
+                })
             
             return formatted_candles
 
