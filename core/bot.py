@@ -3,6 +3,7 @@ import traceback
 from datetime import datetime
 from typing import Dict, Optional, Set, List
 from types import SimpleNamespace
+import pandas as pd # Adicionado pandas
 
 from config import settings
 from services.exnova_service import AsyncExnovaService
@@ -10,6 +11,48 @@ from services.supabase_service import SupabaseService
 from analysis.technical import get_m15_sr_zones, get_h1_sr_zones
 from analysis import technical_indicators as ti
 from core.data_models import TradeSignal
+
+# --- MONKEY PATCH CORRECTION START ---
+# Definimos a função robusta sugerida para corrigir o erro no módulo importado
+def _convert_candles_to_dataframe_fix(candles):
+    """
+    Função corrigida para lidar com lista de dicts ou objetos (SimpleNamespace).
+    Injetada no módulo technical_indicators para substituir a original.
+    """
+    if not candles:
+        return pd.DataFrame()
+
+    normalized = []
+    for c in candles:
+        if isinstance(c, dict):
+            normalized.append(c)
+        else:
+            # Tenta converter usando vars() (para SimpleNamespace, objetos com __dict__, etc.)
+            try:
+                normalized.append(vars(c))
+            except TypeError:
+                # Se não der, tenta acessar atributos conhecidos manualmente ou lança erro
+                try:
+                    normalized.append({
+                        'open': c.open, 'close': c.close, 
+                        'high': c.high, 'low': c.low, 'volume': getattr(c, 'volume', 0)
+                    })
+                except AttributeError:
+                    raise TypeError(f"Candle do tipo não suportado em _convert_candles_to_dataframe: {type(c)}")
+
+    df = pd.DataFrame(normalized)
+
+    # Garante que colunas numéricas realmente fiquem numéricas
+    numeric_cols = ['open', 'close', 'high', 'low', 'volume']
+    for col in numeric_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+
+    return df
+
+# Aplicamos o patch substituindo a função no módulo importado 'ti'
+ti._convert_candles_to_dataframe = _convert_candles_to_dataframe_fix
+# --- MONKEY PATCH CORRECTION END ---
 
 class TradingBot:
     def __init__(self):
@@ -182,12 +225,14 @@ class TradingBot:
             if not analysis_candles or not sr_candles:
                 return
 
-            # --- CORREÇÃO DE TIPOS & SANITIZAÇÃO ---
-            # O módulo technical_indicators EXIGE objetos (devido ao vars()) E floats limpos (devido ao Pandas)
+            # --- PREPARAÇÃO DE DADOS ---
+            # Graças ao Monkey Patch que aplicamos acima, agora podemos converter 
+            # tudo para SimpleNamespace sem medo. A função interna do 'ti' saberá lidar com isso.
+            
             analysis_candles_objs = []
             for c in analysis_candles:
                 clean_c = c.copy()
-                # Forçamos conversão para float para evitar erros no pd.to_numeric depois
+                # Garantimos que os dados são float antes de criar o objeto
                 for field in ['open', 'close', 'high', 'low', 'volume']:
                     if field in clean_c:
                         try:
@@ -195,8 +240,9 @@ class TradingBot:
                         except: pass
                 analysis_candles_objs.append(SimpleNamespace(**clean_c))
             
+            # Usaremos APENAS os objetos daqui para frente nas funções de análise
             signal_candle_obj = analysis_candles_objs[-1]
-            signal_candle = analysis_candles[-1] # Dicionário original para o TradeSignal
+            signal_candle_dict = analysis_candles[-1] # Apenas para o TradeSignal no final
             
             res, sup = res_func(sr_candles)
             zones = {'resistance': res, 'support': sup}
@@ -205,32 +251,30 @@ class TradingBot:
             final_direction, confluences = None, []
 
             if expiration_minutes == 1:
-                # Todas as funções 'ti' recebem a lista de OBJETOS
+                # check_price_near_sr: Requer objeto (funciona OK)
                 sr_signal = ti.check_price_near_sr(signal_candle_obj, zones)
                 
                 if not sr_signal:
                     if base == "EURUSD": 
-                        print(f"[DEBUG M1] {base}: Sem SR. Preço: {signal_candle['close']} | Zonas: OK")
+                        print(f"[DEBUG M1] {base}: Sem SR. Preço: {signal_candle_obj.close} | Zonas: OK")
                 else:
                     print(f"[SINAL M1] {base}: SR {sr_signal} detetado. Analisando...")
                     confluences.append("SR_Zone")
                     
-                    # Passamos OBJETOS para satisfazer vars()
+                    # check_candlestick_pattern: Usa a função corrigida (Monkey Patch) -> Funciona com objetos
                     pattern = ti.check_candlestick_pattern(analysis_candles_objs)
                     if pattern == sr_signal: confluences.append("Candle_Pattern")
 
-                    # Passamos OBJETOS para satisfazer vars()
+                    # check_rsi_condition: Usa a função corrigida (Monkey Patch) -> Funciona com objetos
                     rsi_sig = ti.check_rsi_condition(analysis_candles_objs)
                     if rsi_sig == sr_signal: confluences.append("RSI_Condition")
 
                     if len(confluences) >= threshold: final_direction = sr_signal
 
             elif expiration_minutes == 5:
-                # Passamos OBJETOS
                 m5_signal = ti.check_m5_price_action(analysis_candles_objs, zones)
                 if m5_signal:
                     temp_conf = m5_signal['confluences']
-                    # Passamos OBJETOS
                     rsi_sig = ti.check_rsi_condition(analysis_candles_objs)
                     if rsi_sig == m5_signal['direction']: temp_conf.append("RSI_Condition")
                     
@@ -259,13 +303,12 @@ class TradingBot:
                 strategy = f"M{expiration_minutes}_" + ', '.join(confluences)
                 await self.logger('SUCCESS', f"ENTRADA: {base} | {final_direction.upper()} | {strategy}")
                 
-                # Para o TradeSignal, continuamos a usar o dicionário 'signal_candle'
                 signal = TradeSignal(
                     pair=base, direction=final_direction, strategy=strategy,
-                    setup_candle_open=signal_candle['open'], 
-                    setup_candle_high=signal_candle['high'],
-                    setup_candle_low=signal_candle['low'], 
-                    setup_candle_close=signal_candle['close']
+                    setup_candle_open=signal_candle_dict['open'], 
+                    setup_candle_high=signal_candle_dict['high'],
+                    setup_candle_low=signal_candle_dict['low'], 
+                    setup_candle_close=signal_candle_dict['close']
                 )
                 
                 trade_exp = 4 if expiration_minutes == 5 else expiration_minutes
