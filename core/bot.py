@@ -186,25 +186,21 @@ class TradingBot:
             if not analysis_candles or not sr_candles:
                 return
 
-            # --- CONVERSÃO DE TIPOS (FIX) ---
-            # O módulo technical_indicators espera objetos (dot notation), mas recebemos dicts.
-            # Convertemos para SimpleNamespace para compatibilidade.
+            # --- CONVERSÃO HÍBRIDA (FIX FINAL) ---
+            # 1. analysis_candles (DICTS): Para funções que usam Pandas (check_candlestick_pattern, check_rsi_condition)
+            # 2. analysis_candles_objs (OBJS): Para funções que usam property access (check_price_near_sr, validate_reversal)
             analysis_candles_objs = [SimpleNamespace(**c) for c in analysis_candles]
             signal_candle_obj = analysis_candles_objs[-1]
-            # sr_candles também pode precisar ser convertido se get_m15_sr_zones esperar objetos
-            # Assumindo que get_m15_sr_zones lida com dicts (baseado no traceback original que só falhou no TI),
-            # mas se falhar, precisará de conversão similar.
-            # -------------------------------
-
+            
             res, sup = res_func(sr_candles)
-            signal_candle = analysis_candles[-1] # Mantemos o dict original para uso posterior
+            signal_candle = analysis_candles[-1] # Dicionário puro
             
             final_direction, confluences = None, []
             zones = {'resistance': res, 'support': sup}
             threshold = self.bot_config.get('confirmation_threshold', 2)
 
             if expiration_minutes == 1:
-                # Usamos a versão _obj para as funções de TI
+                # [FIX] check_price_near_sr requer OBJETOS (falhou com dict antes)
                 sr_signal = ti.check_price_near_sr(signal_candle_obj, zones)
                 
                 if not sr_signal:
@@ -214,23 +210,23 @@ class TradingBot:
                     print(f"[SINAL M1] {base}: SR {sr_signal} detetado. Analisando...")
                     confluences.append("SR_Zone")
                     
-                    # Passamos a lista de objetos
-                    pattern = ti.check_candlestick_pattern(analysis_candles_objs)
+                    # [FIX] check_candlestick_pattern requer DICTS para Pandas (falhou com objs agora)
+                    pattern = ti.check_candlestick_pattern(analysis_candles)
                     if pattern == sr_signal: confluences.append("Candle_Pattern")
 
-                    # Passamos a lista de objetos
-                    rsi_sig = ti.check_rsi_condition(analysis_candles_objs)
+                    # [FIX] check_rsi_condition requer DICTS para Pandas
+                    rsi_sig = ti.check_rsi_condition(analysis_candles)
                     if rsi_sig == sr_signal: confluences.append("RSI_Condition")
 
                     if len(confluences) >= threshold: final_direction = sr_signal
 
             elif expiration_minutes == 5:
-                # Usamos a lista de objetos
+                # check_m5_price_action parece fazer verificações manuais, mantemos OBJ
                 m5_signal = ti.check_m5_price_action(analysis_candles_objs, zones)
                 if m5_signal:
                     temp_conf = m5_signal['confluences']
-                    # Usamos a lista de objetos
-                    rsi_sig = ti.check_rsi_condition(analysis_candles_objs)
+                    # [FIX] RSI requer DICTS
+                    rsi_sig = ti.check_rsi_condition(analysis_candles)
                     if rsi_sig == m5_signal['direction']: temp_conf.append("RSI_Condition")
                     
                     print(f"[DEBUG M5] {base}: Sinal {m5_signal['direction']}. Conf: {temp_conf}")
@@ -240,7 +236,7 @@ class TradingBot:
                         confluences = temp_conf
             
             if final_direction:
-                # Usamos a versão objeto para validação
+                # validate_reversal_candle requer OBJETO (acessa .close, .open)
                 if not ti.validate_reversal_candle(signal_candle_obj, final_direction): 
                     print(f"[{base}] Vela inválida.")
                     return
@@ -249,7 +245,6 @@ class TradingBot:
                 if len(self.active_trading_pairs) >= max_trades: return
 
                 now = datetime.utcnow()
-                # Calculate precise wait time to enter at the very start of the next candle
                 wait_sec = (60 - now.second - 1) + (1 - now.microsecond / 1000000) + 0.2
                 await self.logger('INFO', f"Sinal {base} CONFIRMADO. Aguardando {wait_sec:.1f}s.")
                 await asyncio.sleep(wait_sec)
@@ -260,7 +255,7 @@ class TradingBot:
                 strategy = f"M{expiration_minutes}_" + ', '.join(confluences)
                 await self.logger('SUCCESS', f"ENTRADA: {base} | {final_direction.upper()} | {strategy}")
                 
-                # Aqui usamos signal_candle (o dict original) porque TradeSignal/Supabase esperam os valores puros
+                # TradeSignal usa os dados puros do dicionário
                 signal = TradeSignal(
                     pair=base, direction=final_direction, strategy=strategy,
                     setup_candle_open=signal_candle['open'], 
