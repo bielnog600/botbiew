@@ -57,36 +57,25 @@ def _validate_reversal_candle_fix(candle, direction):
         print(f"[DEBUG] Erro validação candle: {e}")
         return False
 
-# 3. NOVA CORREÇÃO: Reconhecimento de Padrões Manual (Sem TA-Lib)
-# Substitui a função que dependia da biblioteca C faltante no servidor
+# 3. Reconhecimento de Padrões Manual (Sem TA-Lib) - (Mantida)
 def _check_candlestick_pattern_fix(candles):
-    """
-    Verifica padrões básicos (Engolfo e Pinbar) usando matemática pura.
-    Retorna 'call', 'put' ou None.
-    """
     if len(candles) < 2: return None
     
-    # Pega as últimas velas (garantindo que são objetos SimpleNamespace ou dict acessível)
-    # Como aplicamos o patch de dataframe antes, aqui assumimos que recebemos a lista original de objetos
     last = candles[-1]
     prev = candles[-2]
     
-    # Helper seguro para atributos
     def get_val(c, attr):
         if isinstance(c, dict): return float(c[attr])
         return float(getattr(c, attr))
 
-    # Dados da vela atual (Sinal)
     l_open = get_val(last, 'open')
     l_close = get_val(last, 'close')
     l_high = get_val(last, 'high')
     l_low = get_val(last, 'low')
     
-    # Dados da vela anterior
     p_open = get_val(prev, 'open')
     p_close = get_val(prev, 'close')
     
-    # Cálculos auxiliares
     l_body = abs(l_close - l_open)
     l_upper_wick = l_high - max(l_close, l_open)
     l_lower_wick = min(l_close, l_open) - l_low
@@ -96,25 +85,21 @@ def _check_candlestick_pattern_fix(candles):
     is_p_green = p_close > p_open
     is_p_red = p_close < p_open
 
-    # 1. ENGOLFO DE ALTA (Bullish Engulfing) -> Call
-    # Vela anterior vermelha, atual verde, fecha acima da abertura anterior e abre abaixo do fechamento anterior
+    # Engolfo de Alta
     if is_p_red and is_l_green:
         if l_close > p_open and l_open < p_close:
             return 'call'
 
-    # 2. ENGOLFO DE BAIXA (Bearish Engulfing) -> Put
-    # Vela anterior verde, atual vermelha, engole o corpo
+    # Engolfo de Baixa
     if is_p_green and is_l_red:
         if l_close < p_open and l_open > p_close:
             return 'put'
 
-    # 3. PINBAR / HAMMER (Reversão para Alta) -> Call
-    # Corpo pequeno, sombra inferior longa (pelo menos 2x o corpo), sombra superior pequena
+    # Pinbar/Hammer (Alta)
     if l_lower_wick >= (2 * l_body) and l_upper_wick <= l_body:
         return 'call'
 
-    # 4. SHOOTING STAR / PINBAR (Reversão para Baixa) -> Put
-    # Corpo pequeno, sombra superior longa (pelo menos 2x o corpo), sombra inferior pequena
+    # Shooting Star/Pinbar (Baixa)
     if l_upper_wick >= (2 * l_body) and l_lower_wick <= l_body:
         return 'put'
 
@@ -123,7 +108,7 @@ def _check_candlestick_pattern_fix(candles):
 # Aplica TODOS os patches
 ti._convert_candles_to_dataframe = _convert_candles_to_dataframe_fix
 ti.validate_reversal_candle = _validate_reversal_candle_fix
-ti.check_candlestick_pattern = _check_candlestick_pattern_fix # Injeta a função manual
+ti.check_candlestick_pattern = _check_candlestick_pattern_fix
 
 # --- FIM DOS PATCHES ---
 
@@ -323,17 +308,21 @@ class TradingBot:
                 
                 if not sr_signal:
                     if base == "EURUSD": 
-                        print(f"[DEBUG M1] {base}: Sem SR. Preço: {signal_candle_obj.close} | Zonas: OK")
+                        pass # Reduzi o spam de "Sem SR"
                 else:
                     print(f"[SINAL M1] {base}: SR {sr_signal} detetado. Analisando...")
                     confluences.append("SR_Zone")
                     
-                    # Agora usa a função MANUAL injetada (sem TA-Lib)
+                    # Funções manuais
                     pattern = ti.check_candlestick_pattern(analysis_candles_objs)
                     if pattern == sr_signal: confluences.append("Candle_Pattern")
 
                     rsi_sig = ti.check_rsi_condition(analysis_candles_objs)
                     if rsi_sig == sr_signal: confluences.append("RSI_Condition")
+                    
+                    # --- DEBUG DETALHADO ADICIONADO ---
+                    print(f"   >>> {base} Detalhes: Padrão={pattern}, RSI={rsi_sig} (Esperado: {sr_signal}). Confluências={len(confluences)}/{threshold}")
+                    # ----------------------------------
 
                     if len(confluences) >= threshold: final_direction = sr_signal
 
@@ -353,7 +342,7 @@ class TradingBot:
             if final_direction:
                 # Usa validação simplificada
                 if not ti.validate_reversal_candle(signal_candle_obj, final_direction): 
-                    print(f"[{base}] Vela inválida.")
+                    print(f"[{base}] Vela inválida (Filtro de cor).")
                     return
                 
                 max_trades = self.bot_config.get('max_simultaneous_trades', 1)
