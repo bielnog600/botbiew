@@ -3,7 +3,7 @@ import traceback
 from datetime import datetime
 from typing import Dict, Optional, Set, List
 from types import SimpleNamespace
-import pandas as pd # Adicionado pandas
+import pandas as pd 
 
 from config import settings
 from services.exnova_service import AsyncExnovaService
@@ -12,13 +12,10 @@ from analysis.technical import get_m15_sr_zones, get_h1_sr_zones
 from analysis import technical_indicators as ti
 from core.data_models import TradeSignal
 
-# --- MONKEY PATCH CORRECTION START ---
-# Definimos a função robusta sugerida para corrigir o erro no módulo importado
+# --- MONKEY PATCH CORRECTIONS ---
+
+# 1. Correção para conversão de DataFrame (já existente)
 def _convert_candles_to_dataframe_fix(candles):
-    """
-    Função corrigida para lidar com lista de dicts ou objetos (SimpleNamespace).
-    Injetada no módulo technical_indicators para substituir a original.
-    """
     if not candles:
         return pd.DataFrame()
 
@@ -27,32 +24,54 @@ def _convert_candles_to_dataframe_fix(candles):
         if isinstance(c, dict):
             normalized.append(c)
         else:
-            # Tenta converter usando vars() (para SimpleNamespace, objetos com __dict__, etc.)
             try:
                 normalized.append(vars(c))
             except TypeError:
-                # Se não der, tenta acessar atributos conhecidos manualmente ou lança erro
                 try:
                     normalized.append({
                         'open': c.open, 'close': c.close, 
                         'high': c.high, 'low': c.low, 'volume': getattr(c, 'volume', 0)
                     })
                 except AttributeError:
-                    raise TypeError(f"Candle do tipo não suportado em _convert_candles_to_dataframe: {type(c)}")
+                    raise TypeError(f"Candle type not supported: {type(c)}")
 
     df = pd.DataFrame(normalized)
-
-    # Garante que colunas numéricas realmente fiquem numéricas
     numeric_cols = ['open', 'close', 'high', 'low', 'volume']
     for col in numeric_cols:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce')
-
     return df
 
-# Aplicamos o patch substituindo a função no módulo importado 'ti'
+# 2. NOVA CORREÇÃO: Validação de vela simplificada
+# Substitui a função que estava rejeitando os sinais válidos
+def _validate_reversal_candle_fix(candle, direction):
+    """
+    Validação simplificada:
+    - Call: Aceita se a vela for Verde (Close >= Open)
+    - Put: Aceita se a vela for Vermelha (Close <= Open)
+    """
+    try:
+        # Garante que lidamos com floats
+        c_open = float(candle.open)
+        c_close = float(candle.close)
+        
+        if direction.lower() == 'call':
+            # Valida se é verde ou doji
+            return c_close >= c_open
+        elif direction.lower() == 'put':
+            # Valida se é vermelha ou doji
+            return c_close <= c_open
+            
+        return False
+    except Exception as e:
+        print(f"[DEBUG] Erro validação candle: {e}")
+        return False
+
+# Aplica os patches
 ti._convert_candles_to_dataframe = _convert_candles_to_dataframe_fix
-# --- MONKEY PATCH CORRECTION END ---
+ti.validate_reversal_candle = _validate_reversal_candle_fix
+
+# --- FIM DOS PATCHES ---
 
 class TradingBot:
     def __init__(self):
@@ -226,13 +245,9 @@ class TradingBot:
                 return
 
             # --- PREPARAÇÃO DE DADOS ---
-            # Graças ao Monkey Patch que aplicamos acima, agora podemos converter 
-            # tudo para SimpleNamespace sem medo. A função interna do 'ti' saberá lidar com isso.
-            
             analysis_candles_objs = []
             for c in analysis_candles:
                 clean_c = c.copy()
-                # Garantimos que os dados são float antes de criar o objeto
                 for field in ['open', 'close', 'high', 'low', 'volume']:
                     if field in clean_c:
                         try:
@@ -240,9 +255,8 @@ class TradingBot:
                         except: pass
                 analysis_candles_objs.append(SimpleNamespace(**clean_c))
             
-            # Usaremos APENAS os objetos daqui para frente nas funções de análise
             signal_candle_obj = analysis_candles_objs[-1]
-            signal_candle_dict = analysis_candles[-1] # Apenas para o TradeSignal no final
+            signal_candle_dict = analysis_candles[-1]
             
             res, sup = res_func(sr_candles)
             zones = {'resistance': res, 'support': sup}
@@ -251,7 +265,6 @@ class TradingBot:
             final_direction, confluences = None, []
 
             if expiration_minutes == 1:
-                # check_price_near_sr: Requer objeto (funciona OK)
                 sr_signal = ti.check_price_near_sr(signal_candle_obj, zones)
                 
                 if not sr_signal:
@@ -261,11 +274,9 @@ class TradingBot:
                     print(f"[SINAL M1] {base}: SR {sr_signal} detetado. Analisando...")
                     confluences.append("SR_Zone")
                     
-                    # check_candlestick_pattern: Usa a função corrigida (Monkey Patch) -> Funciona com objetos
                     pattern = ti.check_candlestick_pattern(analysis_candles_objs)
                     if pattern == sr_signal: confluences.append("Candle_Pattern")
 
-                    # check_rsi_condition: Usa a função corrigida (Monkey Patch) -> Funciona com objetos
                     rsi_sig = ti.check_rsi_condition(analysis_candles_objs)
                     if rsi_sig == sr_signal: confluences.append("RSI_Condition")
 
@@ -285,6 +296,7 @@ class TradingBot:
                         confluences = temp_conf
             
             if final_direction:
+                # Usamos a função patcheada agora, deve passar se a cor bater
                 if not ti.validate_reversal_candle(signal_candle_obj, final_direction): 
                     print(f"[{base}] Vela inválida.")
                     return
