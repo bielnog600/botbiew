@@ -3,6 +3,7 @@ import traceback
 from datetime import datetime
 from typing import Dict, Optional, Set, List
 
+# Assumed imports based on your provided code
 from config import settings
 from services.exnova_service import AsyncExnovaService
 from services.supabase_service import SupabaseService
@@ -50,9 +51,12 @@ class TradingBot:
             self.daily_wins = 0
             self.daily_losses = 0
             self.last_daily_reset_date = current_date_utc
-            bal = await self.exnova.get_current_balance()
-            if bal > 0:
-                await asyncio.to_thread(self.supabase.update_config, {'daily_initial_balance': bal, 'current_balance': bal})
+            try:
+                bal = await self.exnova.get_current_balance()
+                if bal > 0:
+                    await asyncio.to_thread(self.supabase.update_config, {'daily_initial_balance': bal, 'current_balance': bal})
+            except Exception as e:
+                await self.logger('ERROR', f"Erro ao atualizar saldo diário: {e}")
 
     async def run(self):
         await self.logger('INFO', 'Bot a iniciar no modo DEBUG...')
@@ -92,10 +96,13 @@ class TradingBot:
                 status = self.bot_config.get('status', 'PAUSED')
 
                 if status == 'RUNNING':
+                    # Process pending martingales first
                     pending = list(self.pending_martingale_trades.keys())
                     for pair in pending:
                         if pair not in self.active_trading_pairs:
                             asyncio.create_task(self._execute_martingale_trade(pair))
+                    
+                    # Run standard analysis
                     await self.trading_cycle()
                 
                 elif status != 'RUNNING':
@@ -117,6 +124,7 @@ class TradingBot:
         except: pass
 
         now = datetime.utcnow()
+        # Trigger analysis near the end of the minute
         if now.second >= 50:
             if now.minute != self.last_analysis_minute:
                 self.last_analysis_minute = now.minute
@@ -130,29 +138,32 @@ class TradingBot:
                     asyncio.create_task(self.run_analysis_for_timeframe(60, 1))
 
     async def run_analysis_for_timeframe(self, timeframe_seconds: int, expiration_minutes: int):
-        await self.exnova.change_balance(self.bot_config.get('account_type', 'PRACTICE'))
-        
-        assets = await self.exnova.get_open_assets()
-        available_assets = [asset for asset in assets if asset.split('-')[0] not in self.blacklisted_assets]
+        try:
+            await self.exnova.change_balance(self.bot_config.get('account_type', 'PRACTICE'))
+            
+            assets = await self.exnova.get_open_assets()
+            available_assets = [asset for asset in assets if asset.split('-')[0] not in self.blacklisted_assets]
 
-        def get_asset_score(asset_name):
-            pair = asset_name.split('-')[0]
-            stats = self.asset_performance.get(pair, {'wins': 0, 'losses': 0})
-            total = stats['wins'] + stats['losses']
-            if total == 0: return 0.5
-            return stats['wins'] / total
+            def get_asset_score(asset_name):
+                pair = asset_name.split('-')[0]
+                stats = self.asset_performance.get(pair, {'wins': 0, 'losses': 0})
+                total = stats['wins'] + stats['losses']
+                if total == 0: return 0.5
+                return stats['wins'] / total
 
-        target_assets = sorted(available_assets, key=get_asset_score, reverse=True)[:settings.MAX_ASSETS_TO_MONITOR]
-        
-        max_sim = self.bot_config.get('max_simultaneous_trades', 1)
-        if len(self.active_trading_pairs) >= max_sim: return
+            target_assets = sorted(available_assets, key=get_asset_score, reverse=True)[:settings.MAX_ASSETS_TO_MONITOR]
+            
+            max_sim = self.bot_config.get('max_simultaneous_trades', 1)
+            if len(self.active_trading_pairs) >= max_sim: return
 
-        tasks = []
-        for asset in target_assets:
-            if asset.split('-')[0] in self.active_trading_pairs: continue
-            tasks.append(self._analyze_asset(asset, timeframe_seconds, expiration_minutes))
+            tasks = []
+            for asset in target_assets:
+                if asset.split('-')[0] in self.active_trading_pairs: continue
+                tasks.append(self._analyze_asset(asset, timeframe_seconds, expiration_minutes))
 
-        if tasks: await asyncio.gather(*tasks)
+            if tasks: await asyncio.gather(*tasks)
+        except Exception as e:
+            await self.logger('ERROR', f"Erro em run_analysis: {e}")
 
     async def _analyze_asset(self, full_name: str, timeframe_seconds: int, expiration_minutes: int):
         base = full_name.split('-')[0]
@@ -175,7 +186,7 @@ class TradingBot:
                 return
 
             res, sup = res_func(sr_candles)
-            signal_candle = analysis_candles[-1] # É um dicionário puro
+            signal_candle = analysis_candles[-1] # Dicionário puro
             final_direction, confluences = None, []
             zones = {'resistance': res, 'support': sup}
             threshold = self.bot_config.get('confirmation_threshold', 2)
@@ -220,6 +231,7 @@ class TradingBot:
                 if len(self.active_trading_pairs) >= max_trades: return
 
                 now = datetime.utcnow()
+                # Calculate precise wait time to enter at the very start of the next candle
                 wait_sec = (60 - now.second - 1) + (1 - now.microsecond / 1000000) + 0.2
                 await self.logger('INFO', f"Sinal {base} CONFIRMADO. Aguardando {wait_sec:.1f}s.")
                 await asyncio.sleep(wait_sec)
@@ -291,6 +303,7 @@ class TradingBot:
             await self.logger('INFO', f"Ordem {oid} enviada. ${val}. Aguardando...")
             sid = await asyncio.to_thread(self.supabase.insert_trade_signal, signal)
             
+            # Wait for trade duration plus a buffer for API delay
             await asyncio.sleep(expiration * 60 + 15)
             result = await self.exnova.check_win(oid)
             
@@ -308,8 +321,10 @@ class TradingBot:
         
         if sid: await asyncio.to_thread(self.supabase.update_trade_result, sid, result.upper(), mg_lv)
         
-        bal = await self.exnova.get_current_balance()
-        if bal: await asyncio.to_thread(self.supabase.update_current_balance, bal)
+        try:
+            bal = await self.exnova.get_current_balance()
+            if bal: await asyncio.to_thread(self.supabase.update_current_balance, bal)
+        except Exception: pass
 
         self.asset_performance.setdefault(pair, {'wins': 0, 'losses': 0})
         self.consecutive_losses.setdefault(pair, 0)
