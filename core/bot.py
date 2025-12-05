@@ -29,7 +29,7 @@ class TradingBot:
         self.daily_losses = 0
 
     async def logger(self, level: str, message: str):
-        """Logs para console e Supabase"""
+        """Logs para console e Supabase (via thread separada)"""
         ts = datetime.utcnow().isoformat()
         print(f"[{ts}] [{level.upper()}] {message}", flush=True)
         try:
@@ -58,6 +58,7 @@ class TradingBot:
     async def run(self):
         await self.logger('INFO', 'Bot a iniciar no modo DEBUG (Tagarela)...')
         
+        # Conexão inicial
         if not await self.exnova.connect():
             await self.logger('ERROR', 'Falha na conexão inicial. Entrando em loop de recuperação.')
 
@@ -66,10 +67,11 @@ class TradingBot:
         while self.is_running:
             try:
                 # --- AUTO-RECONNECT ---
-                connected = True
                 try:
                     if hasattr(self.exnova, 'is_connected'):
                          connected = await self.exnova.is_connected()
+                    else:
+                         connected = True
                 except:
                     connected = True
 
@@ -91,11 +93,13 @@ class TradingBot:
                 status = self.bot_config.get('status', 'PAUSED')
 
                 if status == 'RUNNING':
+                    # Martingale
                     pending_pairs = list(self.pending_martingale_trades.keys())
                     for pair in pending_pairs:
                         if pair not in self.active_trading_pairs:
                             asyncio.create_task(self._execute_martingale_trade(pair))
 
+                    # Análise Normal
                     await self.trading_cycle()
                 
                 elif status != 'RUNNING':
@@ -111,11 +115,6 @@ class TradingBot:
                 await asyncio.sleep(5)
 
     async def trading_cycle(self):
-        try:
-            if hasattr(self.exnova, 'is_connected') and not await self.exnova.is_connected():
-                return
-        except: pass
-
         now = datetime.utcnow()
         if now.second >= 50:
             if now.minute != self.last_analysis_minute:
@@ -176,22 +175,20 @@ class TradingBot:
             if not analysis_candles or not sr_candles:
                 return
 
+            # --- LÓGICA DE DEBUG TAGARELA ---
             res, sup = res_func(sr_candles)
-            signal_candle = analysis_candles[-1] # Agora é um dicionário
+            signal_candle = analysis_candles[-1]
             final_direction, confluences = None, []
             zones = {'resistance': res, 'support': sup}
             threshold = self.bot_config.get('confirmation_threshold', 2)
 
             if expiration_minutes == 1:
-                # Passamos o dict completo, o módulo technical_indicators deve saber ler
-                # Se technical_indicators.py espera obj, ele falhará. 
-                # Mas o erro anterior era Pandas. Pandas ama dicts.
                 sr_signal = ti.check_price_near_sr(signal_candle, zones)
                 
                 if not sr_signal:
                     if base == "EURUSD": 
-                        # CORREÇÃO: Removido :.5f pois sup e res são LISTAS e não floats únicos
-                        print(f"[DEBUG M1] {base}: Sem SR. Preço: {signal_candle['close']} | Sup: {len(sup)} zonas | Res: {len(res)} zonas")
+                        # CORREÇÃO: Removida a formatação :.5f para evitar erros com listas
+                        print(f"[DEBUG M1] {base}: Sem SR. Preço: {signal_candle['close']} | Zonas OK")
                 else:
                     print(f"[SINAL M1] {base}: Toque em SR detetado ({sr_signal})! Verificando filtros...")
                     confluences.append("SR_Zone")
@@ -251,7 +248,7 @@ class TradingBot:
                 strategy = f"M{expiration_minutes}_" + ', '.join(confluences)
                 await self.logger('SUCCESS', f"EXECUTANDO ORDEM: {base} | {final_direction.upper()} | {strategy}")
                 
-                # Adaptação para acesso via dicionário ['key']
+                # Acesso seguro via dicionário
                 signal = TradeSignal(
                     pair=base, direction=final_direction, strategy=strategy,
                     setup_candle_open=signal_candle['open'], 
