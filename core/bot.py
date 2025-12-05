@@ -57,7 +57,7 @@ def _validate_reversal_candle_fix(candle, direction):
         print(f"[DEBUG] Erro validação candle: {e}")
         return False
 
-# 3. Reconhecimento de Padrões Manual (AJUSTADO: Mais Flexível + Debug)
+# 3. Reconhecimento de Padrões Manual (Mantida)
 def _check_candlestick_pattern_fix(candles):
     if len(candles) < 2: return None
     
@@ -78,7 +78,6 @@ def _check_candlestick_pattern_fix(candles):
         p_close = get_val(prev, 'close')
         
         l_body = abs(l_close - l_open)
-        # Evita divisão por zero
         if l_body == 0: l_body = 0.00001
         
         l_upper_wick = l_high - max(l_close, l_open)
@@ -89,26 +88,21 @@ def _check_candlestick_pattern_fix(candles):
         is_p_green = p_close > p_open
         is_p_red = p_close < p_open
 
-        # Ratio para Pinbar (1.5x é mais comum em M1 que 2x)
         PINBAR_RATIO = 1.5
 
-        # Engolfo de Alta
         if is_p_red and is_l_green:
             if l_close > p_open and l_open < p_close:
-                return 'call'
+                return 'call' # Bullish Engulfing
 
-        # Engolfo de Baixa
         if is_p_green and is_l_red:
             if l_close < p_open and l_open > p_close:
-                return 'put'
+                return 'put' # Bearish Engulfing
 
-        # Pinbar (Alta)
         if l_lower_wick >= (PINBAR_RATIO * l_body) and l_upper_wick <= l_body:
-            return 'call'
+            return 'call' # Pinbar/Hammer
 
-        # Shooting Star (Baixa)
         if l_upper_wick >= (PINBAR_RATIO * l_body) and l_lower_wick <= l_body:
-            return 'put'
+            return 'put' # Shooting Star
             
     except Exception as e:
         print(f"[DEBUG Padrão] Erro: {e}")
@@ -116,7 +110,7 @@ def _check_candlestick_pattern_fix(candles):
 
     return None
 
-# 4. RSI Manual (AJUSTADO: Níveis 65/35 + Debug Print)
+# 4. RSI Manual (AJUSTADO: Com LOG VISÍVEL)
 def _calculate_rsi_pandas(series, period=14):
     delta = series.diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
@@ -125,9 +119,6 @@ def _calculate_rsi_pandas(series, period=14):
     return 100 - (100 / (1 + rs))
 
 def _check_rsi_condition_fix(candles, period=14, overbought=65, oversold=35):
-    """
-    RSI Ajustado para M1: 65/35
-    """
     try:
         df = _convert_candles_to_dataframe_fix(candles)
         if df.empty or len(df) < period + 1:
@@ -145,8 +136,8 @@ def _check_rsi_condition_fix(candles, period=14, overbought=65, oversold=35):
         
         last_rsi = rsi.iloc[-1]
         
-        # Debug para saberes o valor real no log
-        # print(f"   [DEBUG RSI] Valor: {last_rsi:.2f}") 
+        # LOG ATIVADO: Mostra o valor exato para saberes o que está a acontecer
+        print(f"   [RSI DEBUG] Valor Atual: {last_rsi:.2f} (OB: {overbought}, OS: {oversold})") 
         
         if last_rsi >= overbought:
             return 'put'
@@ -366,16 +357,14 @@ class TradingBot:
                     print(f"[SINAL M1] {base}: SR {sr_signal} detetado. Analisando...")
                     confluences.append("SR_Zone")
                     
-                    # Funções manuais (Monkey Patched)
                     pattern = ti.check_candlestick_pattern(analysis_candles_objs)
                     if pattern == sr_signal: confluences.append("Candle_Pattern")
 
                     rsi_sig = ti.check_rsi_condition(analysis_candles_objs)
                     if rsi_sig == sr_signal: confluences.append("RSI_Condition")
                     
-                    # --- DEBUG DETALHADO ---
-                    print(f"   >>> {base} Detalhes: Padrão={pattern}, RSI={rsi_sig} (Esperado: {sr_signal}). Confluências={len(confluences)}/{threshold}")
-                    # -----------------------
+                    # --- DEBUG VISUAL: Mostra o resumo da decisão ---
+                    print(f"   >>> {base} Decisão: Padrão={pattern}, RSI_Sinal={rsi_sig} | Confluências={len(confluences)}/{threshold}")
 
                     if len(confluences) >= threshold: final_direction = sr_signal
 
@@ -393,7 +382,6 @@ class TradingBot:
                         confluences = temp_conf
             
             if final_direction:
-                # Usa validação simplificada (Monkey Patched)
                 if not ti.validate_reversal_candle(signal_candle_obj, final_direction): 
                     print(f"[{base}] Vela inválida (Filtro de cor).")
                     return
@@ -412,7 +400,7 @@ class TradingBot:
                 strategy = f"M{expiration_minutes}_" + ', '.join(confluences)
                 await self.logger('SUCCESS', f"ENTRADA: {base} | {final_direction.upper()} | {strategy}")
                 
-                # CORREÇÃO CRÍTICA AQUI: Usar 'open', 'close' etc. em vez de 'setup_candle_open'
+                # CORREÇÃO Pydantic (Já presente, mas reforçada)
                 signal = TradeSignal(
                     pair=base, 
                     direction=final_direction, 
