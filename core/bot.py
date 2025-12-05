@@ -29,7 +29,6 @@ class TradingBot:
         self.daily_losses = 0
 
     async def logger(self, level: str, message: str):
-        """Logs para console e Supabase (via thread separada)"""
         ts = datetime.utcnow().isoformat()
         print(f"[{ts}] [{level.upper()}] {message}", flush=True)
         try:
@@ -38,7 +37,7 @@ class TradingBot:
             pass
 
     async def _hourly_cycle_reset(self):
-        await self.logger('INFO', "CICLO HORÁRIO: Limpeza de stats e blacklist.")
+        await self.logger('INFO', "CICLO HORÁRIO: Limpeza de stats.")
         self.asset_performance.clear()
         self.consecutive_losses.clear()
         self.blacklisted_assets.clear()
@@ -47,7 +46,7 @@ class TradingBot:
     async def _daily_reset_if_needed(self):
         current_date_utc = datetime.utcnow().date()
         if self.last_daily_reset_date != current_date_utc:
-            await self.logger('INFO', f"NOVO DIA ({current_date_utc}). Metas diárias zeradas.")
+            await self.logger('INFO', f"NOVO DIA ({current_date_utc}). Reset metas.")
             self.daily_wins = 0
             self.daily_losses = 0
             self.last_daily_reset_date = current_date_utc
@@ -56,29 +55,29 @@ class TradingBot:
                 await asyncio.to_thread(self.supabase.update_config, {'daily_initial_balance': bal, 'current_balance': bal})
 
     async def run(self):
-        await self.logger('INFO', 'Bot a iniciar no modo DEBUG (Tagarela)...')
+        await self.logger('INFO', 'Bot a iniciar no modo DEBUG...')
         
-        # Conexão inicial
         if not await self.exnova.connect():
-            await self.logger('ERROR', 'Falha na conexão inicial. Entrando em loop de recuperação.')
+            await self.logger('ERROR', 'Falha na conexão inicial.')
 
         await self._daily_reset_if_needed()
 
         while self.is_running:
             try:
-                # --- AUTO-RECONNECT ---
+                # --- AUTO-RECONEXÃO ---
+                connected = True
                 try:
                     if hasattr(self.exnova, 'is_connected'):
-                         connected = await self.exnova.is_connected()
+                        connected = await self.exnova.is_connected()
                     else:
-                         connected = True
+                        connected = True
                 except:
                     connected = True
 
                 if not connected:
                     print("[AVISO] Conexão perdida. Reconectando...")
                     if await self.exnova.connect():
-                        await self.logger('SUCCESS', 'Conexão restabelecida.')
+                        await self.logger('SUCCESS', 'Reconectado.')
                     else:
                         await asyncio.sleep(5)
                         continue
@@ -93,18 +92,15 @@ class TradingBot:
                 status = self.bot_config.get('status', 'PAUSED')
 
                 if status == 'RUNNING':
-                    # Martingale
-                    pending_pairs = list(self.pending_martingale_trades.keys())
-                    for pair in pending_pairs:
+                    pending = list(self.pending_martingale_trades.keys())
+                    for pair in pending:
                         if pair not in self.active_trading_pairs:
                             asyncio.create_task(self._execute_martingale_trade(pair))
-
-                    # Análise Normal
                     await self.trading_cycle()
                 
                 elif status != 'RUNNING':
                     if len(self.active_trading_pairs) > 0:
-                        print(f"[PAUSA] Aguardando {len(self.active_trading_pairs)} trades finalizarem.")
+                        print(f"[PAUSA] Aguardando {len(self.active_trading_pairs)} trades.")
                     await asyncio.sleep(2)
 
                 await asyncio.sleep(1)
@@ -121,12 +117,11 @@ class TradingBot:
                 self.last_analysis_minute = now.minute
                 
                 is_m5 = (now.minute + 1) % 5 == 0
-                
                 if is_m5:
-                    await self.logger('INFO', f"Iniciando varredura M5...")
+                    await self.logger('INFO', f"Varredura M5...")
                     asyncio.create_task(self.run_analysis_for_timeframe(300, 5))
                 else:
-                    await self.logger('INFO', f"Iniciando varredura M1...")
+                    await self.logger('INFO', f"Varredura M1...")
                     asyncio.create_task(self.run_analysis_for_timeframe(60, 1))
 
     async def run_analysis_for_timeframe(self, timeframe_seconds: int, expiration_minutes: int):
@@ -144,9 +139,8 @@ class TradingBot:
 
         target_assets = sorted(available_assets, key=get_asset_score, reverse=True)[:settings.MAX_ASSETS_TO_MONITOR]
         
-        max_simultaneous = self.bot_config.get('max_simultaneous_trades', 1)
-        if len(self.active_trading_pairs) >= max_simultaneous: 
-            return
+        max_sim = self.bot_config.get('max_simultaneous_trades', 1)
+        if len(self.active_trading_pairs) >= max_sim: return
 
         tasks = []
         for asset in target_assets:
@@ -172,10 +166,8 @@ class TradingBot:
             )
             analysis_candles, sr_candles = candles_tuple
             
-            if not analysis_candles or not sr_candles:
-                return
+            if not analysis_candles or not sr_candles: return
 
-            # --- LÓGICA DE DEBUG TAGARELA ---
             res, sup = res_func(sr_candles)
             signal_candle = analysis_candles[-1]
             final_direction, confluences = None, []
@@ -187,51 +179,36 @@ class TradingBot:
                 
                 if not sr_signal:
                     if base == "EURUSD": 
-                        # CORREÇÃO: Removida a formatação :.5f para evitar erros com listas
-                        print(f"[DEBUG M1] {base}: Sem SR. Preço: {signal_candle['close']} | Zonas OK")
+                        # CORREÇÃO: Removida formatação :.5f que causava crash
+                        print(f"[DEBUG M1] {base}: Sem SR. Preço: {signal_candle['close']} | Zonas: OK")
                 else:
-                    print(f"[SINAL M1] {base}: Toque em SR detetado ({sr_signal})! Verificando filtros...")
+                    print(f"[SINAL M1] {base}: SR {sr_signal} detetado. Analisando...")
                     confluences.append("SR_Zone")
                     
                     pattern = ti.check_candlestick_pattern(analysis_candles)
-                    if pattern == sr_signal: 
-                        confluences.append("Candle_Pattern")
-                        print(f"   -> Padrão de Vela OK ({pattern})")
-                    else:
-                        print(f"   -> Padrão de Vela falhou (Esperado: {sr_signal}, Deu: {pattern})")
+                    if pattern == sr_signal: confluences.append("Candle_Pattern")
 
                     rsi_sig = ti.check_rsi_condition(analysis_candles)
-                    if rsi_sig == sr_signal: 
-                        confluences.append("RSI_Condition")
-                        print(f"   -> RSI OK ({rsi_sig})")
-                    else:
-                        print(f"   -> RSI falhou (Esperado: {sr_signal}, Deu: {rsi_sig})")
+                    if rsi_sig == sr_signal: confluences.append("RSI_Condition")
 
-                    if len(confluences) >= threshold: 
-                        final_direction = sr_signal
-                    else:
-                        print(f"   -> Confluências insuficientes: {len(confluences)}/{threshold}")
+                    if len(confluences) >= threshold: final_direction = sr_signal
 
             elif expiration_minutes == 5:
                 m5_signal = ti.check_m5_price_action(analysis_candles, zones)
                 if m5_signal:
                     temp_conf = m5_signal['confluences']
                     rsi_sig = ti.check_rsi_condition(analysis_candles)
+                    if rsi_sig == m5_signal['direction']: temp_conf.append("RSI_Condition")
                     
-                    if rsi_sig == m5_signal['direction']: 
-                        temp_conf.append("RSI_Condition")
-                    
-                    print(f"[DEBUG M5] {base}: Sinal PriceAction {m5_signal['direction']}. Conf: {temp_conf}")
+                    print(f"[DEBUG M5] {base}: Sinal {m5_signal['direction']}. Conf: {temp_conf}")
                     
                     if len(temp_conf) >= threshold:
                         final_direction = m5_signal['direction']
                         confluences = temp_conf
-                else:
-                    if base == "EURUSD": print(f"[DEBUG M5] {base}: Sem padrão de Price Action.")
             
             if final_direction:
                 if not ti.validate_reversal_candle(signal_candle, final_direction): 
-                    print(f"[{base}] Vela de reversão inválida.")
+                    print(f"[{base}] Vela inválida.")
                     return
                 
                 max_trades = self.bot_config.get('max_simultaneous_trades', 1)
@@ -239,16 +216,16 @@ class TradingBot:
 
                 now = datetime.utcnow()
                 wait_sec = (60 - now.second - 1) + (1 - now.microsecond / 1000000) + 0.2
-                await self.logger('INFO', f"Sinal CONFIRMADO em {base} ({final_direction}). Aguardando {wait_sec:.1f}s.")
+                await self.logger('INFO', f"Sinal {base} CONFIRMADO. Aguardando {wait_sec:.1f}s.")
                 await asyncio.sleep(wait_sec)
                 
                 if base in self.active_trading_pairs: return
                 self.active_trading_pairs.add(base)
 
                 strategy = f"M{expiration_minutes}_" + ', '.join(confluences)
-                await self.logger('SUCCESS', f"EXECUTANDO ORDEM: {base} | {final_direction.upper()} | {strategy}")
+                await self.logger('SUCCESS', f"ENTRADA: {base} | {final_direction.upper()} | {strategy}")
                 
-                # Acesso seguro via dicionário
+                # O Pandas Series aceita tanto ['open'] quanto .open
                 signal = TradeSignal(
                     pair=base, direction=final_direction, strategy=strategy,
                     setup_candle_open=signal_candle['open'], 
@@ -262,7 +239,7 @@ class TradingBot:
 
         except Exception as e:
             if base in self.active_trading_pairs: self.active_trading_pairs.remove(base)
-            print(f"[ERRO ANÁLISE] {base}: {e}")
+            print(f"[ERRO] {base}: {e}")
             traceback.print_exc()
 
     async def _execute_martingale_trade(self, pair: str):
@@ -325,12 +302,10 @@ class TradingBot:
 
         mg_lv = self.martingale_state.get(pair, {}).get('level', 0)
         
-        if sid:
-            await asyncio.to_thread(self.supabase.update_trade_result, sid, result.upper(), mg_lv)
+        if sid: await asyncio.to_thread(self.supabase.update_trade_result, sid, result.upper(), mg_lv)
         
         bal = await self.exnova.get_current_balance()
-        if bal:
-            await asyncio.to_thread(self.supabase.update_current_balance, bal)
+        if bal: await asyncio.to_thread(self.supabase.update_current_balance, bal)
 
         self.asset_performance.setdefault(pair, {'wins': 0, 'losses': 0})
         self.consecutive_losses.setdefault(pair, 0)
@@ -342,8 +317,6 @@ class TradingBot:
             self.martingale_state[pair] = {'level': 0}
             if pair in self.blacklisted_assets:
                 self.blacklisted_assets.remove(pair)
-                await self.logger('INFO', f"{pair} removido da blacklist.")
-                
         elif result == 'loss':
             self.daily_losses += 1
             self.asset_performance[pair]['losses'] += 1
@@ -351,19 +324,17 @@ class TradingBot:
             
             if self.consecutive_losses[pair] >= 2:
                 self.blacklisted_assets.add(pair)
-                await self.logger('ERROR', f"{pair} -> Blacklist (2 loss seguidos).")
 
             if self.bot_config.get('use_martingale', False):
                 cur_lv = self.martingale_state.get(pair, {}).get('level', 0)
                 max_lv = self.bot_config.get('martingale_levels', 2)
-                
                 if cur_lv < max_lv:
                     self.martingale_state[pair] = {'level': cur_lv + 1}
                     self.pending_martingale_trades[pair] = {
                         "full_name": full_name, "direction": direction,
                         "expiration_minutes": expiration, "pair": pair
                     }
-                    await self.logger('WARNING', f"Agendado Gale Nível {cur_lv + 1} para {pair}")
+                    await self.logger('WARNING', f"Agendado Gale {cur_lv + 1} em {pair}")
                 else:
                     self.martingale_state[pair] = {'level': 0}
                     await self.logger('ERROR', f"Stop Gale em {pair}.")
