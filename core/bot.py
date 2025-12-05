@@ -373,9 +373,7 @@ class TradingBot:
                     rsi_sig = ti.check_rsi_condition(analysis_candles_objs)
                     if rsi_sig == sr_signal: confluences.append("RSI_Condition")
                     
-                    # --- DEBUG DETALHADO (Para entender porque falha) ---
-                    # Para obter o valor real do RSI para o log, precisamos recalcular rapidamente ou confiar no log interno se ativado
-                    # Aqui apenas mostramos o resultado
+                    # --- DEBUG DETALHADO ---
                     print(f"   >>> {base} Detalhes: Padrão={pattern}, RSI={rsi_sig} (Esperado: {sr_signal}). Confluências={len(confluences)}/{threshold}")
                     # -----------------------
 
@@ -414,12 +412,15 @@ class TradingBot:
                 strategy = f"M{expiration_minutes}_" + ', '.join(confluences)
                 await self.logger('SUCCESS', f"ENTRADA: {base} | {final_direction.upper()} | {strategy}")
                 
+                # CORREÇÃO CRÍTICA AQUI: Usar 'open', 'close' etc. em vez de 'setup_candle_open'
                 signal = TradeSignal(
-                    pair=base, direction=final_direction, strategy=strategy,
-                    setup_candle_open=signal_candle_dict['open'], 
-                    setup_candle_high=signal_candle_dict['high'],
-                    setup_candle_low=signal_candle_dict['low'], 
-                    setup_candle_close=signal_candle_dict['close']
+                    pair=base, 
+                    direction=final_direction, 
+                    strategy=strategy,
+                    open=signal_candle_dict['open'], 
+                    high=signal_candle_dict['high'],
+                    low=signal_candle_dict['low'], 
+                    close=signal_candle_dict['close']
                 )
                 
                 trade_exp = 4 if expiration_minutes == 5 else expiration_minutes
