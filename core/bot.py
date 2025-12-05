@@ -14,7 +14,7 @@ from core.data_models import TradeSignal
 
 # --- MONKEY PATCH CORRECTIONS ---
 
-# 1. Correção para conversão de DataFrame (já existente)
+# 1. Correção para conversão de DataFrame (Mantida)
 def _convert_candles_to_dataframe_fix(candles):
     if not candles:
         return pd.DataFrame()
@@ -42,34 +42,88 @@ def _convert_candles_to_dataframe_fix(candles):
             df[col] = pd.to_numeric(df[col], errors='coerce')
     return df
 
-# 2. NOVA CORREÇÃO: Validação de vela simplificada
-# Substitui a função que estava rejeitando os sinais válidos
+# 2. Validação de vela simplificada (Mantida)
 def _validate_reversal_candle_fix(candle, direction):
-    """
-    Validação simplificada:
-    - Call: Aceita se a vela for Verde (Close >= Open)
-    - Put: Aceita se a vela for Vermelha (Close <= Open)
-    """
     try:
-        # Garante que lidamos com floats
         c_open = float(candle.open)
         c_close = float(candle.close)
         
         if direction.lower() == 'call':
-            # Valida se é verde ou doji
             return c_close >= c_open
         elif direction.lower() == 'put':
-            # Valida se é vermelha ou doji
             return c_close <= c_open
-            
         return False
     except Exception as e:
         print(f"[DEBUG] Erro validação candle: {e}")
         return False
 
-# Aplica os patches
+# 3. NOVA CORREÇÃO: Reconhecimento de Padrões Manual (Sem TA-Lib)
+# Substitui a função que dependia da biblioteca C faltante no servidor
+def _check_candlestick_pattern_fix(candles):
+    """
+    Verifica padrões básicos (Engolfo e Pinbar) usando matemática pura.
+    Retorna 'call', 'put' ou None.
+    """
+    if len(candles) < 2: return None
+    
+    # Pega as últimas velas (garantindo que são objetos SimpleNamespace ou dict acessível)
+    # Como aplicamos o patch de dataframe antes, aqui assumimos que recebemos a lista original de objetos
+    last = candles[-1]
+    prev = candles[-2]
+    
+    # Helper seguro para atributos
+    def get_val(c, attr):
+        if isinstance(c, dict): return float(c[attr])
+        return float(getattr(c, attr))
+
+    # Dados da vela atual (Sinal)
+    l_open = get_val(last, 'open')
+    l_close = get_val(last, 'close')
+    l_high = get_val(last, 'high')
+    l_low = get_val(last, 'low')
+    
+    # Dados da vela anterior
+    p_open = get_val(prev, 'open')
+    p_close = get_val(prev, 'close')
+    
+    # Cálculos auxiliares
+    l_body = abs(l_close - l_open)
+    l_upper_wick = l_high - max(l_close, l_open)
+    l_lower_wick = min(l_close, l_open) - l_low
+    
+    is_l_green = l_close > l_open
+    is_l_red = l_close < l_open
+    is_p_green = p_close > p_open
+    is_p_red = p_close < p_open
+
+    # 1. ENGOLFO DE ALTA (Bullish Engulfing) -> Call
+    # Vela anterior vermelha, atual verde, fecha acima da abertura anterior e abre abaixo do fechamento anterior
+    if is_p_red and is_l_green:
+        if l_close > p_open and l_open < p_close:
+            return 'call'
+
+    # 2. ENGOLFO DE BAIXA (Bearish Engulfing) -> Put
+    # Vela anterior verde, atual vermelha, engole o corpo
+    if is_p_green and is_l_red:
+        if l_close < p_open and l_open > p_close:
+            return 'put'
+
+    # 3. PINBAR / HAMMER (Reversão para Alta) -> Call
+    # Corpo pequeno, sombra inferior longa (pelo menos 2x o corpo), sombra superior pequena
+    if l_lower_wick >= (2 * l_body) and l_upper_wick <= l_body:
+        return 'call'
+
+    # 4. SHOOTING STAR / PINBAR (Reversão para Baixa) -> Put
+    # Corpo pequeno, sombra superior longa (pelo menos 2x o corpo), sombra inferior pequena
+    if l_upper_wick >= (2 * l_body) and l_lower_wick <= l_body:
+        return 'put'
+
+    return None
+
+# Aplica TODOS os patches
 ti._convert_candles_to_dataframe = _convert_candles_to_dataframe_fix
 ti.validate_reversal_candle = _validate_reversal_candle_fix
+ti.check_candlestick_pattern = _check_candlestick_pattern_fix # Injeta a função manual
 
 # --- FIM DOS PATCHES ---
 
@@ -274,6 +328,7 @@ class TradingBot:
                     print(f"[SINAL M1] {base}: SR {sr_signal} detetado. Analisando...")
                     confluences.append("SR_Zone")
                     
+                    # Agora usa a função MANUAL injetada (sem TA-Lib)
                     pattern = ti.check_candlestick_pattern(analysis_candles_objs)
                     if pattern == sr_signal: confluences.append("Candle_Pattern")
 
@@ -296,7 +351,7 @@ class TradingBot:
                         confluences = temp_conf
             
             if final_direction:
-                # Usamos a função patcheada agora, deve passar se a cor bater
+                # Usa validação simplificada
                 if not ti.validate_reversal_candle(signal_candle_obj, final_direction): 
                     print(f"[{base}] Vela inválida.")
                     return
