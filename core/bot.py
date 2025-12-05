@@ -57,7 +57,7 @@ def _validate_reversal_candle_fix(candle, direction):
         print(f"[DEBUG] Erro validação candle: {e}")
         return False
 
-# 3. Reconhecimento de Padrões Manual (Mantida)
+# 3. Reconhecimento de Padrões Manual (AJUSTADO: Mais Flexível + Debug)
 def _check_candlestick_pattern_fix(candles):
     if len(candles) < 2: return None
     
@@ -78,6 +78,9 @@ def _check_candlestick_pattern_fix(candles):
         p_close = get_val(prev, 'close')
         
         l_body = abs(l_close - l_open)
+        # Evita divisão por zero
+        if l_body == 0: l_body = 0.00001
+        
         l_upper_wick = l_high - max(l_close, l_open)
         l_lower_wick = min(l_close, l_open) - l_low
         
@@ -85,6 +88,9 @@ def _check_candlestick_pattern_fix(candles):
         is_l_red = l_close < l_open
         is_p_green = p_close > p_open
         is_p_red = p_close < p_open
+
+        # Ratio para Pinbar (1.5x é mais comum em M1 que 2x)
+        PINBAR_RATIO = 1.5
 
         # Engolfo de Alta
         if is_p_red and is_l_green:
@@ -97,44 +103,40 @@ def _check_candlestick_pattern_fix(candles):
                 return 'put'
 
         # Pinbar (Alta)
-        if l_lower_wick >= (2 * l_body) and l_upper_wick <= l_body:
+        if l_lower_wick >= (PINBAR_RATIO * l_body) and l_upper_wick <= l_body:
             return 'call'
 
         # Shooting Star (Baixa)
-        if l_upper_wick >= (2 * l_body) and l_lower_wick <= l_body:
+        if l_upper_wick >= (PINBAR_RATIO * l_body) and l_lower_wick <= l_body:
             return 'put'
-    except Exception:
+            
+    except Exception as e:
+        print(f"[DEBUG Padrão] Erro: {e}")
         return None
 
     return None
 
-# 4. NOVA CORREÇÃO: Cálculo de RSI Manual (Substitui TA-Lib)
+# 4. RSI Manual (AJUSTADO: Níveis 65/35 + Debug Print)
 def _calculate_rsi_pandas(series, period=14):
     delta = series.diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-    
     rs = gain / loss
     return 100 - (100 / (1 + rs))
 
-def _check_rsi_condition_fix(candles, period=14, overbought=70, oversold=30):
+def _check_rsi_condition_fix(candles, period=14, overbought=65, oversold=35):
     """
-    Calcula RSI manualmente e verifica condições de sobrecompra/sobrevenda.
+    RSI Ajustado para M1: 65/35
     """
     try:
-        # Usa a nossa função de conversão corrigida
         df = _convert_candles_to_dataframe_fix(candles)
         if df.empty or len(df) < period + 1:
             return None
             
-        # Cálculo manual do RSI (Exponencial para simular Wilder/TA-Lib)
         close_delta = df['close'].diff()
-        
-        # Make two series: gains and losses
         up = close_delta.clip(lower=0)
         down = -1 * close_delta.clip(upper=0)
         
-        # Use exponential moving average
         ma_up = up.ewm(com=period - 1, adjust=True, min_periods=period).mean()
         ma_down = down.ewm(com=period - 1, adjust=True, min_periods=period).mean()
         
@@ -143,22 +145,24 @@ def _check_rsi_condition_fix(candles, period=14, overbought=70, oversold=30):
         
         last_rsi = rsi.iloc[-1]
         
-        # Logica de sinal
+        # Debug para saberes o valor real no log
+        # print(f"   [DEBUG RSI] Valor: {last_rsi:.2f}") 
+        
         if last_rsi >= overbought:
-            return 'put' # Sobrecomprado -> Vender
+            return 'put'
         elif last_rsi <= oversold:
-            return 'call' # Sobrevendido -> Comprar
+            return 'call'
             
         return None
     except Exception as e:
-        print(f"[DEBUG] Erro RSI: {e}")
+        print(f"[DEBUG RSI] Erro: {e}")
         return None
 
 # Aplica TODOS os patches
 ti._convert_candles_to_dataframe = _convert_candles_to_dataframe_fix
 ti.validate_reversal_candle = _validate_reversal_candle_fix
 ti.check_candlestick_pattern = _check_candlestick_pattern_fix
-ti.check_rsi_condition = _check_rsi_condition_fix # Injeta o novo patch de RSI
+ti.check_rsi_condition = _check_rsi_condition_fix
 
 # --- FIM DOS PATCHES ---
 
@@ -369,7 +373,9 @@ class TradingBot:
                     rsi_sig = ti.check_rsi_condition(analysis_candles_objs)
                     if rsi_sig == sr_signal: confluences.append("RSI_Condition")
                     
-                    # --- DEBUG DETALHADO ---
+                    # --- DEBUG DETALHADO (Para entender porque falha) ---
+                    # Para obter o valor real do RSI para o log, precisamos recalcular rapidamente ou confiar no log interno se ativado
+                    # Aqui apenas mostramos o resultado
                     print(f"   >>> {base} Detalhes: Padrão={pattern}, RSI={rsi_sig} (Esperado: {sr_signal}). Confluências={len(confluences)}/{threshold}")
                     # -----------------------
 
