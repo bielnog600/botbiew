@@ -111,6 +111,11 @@ class TradingBot:
                 await asyncio.sleep(5)
 
     async def trading_cycle(self):
+        try:
+            if hasattr(self.exnova, 'is_connected') and not await self.exnova.is_connected():
+                return
+        except: pass
+
         now = datetime.utcnow()
         if now.second >= 50:
             if now.minute != self.last_analysis_minute:
@@ -160,16 +165,17 @@ class TradingBot:
                 t1, t2, res_func = 300, 3600, get_h1_sr_zones
             else: return
 
-            candles_tuple = await asyncio.gather(
+            candles = await asyncio.gather(
                 self.exnova.get_historical_candles(base, t1, 200),
                 self.exnova.get_historical_candles(base, t2, 100)
             )
-            analysis_candles, sr_candles = candles_tuple
+            analysis_candles, sr_candles = candles
             
-            if not analysis_candles or not sr_candles: return
+            if not analysis_candles or not sr_candles:
+                return
 
             res, sup = res_func(sr_candles)
-            signal_candle = analysis_candles[-1]
+            signal_candle = analysis_candles[-1] # É um dicionário puro
             final_direction, confluences = None, []
             zones = {'resistance': res, 'support': sup}
             threshold = self.bot_config.get('confirmation_threshold', 2)
@@ -179,7 +185,6 @@ class TradingBot:
                 
                 if not sr_signal:
                     if base == "EURUSD": 
-                        # CORREÇÃO: Removida formatação :.5f que causava crash
                         print(f"[DEBUG M1] {base}: Sem SR. Preço: {signal_candle['close']} | Zonas: OK")
                 else:
                     print(f"[SINAL M1] {base}: SR {sr_signal} detetado. Analisando...")
@@ -225,7 +230,6 @@ class TradingBot:
                 strategy = f"M{expiration_minutes}_" + ', '.join(confluences)
                 await self.logger('SUCCESS', f"ENTRADA: {base} | {final_direction.upper()} | {strategy}")
                 
-                # O Pandas Series aceita tanto ['open'] quanto .open
                 signal = TradeSignal(
                     pair=base, direction=final_direction, strategy=strategy,
                     setup_candle_open=signal_candle['open'], 
