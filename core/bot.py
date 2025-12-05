@@ -2,9 +2,8 @@ import asyncio
 import traceback
 from datetime import datetime
 from typing import Dict, Optional, Set, List
-from types import SimpleNamespace  # Importação adicionada para correção de tipos
+from types import SimpleNamespace
 
-# Assumed imports based on your provided code
 from config import settings
 from services.exnova_service import AsyncExnovaService
 from services.supabase_service import SupabaseService
@@ -97,13 +96,11 @@ class TradingBot:
                 status = self.bot_config.get('status', 'PAUSED')
 
                 if status == 'RUNNING':
-                    # Process pending martingales first
                     pending = list(self.pending_martingale_trades.keys())
                     for pair in pending:
                         if pair not in self.active_trading_pairs:
                             asyncio.create_task(self._execute_martingale_trade(pair))
                     
-                    # Run standard analysis
                     await self.trading_cycle()
                 
                 elif status != 'RUNNING':
@@ -125,7 +122,6 @@ class TradingBot:
         except: pass
 
         now = datetime.utcnow()
-        # Trigger analysis near the end of the minute
         if now.second >= 50:
             if now.minute != self.last_analysis_minute:
                 self.last_analysis_minute = now.minute
@@ -186,21 +182,30 @@ class TradingBot:
             if not analysis_candles or not sr_candles:
                 return
 
-            # --- CONVERSÃO HÍBRIDA (FIX FINAL) ---
-            # 1. analysis_candles (DICTS): Para funções que usam Pandas (check_candlestick_pattern, check_rsi_condition)
-            # 2. analysis_candles_objs (OBJS): Para funções que usam property access (check_price_near_sr, validate_reversal)
-            analysis_candles_objs = [SimpleNamespace(**c) for c in analysis_candles]
+            # --- CORREÇÃO DE TIPOS & SANITIZAÇÃO ---
+            # O módulo technical_indicators EXIGE objetos (devido ao vars()) E floats limpos (devido ao Pandas)
+            analysis_candles_objs = []
+            for c in analysis_candles:
+                clean_c = c.copy()
+                # Forçamos conversão para float para evitar erros no pd.to_numeric depois
+                for field in ['open', 'close', 'high', 'low', 'volume']:
+                    if field in clean_c:
+                        try:
+                            clean_c[field] = float(clean_c[field])
+                        except: pass
+                analysis_candles_objs.append(SimpleNamespace(**clean_c))
+            
             signal_candle_obj = analysis_candles_objs[-1]
+            signal_candle = analysis_candles[-1] # Dicionário original para o TradeSignal
             
             res, sup = res_func(sr_candles)
-            signal_candle = analysis_candles[-1] # Dicionário puro
-            
-            final_direction, confluences = None, []
             zones = {'resistance': res, 'support': sup}
             threshold = self.bot_config.get('confirmation_threshold', 2)
+            
+            final_direction, confluences = None, []
 
             if expiration_minutes == 1:
-                # [FIX] check_price_near_sr requer OBJETOS (falhou com dict antes)
+                # Todas as funções 'ti' recebem a lista de OBJETOS
                 sr_signal = ti.check_price_near_sr(signal_candle_obj, zones)
                 
                 if not sr_signal:
@@ -210,23 +215,23 @@ class TradingBot:
                     print(f"[SINAL M1] {base}: SR {sr_signal} detetado. Analisando...")
                     confluences.append("SR_Zone")
                     
-                    # [FIX] check_candlestick_pattern requer DICTS para Pandas (falhou com objs agora)
-                    pattern = ti.check_candlestick_pattern(analysis_candles)
+                    # Passamos OBJETOS para satisfazer vars()
+                    pattern = ti.check_candlestick_pattern(analysis_candles_objs)
                     if pattern == sr_signal: confluences.append("Candle_Pattern")
 
-                    # [FIX] check_rsi_condition requer DICTS para Pandas
-                    rsi_sig = ti.check_rsi_condition(analysis_candles)
+                    # Passamos OBJETOS para satisfazer vars()
+                    rsi_sig = ti.check_rsi_condition(analysis_candles_objs)
                     if rsi_sig == sr_signal: confluences.append("RSI_Condition")
 
                     if len(confluences) >= threshold: final_direction = sr_signal
 
             elif expiration_minutes == 5:
-                # check_m5_price_action parece fazer verificações manuais, mantemos OBJ
+                # Passamos OBJETOS
                 m5_signal = ti.check_m5_price_action(analysis_candles_objs, zones)
                 if m5_signal:
                     temp_conf = m5_signal['confluences']
-                    # [FIX] RSI requer DICTS
-                    rsi_sig = ti.check_rsi_condition(analysis_candles)
+                    # Passamos OBJETOS
+                    rsi_sig = ti.check_rsi_condition(analysis_candles_objs)
                     if rsi_sig == m5_signal['direction']: temp_conf.append("RSI_Condition")
                     
                     print(f"[DEBUG M5] {base}: Sinal {m5_signal['direction']}. Conf: {temp_conf}")
@@ -236,7 +241,6 @@ class TradingBot:
                         confluences = temp_conf
             
             if final_direction:
-                # validate_reversal_candle requer OBJETO (acessa .close, .open)
                 if not ti.validate_reversal_candle(signal_candle_obj, final_direction): 
                     print(f"[{base}] Vela inválida.")
                     return
@@ -255,7 +259,7 @@ class TradingBot:
                 strategy = f"M{expiration_minutes}_" + ', '.join(confluences)
                 await self.logger('SUCCESS', f"ENTRADA: {base} | {final_direction.upper()} | {strategy}")
                 
-                # TradeSignal usa os dados puros do dicionário
+                # Para o TradeSignal, continuamos a usar o dicionário 'signal_candle'
                 signal = TradeSignal(
                     pair=base, direction=final_direction, strategy=strategy,
                     setup_candle_open=signal_candle['open'], 
@@ -317,7 +321,6 @@ class TradingBot:
             await self.logger('INFO', f"Ordem {oid} enviada. ${val}. Aguardando...")
             sid = await asyncio.to_thread(self.supabase.insert_trade_signal, signal)
             
-            # Wait for trade duration plus a buffer for API delay
             await asyncio.sleep(expiration * 60 + 15)
             result = await self.exnova.check_win(oid)
             
