@@ -48,10 +48,6 @@
         input:checked + .toggle-bg:after { transform: translateX(100%); }
         input:checked + .toggle-bg { background-color: var(--accent-primary); }
         
-        /* Radios */
-        .radio-label { transition: all 0.2s; user-select: none; }
-        input[type="radio"]:checked + .radio-label { background-color: var(--accent-primary); color: var(--bg-dark); border-color: var(--accent-primary); font-weight: 600; }
-        
         /* Loading */
         .spinner { border: 3px solid rgba(245, 158, 11, 0.2); border-top-color: var(--accent-primary); border-radius: 50%; width: 1.5rem; height: 1.5rem; animation: spin 1s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
@@ -63,6 +59,39 @@
         .toast-container { position: fixed; top: 1rem; right: 1rem; z-index: 50; display: flex; flex-direction: column; gap: 0.5rem; }
         .toast { animation: slideIn 0.3s ease-out forwards; }
         @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+        /* --- ANIMAÇÕES DO SCANNER --- */
+        .scan-line {
+            position: absolute;
+            width: 100%;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, var(--accent-primary), transparent);
+            animation: scanMove 2s linear infinite;
+            opacity: 0.7;
+        }
+        @keyframes scanMove {
+            0% { top: 0%; opacity: 0; }
+            10% { opacity: 1; }
+            90% { opacity: 1; }
+            100% { top: 100%; opacity: 0; }
+        }
+        
+        .pulse-ring {
+            position: absolute;
+            border-radius: 50%;
+            border: 2px solid var(--accent-primary);
+            opacity: 0;
+            animation: pulseEffect 2s ease-out infinite;
+        }
+        @keyframes pulseEffect {
+            0% { transform: scale(0.5); opacity: 0.8; }
+            100% { transform: scale(1.5); opacity: 0; }
+        }
+
+        .ticker-text {
+            font-family: 'Roboto Mono', monospace;
+            animation: fadeSwitch 0.2s ease-in-out;
+        }
     </style>
 </head>
 <body>
@@ -114,7 +143,89 @@
             );
         };
 
-        // --- Componentes Utilitários ---
+        // --- Componentes Visual ---
+        
+        // NOVO: Widget de Scanner Animado
+        const ScannerWidget = ({ lastLog }) => {
+            const [currentPair, setCurrentPair] = useState('AGUARDANDO');
+            const [scanStatus, setScanStatus] = useState('Inativo');
+            const [isScanning, setIsScanning] = useState(false);
+            
+            // Lista simulada para animação
+            const pairs = useMemo(() => ['EURUSD', 'GBPUSD', 'USDJPY', 'AUDCAD', 'USDCHF', 'EURGBP', 'EURJPY', 'NZDUSD'], []);
+
+            useEffect(() => {
+                if (!lastLog) return;
+
+                // Detecta início de varredura
+                if (lastLog.message.includes('Varredura')) {
+                    setIsScanning(true);
+                    setScanStatus(lastLog.message.includes('M5') ? 'VARREDURA M5' : 'VARREDURA M1');
+                    
+                    // Stop scanning visual after 10s (approx cycle time)
+                    const timeout = setTimeout(() => setIsScanning(false), 12000);
+                    return () => clearTimeout(timeout);
+                }
+                
+                // Detecta Confirmação/Entrada
+                if (lastLog.message.includes('CONFIRMADO') || lastLog.message.includes('ENTRADA')) {
+                    setIsScanning(false);
+                    setScanStatus('SINAL ENCONTRADO');
+                    // Tenta extrair o par da mensagem (ex: "Sinal EURUSD CONFIRMADO")
+                    const match = lastLog.message.match(/([A-Z]{6}(-OTC)?)/);
+                    if (match) setCurrentPair(match[0]);
+                }
+            }, [lastLog]);
+
+            // Efeito de ciclo de ativos (Matrix effect)
+            useEffect(() => {
+                let interval;
+                if (isScanning) {
+                    interval = setInterval(() => {
+                        const randomPair = pairs[Math.floor(Math.random() * pairs.length)];
+                        setCurrentPair(randomPair + (Math.random() > 0.5 ? '-OTC' : ''));
+                    }, 150); // Troca rápida
+                } else if (scanStatus === 'Inativo') {
+                    setCurrentPair('---');
+                }
+                return () => clearInterval(interval);
+            }, [isScanning, pairs, scanStatus]);
+
+            return (
+                <div className="glass-card rounded-xl p-0 overflow-hidden relative border-amber-500/30 border">
+                    {/* Background Grid Effect */}
+                    <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-10"></div>
+                    
+                    {/* Scan Line Animation */}
+                    {isScanning && <div className="scan-line z-10"></div>}
+
+                    <div className="p-5 relative z-20 flex justify-between items-center">
+                        <div>
+                            <div className="flex items-center gap-2 mb-1">
+                                <div className={`w-2 h-2 rounded-full ${isScanning ? 'bg-amber-400 animate-ping' : 'bg-gray-500'}`}></div>
+                                <span className="text-[10px] font-bold tracking-widest text-amber-400 uppercase">{scanStatus}</span>
+                            </div>
+                            <div className="text-3xl font-black text-white tracking-tight ticker-text">
+                                {currentPair}
+                            </div>
+                            <p className="text-xs text-gray-400 mt-1 flex items-center gap-1">
+                                <i className="fas fa-microchip"></i> Inteligência Artificial Ativa
+                            </p>
+                        </div>
+
+                        {/* Radar Circle */}
+                        <div className="relative w-16 h-16 flex items-center justify-center">
+                            <div className={`w-full h-full border border-gray-700 rounded-full absolute ${isScanning ? 'animate-spin' : ''}`} style={{borderTopColor: '#f59e0b', animationDuration: '3s'}}></div>
+                            <div className="w-12 h-12 bg-gray-800/50 rounded-full flex items-center justify-center backdrop-blur-sm border border-gray-700">
+                                <i className={`fas fa-radar text-xl ${isScanning ? 'text-amber-400' : 'text-gray-600'}`}></i>
+                            </div>
+                            {isScanning && <div className="pulse-ring w-full h-full"></div>}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
         function CountdownTimer() {
             const [countdown, setCountdown] = useState(60 - new Date().getSeconds());
             useEffect(() => {
@@ -122,9 +233,9 @@
                 return () => clearInterval(timer);
             }, []);
             return (
-                <div className="text-center">
-                    <p className="text-[10px] uppercase tracking-wider text-gray-400">Próxima Vela</p>
-                    <p className="text-2xl font-bold text-amber-400 font-mono">{String(countdown).padStart(2, '0')}s</p>
+                <div className="text-center bg-gray-800/50 rounded-lg p-2">
+                    <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-1">Próxima Vela</p>
+                    <p className="text-xl font-bold text-amber-400 font-mono">{String(countdown).padStart(2, '0')}s</p>
                 </div>
             );
         }
@@ -193,9 +304,9 @@
             const [signals, setSignals] = useState([]);
             const [balanceInfo, setBalanceInfo] = useState({ current: 0, initial: 0 });
             const [isResetting, setIsResetting] = useState(false);
+            const [lastLog, setLastLog] = useState(null); // Para alimentar o scanner
             const { addToast } = useToast();
 
-            // Cálculo otimizado de scores
             const scores = useMemo(() => {
                 const wins = signals.filter(s => s.result === 'WIN').length;
                 const losses = signals.filter(s => s.result === 'LOSS').length;
@@ -238,7 +349,17 @@
                         setBalanceInfo({ current: payload.new.current_balance || 0, initial: payload.new.daily_initial_balance || 0 });
                     }).subscribe();
 
-                return () => { supabaseClient.removeChannel(subSignals); supabaseClient.removeChannel(subConfig); };
+                // Assinar logs para o Scanner
+                const subLogs = supabaseClient.channel('logs_home')
+                    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'logs' }, (payload) => {
+                        setLastLog(payload.new);
+                    }).subscribe();
+
+                return () => { 
+                    supabaseClient.removeChannel(subSignals); 
+                    supabaseClient.removeChannel(subConfig); 
+                    supabaseClient.removeChannel(subLogs);
+                };
             }, []);
 
             return (
@@ -253,6 +374,9 @@
                         </button>
                     </div>
                     
+                    {/* WIDGET NOVO: SCANNER */}
+                    <ScannerWidget lastLog={lastLog} />
+
                     {/* Cards Topo */}
                     <div className="grid grid-cols-2 gap-4">
                         <div className="glass-card p-4 rounded-xl relative overflow-hidden">
@@ -339,7 +463,6 @@
                     if (cat) setCatalog(cat);
                 };
                 fetch();
-                // Assinatura real-time opcional aqui se necessário
             }, []);
 
             const saveWinRate = async () => {
@@ -392,7 +515,6 @@
             const { addToast } = useToast();
             const [saving, setSaving] = useState(false);
             
-            // Timeout para debounce
             const debounceRef = useRef(null);
 
             useEffect(() => {
@@ -405,7 +527,6 @@
 
             const updateField = (field, value) => {
                 setConfig(prev => ({ ...prev, [field]: value }));
-                // Opcional: Auto-save com debounce para inputs numéricos poderia ser implementado aqui
             };
 
             const toggleBotStatus = async () => {
