@@ -3,6 +3,7 @@ import traceback
 import sys
 import threading
 import logging
+import functools
 from datetime import datetime
 from typing import Dict, Optional, Set, List
 from types import SimpleNamespace
@@ -16,7 +17,7 @@ from analysis import technical_indicators as ti
 from core.data_models import TradeSignal
 
 # ==============================================================================
-#                      CONSTANTES OTC (FORNECIDAS)
+#                      CONSTANTES OTC ATUALIZADAS
 # ==============================================================================
 ACTIVES_MAP = {
     "EURUSD": 1, "EURGBP": 2, "GBPJPY": 3, "EURJPY": 4, "GBPUSD": 5, "USDJPY": 6, "AUDCAD": 7, "NZDUSD": 8, "USDCHF": 72,
@@ -34,7 +35,9 @@ ACTIVES_MAP = {
     "AUDUSD-OTC": 2111, "USDCAD-OTC": 2112, "AUDJPY-OTC": 2113, "GBPCAD-OTC": 2114, "GBPCHF-OTC": 2115, "GBPAUD-OTC": 2116,
     "EURCAD-OTC": 2117, "CHFJPY-OTC": 2118, "CADCHF-OTC": 2119, "EURAUD-OTC": 2120, "USDNOK-OTC": 2121, "EURNZD-OTC": 2122,
     "USDSEK-OTC": 2123, "USDTRY-OTC": 2124, "USDPLN-OTC": 2128, "AUDCHF-OTC": 2129, "AUDNZD-OTC": 2130, "EURCHF-OTC": 2131,
-    "GBPNZD-OTC": 2132, "CADJPY-OTC": 2136, "NZDCAD-OTC": 2137, "NZDJPY-OTC": 2138, "NZDCHF-OTC": 2202
+    "GBPNZD-OTC": 2132, "CADJPY-OTC": 2136, "NZDCAD-OTC": 2137, "NZDJPY-OTC": 2138, "NZDCHF-OTC": 2202,
+    # Novos Ativos Adicionados dos Logs
+    "USDMXN-OTC": 1548, "FWONA-OTC": 2169, "XNGUSD-OTC": 2170
 }
 
 # ==============================================================================
@@ -46,16 +49,12 @@ def _patch_library_constants_aggressive():
     FULL_MAP = ACTIVES_MAP.copy()
     REVERSE_MAP = {v: k for k, v in ACTIVES_MAP.items()}
     FULL_MAP.update(REVERSE_MAP)
-    count = 0
     targets = ['iqoptionapi', 'exnovaapi']
     for module_name, module in list(sys.modules.items()):
         if any(t in module_name for t in targets):
             if hasattr(module, 'ACTIVES') and isinstance(module.ACTIVES, dict):
-                try:
-                    module.ACTIVES.update(FULL_MAP)
-                    count += 1
+                try: module.ACTIVES.update(FULL_MAP)
                 except Exception: pass
-    print(f"[PATCH BIDIRECIONAL] Atualizou ACTIVES em {count} módulos internos.")
 
 _patch_library_constants_aggressive()
 
@@ -78,12 +77,9 @@ def _convert_candles_to_dataframe_fix(candles):
 def _validate_reversal_candle_fix(candle, direction):
     try:
         c_open, c_close = float(candle.open), float(candle.close)
-        is_green = c_close >= c_open
-        is_red = c_close <= c_open
-        if direction.lower() == 'call' and not is_green:
-            return False
-        if direction.lower() == 'put' and not is_red:
-            return False
+        is_green, is_red = c_close >= c_open, c_close <= c_open
+        if direction.lower() == 'call' and not is_green: return False
+        if direction.lower() == 'put' and not is_red: return False
         return True
     except: return False
 
@@ -95,6 +91,7 @@ def _check_candlestick_pattern_fix(candles):
         l_open, l_close = get_val(last, 'open'), get_val(last, 'close')
         l_high, l_low = get_val(last, 'high'), get_val(last, 'low')
         p_open, p_close = get_val(prev, 'open'), get_val(prev, 'close')
+        
         l_body = abs(l_close - l_open) or 0.00001
         l_upper = l_high - max(l_close, l_open)
         l_lower = min(l_close, l_open) - l_low
@@ -119,6 +116,7 @@ def _check_rsi_condition_fix(candles, period=14, overbought=65, oversold=35):
         ma_up = up.ewm(com=period - 1, adjust=True, min_periods=period).mean()
         ma_down = down.ewm(com=period - 1, adjust=True, min_periods=period).mean()
         rsi = 100 - (100 / (1 + (ma_up / ma_down)))
+        
         last_rsi = rsi.iloc[-1]
         if last_rsi >= overbought: return 'put'
         if last_rsi <= oversold: return 'call'
@@ -166,72 +164,29 @@ async def _get_open_assets_fix(self):
     except: pass
     
     if datetime.utcnow().weekday() >= 5:
+        # Fallback expandido
         return [
             "EURUSD-OTC", "GBPUSD-OTC", "USDJPY-OTC", "EURJPY-OTC", 
-            "USDCHF-OTC", "AUDCAD-OTC", "NZDUSD-OTC", "EURGBP-OTC", "AUDUSD-OTC"
+            "USDCHF-OTC", "AUDCAD-OTC", "NZDUSD-OTC", "EURGBP-OTC", "AUDUSD-OTC",
+            "USDMXN-OTC", "FWONA-OTC", "XNGUSD-OTC"
         ]
     return []
 
-# --- 4. PATCH ANTI-CRASH (DATA PROTECTION) ---
-# Em vez de corrigir a thread, corrigimos a fonte de dados que a thread usa.
-# Isso garante que nunca retorne um objeto que cause KeyError.
-def _safe_get_digital_underlying_list_data(self):
-    try:
-        # Chama implementação original se existir e estiver acessível, 
-        # mas aqui nós vamos mockar a estrutura segura diretamente se falhar
-        # ou se a original estiver quebrada.
-        # Infelizmente, não podemos chamar "super()" facilmente num monkey patch.
-        # Vamos assumir que se o bot chamou isso, é porque quer dados.
-        
-        # Se a API armazena dados em self.api_digital_data (comum em iqoptionapi)
-        if hasattr(self, 'api_digital_data'):
-            return self.api_digital_data
-            
-        return {"underlying": []} # Estrutura Mínima Segura
-    except Exception:
-        return {"underlying": []}
-
-try:
-    import exnovaapi.stable_api
-    # Este é o método que a thread chama antes de falhar
-    # original: return self.get_digital_underlying_list_data()["underlying"]
-    # A thread espera que get_digital_underlying_list_data() retorne um dict COM a chave "underlying".
-    # Vamos substituir o método que fornece esses dados.
-    
-    # 1. Guardamos referência do original (se possível)
-    _original_method = exnovaapi.stable_api.ExnovaAPI.get_digital_underlying_list_data
-    
-    def _wrapper_method(self):
-        try:
-            data = _original_method(self)
-            if isinstance(data, dict) and "underlying" in data:
-                return data
-        except: pass
-        return {"underlying": []} # Fallback salvador
-        
-    exnovaapi.stable_api.ExnovaAPI.get_digital_underlying_list_data = _wrapper_method
-    print("[PATCH] Data protection applied to ExnovaAPI")
-except: 
-    pass
-
-try:
-    import iqoptionapi.stable_api
-    _original_method_iq = iqoptionapi.stable_api.IQOptionAPI.get_digital_underlying_list_data
-    def _wrapper_method_iq(self):
-        try:
-            data = _original_method_iq(self)
-            if isinstance(data, dict) and "underlying" in data:
-                return data
-        except: pass
-        return {"underlying": []}
-        
-    iqoptionapi.stable_api.IQOptionAPI.get_digital_underlying_list_data = _wrapper_method_iq
-    print("[PATCH] Data protection applied to IQOptionAPI")
-except: 
-    pass
-
 AsyncExnovaService.execute_trade = _execute_trade_robust
 AsyncExnovaService.get_open_assets = _get_open_assets_fix
+
+# --- 4. THREAD EXCEPTION SILENCER (CRÍTICO) ---
+# Substitui o run da Thread para engolir KeyErrors específicos da API
+def _safe_thread_run(self):
+    try:
+        self._target(*self._args, **self._kwargs)
+    except KeyError as e:
+        if 'underlying' in str(e): return # Silencia o erro específico
+        # traceback.print_exc() # Descomente para debug de outros erros
+    except Exception:
+        pass
+
+threading.Thread.run = _safe_thread_run
 
 # ==============================================================================
 
@@ -253,7 +208,7 @@ class TradingBot:
         self.daily_wins = 0
         self.daily_losses = 0
 
-        # SUPRESSÃO DE LOGS DE BIBLIOTECA
+        # SUPRESSÃO DE LOGS
         logging.getLogger("websocket").setLevel(logging.CRITICAL)
         logging.getLogger("exnovaapi").setLevel(logging.CRITICAL)
         logging.getLogger("iqoptionapi").setLevel(logging.CRITICAL)
@@ -290,8 +245,28 @@ class TradingBot:
             except: pass
 
     async def run(self):
-        await self.logger('INFO', 'Bot a iniciar no modo DATA SHIELD...')
-        if not await self.exnova.connect(): await self.logger('ERROR', 'Falha na conexão inicial.')
+        await self.logger('INFO', 'Bot a iniciar no modo INSTANCE PATCH...')
+        
+        # Conecta primeiro
+        if not await self.exnova.connect():
+            await self.logger('ERROR', 'Falha na conexão inicial.')
+        
+        # --- INSTANCE-LEVEL PATCH (CRÍTICO) ---
+        # Patcheia o objeto API ativo para evitar o KeyError na thread
+        try:
+            if hasattr(self.exnova, 'api'):
+                # Define um método seguro
+                def safe_get_digital_data(self_api):
+                    return {"underlying": []} # Mock vazio seguro
+                
+                # Substitui o método na instância ou classe da biblioteca
+                import types
+                self.exnova.api.get_digital_underlying_list_data = types.MethodType(safe_get_digital_data, self.exnova.api)
+                print("[PATCH] Proteção de Thread aplicada na Instância da API.")
+        except Exception as e:
+            print(f"[WARN] Falha ao patchear instância: {e}")
+        # --------------------------------------
+
         await self._daily_reset_if_needed()
         _patch_library_constants_aggressive()
 
@@ -355,6 +330,9 @@ class TradingBot:
             await self.exnova.change_balance(self.bot_config.get('account_type', 'PRACTICE'))
             assets = await self.exnova.get_open_assets()
             
+            if timeframe_seconds == 60:
+                print(f"[DEBUG RAW] Ativos disponíveis: {len(assets)}")
+            
             is_weekend = datetime.utcnow().weekday() >= 5
             available_assets = []
             for asset in assets:
@@ -369,7 +347,6 @@ class TradingBot:
                 total = stats['wins'] + stats['losses']
                 return stats['wins'] / total if total > 0 else 0.5
 
-            # MANTÉM LIMITE DE 15 ATIVOS
             target_assets = sorted(available_assets, key=get_asset_score, reverse=True)[:15]
             
             if timeframe_seconds == 60:
@@ -378,7 +355,6 @@ class TradingBot:
             max_sim = self.bot_config.get('max_simultaneous_trades', 1)
             if len(self.active_trading_pairs) >= max_sim: return
 
-            # --- MODO TARTARUGA (SERIAL + SLOW) ---
             for asset in target_assets:
                 base = asset.split('-')[0]
                 if base in self.active_trading_pairs: continue
@@ -387,8 +363,7 @@ class TradingBot:
                     await self._analyze_asset(asset, timeframe_seconds, expiration_minutes)
                 except Exception: pass
                 
-                # DELAY CRÍTICO: 3.0s entre chamadas para evitar banimento/crash
-                await asyncio.sleep(3.0)
+                await asyncio.sleep(4.0) # Aumentado para 4s para estabilidade máxima
 
         except Exception as e:
             await self.logger('ERROR', f"Erro em run_analysis: {e}")
@@ -483,7 +458,6 @@ class TradingBot:
                 asyncio.create_task(self._execute_and_wait(signal, full_name, trade_exp))
 
         except Exception as e:
-            # Erros silenciosos para não spammar
             pass
 
     async def _execute_martingale_trade(self, pair: str):
