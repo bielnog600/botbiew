@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>MAROMBIEW BOT</title>
 
-    <meta name="theme-color" content="#191919">
+    <meta name="theme-color" content="#111827">
     <link rel="manifest" href="/manifest.json">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -24,31 +24,79 @@
 
     <style>
         :root {
-            --bg-dark: #191919; --bg-medium: #1f2937; --border-color: #374151;
+            --bg-dark: #111827; --bg-medium: #1f2937; --border-color: #374151;
             --text-primary: #f9fafb; --text-secondary: #9ca3af; --accent-primary: #f59e0b;
             --accent-primary-hover: #fbbf24; --accent-red: #ef4444; 
             --accent-win: #22c55e; --accent-loss: #f87171; --accent-info: #3b82f6;
         }
         body { background-color: var(--bg-dark); color: var(--text-primary); font-family: 'Poppins', sans-serif; overflow: hidden; }
+        
+        /* Glassmorphism */
         .glass-card { background: rgba(31, 41, 55, 0.7); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid var(--border-color); }
+        
+        /* Form Elements */
         .form-input, .form-select { background-color: var(--bg-dark); border: 1px solid var(--border-color); color: var(--text-primary); transition: all 0.2s; }
         .form-input:focus, .form-select:focus { outline: none; border-color: var(--accent-primary); box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.2); }
+        
+        /* Utility */
         .btn { transition: all 0.2s; border: none; font-weight: 600; cursor: pointer; }
         .btn:active { transform: scale(0.98); }
         .nav-link-active { background-color: var(--accent-primary); color: var(--bg-dark); }
+        
+        /* Toggles */
         .toggle-bg:after { content: ''; position: absolute; top: 2px; left: 2px; background: white; border-radius: 9999px; height: 1.25rem; width: 1.25rem; transition: all 0.2s; }
         input:checked + .toggle-bg:after { transform: translateX(100%); }
         input:checked + .toggle-bg { background-color: var(--accent-primary); }
+        
+        /* Loading */
         .spinner { border: 3px solid rgba(245, 158, 11, 0.2); border-top-color: var(--accent-primary); border-radius: 50%; width: 1.5rem; height: 1.5rem; animation: spin 1s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
+        
+        /* Splash Screen */
         #static-splash { position: fixed; inset: 0; background-color: var(--bg-dark); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 9999; transition: opacity 0.4s ease-out; }
+
+        /* Toast Notifications */
         .toast-container { position: fixed; top: 1rem; right: 1rem; z-index: 50; display: flex; flex-direction: column; gap: 0.5rem; }
         .toast { animation: slideIn 0.3s ease-out forwards; }
         @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
 
-        /* SCANNER FX */
-        .pulse-text { animation: textPulse 0.5s ease-in-out; }
-        @keyframes textPulse { 0% { color: white; } 50% { color: #f59e0b; } 100% { color: white; } }
+        /* --- ANIMAÇÕES DO SCANNER --- */
+        .scan-line {
+            position: absolute;
+            width: 100%;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, var(--accent-primary), transparent);
+            animation: scanMove 1.5s linear infinite;
+            opacity: 0.8;
+            box-shadow: 0 0 10px var(--accent-primary);
+        }
+        @keyframes scanMove {
+            0% { top: 0%; opacity: 0; }
+            10% { opacity: 1; }
+            90% { opacity: 1; }
+            100% { top: 100%; opacity: 0; }
+        }
+        
+        .pulse-ring {
+            position: absolute;
+            border-radius: 50%;
+            border: 2px solid var(--accent-primary);
+            opacity: 0;
+            animation: pulseEffect 2s ease-out infinite;
+        }
+        @keyframes pulseEffect {
+            0% { transform: scale(0.5); opacity: 0.8; }
+            100% { transform: scale(1.5); opacity: 0; }
+        }
+
+        .ticker-text {
+            font-family: 'Roboto Mono', monospace;
+            animation: fadeSwitch 0.2s ease-in-out;
+        }
+        @keyframes fadeSwitch {
+            0% { opacity: 0.5; transform: translateY(2px); }
+            100% { opacity: 1; transform: translateY(0); }
+        }
     </style>
 </head>
 <body>
@@ -64,10 +112,12 @@
         const { useState, useEffect, useCallback, useMemo, useRef, createContext, useContext } = React;
         const { createClient } = supabase;
 
+        // Configuração Supabase
         const SUPABASE_URL = 'https://ioduahwknfsktujthfyc.supabase.co';
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlvZHVhaHdrbmZza3R1anRoZnljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEzMDc0NDcsImV4cCI6MjA2Njg4MzQ0N30.96f8wZO6SvABKFMWjIiw1pSugAB4Isldj7yxLcLJRSE';
         const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+        // --- Contexto de Toast (Notificações) ---
         const ToastContext = createContext();
         const useToast = () => useContext(ToastContext);
 
@@ -79,13 +129,18 @@
                 setTimeout(() => removeToast(id), 3000);
             };
             const removeToast = (id) => setToasts(prev => prev.filter(t => t.id !== id));
+
             return (
                 <ToastContext.Provider value={{ addToast }}>
                     {children}
                     <div className="toast-container">
                         {toasts.map(t => (
-                            <div key={t.id} className={`toast px-4 py-3 rounded-lg shadow-lg text-sm font-medium flex items-center gap-2 ${t.type === 'error' ? 'bg-red-600' : t.type === 'success' ? 'bg-green-600' : 'bg-gray-800 border-gray-700'} text-white`}>
-                                <i className={`fas ${t.type === 'error' ? 'fa-exclamation-circle' : t.type === 'success' ? 'fa-check-circle' : 'fa-info-circle'}`}></i>{t.msg}
+                            <div key={t.id} className={`toast px-4 py-3 rounded-lg shadow-lg text-sm font-medium flex items-center gap-2 ${
+                                t.type === 'error' ? 'bg-red-600 text-white' : 
+                                t.type === 'success' ? 'bg-green-600 text-white' : 'bg-gray-800 text-white border border-gray-700'
+                            }`}>
+                                <i className={`fas ${t.type === 'error' ? 'fa-exclamation-circle' : t.type === 'success' ? 'fa-check-circle' : 'fa-info-circle'}`}></i>
+                                {t.msg}
                             </div>
                         ))}
                     </div>
@@ -93,7 +148,9 @@
             );
         };
 
-        // --- SCANNER REAL-TIME ---
+        // --- Componentes Visual ---
+        
+        // WIDGET SCANNER INTELIGENTE
         const ScannerWidget = ({ lastLog, botStatus }) => {
             const [data, setData] = useState({ pair: '---', price: '0.00000', rsi: '0.0' });
             const [anim, setAnim] = useState(false);
@@ -159,38 +216,56 @@
         const NavLink = ({ viewName, currentView, setView, icon, text, isMobile = false }) => {
             const isActive = currentView === viewName;
             return (
-                <button onClick={() => setView(viewName)} className={`flex items-center transition-all duration-200 ${isMobile ? `flex-1 flex-col py-3 text-[10px] ${isActive ? 'text-amber-400' : 'text-gray-500 hover:text-gray-300'}` : `w-full space-x-3 px-4 py-3 rounded-lg text-sm font-medium ${isActive ? 'nav-link-active shadow-lg shadow-amber-500/20' : 'text-gray-400 hover:bg-gray-800 hover:text-white'}`}`}>
+                <button 
+                    onClick={() => setView(viewName)} 
+                    className={`flex items-center transition-all duration-200 ${
+                        isMobile 
+                        ? `flex-1 flex-col py-3 text-[10px] ${isActive ? 'text-amber-400' : 'text-gray-500 hover:text-gray-300'}` 
+                        : `w-full space-x-3 px-4 py-3 rounded-lg text-sm font-medium ${isActive ? 'nav-link-active shadow-lg shadow-amber-500/20' : 'text-gray-400 hover:bg-gray-800 hover:text-white'}`
+                    }`}
+                >
                     <i className={`fa-solid ${icon} text-lg ${isMobile ? 'mb-1 text-xl' : 'w-6 text-center'}`}></i>
                     <span className={isMobile ? '' : ''}>{text}</span>
                 </button>
             );
         };
 
+        // --- Páginas ---
+
         function LoginPage({ onLogin }) {
             const [email, setEmail] = useState('');
             const [password, setPassword] = useState('');
             const [loading, setLoading] = useState(false);
             const { addToast } = useToast();
+
             const handleLogin = async (e) => {
                 e.preventDefault();
                 setLoading(true);
                 const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
                 if (error) addToast(error.message, 'error');
-                else if (data.user) { addToast('Bem-vindo de volta!', 'success'); onLogin(data.user); }
+                else if (data.user) {
+                    addToast('Bem-vindo de volta!', 'success');
+                    onLogin(data.user);
+                }
                 setLoading(false);
             };
+
             return (
                 <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-gray-900 to-black">
                     <div className="w-full max-w-md p-8 glass-card rounded-2xl shadow-2xl">
                         <div className="text-center mb-8">
-                            <div className="w-16 h-16 bg-amber-500/10 rounded-full flex items-center justify-center mx-auto mb-4"><i className="fas fa-robot text-3xl text-amber-400"></i></div>
+                            <div className="w-16 h-16 bg-amber-500/10 rounded-full flex items-center justify-center mx-auto mb-4">
+                                <i className="fas fa-robot text-3xl text-amber-400"></i>
+                            </div>
                             <h2 className="text-2xl font-bold text-white">Acesso Admin</h2>
+                            <p className="text-gray-400 text-sm mt-1">Marombiew Bot Control</p>
                         </div>
                         <form className="space-y-5" onSubmit={handleLogin}>
                             <div><input type="email" required className="form-input w-full px-4 py-3 rounded-xl" placeholder="admin@exemplo.com" value={email} onChange={e => setEmail(e.target.value)} /></div>
                             <div><input type="password" required className="form-input w-full px-4 py-3 rounded-xl" placeholder="••••••••" value={password} onChange={e => setPassword(e.target.value)} /></div>
-                            <button type="submit" className="btn bg-amber-500 hover:bg-amber-600 w-full py-3 rounded-xl text-white shadow-lg flex justify-center items-center gap-2" disabled={loading}>
-                                {loading && <div className="spinner w-4 h-4 border-2"></div>} {loading ? 'Autenticando...' : 'Entrar no Sistema'}
+                            <button type="submit" className="btn bg-amber-500 hover:bg-amber-600 w-full py-3 rounded-xl text-white shadow-lg shadow-amber-500/20 flex justify-center items-center gap-2" disabled={loading}>
+                                {loading && <div className="spinner w-4 h-4 border-2"></div>}
+                                {loading ? 'Autenticando...' : 'Entrar no Sistema'}
                             </button>
                         </form>
                     </div>
@@ -201,9 +276,9 @@
         function HomeView() {
             const [signals, setSignals] = useState([]);
             const [balanceInfo, setBalanceInfo] = useState({ current: 0, initial: 0 });
-            const [botStatus, setBotStatus] = useState('PAUSED');
+            const [botStatus, setBotStatus] = useState('PAUSED'); // Novo estado
             const [isResetting, setIsResetting] = useState(false);
-            const [lastLog, setLastLog] = useState(null);
+            const [lastLog, setLastLog] = useState(null); 
             const { addToast } = useToast();
 
             const scores = useMemo(() => {
@@ -211,6 +286,7 @@
                 const losses = signals.filter(s => s.result === 'LOSS').length;
                 return { wins, losses, total: wins + losses };
             }, [signals]);
+
             const assertividade = scores.total > 0 ? ((scores.wins / scores.total) * 100).toFixed(0) : 0;
             const profit = balanceInfo.current - balanceInfo.initial;
 
@@ -219,7 +295,10 @@
                 setIsResetting(true);
                 const { error } = await supabaseClient.rpc('reset_daily_stats');
                 if (error) addToast("Erro ao zerar: " + error.message, 'error');
-                else { setSignals([]); addToast("Placar zerado com sucesso", 'success'); }
+                else {
+                    setSignals([]);
+                    addToast("Placar zerado com sucesso", 'success');
+                }
                 setIsResetting(false);
             };
             
@@ -227,33 +306,56 @@
                 const fetchData = async () => {
                     const { data: sData } = await supabaseClient.from('trade_signals').select('*').order('created_at', { ascending: false }).limit(50);
                     if (sData) setSignals(sData);
+                    
                     const { data: cData } = await supabaseClient.from('bot_config').select('current_balance, daily_initial_balance, status').eq('id', 1).single();
-                    if (cData) { setBalanceInfo({ current: cData.current_balance || 0, initial: cData.daily_initial_balance || 0 }); setBotStatus(cData.status || 'PAUSED'); }
+                    if (cData) {
+                        setBalanceInfo({ current: cData.current_balance || 0, initial: cData.daily_initial_balance || 0 });
+                        setBotStatus(cData.status || 'PAUSED');
+                    }
                 };
                 fetchData();
-                const subSignals = supabaseClient.channel('signals_realtime').on('postgres_changes', { event: '*', schema: 'public', table: 'trade_signals' }, (payload) => {
-                    if (payload.eventType === 'INSERT') setSignals(prev => [payload.new, ...prev]);
-                    else if (payload.eventType === 'UPDATE') setSignals(prev => prev.map(s => s.id === payload.new.id ? payload.new : s));
-                }).subscribe();
-                const subConfig = supabaseClient.channel('config_realtime').on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'bot_config' }, (payload) => {
-                    setBalanceInfo({ current: payload.new.current_balance || 0, initial: payload.new.daily_initial_balance || 0 });
-                    setBotStatus(payload.new.status || 'PAUSED');
-                }).subscribe();
-                const subLogs = supabaseClient.channel('logs_home').on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'logs' }, (payload) => {
-                    setLastLog(payload.new);
-                }).subscribe();
-                return () => { supabaseClient.removeChannel(subSignals); supabaseClient.removeChannel(subConfig); supabaseClient.removeChannel(subLogs); };
+
+                const subSignals = supabaseClient.channel('signals_realtime')
+                    .on('postgres_changes', { event: '*', schema: 'public', table: 'trade_signals' }, (payload) => {
+                        if (payload.eventType === 'INSERT') setSignals(prev => [payload.new, ...prev]);
+                        else if (payload.eventType === 'UPDATE') setSignals(prev => prev.map(s => s.id === payload.new.id ? payload.new : s));
+                    }).subscribe();
+
+                const subConfig = supabaseClient.channel('config_realtime')
+                    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'bot_config' }, (payload) => {
+                        setBalanceInfo({ current: payload.new.current_balance || 0, initial: payload.new.daily_initial_balance || 0 });
+                        setBotStatus(payload.new.status || 'PAUSED');
+                    }).subscribe();
+
+                // Assinar logs para o Scanner
+                const subLogs = supabaseClient.channel('logs_home')
+                    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'logs' }, (payload) => {
+                        setLastLog(payload.new);
+                    }).subscribe();
+
+                return () => { 
+                    supabaseClient.removeChannel(subSignals); 
+                    supabaseClient.removeChannel(subConfig); 
+                    supabaseClient.removeChannel(subLogs);
+                };
             }, []);
 
             return (
                 <div className="space-y-6 pb-20 md:pb-0">
                     <div className="flex justify-between items-center">
-                        <div><h1 className="text-2xl font-bold text-white">Dashboard</h1><p className="text-xs text-gray-400">Visão geral do dia</p></div>
-                        <button onClick={handleResetScores} className="btn bg-gray-800 hover:bg-gray-700 border border-gray-600 text-white px-3 py-2 rounded-lg text-xs flex items-center gap-2" disabled={isResetting}><i className={`fas fa-undo ${isResetting ? 'fa-spin' : ''}`}></i> Reset</button>
+                        <div>
+                            <h1 className="text-2xl font-bold text-white">Dashboard</h1>
+                            <p className="text-xs text-gray-400">Visão geral do dia</p>
+                        </div>
+                        <button onClick={handleResetScores} className="btn bg-gray-800 hover:bg-gray-700 border border-gray-600 text-white px-3 py-2 rounded-lg text-xs flex items-center gap-2" disabled={isResetting}>
+                            <i className={`fas fa-undo ${isResetting ? 'fa-spin' : ''}`}></i> Reset
+                        </button>
                     </div>
                     
+                    {/* WIDGET DO SCANNER (Passamos o status real) */}
                     <ScannerWidget lastLog={lastLog} botStatus={botStatus} />
 
+                    {/* Cards Topo */}
                     <div className="grid grid-cols-2 gap-4">
                         <div className="glass-card p-4 rounded-xl relative overflow-hidden">
                             <div className="absolute top-0 right-0 p-2 opacity-10"><i className="fas fa-wallet text-6xl"></i></div>
@@ -263,26 +365,43 @@
                         <div className="glass-card p-4 rounded-xl relative overflow-hidden">
                             <div className={`absolute top-0 right-0 p-2 opacity-10 ${profit >= 0 ? 'text-green-500' : 'text-red-500'}`}><i className="fas fa-chart-line text-6xl"></i></div>
                             <p className="text-xs text-gray-400 font-medium">RESULTADO DO DIA</p>
-                            <p className={`text-2xl font-bold mt-1 ${profit >= 0 ? 'text-green-400' : 'text-red-400'}`}>{profit >= 0 ? '+' : ''}${profit.toFixed(2)}</p>
+                            <p className={`text-2xl font-bold mt-1 ${profit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                {profit >= 0 ? '+' : ''}${profit.toFixed(2)}
+                            </p>
                         </div>
                     </div>
 
+                    {/* Placar */}
                     <div className="glass-card p-4 rounded-xl">
                         <div className="flex justify-between items-center text-center divide-x divide-gray-700">
-                            <div className="flex-1 px-2"><p className="text-xs text-green-500 font-bold mb-1">WINS</p><span className="text-2xl font-bold text-white">{scores.wins}</span></div>
-                            <div className="flex-1 px-2"><p className="text-xs text-red-500 font-bold mb-1">LOSS</p><span className="text-2xl font-bold text-white">{scores.losses}</span></div>
-                            <div className="flex-1 px-2"><p className="text-xs text-blue-400 font-bold mb-1">ASSERT.</p><span className="text-2xl font-bold text-white">{assertividade}%</span></div>
-                            <div className="flex-1 px-2"><CountdownTimer /></div>
+                            <div className="flex-1 px-2">
+                                <p className="text-xs text-green-500 font-bold mb-1">WINS</p>
+                                <span className="text-2xl font-bold text-white">{scores.wins}</span>
+                            </div>
+                            <div className="flex-1 px-2">
+                                <p className="text-xs text-red-500 font-bold mb-1">LOSS</p>
+                                <span className="text-2xl font-bold text-white">{scores.losses}</span>
+                            </div>
+                            <div className="flex-1 px-2">
+                                <p className="text-xs text-blue-400 font-bold mb-1">ASSERT.</p>
+                                <span className="text-2xl font-bold text-white">{assertividade}%</span>
+                            </div>
+                            <div className="flex-1 px-2">
+                                <CountdownTimer />
+                            </div>
                         </div>
                     </div>
                     
+                    {/* Lista de Sinais */}
                     <div>
                         <h2 className="text-sm font-bold text-gray-400 mb-3 uppercase tracking-wide">Últimos Sinais</h2>
                         <div className="space-y-3">
                             {signals.length > 0 ? signals.map(signal => (
                                 <div key={signal.id} className="glass-card p-3 rounded-lg flex items-center justify-between border-l-4" style={{borderLeftColor: signal.direction === 'call' ? '#22c55e' : '#ef4444'}}>
                                     <div className="flex items-center gap-3">
-                                        <div className={`w-8 h-8 rounded-full flex items-center justify-center ${signal.direction === 'call' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}><i className={`fas fa-arrow-${signal.direction === 'call' ? 'up' : 'down'}`}></i></div>
+                                        <div className={`w-8 h-8 rounded-full flex items-center justify-center ${signal.direction === 'call' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                                            <i className={`fas fa-arrow-${signal.direction === 'call' ? 'up' : 'down'}`}></i>
+                                        </div>
                                         <div>
                                             <p className="font-bold text-white text-sm">{signal.pair}</p>
                                             <p className="text-[10px] text-gray-400">{new Date(signal.created_at).toLocaleTimeString()} • {signal.strategy}</p>
@@ -297,7 +416,10 @@
                                     </div>
                                 </div>
                             )) : (
-                                <div className="text-center py-10 glass-card rounded-xl"><i className="fas fa-radar text-gray-600 text-4xl mb-3"></i><p className="text-gray-500 text-sm">A aguardar sinais...</p></div>
+                                <div className="text-center py-10 glass-card rounded-xl">
+                                    <i className="fas fa-radar text-gray-600 text-4xl mb-3"></i>
+                                    <p className="text-gray-500 text-sm">A aguardar sinais...</p>
+                                </div>
                             )}
                         </div>
                     </div>
@@ -324,7 +446,8 @@
             const saveWinRate = async () => {
                 setSaving(true);
                 const { error } = await supabaseClient.from('bot_config').update({ min_win_rate: config.min_win_rate }).eq('id', 1);
-                if (error) addToast("Erro ao salvar: " + error.message, 'error'); else addToast("Assertividade mínima atualizada!", 'success');
+                if (error) addToast("Erro ao salvar: " + error.message, 'error');
+                else addToast("Assertividade mínima atualizada!", 'success');
                 setSaving(false);
             };
 
@@ -333,19 +456,33 @@
             return (
                 <div className="space-y-6 pb-20 md:pb-0">
                     <h1 className="text-2xl font-bold text-white">Catalogador</h1>
+                    
                     <div className="glass-card p-5 rounded-xl">
-                        <div className="flex justify-between items-center mb-4"><h2 className="text-sm font-bold text-gray-300">Assertividade Mínima</h2><span className="text-amber-400 font-bold text-xl">{config.min_win_rate}%</span></div>
+                        <div className="flex justify-between items-center mb-4">
+                            <h2 className="text-sm font-bold text-gray-300">Assertividade Mínima</h2>
+                            <span className="text-amber-400 font-bold text-xl">{config.min_win_rate}%</span>
+                        </div>
                         <input type="range" min="50" max="95" value={config.min_win_rate} onChange={e => setConfig({...config, min_win_rate: parseInt(e.target.value)})} className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-amber-500" />
-                        <button onClick={saveWinRate} className="btn bg-gray-700 hover:bg-gray-600 w-full mt-4 py-2 rounded-lg text-sm text-white" disabled={saving}>{saving ? 'Salvando...' : 'Atualizar Filtro'}</button>
+                        <button onClick={saveWinRate} className="btn bg-gray-700 hover:bg-gray-600 w-full mt-4 py-2 rounded-lg text-sm text-white" disabled={saving}>
+                            {saving ? 'Salvando...' : 'Atualizar Filtro'}
+                        </button>
                     </div>
+
                     <div className="space-y-3">
                         <h2 className="text-sm font-bold text-gray-400 uppercase tracking-wide">Melhores Ativos (M5/M1)</h2>
                         {catalog.length > 0 ? catalog.map(asset => (
                             <div key={asset.pair} className="glass-card p-3 rounded-lg flex items-center justify-between">
-                                <div><p className="font-bold text-white">{asset.pair}</p><p className="text-xs text-gray-400">{asset.best_strategy} • <span className="text-green-400">{asset.wins}W</span> / <span className="text-red-400">{asset.losses}L</span></p></div>
-                                <div className={`text-lg font-bold ${asset.win_rate >= 80 ? 'text-green-400' : asset.win_rate >= 60 ? 'text-amber-400' : 'text-red-400'}`}>{asset.win_rate.toFixed(1)}%</div>
+                                <div>
+                                    <p className="font-bold text-white">{asset.pair}</p>
+                                    <p className="text-xs text-gray-400">{asset.best_strategy} • <span className="text-green-400">{asset.wins}W</span> / <span className="text-red-400">{asset.losses}L</span></p>
+                                </div>
+                                <div className={`text-lg font-bold ${asset.win_rate >= 80 ? 'text-green-400' : asset.win_rate >= 60 ? 'text-amber-400' : 'text-red-400'}`}>
+                                    {asset.win_rate.toFixed(1)}%
+                                </div>
                             </div>
-                        )) : (<p className="text-center text-gray-500 py-10">Nenhum dado catalogado ainda.</p>)}
+                        )) : (
+                            <p className="text-center text-gray-500 py-10">Nenhum dado catalogado ainda.</p>
+                        )}
                     </div>
                 </div>
             );
@@ -356,6 +493,8 @@
             const { addToast } = useToast();
             const [saving, setSaving] = useState(false);
             
+            const debounceRef = useRef(null);
+
             useEffect(() => {
                 const fetch = async () => {
                     const { data } = await supabaseClient.from('bot_config').select('*').eq('id', 1).single();
@@ -364,19 +503,29 @@
                 fetch();
             }, []);
 
-            const updateField = (field, value) => setConfig(prev => ({ ...prev, [field]: value }));
+            const updateField = (field, value) => {
+                setConfig(prev => ({ ...prev, [field]: value }));
+            };
 
             const toggleBotStatus = async () => {
                 const newStatus = config.status === 'RUNNING' ? 'PAUSED' : 'RUNNING';
-                if (newStatus === 'RUNNING') { if (!confirm("Iniciar o bot irá resetar o placar diário. Continuar?")) return; await supabaseClient.rpc('reset_daily_stats'); }
+                if (newStatus === 'RUNNING') {
+                    if (!confirm("Iniciar o bot irá resetar o placar diário. Continuar?")) return;
+                    await supabaseClient.rpc('reset_daily_stats');
+                }
                 const { error } = await supabaseClient.from('bot_config').update({ status: newStatus }).eq('id', 1);
-                if (error) addToast("Erro: " + error.message, 'error'); else { setConfig(prev => ({ ...prev, status: newStatus })); addToast(`Bot ${newStatus === 'RUNNING' ? 'INICIADO' : 'PAUSADO'}`, newStatus === 'RUNNING' ? 'success' : 'info'); }
+                if (error) addToast("Erro: " + error.message, 'error');
+                else {
+                    setConfig(prev => ({ ...prev, status: newStatus }));
+                    addToast(`Bot ${newStatus === 'RUNNING' ? 'INICIADO' : 'PAUSADO'}`, newStatus === 'RUNNING' ? 'success' : 'info');
+                }
             };
 
             const saveSettings = async () => {
                 setSaving(true);
                 const { error } = await supabaseClient.from('bot_config').update(config).eq('id', 1);
-                if (error) addToast("Erro ao salvar: " + error.message, 'error'); else addToast("Configurações atualizadas!", 'success');
+                if (error) addToast("Erro ao salvar: " + error.message, 'error');
+                else addToast("Configurações atualizadas!", 'success');
                 setSaving(false);
             };
 
@@ -385,13 +534,23 @@
             return (
                 <div className="space-y-6 pb-20 md:pb-0">
                     <h1 className="text-2xl font-bold text-white">Configurações</h1>
+
+                    {/* Status Card */}
                     <div className="glass-card p-5 rounded-xl flex items-center justify-between border border-gray-700">
-                        <div><p className="text-sm text-gray-400 font-medium">STATUS DO SISTEMA</p><p className={`text-xl font-bold ${config.status === 'RUNNING' ? 'text-green-400' : 'text-amber-400'}`}>{config.status === 'RUNNING' ? 'ONLINE' : 'PAUSADO'}</p></div>
-                        <button onClick={toggleBotStatus} className={`btn w-12 h-12 rounded-full flex items-center justify-center shadow-lg ${config.status === 'RUNNING' ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'}`}><i className={`fas ${config.status === 'RUNNING' ? 'fa-pause' : 'fa-play'} text-white text-lg`}></i></button>
+                        <div>
+                            <p className="text-sm text-gray-400 font-medium">STATUS DO SISTEMA</p>
+                            <p className={`text-xl font-bold ${config.status === 'RUNNING' ? 'text-green-400' : 'text-amber-400'}`}>
+                                {config.status === 'RUNNING' ? 'ONLINE' : 'PAUSADO'}
+                            </p>
+                        </div>
+                        <button onClick={toggleBotStatus} className={`btn w-12 h-12 rounded-full flex items-center justify-center shadow-lg ${config.status === 'RUNNING' ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'}`}>
+                            <i className={`fas ${config.status === 'RUNNING' ? 'fa-pause' : 'fa-play'} text-white text-lg`}></i>
+                        </button>
                     </div>
 
                     <div className="glass-card p-6 rounded-xl space-y-6">
                         <h2 className="text-sm font-bold text-amber-400 uppercase tracking-wide mb-4">Gerenciamento de Risco</h2>
+                        
                         <div>
                             <label className="block text-xs text-gray-400 mb-2 uppercase">Modo de Stop</label>
                             <div className="grid grid-cols-2 gap-2 bg-gray-900 p-1 rounded-lg">
@@ -399,26 +558,63 @@
                                 <button onClick={() => updateField('stop_mode', 'percentage')} className={`py-2 text-xs font-bold rounded-md transition-all ${config.stop_mode === 'percentage' ? 'bg-gray-700 text-white shadow' : 'text-gray-500 hover:text-gray-300'}`}>PORCENTAGEM</button>
                             </div>
                         </div>
+
                         <div className="grid grid-cols-2 gap-4">
-                            <div><label className="block text-xs text-gray-400 mb-1">Stop Win</label><input type="number" className="form-input w-full p-3 rounded-lg text-green-400 font-bold" value={config.stop_mode === 'operations' ? config.stop_win : config.stop_win_percent} onChange={e => updateField(config.stop_mode === 'operations' ? 'stop_win' : 'stop_win_percent', Number(e.target.value))} /></div>
-                            <div><label className="block text-xs text-gray-400 mb-1">Stop Loss</label><input type="number" className="form-input w-full p-3 rounded-lg text-red-400 font-bold" value={config.stop_mode === 'operations' ? config.stop_loss : config.stop_loss_percent} onChange={e => updateField(config.stop_mode === 'operations' ? 'stop_loss' : 'stop_loss_percent', Number(e.target.value))} /></div>
+                            <div>
+                                <label className="block text-xs text-gray-400 mb-1">Stop Win ({config.stop_mode === 'operations' ? 'Qtd' : '%'})</label>
+                                <input type="number" className="form-input w-full p-3 rounded-lg text-green-400 font-bold" value={config.stop_mode === 'operations' ? config.stop_win : config.stop_win_percent} onChange={e => updateField(config.stop_mode === 'operations' ? 'stop_win' : 'stop_win_percent', Number(e.target.value))} />
+                            </div>
+                            <div>
+                                <label className="block text-xs text-gray-400 mb-1">Stop Loss ({config.stop_mode === 'operations' ? 'Qtd' : '%'})</label>
+                                <input type="number" className="form-input w-full p-3 rounded-lg text-red-400 font-bold" value={config.stop_mode === 'operations' ? config.stop_loss : config.stop_loss_percent} onChange={e => updateField(config.stop_mode === 'operations' ? 'stop_loss' : 'stop_loss_percent', Number(e.target.value))} />
+                            </div>
                         </div>
                     </div>
 
                     <div className="glass-card p-6 rounded-xl space-y-6">
-                        <div className="flex justify-between items-center"><h2 className="text-sm font-bold text-amber-400 uppercase tracking-wide">Estratégia & Martingale</h2><label className="flex items-center cursor-pointer"><span className="text-xs mr-2 text-gray-400">{config.use_martingale ? 'Gale ON' : 'Gale OFF'}</span><div className="relative"><input type="checkbox" className="hidden" checked={config.use_martingale} onChange={() => updateField('use_martingale', !config.use_martingale)} /><div className="toggle-bg w-10 h-6 bg-gray-700 rounded-full shadow-inner"></div></div></label></div>
-                        <div className="grid grid-cols-2 gap-4">
-                            <div><label className="block text-xs text-gray-400 mb-1">Valor Entrada ($)</label><input type="number" className="form-input w-full p-3 rounded-lg font-bold" value={config.entry_value} onChange={e => updateField('entry_value', Number(e.target.value))} /></div>
-                            <div><label className="block text-xs text-gray-400 mb-1">Conta</label><select className="form-select w-full p-3 rounded-lg font-bold" value={config.account_type} onChange={e => updateField('account_type', e.target.value)}><option value="PRACTICE">DEMO</option><option value="REAL">REAL</option></select></div>
+                        <div className="flex justify-between items-center">
+                            <h2 className="text-sm font-bold text-amber-400 uppercase tracking-wide">Estratégia & Martingale</h2>
+                            <label className="flex items-center cursor-pointer">
+                                <span className="text-xs mr-2 text-gray-400">{config.use_martingale ? 'Gale ON' : 'Gale OFF'}</span>
+                                <div className="relative">
+                                    <input type="checkbox" className="hidden" checked={config.use_martingale} onChange={() => updateField('use_martingale', !config.use_martingale)} />
+                                    <div className="toggle-bg w-10 h-6 bg-gray-700 rounded-full shadow-inner"></div>
+                                </div>
+                            </label>
                         </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-xs text-gray-400 mb-1">Valor Entrada ($)</label>
+                                <input type="number" className="form-input w-full p-3 rounded-lg font-bold" value={config.entry_value} onChange={e => updateField('entry_value', Number(e.target.value))} />
+                            </div>
+                            <div>
+                                <label className="block text-xs text-gray-400 mb-1">Conta</label>
+                                <select className="form-select w-full p-3 rounded-lg font-bold" value={config.account_type} onChange={e => updateField('account_type', e.target.value)}>
+                                    <option value="PRACTICE">DEMO</option>
+                                    <option value="REAL">REAL</option>
+                                </select>
+                            </div>
+                        </div>
+
                         {config.use_martingale && (
                             <div className="grid grid-cols-2 gap-4 p-4 bg-gray-900/50 rounded-lg border border-gray-800">
-                                <div><label className="block text-xs text-gray-500 mb-1">Níveis</label><input type="number" className="form-input w-full p-2 rounded text-sm" value={config.martingale_levels} onChange={e => updateField('martingale_levels', Number(e.target.value))} /></div>
-                                <div><label className="block text-xs text-gray-500 mb-1">Fator</label><input type="number" step="0.1" className="form-input w-full p-2 rounded text-sm" value={config.martingale_factor} onChange={e => updateField('martingale_factor', Number(e.target.value))} /></div>
+                                <div>
+                                    <label className="block text-xs text-gray-500 mb-1">Níveis</label>
+                                    <input type="number" className="form-input w-full p-2 rounded text-sm" value={config.martingale_levels} onChange={e => updateField('martingale_levels', Number(e.target.value))} />
+                                </div>
+                                <div>
+                                    <label className="block text-xs text-gray-500 mb-1">Fator</label>
+                                    <input type="number" step="0.1" className="form-input w-full p-2 rounded text-sm" value={config.martingale_factor} onChange={e => updateField('martingale_factor', Number(e.target.value))} />
+                                </div>
                             </div>
                         )}
                     </div>
-                    <button onClick={saveSettings} className="btn w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-4 rounded-xl shadow-lg flex justify-center items-center gap-2" disabled={saving}>{saving ? <div className="spinner w-5 h-5 border-white"></div> : <i className="fas fa-save"></i>} {saving ? 'Salvando...' : 'Salvar Alterações'}</button>
+
+                    <button onClick={saveSettings} className="btn w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-4 rounded-xl shadow-lg shadow-amber-500/20 flex justify-center items-center gap-2" disabled={saving}>
+                        {saving ? <div className="spinner w-5 h-5 border-white"></div> : <i className="fas fa-save"></i>}
+                        {saving ? 'Salvando...' : 'Salvar Alterações'}
+                    </button>
                 </div>
             );
         }
@@ -426,19 +622,35 @@
         function LogsView() {
             const [logs, setLogs] = useState([]);
             const endRef = useRef(null);
+
             useEffect(() => {
-                const fetch = async () => { const { data } = await supabaseClient.from('logs').select('*').order('created_at', { ascending: false }).limit(100); if (data) setLogs(data.reverse()); };
+                const fetch = async () => {
+                    const { data } = await supabaseClient.from('logs').select('*').order('created_at', { ascending: false }).limit(100);
+                    if (data) setLogs(data.reverse());
+                };
                 fetch();
-                const sub = supabaseClient.channel('logs_rt').on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'logs' }, payload => { setLogs(prev => [...prev.slice(-99), payload.new]); }).subscribe();
+                const sub = supabaseClient.channel('logs_rt').on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'logs' }, payload => {
+                    setLogs(prev => [...prev.slice(-99), payload.new]);
+                }).subscribe();
                 return () => supabaseClient.removeChannel(sub);
             }, []);
+
             useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [logs]);
+
             return (
                 <div className="flex flex-col h-full pb-20 md:pb-0">
                     <h1 className="text-2xl font-bold text-white mb-4">Terminal de Logs</h1>
                     <div className="flex-1 glass-card rounded-xl p-4 overflow-y-auto font-mono text-xs space-y-2 border border-gray-700 bg-black/40">
                         {logs.length === 0 && <p className="text-gray-500 text-center mt-10">Aguardando logs do sistema...</p>}
-                        {logs.map(log => (<div key={log.id} className="flex gap-2"><span className="text-gray-500 shrink-0">[{new Date(log.created_at).toLocaleTimeString()}]</span><span className={`${log.level === 'ERROR' ? 'text-red-400' : log.level === 'WARNING' ? 'text-amber-400' : log.level === 'SUCCESS' ? 'text-green-400' : log.level === 'DEBUG' ? 'text-gray-500' : 'text-blue-300'}`}>{log.level}:</span><span className="text-gray-300 break-all">{log.message}</span></div>))}
+                        {logs.map(log => (
+                            <div key={log.id} className="flex gap-2">
+                                <span className="text-gray-500 shrink-0">[{new Date(log.created_at).toLocaleTimeString()}]</span>
+                                <span className={`${log.level === 'ERROR' ? 'text-red-400' : log.level === 'WARNING' ? 'text-amber-400' : log.level === 'SUCCESS' ? 'text-green-400' : 'text-blue-300'}`}>
+                                    {log.level}:
+                                </span>
+                                <span className="text-gray-300 break-all">{log.message}</span>
+                            </div>
+                        ))}
                         <div ref={endRef}></div>
                     </div>
                 </div>
@@ -451,38 +663,79 @@
             const [view, setView] = useState('home');
 
             useEffect(() => {
-                supabaseClient.auth.getSession().then(({ data: { session } }) => { setSession(session); setLoading(false); });
+                supabaseClient.auth.getSession().then(({ data: { session } }) => {
+                    setSession(session);
+                    setLoading(false);
+                });
                 const { data: { subscription } } = supabaseClient.auth.onAuthStateChange((_event, session) => setSession(session));
                 return () => subscription.unsubscribe();
             }, []);
 
-            useEffect(() => { if (!loading) { const splash = document.getElementById('static-splash'); if (splash) { splash.style.opacity = '0'; setTimeout(() => splash.remove(), 400); } } }, [loading]);
+            useEffect(() => {
+                if (!loading) {
+                    const splash = document.getElementById('static-splash');
+                    if (splash) {
+                        splash.style.opacity = '0';
+                        setTimeout(() => splash.remove(), 400);
+                    }
+                }
+            }, [loading]);
 
             if (loading) return null;
-            if (!session) return <ToastProvider><LoginPage onLogin={() => {}} /></ToastProvider>;
+            if (!session) return (
+                <ToastProvider>
+                    <LoginPage onLogin={() => {}} />
+                </ToastProvider>
+            );
 
             const handleLogout = () => supabaseClient.auth.signOut();
 
             return (
                 <ToastProvider>
                     <div className="flex h-screen bg-bg-dark text-text-primary overflow-hidden">
+                        {/* Sidebar Desktop */}
                         <aside className="hidden md:flex w-64 bg-bg-medium border-r border-border-color flex-col">
-                            <div className="h-20 flex items-center px-6 border-b border-gray-800"><i className="fas fa-robot text-amber-400 text-2xl mr-3"></i><span className="font-bold text-lg tracking-wider">MAROMBIEW</span></div>
+                            <div className="h-20 flex items-center px-6 border-b border-gray-800">
+                                <i className="fas fa-robot text-amber-400 text-2xl mr-3"></i>
+                                <span className="font-bold text-lg tracking-wider">MAROMBIEW</span>
+                            </div>
                             <nav className="flex-1 p-4 space-y-2">
                                 <NavLink viewName="home" currentView={view} setView={setView} icon="fa-chart-pie" text="Dashboard" />
                                 <NavLink viewName="strategies" currentView={view} setView={setView} icon="fa-layer-group" text="Estratégias" />
                                 <NavLink viewName="settings" currentView={view} setView={setView} icon="fa-sliders" text="Configurações" />
                                 <NavLink viewName="logs" currentView={view} setView={setView} icon="fa-terminal" text="Logs do Sistema" />
                             </nav>
-                            <div className="p-4 border-t border-gray-800"><button onClick={handleLogout} className="w-full flex items-center px-4 py-3 text-sm text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"><i className="fa-solid fa-right-from-bracket w-6"></i> Sair</button></div>
+                            <div className="p-4 border-t border-gray-800">
+                                <button onClick={handleLogout} className="w-full flex items-center px-4 py-3 text-sm text-red-400 hover:bg-red-500/10 rounded-lg transition-colors">
+                                    <i className="fa-solid fa-right-from-bracket w-6"></i> Sair
+                                </button>
+                            </div>
                         </aside>
-                        <main className="flex-1 flex flex-col h-full overflow-hidden relative"><div className="flex-1 overflow-y-auto p-4 md:p-8 scroll-smooth">{view === 'home' && <HomeView />}{view === 'strategies' && <StrategiesView />}{view === 'settings' && <SettingsView />}{view === 'logs' && <LogsView />}</div></main>
+
+                        {/* Conteúdo Principal */}
+                        <main className="flex-1 flex flex-col h-full overflow-hidden relative">
+                            <div className="flex-1 overflow-y-auto p-4 md:p-8 scroll-smooth">
+                                {view === 'home' && <HomeView />}
+                                {view === 'strategies' && <StrategiesView />}
+                                {view === 'settings' && <SettingsView />}
+                                {view === 'logs' && <LogsView />}
+                            </div>
+                        </main>
+
+                        {/* Menu Mobile (Fixo em baixo) */}
                         <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-bg-medium/95 backdrop-blur-lg border-t border-gray-800 flex justify-around px-2 pb-safe z-40 h-16">
                             <NavLink viewName="home" currentView={view} setView={setView} icon="fa-chart-pie" text="Dash" isMobile={true} />
                             <NavLink viewName="strategies" currentView={view} setView={setView} icon="fa-layer-group" text="Estrat." isMobile={true} />
-                            <div className="relative -top-5"><button onClick={() => setView('settings')} className={`w-14 h-14 rounded-full flex items-center justify-center shadow-lg border-4 border-bg-dark ${view === 'settings' ? 'bg-amber-500 text-white' : 'bg-gray-700 text-gray-300'}`}><i className="fas fa-sliders text-xl"></i></button></div>
+                            <div className="relative -top-5">
+                                <button onClick={() => setView('settings')} className={`w-14 h-14 rounded-full flex items-center justify-center shadow-lg border-4 border-bg-dark ${view === 'settings' ? 'bg-amber-500 text-white' : 'bg-gray-700 text-gray-300'}`}>
+                                    <i className="fas fa-sliders text-xl"></i>
+                                </button>
+                            </div>
                             <NavLink viewName="logs" currentView={view} setView={setView} icon="fa-terminal" text="Logs" isMobile={true} />
-                            <button onClick={handleLogout} className="flex-1 flex flex-col items-center justify-center py-2 text-[10px] text-gray-500"><i className="fa-solid fa-power-off text-lg mb-1"></i><span>Sair</span></button>
+                            <button onClick={handleLogout} className="flex-1 flex flex-col items-center justify-center py-2 text-[10px] text-gray-500">
+                                <i className="fa-solid fa-power-off text-lg mb-1"></i>
+                                <span>Sair</span>
+                            </button>
                         </nav>
                     </div>
                 </ToastProvider>
