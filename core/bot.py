@@ -36,44 +36,35 @@ ACTIVES_MAP = {
 }
 
 # ==============================================================================
-#                      MONKEY PATCHES (BIBLIOTECA & INDICADORES)
+#                      MONKEY PATCHES (AGRESSIVOS)
 # ==============================================================================
 
-# --- 0. PATCH CRÍTICO: Atualizar constantes da biblioteca Exnova/IQ ---
-def _patch_library_constants():
-    """Injeta os IDs OTC na biblioteca instalada para evitar erro 'Asset not found'"""
-    try:
-        # Tenta encontrar a biblioteca carregada (pode ser iqoptionapi ou exnovaapi)
-        # Procuramos nos módulos carregados
-        target_modules = ['iqoptionapi.constants', 'exnovaapi.constants', 'iqoptionapi.stable_api', 'exnovaapi.stable_api']
-        
-        patched = False
-        
-        # 1. Tentar importar e atualizar diretamente
-        try:
-            import iqoptionapi.constants as iqc
-            iqc.ACTIVES.update(ACTIVES_MAP)
-            print("[PATCH] iqoptionapi.constants atualizado com sucesso!")
-            patched = True
-        except ImportError: pass
+# --- 0. PATCH NUCLEAR DE CONSTANTES ---
+def _patch_library_constants_aggressive():
+    """
+    Percorre TODOS os módulos carregados. Se encontrar um dicionário 'ACTIVES'
+    dentro de um módulo da biblioteca (iqoptionapi ou exnovaapi), atualiza-o.
+    """
+    count = 0
+    targets = ['iqoptionapi', 'exnovaapi']
+    
+    # 1. Atualizar sys.modules
+    for module_name, module in list(sys.modules.items()):
+        # Verifica se o módulo pertence às bibliotecas alvo
+        if any(t in module_name for t in targets):
+            # Verifica se tem o atributo ACTIVES
+            if hasattr(module, 'ACTIVES') and isinstance(module.ACTIVES, dict):
+                try:
+                    module.ACTIVES.update(ACTIVES_MAP)
+                    count += 1
+                except Exception: pass
+    
+    print(f"[PATCH NUCLEAR] Atualizou ACTIVES em {count} módulos internos.")
 
-        try:
-            import exnovaapi.constants as exc
-            exc.ACTIVES.update(ACTIVES_MAP)
-            print("[PATCH] exnovaapi.constants atualizado com sucesso!")
-            patched = True
-        except ImportError: pass
-        
-        if not patched:
-            print("[WARN] Não foi possível encontrar a biblioteca para patch de constantes. O OTC pode falhar.")
-            
-    except Exception as e:
-        print(f"[PATCH ERROR] Falha ao injetar constantes: {e}")
+# Executa o patch imediatamente
+_patch_library_constants_aggressive()
 
-# Executa o patch imediatamente ao carregar o arquivo
-_patch_library_constants()
-
-# --- 1. CORREÇÃO INDICADORES (Pandas & Padrões) ---
+# --- 1. CORREÇÃO INDICADORES ---
 def _convert_candles_to_dataframe_fix(candles):
     if not candles: return pd.DataFrame()
     normalized = []
@@ -157,7 +148,7 @@ ti.validate_reversal_candle = _validate_reversal_candle_fix
 ti.check_candlestick_pattern = _check_candlestick_pattern_fix
 ti.check_rsi_condition = _check_rsi_condition_fix
 
-# --- 2. CORREÇÃO SERVIÇO DE EXECUÇÃO (ID + Híbrido) ---
+# --- 2. CORREÇÃO SERVIÇO DE EXECUÇÃO ---
 async def _execute_trade_robust(self, amount, active, direction, duration):
     try:
         if hasattr(self, 'api') and self.api:
@@ -239,9 +230,14 @@ class TradingBot:
                 await self.logger('ERROR', f"Erro ao atualizar saldo diário: {e}")
 
     async def run(self):
-        await self.logger('INFO', 'Bot a iniciar no modo LIBRARY PATCHED...')
+        await self.logger('INFO', 'Bot a iniciar no modo NUCLEAR PATCH...')
+        
+        # --- RE-EXECUTA O PATCH APÓS CONEXÃO (Por segurança, caso carregue lazy modules) ---
         if not await self.exnova.connect():
             await self.logger('ERROR', 'Falha na conexão inicial.')
+        
+        _patch_library_constants_aggressive()
+        # ---------------------------------------------------------------------------------
 
         await self._daily_reset_if_needed()
 
@@ -259,6 +255,7 @@ class TradingBot:
                     print("[AVISO] Conexão perdida. Reconectando...")
                     if await self.exnova.connect():
                         await self.logger('SUCCESS', 'Reconectado.')
+                        _patch_library_constants_aggressive() # Re-aplica patch na reconexão
                     else:
                         await asyncio.sleep(5)
                         continue
@@ -369,7 +366,6 @@ class TradingBot:
 
             asset_id = self._get_asset_id(full_name)
 
-            # AQUI: Se o patch da biblioteca funcionou, o erro "Asset not found" deve desaparecer
             candles = await asyncio.gather(
                 self.exnova.get_historical_candles(asset_id, t1, 200),
                 self.exnova.get_historical_candles(asset_id, t2, 100)
