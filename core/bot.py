@@ -3,8 +3,8 @@ import traceback
 import sys
 import threading
 import logging
-import functools
 import json
+import time
 from datetime import datetime
 from typing import Dict, Optional, Set, List
 from types import SimpleNamespace
@@ -41,7 +41,7 @@ ACTIVES_MAP = {
 }
 
 # ==============================================================================
-#                      MONKEY PATCHES (AGRESSIVOS & BIDIRECIONAIS)
+#                      MONKEY PATCHES (SISTEMA DE SUPORTE DE VIDA)
 # ==============================================================================
 
 # --- 0. PATCH NUCLEAR DE CONSTANTES ---
@@ -54,15 +54,68 @@ def _patch_library_constants_aggressive():
     for module_name, module in list(sys.modules.items()):
         if any(t in module_name for t in targets):
             if hasattr(module, 'ACTIVES') and isinstance(module.ACTIVES, dict):
-                try:
-                    module.ACTIVES.update(FULL_MAP)
-                    count += 1
+                try: module.ACTIVES.update(FULL_MAP); count += 1
                 except Exception: pass
-    print(f"[PATCH BIDIRECIONAL] Atualizou ACTIVES em {count} módulos internos.")
+    if count > 0: print(f"[PATCH] Constantes atualizadas em {count} módulos.")
 
 _patch_library_constants_aggressive()
 
-# --- 1. CORREÇÃO INDICADORES ---
+# --- 1. PROXY SEGURO PARA GET_CANDLES (SEM REINVENTAR) ---
+# Em vez de tentar enviar frames manuais, delegamos para a API interna que sabe fazer isso.
+def _proxy_get_candles(self, active, size, count=100, to=None):
+    """
+    Encaminha a chamada para a API interna (self.api),
+    que é onde o método get_candles original existe.
+    """
+    if not hasattr(self, "api") or self.api is None:
+        return []
+
+    if to is None:
+        to = time.time()
+
+    try:
+        # A grande maioria dessas libs usa (active, size, count, to) na camada interna
+        return self.api.get_candles(active, size, count, to)
+    except Exception:
+        return []
+
+# Injeta o proxy na classe Stable
+try:
+    import exnovaapi.stable_api
+    if not hasattr(exnovaapi.stable_api.ExnovaAPI, 'get_candles'):
+        exnovaapi.stable_api.ExnovaAPI.get_candles = _proxy_get_candles
+        print("[PATCH] Proxy get_candles adicionado na ExnovaAPI.")
+except: pass
+
+try:
+    import iqoptionapi.stable_api
+    if not hasattr(iqoptionapi.stable_api.IQOptionAPI, 'get_candles'):
+        iqoptionapi.stable_api.IQOptionAPI.get_candles = _proxy_get_candles
+        print("[PATCH] Proxy get_candles adicionado na IQOptionAPI.")
+except: pass
+
+# --- 2. PATCH SERVICE GET_CANDLES ---
+# Atualiza o serviço para usar o proxy
+async def _get_historical_candles_patched(self, asset_id, duration, amount):
+    try:
+        if not self.api: return []
+        
+        # duration = timeframe (size), amount = count
+        # Chama o proxy que injetamos acima via thread
+        candles = await asyncio.to_thread(
+            self.api.get_candles,
+            asset_id,
+            duration,
+            amount,
+            time.time()
+        )
+        return candles or []
+    except Exception:
+        return []
+
+AsyncExnovaService.get_historical_candles = _get_historical_candles_patched
+
+# --- 3. CORREÇÃO INDICADORES ---
 def _convert_candles_to_dataframe_fix(candles):
     if not candles: return pd.DataFrame()
     normalized = []
@@ -101,10 +154,8 @@ def _check_candlestick_pattern_fix(candles):
         l_lower = min(l_close, l_open) - l_low
         is_p_red, is_p_green = p_close < p_open, p_close > p_open
         is_l_green, is_l_red = l_close > l_open, l_close < l_open
-        
         if is_p_red and is_l_green and l_close > p_open and l_open < p_close: return 'call'
         if is_p_green and is_l_red and l_close < p_open and l_open > p_close: return 'put'
-        
         RATIO = 1.5
         if l_lower >= (RATIO * l_body) and l_upper <= l_body: return 'call'
         if l_upper >= (RATIO * l_body) and l_lower <= l_body: return 'put'
@@ -131,7 +182,7 @@ ti.validate_reversal_candle = _validate_reversal_candle_fix
 ti.check_candlestick_pattern = _check_candlestick_pattern_fix
 ti.check_rsi_condition = _check_rsi_condition_fix
 
-# --- 2. CORREÇÃO SERVIÇO DE EXECUÇÃO ---
+# --- 4. CORREÇÃO SERVIÇO DE EXECUÇÃO ---
 async def _execute_trade_robust(self, amount, active, direction, duration):
     try:
         if hasattr(self, 'api') and self.api:
@@ -152,8 +203,17 @@ async def _execute_trade_robust(self, amount, active, direction, duration):
     except Exception: pass
     return None
 
-# --- 3. CORREÇÃO GET_OPEN_ASSETS ---
+# --- 5. CORREÇÃO GET_OPEN_ASSETS (FORÇAR OTC NO FIM DE SEMANA) ---
 async def _get_open_assets_fix(self):
+    # Se for Fim de Semana (Sáb=5, Dom=6), ignora API e força lista
+    if datetime.utcnow().weekday() >= 5:
+        return [
+            "EURUSD-OTC", "GBPUSD-OTC", "USDJPY-OTC", "EURJPY-OTC", 
+            "USDCHF-OTC", "AUDCAD-OTC", "NZDUSD-OTC", "EURGBP-OTC", "AUDUSD-OTC",
+            "USDMXN-OTC", "FWONA-OTC", "XNGUSD-OTC"
+        ]
+    
+    # Se for dia útil, tenta API
     try:
         if hasattr(self, 'api') and self.api:
             assets = await asyncio.to_thread(self.api.get_all_open_time)
@@ -166,54 +226,37 @@ async def _get_open_assets_fix(self):
                 if opened: return list(set(opened))
     except: pass
     
-    if datetime.utcnow().weekday() >= 5:
-        return [
-            "EURUSD-OTC", "GBPUSD-OTC", "USDJPY-OTC", "EURJPY-OTC", 
-            "USDCHF-OTC", "AUDCAD-OTC", "NZDUSD-OTC", "EURGBP-OTC", "AUDUSD-OTC",
-            "USDMXN-OTC", "FWONA-OTC", "XNGUSD-OTC"
-        ]
     return []
 
-# --- 4. PATCH ANTI-CRASH (DATA PROTECTION) ---
+# --- 6. PATCH ANTI-CRASH (DATA PROTECTION) ---
 def _safe_get_digital_underlying_list_data(self):
     return {"underlying": []}
 
 try:
     import exnovaapi.stable_api
     import types
-    # Mock direto no método da classe para silenciar o erro da thread
     exnovaapi.stable_api.ExnovaAPI.get_digital_underlying_list_data = lambda self: {"underlying": []}
 except: pass
 
-try:
-    import iqoptionapi.stable_api
-    iqoptionapi.stable_api.IQOptionAPI.get_digital_underlying_list_data = lambda self: {"underlying": []}
-except: pass
-
-# --- 5. PATCH: RECONEXÃO LIMPA (FRESH INSTANCE) (CRÍTICO) ---
+# --- 7. PATCH: RECONEXÃO LIMPA ---
 async def _connect_fresh_instance(self):
     try:
         if hasattr(self, 'api') and self.api is not None:
-            try:
-                if hasattr(self.api, 'websocket_client'):
-                    self.api.websocket_client.close()
+            try: self.api.websocket_client.close()
             except: pass
             self.api = None 
 
         from exnovaapi.stable_api import ExnovaAPI
-        # FIX: Passamos o HOST "exnova.com" para satisfazer os 3 argumentos do construtor
         self.api = ExnovaAPI("exnova.com", self.email, self.password)
-
         check = await asyncio.to_thread(self.api.connect)
-        if check: return True
-        return False
+        return check
     except Exception as e:
         print(f"[EXNOVA EXCEPTION] Erro crítico ao conectar: {e}")
         return False
 
 AsyncExnovaService.connect = _connect_fresh_instance
 
-# --- 6. PATCH: SOCKET SAFETY ---
+# --- 8. PATCH: SOCKET SAFETY ---
 def _safe_send_websocket_request(self, name, msg, request_id=""):
     try:
         if self.websocket and self.websocket.sock and self.websocket.sock.connected:
@@ -228,10 +271,23 @@ try:
     exnovaapi.api.ExnovaAPI.send_websocket_request = _safe_send_websocket_request
 except: pass
 
+# --- 9. PATCH: SILENCIADOR DE THREADS (Opcional, mas bom para estabilidade) ---
+# Faz get_instruments devolver uma estrutura vazia e NÃO tocar no websocket
+def _safe_get_instruments(self, instruments_type=None):
+    return {"instruments": []}
+
+def _noop_get_other_open(self, *args, **kwargs):
+    return
+
 try:
-    import iqoptionapi.api
-    iqoptionapi.api.IQOptionAPI.send_websocket_request = _safe_send_websocket_request
+    import exnovaapi.stable_api as ex_stable
+    ex_stable.ExnovaAPI.get_instruments = _safe_get_instruments
+    ex_stable.ExnovaAPI._ExnovaAPI__get_other_open = _noop_get_other_open
+    print("[PATCH] Desativado get_instruments/__get_other_open.")
 except: pass
+
+AsyncExnovaService.execute_trade = _execute_trade_robust
+AsyncExnovaService.get_open_assets = _get_open_assets_fix
 
 # ==============================================================================
 
@@ -290,9 +346,10 @@ class TradingBot:
             except: pass
 
     async def run(self):
-        await self.logger('INFO', 'Bot a iniciar no modo HOST CORRECTED...')
+        await self.logger('INFO', 'Bot a iniciar no modo PROXY CANDLES...')
         if not await self.exnova.connect(): await self.logger('ERROR', 'Falha na conexão inicial.')
         
+        # Patch na Instância (Dupla Segurança)
         try:
             if hasattr(self.exnova, 'api'):
                 import types
@@ -363,7 +420,7 @@ class TradingBot:
             assets = await self.exnova.get_open_assets()
             
             if timeframe_seconds == 60:
-                print(f"[DEBUG RAW] Ativos disponíveis (API): {len(assets)}")
+                print(f"[DEBUG RAW] Ativos disponíveis (API/Forced): {len(assets)}")
             
             is_weekend = datetime.utcnow().weekday() >= 5
             available_assets = []
@@ -372,17 +429,6 @@ class TradingBot:
                 if not is_weekend and 'OTC' in asset: continue
                 if asset.split('-')[0] not in self.blacklisted_assets:
                     available_assets.append(asset)
-
-            if is_weekend and len(available_assets) == 0:
-                print("[WARN] Lista vazia. Injetando pares OTC forçados.")
-                forced_list = [
-                    "EURUSD-OTC", "GBPUSD-OTC", "USDJPY-OTC", "EURJPY-OTC", 
-                    "USDCHF-OTC", "AUDCAD-OTC", "NZDUSD-OTC", "EURGBP-OTC", "AUDUSD-OTC",
-                    "USDMXN-OTC", "FWONA-OTC", "XNGUSD-OTC"
-                ]
-                for asset in forced_list:
-                    if asset.split('-')[0] not in self.blacklisted_assets:
-                        available_assets.append(asset)
 
             def get_asset_score(asset_name):
                 pair = asset_name.split('-')[0]
