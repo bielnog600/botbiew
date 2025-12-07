@@ -160,23 +160,29 @@ async def _get_open_assets_fix(self):
                 if opened: return list(set(opened))
     except: pass
     
+    # Se falhar ou retornar vazio no fds, retornamos lista forçada
     if datetime.utcnow().weekday() >= 5:
-        return [
-            "EURUSD-OTC", "GBPUSD-OTC", "USDJPY-OTC", "EURJPY-OTC", 
-            "USDCHF-OTC", "AUDCAD-OTC", "NZDUSD-OTC", "EURGBP-OTC", "AUDUSD-OTC",
-            "USDMXN-OTC", "FWONA-OTC", "XNGUSD-OTC"
-        ]
+        return [] # Retornamos vazio aqui para ativar a lógica no bot
     return []
 
-# --- 4. THREAD EXCEPTION SILENCER ---
-def _safe_thread_run(self):
-    try:
-        self._target(*self._args, **self._kwargs)
-    except KeyError as e:
-        if 'underlying' in str(e): return
-    except Exception: pass
+# --- 4. PATCH ANTI-CRASH (DATA PROTECTION) ---
+def _safe_get_digital_underlying_list_data(self):
+    return {"underlying": []}
 
-threading.Thread.run = _safe_thread_run
+try:
+    import exnovaapi.stable_api
+    import types
+    # Mock direto no método da classe para silenciar o erro da thread
+    exnovaapi.stable_api.ExnovaAPI.get_digital_underlying_list_data = lambda self: {"underlying": []}
+except: pass
+
+try:
+    import iqoptionapi.stable_api
+    iqoptionapi.stable_api.IQOptionAPI.get_digital_underlying_list_data = lambda self: {"underlying": []}
+except: pass
+
+AsyncExnovaService.execute_trade = _execute_trade_robust
+AsyncExnovaService.get_open_assets = _get_open_assets_fix
 
 # ==============================================================================
 
@@ -198,7 +204,6 @@ class TradingBot:
         self.daily_wins = 0
         self.daily_losses = 0
 
-        # SUPRESSÃO AGRESSIVA DE LOGS
         for logger_name in ["websocket", "exnovaapi", "iqoptionapi", "urllib3", "iqoptionapi.websocket.client"]:
             logger = logging.getLogger(logger_name)
             logger.setLevel(logging.CRITICAL)
@@ -235,10 +240,10 @@ class TradingBot:
             except: pass
 
     async def run(self):
-        await self.logger('INFO', 'Bot a iniciar no modo FAIL-SAFE...')
+        await self.logger('INFO', 'Bot a iniciar no modo FORCE OTC LIST...')
         if not await self.exnova.connect(): await self.logger('ERROR', 'Falha na conexão inicial.')
         
-        # Patch na Instância para garantir dados vazios em caso de erro
+        # Patch na Instância (Dupla Segurança)
         try:
             if hasattr(self.exnova, 'api'):
                 import types
@@ -309,7 +314,7 @@ class TradingBot:
             assets = await self.exnova.get_open_assets()
             
             if timeframe_seconds == 60:
-                print(f"[DEBUG RAW] Ativos disponíveis: {len(assets)}")
+                print(f"[DEBUG RAW] Ativos disponíveis (API): {len(assets)}")
             
             is_weekend = datetime.utcnow().weekday() >= 5
             available_assets = []
@@ -318,6 +323,20 @@ class TradingBot:
                 if not is_weekend and 'OTC' in asset: continue
                 if asset.split('-')[0] not in self.blacklisted_assets:
                     available_assets.append(asset)
+
+            # --- CORREÇÃO: INJEÇÃO FORÇADA DE OTC SE LISTA VAZIA ---
+            if is_weekend and len(available_assets) == 0:
+                print("[WARN] Lista vazia. Injetando pares OTC forçados.")
+                forced_list = [
+                    "EURUSD-OTC", "GBPUSD-OTC", "USDJPY-OTC", "EURJPY-OTC", 
+                    "USDCHF-OTC", "AUDCAD-OTC", "NZDUSD-OTC", "EURGBP-OTC", "AUDUSD-OTC",
+                    "USDMXN-OTC", "FWONA-OTC", "XNGUSD-OTC"
+                ]
+                # Verifica blacklist também na lista forçada
+                for asset in forced_list:
+                    if asset.split('-')[0] not in self.blacklisted_assets:
+                        available_assets.append(asset)
+            # -------------------------------------------------------
 
             def get_asset_score(asset_name):
                 pair = asset_name.split('-')[0]
@@ -334,14 +353,11 @@ class TradingBot:
             if len(self.active_trading_pairs) >= max_sim: return
 
             for asset in target_assets:
-                # --- CHECK DE SEGURANÇA NO LOOP ---
-                # Se a conexão cair, paramos o loop imediatamente para evitar spam de erros
                 try:
                     if hasattr(self.exnova, 'is_connected') and not await self.exnova.is_connected():
-                        print("[WARN] Conexão instável detectada no loop. Interrompendo scan.")
+                        print("[WARN] Conexão instável. Interrompendo scan.")
                         break
                 except: break
-                # ----------------------------------
 
                 base = asset.split('-')[0]
                 if base in self.active_trading_pairs: continue
@@ -350,7 +366,6 @@ class TradingBot:
                     await self._analyze_asset(asset, timeframe_seconds, expiration_minutes)
                 except Exception: pass
                 
-                # Delay de 4s para estabilidade máxima
                 await asyncio.sleep(4.0)
 
         except Exception as e:
