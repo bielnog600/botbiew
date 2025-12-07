@@ -3,7 +3,7 @@ import traceback
 import sys
 import threading
 import logging
-import functools
+import json
 from datetime import datetime
 from typing import Dict, Optional, Set, List
 from types import SimpleNamespace
@@ -17,7 +17,7 @@ from analysis import technical_indicators as ti
 from core.data_models import TradeSignal
 
 # ==============================================================================
-#                      CONSTANTES OTC ATUALIZADAS
+#                      CONSTANTES OTC (FORNECIDAS)
 # ==============================================================================
 ACTIVES_MAP = {
     "EURUSD": 1, "EURGBP": 2, "GBPJPY": 3, "EURJPY": 4, "GBPUSD": 5, "USDJPY": 6, "AUDCAD": 7, "NZDUSD": 8, "USDCHF": 72,
@@ -40,22 +40,24 @@ ACTIVES_MAP = {
 }
 
 # ==============================================================================
-#                      MONKEY PATCHES (AGRESSIVOS & BIDIRECIONAIS)
+#                      MONKEY PATCHES (SISTEMA DE SUPORTE DE VIDA)
 # ==============================================================================
 
-# --- 0. PATCH NUCLEAR DE CONSTANTES ---
+# --- 0. PATCH NUCLEAR DE CONSTANTES (BIDIRECIONAL) ---
 def _patch_library_constants_aggressive():
     FULL_MAP = ACTIVES_MAP.copy()
     REVERSE_MAP = {v: k for k, v in ACTIVES_MAP.items()}
     FULL_MAP.update(REVERSE_MAP)
-    count = 0
     targets = ['iqoptionapi', 'exnovaapi']
+    count = 0
     for module_name, module in list(sys.modules.items()):
         if any(t in module_name for t in targets):
             if hasattr(module, 'ACTIVES') and isinstance(module.ACTIVES, dict):
-                try: module.ACTIVES.update(FULL_MAP); count += 1
+                try:
+                    module.ACTIVES.update(FULL_MAP)
+                    count += 1
                 except Exception: pass
-    print(f"[PATCH BIDIRECIONAL] Atualizou ACTIVES em {count} módulos internos.")
+    if count > 0: print(f"[PATCH] Constantes atualizadas em {count} módulos.")
 
 _patch_library_constants_aggressive()
 
@@ -78,7 +80,8 @@ def _convert_candles_to_dataframe_fix(candles):
 def _validate_reversal_candle_fix(candle, direction):
     try:
         c_open, c_close = float(candle.open), float(candle.close)
-        is_green, is_red = c_close >= c_open, c_close <= c_open
+        is_green = c_close >= c_open
+        is_red = c_close <= c_open
         if direction.lower() == 'call' and not is_green: return False
         if direction.lower() == 'put' and not is_red: return False
         return True
@@ -97,8 +100,10 @@ def _check_candlestick_pattern_fix(candles):
         l_lower = min(l_close, l_open) - l_low
         is_p_red, is_p_green = p_close < p_open, p_close > p_open
         is_l_green, is_l_red = l_close > l_open, l_close < l_open
+        
         if is_p_red and is_l_green and l_close > p_open and l_open < p_close: return 'call'
         if is_p_green and is_l_red and l_close < p_open and l_open > p_close: return 'put'
+        
         RATIO = 1.5
         if l_lower >= (RATIO * l_body) and l_upper <= l_body: return 'call'
         if l_upper >= (RATIO * l_body) and l_lower <= l_body: return 'put'
@@ -160,29 +165,98 @@ async def _get_open_assets_fix(self):
                 if opened: return list(set(opened))
     except: pass
     
-    # Se falhar ou retornar vazio no fds, retornamos lista forçada
     if datetime.utcnow().weekday() >= 5:
-        return [] # Retornamos vazio aqui para ativar a lógica no bot
+        return [
+            "EURUSD-OTC", "GBPUSD-OTC", "USDJPY-OTC", "EURJPY-OTC", 
+            "USDCHF-OTC", "AUDCAD-OTC", "NZDUSD-OTC", "EURGBP-OTC", "AUDUSD-OTC",
+            "USDMXN-OTC", "FWONA-OTC", "XNGUSD-OTC"
+        ]
     return []
 
-# --- 4. PATCH ANTI-CRASH (DATA PROTECTION) ---
+AsyncExnovaService.execute_trade = _execute_trade_robust
+AsyncExnovaService.get_open_assets = _get_open_assets_fix
+
+# --- 4. PATCH: SILENCIAR THREADS INTERNAS DA LIB (CRÍTICO) ---
+# Isto impede que 'get_instruments' e '__get_other_open' tentem usar um socket morto
+def _safe_get_instruments_mock(self, *args, **kwargs):
+    return {"instruments": []}
+
+def _noop_get_other_open_mock(self, *args, **kwargs):
+    return # Não faz nada
+
 def _safe_get_digital_underlying_list_data(self):
     return {"underlying": []}
 
 try:
     import exnovaapi.stable_api
-    import types
-    # Mock direto no método da classe para silenciar o erro da thread
-    exnovaapi.stable_api.ExnovaAPI.get_digital_underlying_list_data = lambda self: {"underlying": []}
+    # Desativa get_instruments
+    exnovaapi.stable_api.ExnovaAPI.get_instruments = _safe_get_instruments_mock
+    # Desativa thread interna (nome mangled)
+    exnovaapi.stable_api.ExnovaAPI._ExnovaAPI__get_other_open = _noop_get_other_open_mock
+    # Garante estrutura vazia se algo escapar
+    exnovaapi.stable_api.ExnovaAPI.get_digital_underlying_list_data = _safe_get_digital_underlying_list_data
+    print("[PATCH] Threads internas da ExnovaAPI desativadas.")
 except: pass
 
 try:
     import iqoptionapi.stable_api
-    iqoptionapi.stable_api.IQOptionAPI.get_digital_underlying_list_data = lambda self: {"underlying": []}
+    iqoptionapi.stable_api.IQOptionAPI.get_instruments = _safe_get_instruments_mock
+    iqoptionapi.stable_api.IQOptionAPI._IQOptionAPI__get_other_open = _noop_get_other_open_mock
+    iqoptionapi.stable_api.IQOptionAPI.get_digital_underlying_list_data = _safe_get_digital_underlying_list_data
+    print("[PATCH] Threads internas da IQOptionAPI desativadas.")
 except: pass
 
-AsyncExnovaService.execute_trade = _execute_trade_robust
-AsyncExnovaService.get_open_assets = _get_open_assets_fix
+# --- 5. PATCH: RECONEXÃO LIMPA (FRESH INSTANCE) (CRÍTICO) ---
+# Substitui o connect() original do teu serviço para recriar a API do zero
+async def _connect_fresh_instance(self):
+    try:
+        # 1. Limpa a instância anterior (se existir)
+        if hasattr(self, 'api') and self.api is not None:
+            try:
+                # Tenta fechar socket se ainda existir
+                if hasattr(self.api, 'websocket_client'):
+                    self.api.websocket_client.close()
+            except: pass
+            self.api = None # Força o Garbage Collector
+
+        # 2. Cria NOVA instância limpa
+        from exnovaapi.stable_api import ExnovaAPI
+        self.api = ExnovaAPI(self.email, self.password)
+
+        # 3. Conecta
+        check = await asyncio.to_thread(self.api.connect)
+        
+        if check:
+            return True
+        else:
+            return False
+            
+    except Exception as e:
+        print(f"[EXNOVA EXCEPTION] Erro crítico ao conectar: {e}")
+        return False
+
+# Aplica o patch no método connect da classe de serviço
+AsyncExnovaService.connect = _connect_fresh_instance
+
+# --- 6. PATCH: SOCKET SAFETY ---
+def _safe_send_websocket_request(self, name, msg, request_id=""):
+    try:
+        if self.websocket and self.websocket.sock and self.websocket.sock.connected:
+            data = json.dumps(dict(name=name, msg=msg, request_id=request_id))
+            self.websocket.send(data)
+            return True
+    except Exception: pass
+    return False
+
+try:
+    import exnovaapi.api
+    exnovaapi.api.ExnovaAPI.send_websocket_request = _safe_send_websocket_request
+except: pass
+
+try:
+    import iqoptionapi.api
+    iqoptionapi.api.IQOptionAPI.send_websocket_request = _safe_send_websocket_request
+except: pass
 
 # ==============================================================================
 
@@ -204,6 +278,7 @@ class TradingBot:
         self.daily_wins = 0
         self.daily_losses = 0
 
+        # SUPRESSÃO AGRESSIVA DE LOGS
         for logger_name in ["websocket", "exnovaapi", "iqoptionapi", "urllib3", "iqoptionapi.websocket.client"]:
             logger = logging.getLogger(logger_name)
             logger.setLevel(logging.CRITICAL)
@@ -240,16 +315,9 @@ class TradingBot:
             except: pass
 
     async def run(self):
-        await self.logger('INFO', 'Bot a iniciar no modo FORCE OTC LIST...')
+        await self.logger('INFO', 'Bot a iniciar no modo ZOMBIE KILLER (Fresh Instance)...')
         if not await self.exnova.connect(): await self.logger('ERROR', 'Falha na conexão inicial.')
         
-        # Patch na Instância (Dupla Segurança)
-        try:
-            if hasattr(self.exnova, 'api'):
-                import types
-                self.exnova.api.get_digital_underlying_list_data = types.MethodType(lambda s: {"underlying": []}, self.exnova.api)
-        except: pass
-
         await self._daily_reset_if_needed()
         _patch_library_constants_aggressive()
 
@@ -262,9 +330,9 @@ class TradingBot:
                 except: pass
 
                 if not connected:
-                    print("[AVISO] Conexão perdida. Reconectando...")
-                    if await self.exnova.connect():
-                        await self.logger('SUCCESS', 'Reconectado.')
+                    print("[AVISO] Conexão perdida. Reconectando e recriando instância...")
+                    if await self.exnova.connect(): # Isso agora chama o _connect_fresh_instance
+                        await self.logger('SUCCESS', 'Reconectado (Nova Instância).')
                         _patch_library_constants_aggressive()
                     else:
                         await asyncio.sleep(5)
@@ -324,7 +392,6 @@ class TradingBot:
                 if asset.split('-')[0] not in self.blacklisted_assets:
                     available_assets.append(asset)
 
-            # --- CORREÇÃO: INJEÇÃO FORÇADA DE OTC SE LISTA VAZIA ---
             if is_weekend and len(available_assets) == 0:
                 print("[WARN] Lista vazia. Injetando pares OTC forçados.")
                 forced_list = [
@@ -332,11 +399,9 @@ class TradingBot:
                     "USDCHF-OTC", "AUDCAD-OTC", "NZDUSD-OTC", "EURGBP-OTC", "AUDUSD-OTC",
                     "USDMXN-OTC", "FWONA-OTC", "XNGUSD-OTC"
                 ]
-                # Verifica blacklist também na lista forçada
                 for asset in forced_list:
                     if asset.split('-')[0] not in self.blacklisted_assets:
                         available_assets.append(asset)
-            # -------------------------------------------------------
 
             def get_asset_score(asset_name):
                 pair = asset_name.split('-')[0]
@@ -353,11 +418,13 @@ class TradingBot:
             if len(self.active_trading_pairs) >= max_sim: return
 
             for asset in target_assets:
+                # --- CHECK DE SAÚDE DO SOCKET ---
                 try:
                     if hasattr(self.exnova, 'is_connected') and not await self.exnova.is_connected():
-                        print("[WARN] Conexão instável. Interrompendo scan.")
+                        print("[WARN] Conexão caiu. Abortando scan.")
                         break
                 except: break
+                # --------------------------------
 
                 base = asset.split('-')[0]
                 if base in self.active_trading_pairs: continue
