@@ -110,7 +110,8 @@ def _check_rsi_condition_fix(candles, period=14, overbought=65, oversold=35):
         rsi = 100 - (100 / (1 + (ma_up / ma_down)))
         
         last_rsi = rsi.iloc[-1]
-        print(f"   [RSI DEBUG] Valor: {last_rsi:.2f} (OB:{overbought}, OS:{oversold})")
+        # Log menos intrusivo para poupar espaço, reative se necessário
+        # print(f"   [RSI DEBUG] Valor: {last_rsi:.2f}")
         
         if last_rsi >= overbought: return 'put'
         if last_rsi <= oversold: return 'call'
@@ -125,10 +126,6 @@ ti.check_rsi_condition = _check_rsi_condition_fix
 
 # --- 2. CORREÇÃO SERVIÇO DE EXECUÇÃO (ID + Híbrido) ---
 async def _execute_trade_robust(self, amount, active, direction, duration):
-    # Se 'active' for string, tentamos converter para ID se possível, 
-    # mas aqui o bot já deve estar enviando ID.
-    
-    # 1. Tentar BINARY
     try:
         if hasattr(self, 'api') and self.api:
             print(f"[EXEC] Tentando BINARY para {active}...")
@@ -141,18 +138,15 @@ async def _execute_trade_robust(self, amount, active, direction, duration):
     except Exception as e:
         print(f"[EXEC] Erro ao tentar Binary: {e}")
 
-    # 2. Tentar DIGITAL (Fallback)
     try:
         if hasattr(self, 'api') and self.api:
             print(f"[EXEC] Binary falhou. Tentando DIGITAL para {active}...")
-            # Para Digital, duration geralmente é index (1, 5, 15). Se vier 1 (minuto), ok.
             status, id = await asyncio.to_thread(self.api.buy_digital_spot, active, amount, direction, duration)
             if status and id:
                 print(f"[EXEC] Sucesso via DIGITAL. ID: {id}")
                 return id
     except Exception as e:
         print(f"[EXEC] Erro ao tentar Digital: {e}")
-        
     return None
 
 AsyncExnovaService.execute_trade = _execute_trade_robust
@@ -178,10 +172,15 @@ class TradingBot:
         self.daily_losses = 0
 
     def _get_asset_id(self, asset_name):
-        """Converte Nome (EURUSD-OTC) para ID (76) usando o mapa fornecido."""
-        if asset_name in ACTIVES_MAP:
-            return ACTIVES_MAP[asset_name]
-        return asset_name # Retorna o nome se não encontrar (fallback)
+        """Converte Nome e Normaliza (EURUSD (OTC) -> EURUSD-OTC -> ID)."""
+        # Normalização de nomes
+        name = asset_name.replace(" (OTC)", "-OTC")
+        
+        if name in ACTIVES_MAP:
+            return ACTIVES_MAP[name]
+        
+        # Fallback: Se não encontrou, retorna o próprio nome (pode falhar na API)
+        return name
 
     async def logger(self, level: str, message: str):
         ts = datetime.utcnow().isoformat()
@@ -213,7 +212,7 @@ class TradingBot:
                 await self.logger('ERROR', f"Erro ao atualizar saldo diário: {e}")
 
     async def run(self):
-        await self.logger('INFO', 'Bot a iniciar no modo OTC ID-FORCE...')
+        await self.logger('INFO', 'Bot a iniciar no modo DEBUG (Scan Verbose)...')
         
         if not await self.exnova.connect():
             await self.logger('ERROR', 'Falha na conexão inicial.')
@@ -287,13 +286,13 @@ class TradingBot:
             assets = await self.exnova.get_open_assets()
             
             # --- LÓGICA DE FIM DE SEMANA / OTC ---
-            # Se for Sábado (5) ou Domingo (6), FORÇAMOS o uso de pares OTC.
             is_weekend = datetime.utcnow().weekday() >= 5
             
             available_assets = []
             for asset in assets:
-                if is_weekend and '-OTC' not in asset: continue
-                if not is_weekend and '-OTC' in asset: continue
+                # Verificação mais flexível para 'OTC'
+                if is_weekend and 'OTC' not in asset: continue
+                if not is_weekend and 'OTC' in asset: continue
                     
                 if asset.split('-')[0] not in self.blacklisted_assets:
                     available_assets.append(asset)
@@ -306,6 +305,11 @@ class TradingBot:
                 return stats['wins'] / total if total > 0 else 0.5
 
             target_assets = sorted(available_assets, key=get_asset_score, reverse=True)[:settings.MAX_ASSETS_TO_MONITOR]
+            
+            # [DEBUG IMPORTANTE] Ver o que o bot encontrou
+            if timeframe_seconds == 60: # Só imprime no M1 para não spammar
+                print(f"[DEBUG SCAN] Ativos encontrados: {len(target_assets)} (Exemplos: {target_assets[:3]})")
+
             max_sim = self.bot_config.get('max_simultaneous_trades', 1)
             
             if len(self.active_trading_pairs) >= max_sim: return
@@ -314,7 +318,6 @@ class TradingBot:
             for asset in target_assets:
                 base = asset.split('-')[0]
                 if base in self.active_trading_pairs: continue
-                # asset é o nome completo (ex: EURUSD-OTC)
                 tasks.append(self._analyze_asset(asset, timeframe_seconds, expiration_minutes))
 
             if tasks: await asyncio.gather(*tasks)
@@ -330,16 +333,22 @@ class TradingBot:
             elif expiration_minutes == 5: t1, t2, res_func = 300, 3600, get_h1_sr_zones
             else: return
 
-            # --- CORREÇÃO: USAR ID PARA BUSCAR VELAS ---
+            # --- ID RESOLUTION DEBUG ---
             asset_id = self._get_asset_id(full_name)
-            # -------------------------------------------
+            # ---------------------------
 
             candles = await asyncio.gather(
                 self.exnova.get_historical_candles(asset_id, t1, 200),
                 self.exnova.get_historical_candles(asset_id, t2, 100)
             )
             analysis_candles, sr_candles = candles
-            if not analysis_candles or not sr_candles: return
+            
+            # [DEBUG CRÍTICO] Se as velas vierem vazias, avisar!
+            if not analysis_candles:
+                # Comenta isto depois se spammar muito, mas precisamos agora
+                if timeframe_seconds == 60:
+                    print(f"[WARN] Sem velas para {full_name} (ID usado: {asset_id}). Verifique o ID.")
+                return
 
             # Prepara dados
             analysis_candles_objs = []
