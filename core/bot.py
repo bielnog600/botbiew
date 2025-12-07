@@ -1,5 +1,6 @@
 import asyncio
 import traceback
+import sys
 from datetime import datetime
 from typing import Dict, Optional, Set, List
 from types import SimpleNamespace
@@ -35,8 +36,42 @@ ACTIVES_MAP = {
 }
 
 # ==============================================================================
-#                      MONKEY PATCHES (CORREÇÕES INJETADAS)
+#                      MONKEY PATCHES (BIBLIOTECA & INDICADORES)
 # ==============================================================================
+
+# --- 0. PATCH CRÍTICO: Atualizar constantes da biblioteca Exnova/IQ ---
+def _patch_library_constants():
+    """Injeta os IDs OTC na biblioteca instalada para evitar erro 'Asset not found'"""
+    try:
+        # Tenta encontrar a biblioteca carregada (pode ser iqoptionapi ou exnovaapi)
+        # Procuramos nos módulos carregados
+        target_modules = ['iqoptionapi.constants', 'exnovaapi.constants', 'iqoptionapi.stable_api', 'exnovaapi.stable_api']
+        
+        patched = False
+        
+        # 1. Tentar importar e atualizar diretamente
+        try:
+            import iqoptionapi.constants as iqc
+            iqc.ACTIVES.update(ACTIVES_MAP)
+            print("[PATCH] iqoptionapi.constants atualizado com sucesso!")
+            patched = True
+        except ImportError: pass
+
+        try:
+            import exnovaapi.constants as exc
+            exc.ACTIVES.update(ACTIVES_MAP)
+            print("[PATCH] exnovaapi.constants atualizado com sucesso!")
+            patched = True
+        except ImportError: pass
+        
+        if not patched:
+            print("[WARN] Não foi possível encontrar a biblioteca para patch de constantes. O OTC pode falhar.")
+            
+    except Exception as e:
+        print(f"[PATCH ERROR] Falha ao injetar constantes: {e}")
+
+# Executa o patch imediatamente ao carregar o arquivo
+_patch_library_constants()
 
 # --- 1. CORREÇÃO INDICADORES (Pandas & Padrões) ---
 def _convert_candles_to_dataframe_fix(candles):
@@ -204,7 +239,7 @@ class TradingBot:
                 await self.logger('ERROR', f"Erro ao atualizar saldo diário: {e}")
 
     async def run(self):
-        await self.logger('INFO', 'Bot a iniciar no modo OTC FORCED LIST...')
+        await self.logger('INFO', 'Bot a iniciar no modo LIBRARY PATCHED...')
         if not await self.exnova.connect():
             await self.logger('ERROR', 'Falha na conexão inicial.')
 
@@ -290,10 +325,9 @@ class TradingBot:
                 if asset.split('-')[0] not in self.blacklisted_assets:
                     available_assets.append(asset)
 
-            # 2. FALLBACK CRÍTICO: Se estivermos no Fim de Semana e a API devolveu 0 OTCs,
-            #    Forçamos o uso dos pares OTC mais populares da nossa lista.
+            # 2. FALLBACK CRÍTICO:
             if is_weekend and len(available_assets) == 0:
-                print("[WARN] API retornou 0 ativos OTC. Usando lista de Fallback forçada.")
+                print("[WARN] Usando lista de Fallback forçada (OTC).")
                 available_assets = [
                     "EURUSD-OTC", "GBPUSD-OTC", "USDJPY-OTC", 
                     "EURJPY-OTC", "USDCHF-OTC", "AUDCAD-OTC", 
@@ -335,6 +369,7 @@ class TradingBot:
 
             asset_id = self._get_asset_id(full_name)
 
+            # AQUI: Se o patch da biblioteca funcionou, o erro "Asset not found" deve desaparecer
             candles = await asyncio.gather(
                 self.exnova.get_historical_candles(asset_id, t1, 200),
                 self.exnova.get_historical_candles(asset_id, t2, 100)
@@ -342,8 +377,6 @@ class TradingBot:
             analysis_candles, sr_candles = candles
             
             if not analysis_candles:
-                # Se não temos velas, é provável que o ativo esteja fechado ou o ID esteja errado.
-                # Não fazemos nada, apenas retornamos.
                 return
 
             analysis_candles_objs = []
