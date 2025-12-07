@@ -13,6 +13,28 @@ from analysis import technical_indicators as ti
 from core.data_models import TradeSignal
 
 # ==============================================================================
+#                      CONSTANTES OTC (FORNECIDAS)
+# ==============================================================================
+ACTIVES_MAP = {
+    "EURUSD": 1, "EURGBP": 2, "GBPJPY": 3, "EURJPY": 4, "GBPUSD": 5, "USDJPY": 6, "AUDCAD": 7, "NZDUSD": 8, "USDCHF": 72,
+    "EURUSD-OTC": 76, "EURGBP-OTC": 77, "USDCHF-OTC": 78, "EURJPY-OTC": 79, "NZDUSD-OTC": 80, "GBPUSD-OTC": 81,
+    "GBPJPY-OTC": 84, "USDJPY-OTC": 85, "AUDCAD-OTC": 86, "AUDUSD": 99, "USDCAD": 100, "AUDJPY": 101, "GBPCAD": 102,
+    "GBPCHF": 103, "GBPAUD": 104, "EURCAD": 105, "CHFJPY": 106, "CADCHF": 107, "EURAUD": 108, "USDNOK": 168,
+    "EURNZD": 212, "USDSEK": 219, "USDTRY": 220, "AUDCHF": 943, "AUDNZD": 944, "CADJPY": 945, "EURCHF": 946,
+    "GBPNZD": 947, "NZDCAD": 948, "NZDJPY": 949, "EURSEK": 950, "EURNOK": 951, "CHFSGD": 952, "EURSGD": 955,
+    "USDMXN": 957, "USDDKK": 1045, "NZDCHF": 1048, "CADSGD": 1054, "EURCZK": 1056, "USDTHB": 1062, "USDBRL-OTC": 1546,
+    "USDMXN-OTC-L": 1548, "XAUUSD-OTC": 1857, "EURUSD-op": 1861, "EURGBP-op": 1862, "EURJPY-op": 1864, "USDJPY-op": 1865,
+    "GBPJPY-op": 1866, "GBPUSD-op": 1867, "AUDCAD-op": 1868, "AUDJPY-op": 1869, "AUDUSD-op": 1870, "CADCHF-op": 1871,
+    "EURAUD-op": 1874, "EURCAD-op": 1875, "EURCHF-op": 1876, "GBPAUD-op": 1877, "USDCAD-op": 1878, "GBPNZD-op": 1880,
+    "NZDCAD-op": 1881, "NZDJPY-op": 1882, "AUDCHF-op": 1884, "NZDUSD-op": 1896, "GBPCAD-op": 1897, "GBPCHF-op": 1898,
+    "AUDNZD-op": 1900, "EURNZD-op": 1901, "US30/JP225-OTC": 2079, "US100/JP225-OTC": 2080, "US500/JP225-OTC": 2081,
+    "AUDUSD-OTC": 2111, "USDCAD-OTC": 2112, "AUDJPY-OTC": 2113, "GBPCAD-OTC": 2114, "GBPCHF-OTC": 2115, "GBPAUD-OTC": 2116,
+    "EURCAD-OTC": 2117, "CHFJPY-OTC": 2118, "CADCHF-OTC": 2119, "EURAUD-OTC": 2120, "USDNOK-OTC": 2121, "EURNZD-OTC": 2122,
+    "USDSEK-OTC": 2123, "USDTRY-OTC": 2124, "USDPLN-OTC": 2128, "AUDCHF-OTC": 2129, "AUDNZD-OTC": 2130, "EURCHF-OTC": 2131,
+    "GBPNZD-OTC": 2132, "CADJPY-OTC": 2136, "NZDCAD-OTC": 2137, "NZDJPY-OTC": 2138, "NZDCHF-OTC": 2202
+}
+
+# ==============================================================================
 #                      MONKEY PATCHES (CORREÇÕES INJETADAS)
 # ==============================================================================
 
@@ -101,8 +123,11 @@ ti.validate_reversal_candle = _validate_reversal_candle_fix
 ti.check_candlestick_pattern = _check_candlestick_pattern_fix
 ti.check_rsi_condition = _check_rsi_condition_fix
 
-# --- 2. CORREÇÃO SERVIÇO DE EXECUÇÃO (Híbrido Binary/Digital) ---
+# --- 2. CORREÇÃO SERVIÇO DE EXECUÇÃO (ID + Híbrido) ---
 async def _execute_trade_robust(self, amount, active, direction, duration):
+    # Se 'active' for string, tentamos converter para ID se possível, 
+    # mas aqui o bot já deve estar enviando ID.
+    
     # 1. Tentar BINARY
     try:
         if hasattr(self, 'api') and self.api:
@@ -111,6 +136,8 @@ async def _execute_trade_robust(self, amount, active, direction, duration):
             if status and id:
                 print(f"[EXEC] Sucesso via BINARY. ID: {id}")
                 return id
+            elif not status and isinstance(id, str):
+                print(f"[EXEC] Falha Binary: {id}")
     except Exception as e:
         print(f"[EXEC] Erro ao tentar Binary: {e}")
 
@@ -118,6 +145,7 @@ async def _execute_trade_robust(self, amount, active, direction, duration):
     try:
         if hasattr(self, 'api') and self.api:
             print(f"[EXEC] Binary falhou. Tentando DIGITAL para {active}...")
+            # Para Digital, duration geralmente é index (1, 5, 15). Se vier 1 (minuto), ok.
             status, id = await asyncio.to_thread(self.api.buy_digital_spot, active, amount, direction, duration)
             if status and id:
                 print(f"[EXEC] Sucesso via DIGITAL. ID: {id}")
@@ -149,6 +177,12 @@ class TradingBot:
         self.daily_wins = 0
         self.daily_losses = 0
 
+    def _get_asset_id(self, asset_name):
+        """Converte Nome (EURUSD-OTC) para ID (76) usando o mapa fornecido."""
+        if asset_name in ACTIVES_MAP:
+            return ACTIVES_MAP[asset_name]
+        return asset_name # Retorna o nome se não encontrar (fallback)
+
     async def logger(self, level: str, message: str):
         ts = datetime.utcnow().isoformat()
         print(f"[{ts}] [{level.upper()}] {message}", flush=True)
@@ -179,7 +213,7 @@ class TradingBot:
                 await self.logger('ERROR', f"Erro ao atualizar saldo diário: {e}")
 
     async def run(self):
-        await self.logger('INFO', 'Bot a iniciar no modo OTC FRIENDLY...')
+        await self.logger('INFO', 'Bot a iniciar no modo OTC ID-FORCE...')
         
         if not await self.exnova.connect():
             await self.logger('ERROR', 'Falha na conexão inicial.')
@@ -258,12 +292,8 @@ class TradingBot:
             
             available_assets = []
             for asset in assets:
-                # Se for fim de semana e o asset não tiver 'OTC', ignora
-                if is_weekend and '-OTC' not in asset:
-                    continue
-                # Se for dia de semana e o asset tiver 'OTC', ignora (opcional, mas evita misturar)
-                if not is_weekend and '-OTC' in asset:
-                    continue
+                if is_weekend and '-OTC' not in asset: continue
+                if not is_weekend and '-OTC' in asset: continue
                     
                 if asset.split('-')[0] not in self.blacklisted_assets:
                     available_assets.append(asset)
@@ -282,9 +312,9 @@ class TradingBot:
 
             tasks = []
             for asset in target_assets:
-                # asset aqui é o nome completo (ex: EURUSD-OTC)
                 base = asset.split('-')[0]
                 if base in self.active_trading_pairs: continue
+                # asset é o nome completo (ex: EURUSD-OTC)
                 tasks.append(self._analyze_asset(asset, timeframe_seconds, expiration_minutes))
 
             if tasks: await asyncio.gather(*tasks)
@@ -300,10 +330,13 @@ class TradingBot:
             elif expiration_minutes == 5: t1, t2, res_func = 300, 3600, get_h1_sr_zones
             else: return
 
-            # CORREÇÃO CRÍTICA: Usamos 'full_name' (ex: EURUSD-OTC) para buscar velas, não 'base'.
+            # --- CORREÇÃO: USAR ID PARA BUSCAR VELAS ---
+            asset_id = self._get_asset_id(full_name)
+            # -------------------------------------------
+
             candles = await asyncio.gather(
-                self.exnova.get_historical_candles(full_name, t1, 200),
-                self.exnova.get_historical_candles(full_name, t2, 100)
+                self.exnova.get_historical_candles(asset_id, t1, 200),
+                self.exnova.get_historical_candles(asset_id, t2, 100)
             )
             analysis_candles, sr_candles = candles
             if not analysis_candles or not sr_candles: return
@@ -420,18 +453,22 @@ class TradingBot:
             is_gale = "Gale" in signal.strategy or "Martingale" in signal.strategy
             val = self._get_entry_value(signal.pair, is_martingale=is_gale)
             
+            # --- CORREÇÃO: USAR ID PARA EXECUTAR ---
+            active_id = self._get_asset_id(full_name)
+            # ---------------------------------------
+            
             oid = None
             retries = 2
             
             for attempt in range(retries):
-                oid = await self.exnova.execute_trade(val, full_name, signal.direction.lower(), expiration)
+                oid = await self.exnova.execute_trade(val, active_id, signal.direction.lower(), expiration)
                 if oid: break
                 
-                print(f"[DEBUG] Tentativa {attempt+1}/{retries} falhou para {full_name}. Retrying...")
+                print(f"[DEBUG] Tentativa {attempt+1}/{retries} falhou para {full_name} (ID: {active_id}). Retrying...")
                 await asyncio.sleep(1)
             
             if not oid:
-                await self.logger('ERROR', f"FALHA FATAL na ordem {full_name} (${val}) - Ativo fechado ou indisponível.")
+                await self.logger('ERROR', f"FALHA FATAL na ordem {full_name} (${val}).")
                 if is_gale: self.martingale_state[signal.pair] = {'level': 0}
                 self.active_trading_pairs.discard(signal.pair)
                 return
