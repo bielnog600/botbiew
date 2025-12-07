@@ -42,16 +42,25 @@ def _convert_candles_to_dataframe_fix(candles):
             df[col] = pd.to_numeric(df[col], errors='coerce')
     return df
 
-# 2. Validação de vela simplificada (Mantida)
+# 2. Validação de vela simplificada (MELHORADA: Com Debug de Preços)
 def _validate_reversal_candle_fix(candle, direction):
     try:
         c_open = float(candle.open)
         c_close = float(candle.close)
         
+        is_green = c_close >= c_open
+        is_red = c_close <= c_open
+        
         if direction.lower() == 'call':
-            return c_close >= c_open
+            if not is_green:
+                print(f"   [FILTRO] Call rejeitado. Vela Vermelha (O:{c_open} -> C:{c_close})")
+                return False
+            return True
         elif direction.lower() == 'put':
-            return c_close <= c_open
+            if not is_red:
+                print(f"   [FILTRO] Put rejeitado. Vela Verde (O:{c_open} -> C:{c_close})")
+                return False
+            return True
         return False
     except Exception as e:
         print(f"[DEBUG] Erro validação candle: {e}")
@@ -110,7 +119,7 @@ def _check_candlestick_pattern_fix(candles):
 
     return None
 
-# 4. RSI Manual (AJUSTADO: Com LOG VISÍVEL)
+# 4. RSI Manual (Mantida)
 def _calculate_rsi_pandas(series, period=14):
     delta = series.diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
@@ -136,8 +145,8 @@ def _check_rsi_condition_fix(candles, period=14, overbought=65, oversold=35):
         
         last_rsi = rsi.iloc[-1]
         
-        # LOG ATIVADO: Mostra o valor exato para saberes o que está a acontecer
-        print(f"   [RSI DEBUG] Valor Atual: {last_rsi:.2f} (OB: {overbought}, OS: {oversold})") 
+        # Log menos intrusivo (descomente se quiser ver todos os valores)
+        # print(f"   [RSI DEBUG] Valor: {last_rsi:.2f}") 
         
         if last_rsi >= overbought:
             return 'put'
@@ -146,7 +155,6 @@ def _check_rsi_condition_fix(candles, period=14, overbought=65, oversold=35):
             
         return None
     except Exception as e:
-        print(f"[DEBUG RSI] Erro: {e}")
         return None
 
 # Aplica TODOS os patches
@@ -215,14 +223,14 @@ class TradingBot:
         while self.is_running:
             try:
                 # --- AUTO-RECONEXÃO ---
-                connected = True
+                connected = False
                 try:
                     if hasattr(self.exnova, 'is_connected'):
                         connected = await self.exnova.is_connected()
                     else:
-                        connected = True
+                        connected = True # Fallback se o método não existir
                 except:
-                    connected = True
+                    pass
 
                 if not connected:
                     print("[AVISO] Conexão perdida. Reconectando...")
@@ -258,7 +266,7 @@ class TradingBot:
 
             except Exception as e:
                 print(f"[LOOP ERROR] {e}")
-                traceback.print_exc()
+                # traceback.print_exc() # Descomente se quiser ver erros completos
                 await asyncio.sleep(5)
 
     async def trading_cycle(self):
@@ -363,7 +371,7 @@ class TradingBot:
                     rsi_sig = ti.check_rsi_condition(analysis_candles_objs)
                     if rsi_sig == sr_signal: confluences.append("RSI_Condition")
                     
-                    # --- DEBUG VISUAL: Mostra o resumo da decisão ---
+                    # --- DEBUG VISUAL ---
                     print(f"   >>> {base} Decisão: Padrão={pattern}, RSI_Sinal={rsi_sig} | Confluências={len(confluences)}/{threshold}")
 
                     if len(confluences) >= threshold: final_direction = sr_signal
@@ -382,8 +390,9 @@ class TradingBot:
                         confluences = temp_conf
             
             if final_direction:
+                # Usa validação simplificada (Monkey Patched)
                 if not ti.validate_reversal_candle(signal_candle_obj, final_direction): 
-                    print(f"[{base}] Vela inválida (Filtro de cor).")
+                    print(f"[{base}] Vela inválida (Cancelado).")
                     return
                 
                 max_trades = self.bot_config.get('max_simultaneous_trades', 1)
@@ -400,7 +409,6 @@ class TradingBot:
                 strategy = f"M{expiration_minutes}_" + ', '.join(confluences)
                 await self.logger('SUCCESS', f"ENTRADA: {base} | {final_direction.upper()} | {strategy}")
                 
-                # CORREÇÃO Pydantic (Já presente, mas reforçada)
                 signal = TradeSignal(
                     pair=base, 
                     direction=final_direction, 
@@ -453,15 +461,29 @@ class TradingBot:
             is_gale = "Gale" in signal.strategy or "Martingale" in signal.strategy
             val = self._get_entry_value(signal.pair, is_martingale=is_gale)
             
-            oid = await self.exnova.execute_trade(val, full_name, signal.direction.lower(), expiration)
+            # --- RETRY LOGIC (Melhoria para Falha de Ordem) ---
+            oid = None
+            retries = 2
+            
+            for attempt in range(retries):
+                # Tenta executar (normal)
+                oid = await self.exnova.execute_trade(val, full_name, signal.direction.lower(), expiration)
+                
+                if oid:
+                    break
+                
+                # Se falhar, print debug e tenta de novo rapidinho
+                print(f"[DEBUG] Tentativa {attempt+1}/{retries} falhou para {full_name} (${val}).")
+                await asyncio.sleep(0.5)
             
             if not oid:
-                await self.logger('ERROR', f"Falha ordem {full_name}.")
+                await self.logger('ERROR', f"FALHA FATAL na ordem {full_name} (${val}) após {retries} tentativas.")
+                # Reset estado para evitar travar o ativo
                 if is_gale: self.martingale_state[signal.pair] = {'level': 0}
                 self.active_trading_pairs.discard(signal.pair)
                 return
 
-            await self.logger('INFO', f"Ordem {oid} enviada. ${val}. Aguardando...")
+            await self.logger('INFO', f"Ordem {oid} aceita. ${val}. Monitorando...")
             sid = await asyncio.to_thread(self.supabase.insert_trade_signal, signal)
             
             await asyncio.sleep(expiration * 60 + 15)
