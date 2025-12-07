@@ -1,6 +1,7 @@
 import asyncio
 import traceback
 import sys
+import threading
 from datetime import datetime
 from typing import Dict, Optional, Set, List
 from types import SimpleNamespace
@@ -39,16 +40,13 @@ ACTIVES_MAP = {
 #                      MONKEY PATCHES (AGRESSIVOS & BIDIRECIONAIS)
 # ==============================================================================
 
-# --- 0. PATCH NUCLEAR DE CONSTANTES (FIX: BIDIRECIONAL) ---
+# --- 0. PATCH NUCLEAR DE CONSTANTES (BIDIRECIONAL) ---
 def _patch_library_constants_aggressive():
-    """Injeta IDs e Nomes no dicionário ACTIVES da biblioteca."""
     FULL_MAP = ACTIVES_MAP.copy()
     REVERSE_MAP = {v: k for k, v in ACTIVES_MAP.items()}
     FULL_MAP.update(REVERSE_MAP)
-
     count = 0
     targets = ['iqoptionapi', 'exnovaapi']
-    
     for module_name, module in list(sys.modules.items()):
         if any(t in module_name for t in targets):
             if hasattr(module, 'ACTIVES') and isinstance(module.ACTIVES, dict):
@@ -56,7 +54,6 @@ def _patch_library_constants_aggressive():
                     module.ACTIVES.update(FULL_MAP)
                     count += 1
                 except Exception: pass
-    
     print(f"[PATCH BIDIRECIONAL] Atualizou ACTIVES em {count} módulos internos.")
 
 _patch_library_constants_aggressive()
@@ -123,7 +120,6 @@ def _check_rsi_condition_fix(candles, period=14, overbought=65, oversold=35):
         ma_up = up.ewm(com=period - 1, adjust=True, min_periods=period).mean()
         ma_down = down.ewm(com=period - 1, adjust=True, min_periods=period).mean()
         rsi = 100 - (100 / (1 + (ma_up / ma_down)))
-        
         last_rsi = rsi.iloc[-1]
         if last_rsi >= overbought: return 'put'
         if last_rsi <= oversold: return 'call'
@@ -160,7 +156,6 @@ async def _execute_trade_robust(self, amount, active, direction, duration):
 
 # --- 3. CORREÇÃO GET_OPEN_ASSETS ---
 async def _get_open_assets_fix(self):
-    """Retorna lista forçada de OTCs se a API falhar no fim de semana"""
     try:
         if hasattr(self, 'api') and self.api:
             assets = await asyncio.to_thread(self.api.get_all_open_time)
@@ -179,6 +174,23 @@ async def _get_open_assets_fix(self):
             "USDCHF-OTC", "AUDCAD-OTC", "NZDUSD-OTC", "EURGBP-OTC", "AUDUSD-OTC"
         ]
     return []
+
+# --- 4. PATCH ANTI-CRASH PARA THREADS INTERNAS ---
+# Isto impede que o erro 'KeyError: underlying' mate as threads da biblioteca
+def _safe_get_digital_open_patch(self):
+    try:
+        if self.get_digital_underlying_list_data:
+            data = self.get_digital_underlying_list_data()
+            if isinstance(data, dict) and "underlying" in data:
+                return data["underlying"]
+    except Exception: pass # Silencia erros internos para manter o bot vivo
+    return []
+
+# Tentamos aplicar este patch se encontrarmos a classe
+try:
+    import exnovaapi.stable_api
+    exnovaapi.stable_api.ExnovaAPI.__get_digital_open = _safe_get_digital_open_patch
+except: pass
 
 AsyncExnovaService.execute_trade = _execute_trade_robust
 AsyncExnovaService.get_open_assets = _get_open_assets_fix
@@ -202,7 +214,7 @@ class TradingBot:
         self.last_daily_reset_date = None
         self.daily_wins = 0
         self.daily_losses = 0
-        self.semaphore = asyncio.Semaphore(3) # Limite de requisições simultâneas
+        # Removido Semaphore, vamos usar serialização pura
 
     def _get_asset_id(self, asset_name):
         name = asset_name.replace(" (OTC)", "-OTC")
@@ -235,7 +247,7 @@ class TradingBot:
             except: pass
 
     async def run(self):
-        await self.logger('INFO', 'Bot a iniciar no modo RATE LIMITED & STABLE...')
+        await self.logger('INFO', 'Bot a iniciar no modo ULTRA STABLE (SERIAL)...')
         if not await self.exnova.connect(): await self.logger('ERROR', 'Falha na conexão inicial.')
         await self._daily_reset_if_needed()
         _patch_library_constants_aggressive()
@@ -301,7 +313,7 @@ class TradingBot:
             assets = await self.exnova.get_open_assets()
             
             if timeframe_seconds == 60:
-                print(f"[DEBUG RAW] Ativos disponíveis (API+Fallback): {len(assets)}")
+                print(f"[DEBUG RAW] Ativos disponíveis: {len(assets)}")
             
             is_weekend = datetime.utcnow().weekday() >= 5
             available_assets = []
@@ -317,33 +329,30 @@ class TradingBot:
                 total = stats['wins'] + stats['losses']
                 return stats['wins'] / total if total > 0 else 0.5
 
-            # --- LIMITE RÍGIDO DE ATIVOS PARA ESTABILIDADE ---
-            # Seleciona apenas os 15 melhores para evitar flood no socket
+            # Limite: 15 ativos
             target_assets = sorted(available_assets, key=get_asset_score, reverse=True)[:15]
             
             if timeframe_seconds == 60:
-                print(f"[DEBUG SCAN] Ativos alvo (Limitado): {len(target_assets)} (Exemplos: {target_assets[:3]})")
+                print(f"[DEBUG SCAN] Alvo: {len(target_assets)} ativos.")
 
             max_sim = self.bot_config.get('max_simultaneous_trades', 1)
             if len(self.active_trading_pairs) >= max_sim: return
 
-            tasks = []
-            
-            # --- FUNÇÃO WRAPPER COM RATE LIMITING ---
-            async def analyze_with_limit(asset):
-                async with self.semaphore: # Máximo 3 simultâneos
-                    try:
-                        await self._analyze_asset(asset, timeframe_seconds, expiration_minutes)
-                    except Exception as e:
-                        print(f"[ERR] Análise {asset}: {e}")
-                    await asyncio.sleep(0.5) # Pausa para respirar
-
+            # --- MUDANÇA CRÍTICA: EXECUÇÃO SERIAL (SEM ASYNCIO.GATHER) ---
+            # Para evitar sobrecarga de socket em OTC
             for asset in target_assets:
                 base = asset.split('-')[0]
                 if base in self.active_trading_pairs: continue
-                tasks.append(analyze_with_limit(asset))
+                
+                # Executa um por um e espera um pouco
+                try:
+                    await self._analyze_asset(asset, timeframe_seconds, expiration_minutes)
+                except Exception as e:
+                    print(f"[ERR] Análise {asset}: {e}")
+                
+                # Pausa obrigatória para o servidor "respirar"
+                await asyncio.sleep(1.5)
 
-            if tasks: await asyncio.gather(*tasks)
         except Exception as e:
             await self.logger('ERROR', f"Erro em run_analysis: {e}")
 
@@ -358,15 +367,13 @@ class TradingBot:
 
             asset_id = self._get_asset_id(full_name)
             
-            # Busca velas (com gestão de erro específica)
+            # Tenta obter velas (se falhar, não crasha o bot)
             try:
                 candles = await asyncio.gather(
                     self.exnova.get_historical_candles(asset_id, t1, 200),
                     self.exnova.get_historical_candles(asset_id, t2, 100)
                 )
-            except Exception as e:
-                # Silencia erros de conexão para não poluir, apenas desiste deste ativo
-                return
+            except: return
 
             analysis_candles, sr_candles = candles
             if not analysis_candles: return
@@ -441,9 +448,7 @@ class TradingBot:
                 asyncio.create_task(self._execute_and_wait(signal, full_name, trade_exp))
 
         except Exception as e:
-            if base in self.active_trading_pairs: self.active_trading_pairs.remove(base)
-            print(f"[ERRO] {base}: {e}")
-            traceback.print_exc()
+            await self.logger('ERROR', f"Erro execução {full_name}: {e}")
 
     async def _execute_martingale_trade(self, pair: str):
         trade_info = self.pending_martingale_trades.pop(pair, None)
