@@ -81,10 +81,8 @@ def _validate_reversal_candle_fix(candle, direction):
         is_green = c_close >= c_open
         is_red = c_close <= c_open
         if direction.lower() == 'call' and not is_green:
-            # print(f"   [FILTRO] Call rejeitado. Vela Vermelha.") # Silenciado para menos spam
             return False
         if direction.lower() == 'put' and not is_red:
-            # print(f"   [FILTRO] Put rejeitado. Vela Verde.")
             return False
         return True
     except: return False
@@ -174,30 +172,61 @@ async def _get_open_assets_fix(self):
         ]
     return []
 
-# --- 4. PATCH ANTI-CRASH (THREAD PROTECTION) ---
-# Patcheia o método MANGLED para evitar KeyError na thread
-def _safe_get_digital_open_patch_mangled(self):
+# --- 4. PATCH ANTI-CRASH (DATA PROTECTION) ---
+# Em vez de corrigir a thread, corrigimos a fonte de dados que a thread usa.
+# Isso garante que nunca retorne um objeto que cause KeyError.
+def _safe_get_digital_underlying_list_data(self):
     try:
-        # Tenta pegar os dados de forma segura
-        if hasattr(self, 'get_digital_underlying_list_data'):
-            data = self.get_digital_underlying_list_data()
-            if isinstance(data, dict):
-                return data.get("underlying", [])
-    except Exception: pass
-    return []
+        # Chama implementação original se existir e estiver acessível, 
+        # mas aqui nós vamos mockar a estrutura segura diretamente se falhar
+        # ou se a original estiver quebrada.
+        # Infelizmente, não podemos chamar "super()" facilmente num monkey patch.
+        # Vamos assumir que se o bot chamou isso, é porque quer dados.
+        
+        # Se a API armazena dados em self.api_digital_data (comum em iqoptionapi)
+        if hasattr(self, 'api_digital_data'):
+            return self.api_digital_data
+            
+        return {"underlying": []} # Estrutura Mínima Segura
+    except Exception:
+        return {"underlying": []}
 
 try:
     import exnovaapi.stable_api
-    # Aplica no nome correto (mangled)
-    exnovaapi.stable_api.ExnovaAPI._ExnovaAPI__get_digital_open = _safe_get_digital_open_patch_mangled
-    print("[PATCH] Thread protection applied to ExnovaAPI")
+    # Este é o método que a thread chama antes de falhar
+    # original: return self.get_digital_underlying_list_data()["underlying"]
+    # A thread espera que get_digital_underlying_list_data() retorne um dict COM a chave "underlying".
+    # Vamos substituir o método que fornece esses dados.
+    
+    # 1. Guardamos referência do original (se possível)
+    _original_method = exnovaapi.stable_api.ExnovaAPI.get_digital_underlying_list_data
+    
+    def _wrapper_method(self):
+        try:
+            data = _original_method(self)
+            if isinstance(data, dict) and "underlying" in data:
+                return data
+        except: pass
+        return {"underlying": []} # Fallback salvador
+        
+    exnovaapi.stable_api.ExnovaAPI.get_digital_underlying_list_data = _wrapper_method
+    print("[PATCH] Data protection applied to ExnovaAPI")
 except: 
     pass
 
 try:
     import iqoptionapi.stable_api
-    iqoptionapi.stable_api.IQOptionAPI._IQOptionAPI__get_digital_open = _safe_get_digital_open_patch_mangled
-    print("[PATCH] Thread protection applied to IQOptionAPI")
+    _original_method_iq = iqoptionapi.stable_api.IQOptionAPI.get_digital_underlying_list_data
+    def _wrapper_method_iq(self):
+        try:
+            data = _original_method_iq(self)
+            if isinstance(data, dict) and "underlying" in data:
+                return data
+        except: pass
+        return {"underlying": []}
+        
+    iqoptionapi.stable_api.IQOptionAPI.get_digital_underlying_list_data = _wrapper_method_iq
+    print("[PATCH] Data protection applied to IQOptionAPI")
 except: 
     pass
 
@@ -228,6 +257,7 @@ class TradingBot:
         logging.getLogger("websocket").setLevel(logging.CRITICAL)
         logging.getLogger("exnovaapi").setLevel(logging.CRITICAL)
         logging.getLogger("iqoptionapi").setLevel(logging.CRITICAL)
+        logging.getLogger("urllib3").setLevel(logging.CRITICAL)
 
     def _get_asset_id(self, asset_name):
         name = asset_name.replace(" (OTC)", "-OTC")
@@ -260,7 +290,7 @@ class TradingBot:
             except: pass
 
     async def run(self):
-        await self.logger('INFO', 'Bot a iniciar no modo TURTLE (SLOW & STABLE)...')
+        await self.logger('INFO', 'Bot a iniciar no modo DATA SHIELD...')
         if not await self.exnova.connect(): await self.logger('ERROR', 'Falha na conexão inicial.')
         await self._daily_reset_if_needed()
         _patch_library_constants_aggressive()
