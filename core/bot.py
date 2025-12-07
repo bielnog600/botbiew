@@ -102,16 +102,10 @@ ti.check_candlestick_pattern = _check_candlestick_pattern_fix
 ti.check_rsi_condition = _check_rsi_condition_fix
 
 # --- 2. CORREÇÃO SERVIÇO DE EXECUÇÃO (Híbrido Binary/Digital) ---
-# Substituímos o método execute_trade original por este mais robusto
 async def _execute_trade_robust(self, amount, active, direction, duration):
-    """
-    Tenta executar ordem em Binárias. Se falhar, tenta em Digital.
-    """
-    # 1. Tentar BINARY (Padrão)
+    # 1. Tentar BINARY
     try:
         if hasattr(self, 'api') and self.api:
-            # Chama a API interna diretamente se acessível (iqoptionapi style)
-            # Nota: buy(amount, active, action, expiration)
             print(f"[EXEC] Tentando BINARY para {active}...")
             status, id = await asyncio.to_thread(self.api.buy, amount, active, direction, duration)
             if status and id:
@@ -124,8 +118,6 @@ async def _execute_trade_robust(self, amount, active, direction, duration):
     try:
         if hasattr(self, 'api') and self.api:
             print(f"[EXEC] Binary falhou. Tentando DIGITAL para {active}...")
-            # buy_digital_spot(active, amount, action, duration)
-            # Duration em digital geralmente é int (1, 5, 15)
             status, id = await asyncio.to_thread(self.api.buy_digital_spot, active, amount, direction, duration)
             if status and id:
                 print(f"[EXEC] Sucesso via DIGITAL. ID: {id}")
@@ -135,7 +127,6 @@ async def _execute_trade_robust(self, amount, active, direction, duration):
         
     return None
 
-# Injetamos o método robusto na classe AsyncExnovaService
 AsyncExnovaService.execute_trade = _execute_trade_robust
 
 # ==============================================================================
@@ -188,7 +179,7 @@ class TradingBot:
                 await self.logger('ERROR', f"Erro ao atualizar saldo diário: {e}")
 
     async def run(self):
-        await self.logger('INFO', 'Bot a iniciar no modo DEBUG (Híbrido Bin/Dig)...')
+        await self.logger('INFO', 'Bot a iniciar no modo OTC FRIENDLY...')
         
         if not await self.exnova.connect():
             await self.logger('ERROR', 'Falha na conexão inicial.')
@@ -260,7 +251,23 @@ class TradingBot:
         try:
             await self.exnova.change_balance(self.bot_config.get('account_type', 'PRACTICE'))
             assets = await self.exnova.get_open_assets()
-            available_assets = [asset for asset in assets if asset.split('-')[0] not in self.blacklisted_assets]
+            
+            # --- LÓGICA DE FIM DE SEMANA / OTC ---
+            # Se for Sábado (5) ou Domingo (6), FORÇAMOS o uso de pares OTC.
+            is_weekend = datetime.utcnow().weekday() >= 5
+            
+            available_assets = []
+            for asset in assets:
+                # Se for fim de semana e o asset não tiver 'OTC', ignora
+                if is_weekend and '-OTC' not in asset:
+                    continue
+                # Se for dia de semana e o asset tiver 'OTC', ignora (opcional, mas evita misturar)
+                if not is_weekend and '-OTC' in asset:
+                    continue
+                    
+                if asset.split('-')[0] not in self.blacklisted_assets:
+                    available_assets.append(asset)
+            # -------------------------------------
 
             def get_asset_score(asset_name):
                 pair = asset_name.split('-')[0]
@@ -275,7 +282,9 @@ class TradingBot:
 
             tasks = []
             for asset in target_assets:
-                if asset.split('-')[0] in self.active_trading_pairs: continue
+                # asset aqui é o nome completo (ex: EURUSD-OTC)
+                base = asset.split('-')[0]
+                if base in self.active_trading_pairs: continue
                 tasks.append(self._analyze_asset(asset, timeframe_seconds, expiration_minutes))
 
             if tasks: await asyncio.gather(*tasks)
@@ -291,9 +300,10 @@ class TradingBot:
             elif expiration_minutes == 5: t1, t2, res_func = 300, 3600, get_h1_sr_zones
             else: return
 
+            # CORREÇÃO CRÍTICA: Usamos 'full_name' (ex: EURUSD-OTC) para buscar velas, não 'base'.
             candles = await asyncio.gather(
-                self.exnova.get_historical_candles(base, t1, 200),
-                self.exnova.get_historical_candles(base, t2, 100)
+                self.exnova.get_historical_candles(full_name, t1, 200),
+                self.exnova.get_historical_candles(full_name, t2, 100)
             )
             analysis_candles, sr_candles = candles
             if not analysis_candles or not sr_candles: return
@@ -319,7 +329,7 @@ class TradingBot:
             if expiration_minutes == 1:
                 sr_signal = ti.check_price_near_sr(signal_candle_obj, zones)
                 if sr_signal:
-                    print(f"[SINAL M1] {base}: SR {sr_signal} detetado. Analisando...")
+                    print(f"[SINAL M1] {full_name}: SR {sr_signal} detetado. Analisando...")
                     confluences.append("SR_Zone")
                     
                     pattern = ti.check_candlestick_pattern(analysis_candles_objs)
@@ -328,7 +338,7 @@ class TradingBot:
                     rsi_sig = ti.check_rsi_condition(analysis_candles_objs)
                     if rsi_sig == sr_signal: confluences.append("RSI_Condition")
                     
-                    print(f"   >>> {base} Decisão: Padrão={pattern}, RSI_Sinal={rsi_sig} | Confluências={len(confluences)}/{threshold}")
+                    print(f"   >>> {full_name} Decisão: Padrão={pattern}, RSI_Sinal={rsi_sig} | Confluências={len(confluences)}/{threshold}")
                     if len(confluences) >= threshold: final_direction = sr_signal
 
             elif expiration_minutes == 5:
@@ -338,14 +348,14 @@ class TradingBot:
                     rsi_sig = ti.check_rsi_condition(analysis_candles_objs)
                     if rsi_sig == m5_signal['direction']: temp_conf.append("RSI_Condition")
                     
-                    print(f"[DEBUG M5] {base}: Sinal {m5_signal['direction']}. Conf: {temp_conf}")
+                    print(f"[DEBUG M5] {full_name}: Sinal {m5_signal['direction']}. Conf: {temp_conf}")
                     if len(temp_conf) >= threshold:
                         final_direction = m5_signal['direction']
                         confluences = temp_conf
             
             if final_direction:
                 if not ti.validate_reversal_candle(signal_candle_obj, final_direction): 
-                    print(f"[{base}] Vela inválida (Filtro de cor).")
+                    print(f"[{full_name}] Vela inválida (Filtro de cor).")
                     return
                 
                 max_trades = self.bot_config.get('max_simultaneous_trades', 1)
@@ -353,14 +363,14 @@ class TradingBot:
 
                 now = datetime.utcnow()
                 wait_sec = (60 - now.second - 1) + (1 - now.microsecond / 1000000) + 0.2
-                await self.logger('INFO', f"Sinal {base} CONFIRMADO. Aguardando {wait_sec:.1f}s.")
+                await self.logger('INFO', f"Sinal {full_name} CONFIRMADO. Aguardando {wait_sec:.1f}s.")
                 await asyncio.sleep(wait_sec)
                 
                 if base in self.active_trading_pairs: return
                 self.active_trading_pairs.add(base)
 
                 strategy = f"M{expiration_minutes}_" + ', '.join(confluences)
-                await self.logger('SUCCESS', f"ENTRADA: {base} | {final_direction.upper()} | {strategy}")
+                await self.logger('SUCCESS', f"ENTRADA: {full_name} | {final_direction.upper()} | {strategy}")
                 
                 signal = TradeSignal(
                     pair=base, direction=final_direction, strategy=strategy,
@@ -410,12 +420,10 @@ class TradingBot:
             is_gale = "Gale" in signal.strategy or "Martingale" in signal.strategy
             val = self._get_entry_value(signal.pair, is_martingale=is_gale)
             
-            # --- RETRY & FALLBACK LOGIC ---
             oid = None
             retries = 2
             
             for attempt in range(retries):
-                # Chama a nossa função robusta (Monkey Patched)
                 oid = await self.exnova.execute_trade(val, full_name, signal.direction.lower(), expiration)
                 if oid: break
                 
@@ -432,7 +440,6 @@ class TradingBot:
             sid = await asyncio.to_thread(self.supabase.insert_trade_signal, signal)
             
             await asyncio.sleep(expiration * 60 + 15)
-            # Check win standard
             result = await self.exnova.check_win(oid)
             
             await self.process_trade_result(signal.pair, full_name, result, sid, is_gale, expiration, signal.direction)
