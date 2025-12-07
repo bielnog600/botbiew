@@ -66,8 +66,9 @@
             width: 100%;
             height: 2px;
             background: linear-gradient(90deg, transparent, var(--accent-primary), transparent);
-            animation: scanMove 2s linear infinite;
-            opacity: 0.7;
+            animation: scanMove 1.5s linear infinite;
+            opacity: 0.8;
+            box-shadow: 0 0 10px var(--accent-primary);
         }
         @keyframes scanMove {
             0% { top: 0%; opacity: 0; }
@@ -91,6 +92,10 @@
         .ticker-text {
             font-family: 'Roboto Mono', monospace;
             animation: fadeSwitch 0.2s ease-in-out;
+        }
+        @keyframes fadeSwitch {
+            0% { opacity: 0.5; transform: translateY(2px); }
+            100% { opacity: 1; transform: translateY(0); }
         }
     </style>
 </head>
@@ -145,81 +150,134 @@
 
         // --- Componentes Visual ---
         
-        // NOVO: Widget de Scanner Animado
-        const ScannerWidget = ({ lastLog }) => {
-            const [currentPair, setCurrentPair] = useState('AGUARDANDO');
-            const [scanStatus, setScanStatus] = useState('Inativo');
-            const [isScanning, setIsScanning] = useState(false);
+        // WIDGET SCANNER INTELIGENTE
+        const ScannerWidget = ({ lastLog, botStatus }) => {
+            const [currentPair, setCurrentPair] = useState('INICIANDO...');
+            const [scanStatus, setScanStatus] = useState('AGUARDANDO');
+            const [mode, setMode] = useState('IDLE'); // IDLE, SCANNING, SIGNAL
             
-            // Lista simulada para animação
-            const pairs = useMemo(() => ['EURUSD', 'GBPUSD', 'USDJPY', 'AUDCAD', 'USDCHF', 'EURGBP', 'EURJPY', 'NZDUSD'], []);
+            // Pares para simulação visual (efeito Matrix)
+            const pairs = useMemo(() => [
+                'EURUSD-OTC', 'GBPUSD-OTC', 'USDJPY-OTC', 'AUDCAD-OTC', 
+                'USDCHF-OTC', 'EURGBP-OTC', 'EURJPY-OTC', 'NZDUSD-OTC'
+            ], []);
 
+            // 1. Reage aos logs reais
             useEffect(() => {
                 if (!lastLog) return;
 
-                // Detecta início de varredura
+                // Log de Varredura -> Modo SCANNING (Rápido)
                 if (lastLog.message.includes('Varredura')) {
-                    setIsScanning(true);
+                    setMode('SCANNING');
                     setScanStatus(lastLog.message.includes('M5') ? 'VARREDURA M5' : 'VARREDURA M1');
                     
-                    // Stop scanning visual after 10s (approx cycle time)
-                    const timeout = setTimeout(() => setIsScanning(false), 12000);
-                    return () => clearTimeout(timeout);
+                    // Após 12s, volta para IDLE (Monitoramento Lento) se não houver sinal
+                    const t = setTimeout(() => setMode('IDLE'), 12000);
+                    return () => clearTimeout(t);
                 }
                 
-                // Detecta Confirmação/Entrada
+                // Log de Confirmação/Entrada -> Modo SIGNAL (Fixo)
                 if (lastLog.message.includes('CONFIRMADO') || lastLog.message.includes('ENTRADA')) {
-                    setIsScanning(false);
+                    setMode('SIGNAL');
                     setScanStatus('SINAL ENCONTRADO');
-                    // Tenta extrair o par da mensagem (ex: "Sinal EURUSD CONFIRMADO")
                     const match = lastLog.message.match(/([A-Z]{6}(-OTC)?)/);
                     if (match) setCurrentPair(match[0]);
+                    
+                    // Segura o sinal na tela por 30s
+                    const t = setTimeout(() => setMode('IDLE'), 30000);
+                    return () => clearTimeout(t);
                 }
             }, [lastLog]);
 
-            // Efeito de ciclo de ativos (Matrix effect)
+            // 2. Controla o estado "IDLE" baseado no status global do bot
+            useEffect(() => {
+                if (botStatus === 'PAUSED') {
+                    setMode('OFF');
+                    setScanStatus('SISTEMA PAUSADO');
+                    setCurrentPair('---');
+                } else if (mode === 'OFF' && botStatus === 'RUNNING') {
+                    setMode('IDLE');
+                }
+            }, [botStatus]);
+
+            // 3. Loop de Animação Visual (Ciclo de Pares)
             useEffect(() => {
                 let interval;
-                if (isScanning) {
+                
+                if (mode === 'SCANNING') {
+                    // Troca muito rápida (Efeito processamento)
                     interval = setInterval(() => {
                         const randomPair = pairs[Math.floor(Math.random() * pairs.length)];
-                        setCurrentPair(randomPair + (Math.random() > 0.5 ? '-OTC' : ''));
-                    }, 150); // Troca rápida
-                } else if (scanStatus === 'Inativo') {
-                    setCurrentPair('---');
+                        setCurrentPair(randomPair);
+                    }, 100); 
+                } else if (mode === 'IDLE' && botStatus === 'RUNNING') {
+                    // Troca lenta (Efeito monitoramento constante)
+                    setScanStatus('MONITORANDO MERCADO');
+                    interval = setInterval(() => {
+                        const randomPair = pairs[Math.floor(Math.random() * pairs.length)];
+                        setCurrentPair(randomPair);
+                    }, 2000);
+                } else if (mode === 'SIGNAL') {
+                    // Fixo no par do sinal
+                    clearInterval(interval);
                 }
+
                 return () => clearInterval(interval);
-            }, [isScanning, pairs, scanStatus]);
+            }, [mode, botStatus, pairs]);
+
+            // Cores dinâmicas
+            const getStatusColor = () => {
+                if (mode === 'SIGNAL') return 'text-green-400';
+                if (mode === 'SCANNING') return 'text-amber-400';
+                if (mode === 'IDLE') return 'text-blue-400';
+                return 'text-gray-500';
+            };
+
+            const getBgColor = () => {
+                if (mode === 'SIGNAL') return 'bg-green-500';
+                if (mode === 'SCANNING') return 'bg-amber-500';
+                if (mode === 'IDLE') return 'bg-blue-500';
+                return 'bg-gray-700';
+            };
 
             return (
-                <div className="glass-card rounded-xl p-0 overflow-hidden relative border-amber-500/30 border">
+                <div className={`glass-card rounded-xl p-0 overflow-hidden relative transition-colors duration-500 border ${mode === 'SIGNAL' ? 'border-green-500/50' : mode === 'SCANNING' ? 'border-amber-500/50' : 'border-gray-700'}`}>
                     {/* Background Grid Effect */}
                     <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-10"></div>
                     
-                    {/* Scan Line Animation */}
-                    {isScanning && <div className="scan-line z-10"></div>}
+                    {/* Scan Line Animation (Só quando scanning) */}
+                    {mode === 'SCANNING' && <div className="scan-line z-10"></div>}
 
                     <div className="p-5 relative z-20 flex justify-between items-center">
                         <div>
                             <div className="flex items-center gap-2 mb-1">
-                                <div className={`w-2 h-2 rounded-full ${isScanning ? 'bg-amber-400 animate-ping' : 'bg-gray-500'}`}></div>
-                                <span className="text-[10px] font-bold tracking-widest text-amber-400 uppercase">{scanStatus}</span>
+                                <div className={`w-2 h-2 rounded-full ${mode !== 'OFF' ? 'animate-pulse' : ''} ${getBgColor()}`}></div>
+                                <span className={`text-[10px] font-bold tracking-widest uppercase ${getStatusColor()}`}>
+                                    {scanStatus}
+                                </span>
                             </div>
                             <div className="text-3xl font-black text-white tracking-tight ticker-text">
                                 {currentPair}
                             </div>
                             <p className="text-xs text-gray-400 mt-1 flex items-center gap-1">
-                                <i className="fas fa-microchip"></i> Inteligência Artificial Ativa
+                                <i className={`fas fa-microchip ${mode !== 'OFF' ? 'text-green-500' : 'text-gray-600'}`}></i> 
+                                {mode === 'OFF' ? 'IA Desativada' : 'IA Operacional'}
                             </p>
                         </div>
 
                         {/* Radar Circle */}
                         <div className="relative w-16 h-16 flex items-center justify-center">
-                            <div className={`w-full h-full border border-gray-700 rounded-full absolute ${isScanning ? 'animate-spin' : ''}`} style={{borderTopColor: '#f59e0b', animationDuration: '3s'}}></div>
-                            <div className="w-12 h-12 bg-gray-800/50 rounded-full flex items-center justify-center backdrop-blur-sm border border-gray-700">
-                                <i className={`fas fa-radar text-xl ${isScanning ? 'text-amber-400' : 'text-gray-600'}`}></i>
+                            {/* Anel Externo Giratório */}
+                            <div className={`w-full h-full border border-gray-700 rounded-full absolute ${mode === 'SCANNING' ? 'animate-spin border-t-amber-500' : mode === 'IDLE' ? 'animate-spin border-t-blue-500' : ''}`} style={{animationDuration: mode === 'SCANNING' ? '1s' : '4s'}}></div>
+                            
+                            {/* Ícone Central */}
+                            <div className="w-12 h-12 bg-gray-800/50 rounded-full flex items-center justify-center backdrop-blur-sm border border-gray-700 z-10">
+                                <i className={`fas fa-radar text-xl ${getStatusColor()}`}></i>
                             </div>
-                            {isScanning && <div className="pulse-ring w-full h-full"></div>}
+                            
+                            {/* Ondas de Pulso */}
+                            {mode === 'SIGNAL' && <div className="pulse-ring w-full h-full border-green-500"></div>}
+                            {mode === 'SCANNING' && <div className="pulse-ring w-full h-full border-amber-500"></div>}
                         </div>
                     </div>
                 </div>
@@ -303,8 +361,9 @@
         function HomeView() {
             const [signals, setSignals] = useState([]);
             const [balanceInfo, setBalanceInfo] = useState({ current: 0, initial: 0 });
+            const [botStatus, setBotStatus] = useState('PAUSED'); // Novo estado
             const [isResetting, setIsResetting] = useState(false);
-            const [lastLog, setLastLog] = useState(null); // Para alimentar o scanner
+            const [lastLog, setLastLog] = useState(null); 
             const { addToast } = useToast();
 
             const scores = useMemo(() => {
@@ -333,8 +392,11 @@
                     const { data: sData } = await supabaseClient.from('trade_signals').select('*').order('created_at', { ascending: false }).limit(50);
                     if (sData) setSignals(sData);
                     
-                    const { data: cData } = await supabaseClient.from('bot_config').select('current_balance, daily_initial_balance').eq('id', 1).single();
-                    if (cData) setBalanceInfo({ current: cData.current_balance || 0, initial: cData.daily_initial_balance || 0 });
+                    const { data: cData } = await supabaseClient.from('bot_config').select('current_balance, daily_initial_balance, status').eq('id', 1).single();
+                    if (cData) {
+                        setBalanceInfo({ current: cData.current_balance || 0, initial: cData.daily_initial_balance || 0 });
+                        setBotStatus(cData.status || 'PAUSED');
+                    }
                 };
                 fetchData();
 
@@ -347,6 +409,7 @@
                 const subConfig = supabaseClient.channel('config_realtime')
                     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'bot_config' }, (payload) => {
                         setBalanceInfo({ current: payload.new.current_balance || 0, initial: payload.new.daily_initial_balance || 0 });
+                        setBotStatus(payload.new.status || 'PAUSED');
                     }).subscribe();
 
                 // Assinar logs para o Scanner
@@ -374,8 +437,8 @@
                         </button>
                     </div>
                     
-                    {/* WIDGET NOVO: SCANNER */}
-                    <ScannerWidget lastLog={lastLog} />
+                    {/* WIDGET DO SCANNER (Passamos o status real) */}
+                    <ScannerWidget lastLog={lastLog} botStatus={botStatus} />
 
                     {/* Cards Topo */}
                     <div className="grid grid-cols-2 gap-4">
