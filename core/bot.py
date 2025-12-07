@@ -110,8 +110,6 @@ def _check_rsi_condition_fix(candles, period=14, overbought=65, oversold=35):
         rsi = 100 - (100 / (1 + (ma_up / ma_down)))
         
         last_rsi = rsi.iloc[-1]
-        # Log menos intrusivo para poupar espaço, reative se necessário
-        # print(f"   [RSI DEBUG] Valor: {last_rsi:.2f}")
         
         if last_rsi >= overbought: return 'put'
         if last_rsi <= oversold: return 'call'
@@ -173,13 +171,8 @@ class TradingBot:
 
     def _get_asset_id(self, asset_name):
         """Converte Nome e Normaliza (EURUSD (OTC) -> EURUSD-OTC -> ID)."""
-        # Normalização de nomes
         name = asset_name.replace(" (OTC)", "-OTC")
-        
-        if name in ACTIVES_MAP:
-            return ACTIVES_MAP[name]
-        
-        # Fallback: Se não encontrou, retorna o próprio nome (pode falhar na API)
+        if name in ACTIVES_MAP: return ACTIVES_MAP[name]
         return name
 
     async def logger(self, level: str, message: str):
@@ -187,8 +180,7 @@ class TradingBot:
         print(f"[{ts}] [{level.upper()}] {message}", flush=True)
         try:
             await asyncio.to_thread(self.supabase.insert_log, level, message)
-        except Exception:
-            pass
+        except Exception: pass
 
     async def _hourly_cycle_reset(self):
         await self.logger('INFO', "CICLO HORÁRIO: Limpeza de stats.")
@@ -212,8 +204,7 @@ class TradingBot:
                 await self.logger('ERROR', f"Erro ao atualizar saldo diário: {e}")
 
     async def run(self):
-        await self.logger('INFO', 'Bot a iniciar no modo DEBUG (Scan Verbose)...')
-        
+        await self.logger('INFO', 'Bot a iniciar no modo OTC FORCED LIST...')
         if not await self.exnova.connect():
             await self.logger('ERROR', 'Falha na conexão inicial.')
 
@@ -285,18 +276,29 @@ class TradingBot:
             await self.exnova.change_balance(self.bot_config.get('account_type', 'PRACTICE'))
             assets = await self.exnova.get_open_assets()
             
-            # --- LÓGICA DE FIM DE SEMANA / OTC ---
-            is_weekend = datetime.utcnow().weekday() >= 5
+            # --- DEBUG RAW ASSETS ---
+            if timeframe_seconds == 60:
+                print(f"[DEBUG RAW] Ativos retornados pela API: {len(assets)}")
             
+            is_weekend = datetime.utcnow().weekday() >= 5
             available_assets = []
+
+            # 1. Tenta filtrar do retorno da API
             for asset in assets:
-                # Verificação mais flexível para 'OTC'
                 if is_weekend and 'OTC' not in asset: continue
                 if not is_weekend and 'OTC' in asset: continue
-                    
                 if asset.split('-')[0] not in self.blacklisted_assets:
                     available_assets.append(asset)
-            # -------------------------------------
+
+            # 2. FALLBACK CRÍTICO: Se estivermos no Fim de Semana e a API devolveu 0 OTCs,
+            #    Forçamos o uso dos pares OTC mais populares da nossa lista.
+            if is_weekend and len(available_assets) == 0:
+                print("[WARN] API retornou 0 ativos OTC. Usando lista de Fallback forçada.")
+                available_assets = [
+                    "EURUSD-OTC", "GBPUSD-OTC", "USDJPY-OTC", 
+                    "EURJPY-OTC", "USDCHF-OTC", "AUDCAD-OTC", 
+                    "NZDUSD-OTC", "EURGBP-OTC", "AUDUSD-OTC"
+                ]
 
             def get_asset_score(asset_name):
                 pair = asset_name.split('-')[0]
@@ -306,12 +308,10 @@ class TradingBot:
 
             target_assets = sorted(available_assets, key=get_asset_score, reverse=True)[:settings.MAX_ASSETS_TO_MONITOR]
             
-            # [DEBUG IMPORTANTE] Ver o que o bot encontrou
-            if timeframe_seconds == 60: # Só imprime no M1 para não spammar
-                print(f"[DEBUG SCAN] Ativos encontrados: {len(target_assets)} (Exemplos: {target_assets[:3]})")
+            if timeframe_seconds == 60:
+                print(f"[DEBUG SCAN] Ativos alvo: {len(target_assets)} (Exemplos: {target_assets[:3]})")
 
             max_sim = self.bot_config.get('max_simultaneous_trades', 1)
-            
             if len(self.active_trading_pairs) >= max_sim: return
 
             tasks = []
@@ -333,9 +333,7 @@ class TradingBot:
             elif expiration_minutes == 5: t1, t2, res_func = 300, 3600, get_h1_sr_zones
             else: return
 
-            # --- ID RESOLUTION DEBUG ---
             asset_id = self._get_asset_id(full_name)
-            # ---------------------------
 
             candles = await asyncio.gather(
                 self.exnova.get_historical_candles(asset_id, t1, 200),
@@ -343,14 +341,11 @@ class TradingBot:
             )
             analysis_candles, sr_candles = candles
             
-            # [DEBUG CRÍTICO] Se as velas vierem vazias, avisar!
             if not analysis_candles:
-                # Comenta isto depois se spammar muito, mas precisamos agora
-                if timeframe_seconds == 60:
-                    print(f"[WARN] Sem velas para {full_name} (ID usado: {asset_id}). Verifique o ID.")
+                # Se não temos velas, é provável que o ativo esteja fechado ou o ID esteja errado.
+                # Não fazemos nada, apenas retornamos.
                 return
 
-            # Prepara dados
             analysis_candles_objs = []
             for c in analysis_candles:
                 clean_c = c.copy()
@@ -461,10 +456,7 @@ class TradingBot:
         try:
             is_gale = "Gale" in signal.strategy or "Martingale" in signal.strategy
             val = self._get_entry_value(signal.pair, is_martingale=is_gale)
-            
-            # --- CORREÇÃO: USAR ID PARA EXECUTAR ---
             active_id = self._get_asset_id(full_name)
-            # ---------------------------------------
             
             oid = None
             retries = 2
