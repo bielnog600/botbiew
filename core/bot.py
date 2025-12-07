@@ -36,30 +36,32 @@ ACTIVES_MAP = {
 }
 
 # ==============================================================================
-#                      MONKEY PATCHES (AGRESSIVOS)
+#                      MONKEY PATCHES (AGRESSIVOS & BIDIRECIONAIS)
 # ==============================================================================
 
-# --- 0. PATCH NUCLEAR DE CONSTANTES ---
+# --- 0. PATCH NUCLEAR DE CONSTANTES (FIX: BIDIRECIONAL) ---
 def _patch_library_constants_aggressive():
     """
-    Percorre TODOS os módulos carregados. Se encontrar um dicionário 'ACTIVES'
-    dentro de um módulo da biblioteca (iqoptionapi ou exnovaapi), atualiza-o.
+    Injeta IDs e Nomes no dicionário ACTIVES da biblioteca.
+    Cria mapeamento Bidirecional (Nome -> ID e ID -> Nome) para evitar erros de lookup.
     """
+    # Cria mapa reverso (ID -> Nome) também
+    FULL_MAP = ACTIVES_MAP.copy()
+    REVERSE_MAP = {v: k for k, v in ACTIVES_MAP.items()}
+    FULL_MAP.update(REVERSE_MAP) # Agora ACTIVES tem { "EURUSD": 1 } E { 1: "EURUSD" }
+
     count = 0
     targets = ['iqoptionapi', 'exnovaapi']
     
-    # 1. Atualizar sys.modules
     for module_name, module in list(sys.modules.items()):
-        # Verifica se o módulo pertence às bibliotecas alvo
         if any(t in module_name for t in targets):
-            # Verifica se tem o atributo ACTIVES
             if hasattr(module, 'ACTIVES') and isinstance(module.ACTIVES, dict):
                 try:
-                    module.ACTIVES.update(ACTIVES_MAP)
+                    module.ACTIVES.update(FULL_MAP)
                     count += 1
                 except Exception: pass
     
-    print(f"[PATCH NUCLEAR] Atualizou ACTIVES em {count} módulos internos.")
+    print(f"[PATCH BIDIRECIONAL] Atualizou ACTIVES em {count} módulos internos (ID<->Nome).")
 
 # Executa o patch imediatamente
 _patch_library_constants_aggressive()
@@ -99,25 +101,18 @@ def _check_candlestick_pattern_fix(candles):
     try:
         last, prev = candles[-1], candles[-2]
         get_val = lambda c, a: float(c[a]) if isinstance(c, dict) else float(getattr(c, a))
-        
         l_open, l_close = get_val(last, 'open'), get_val(last, 'close')
         l_high, l_low = get_val(last, 'high'), get_val(last, 'low')
         p_open, p_close = get_val(prev, 'open'), get_val(prev, 'close')
-        
         l_body = abs(l_close - l_open) or 0.00001
         l_upper = l_high - max(l_close, l_open)
         l_lower = min(l_close, l_open) - l_low
+        is_p_red, is_p_green = p_close < p_open, p_close > p_open
+        is_l_green, is_l_red = l_close > l_open, l_close < l_open
         
-        is_p_red = p_close < p_open
-        is_p_green = p_close > p_open
-        is_l_green = l_close > l_open
-        is_l_red = l_close < l_open
-        
-        # Engolfo
         if is_p_red and is_l_green and l_close > p_open and l_open < p_close: return 'call'
         if is_p_green and is_l_red and l_close < p_open and l_open > p_close: return 'put'
         
-        # Pinbar (Ratio 1.5x)
         RATIO = 1.5
         if l_lower >= (RATIO * l_body) and l_upper <= l_body: return 'call'
         if l_upper >= (RATIO * l_body) and l_lower <= l_body: return 'put'
@@ -128,7 +123,6 @@ def _check_rsi_condition_fix(candles, period=14, overbought=65, oversold=35):
     try:
         df = _convert_candles_to_dataframe_fix(candles)
         if df.empty or len(df) < period + 1: return None
-        
         delta = df['close'].diff()
         up, down = delta.clip(lower=0), -1 * delta.clip(upper=0)
         ma_up = up.ewm(com=period - 1, adjust=True, min_periods=period).mean()
@@ -136,13 +130,11 @@ def _check_rsi_condition_fix(candles, period=14, overbought=65, oversold=35):
         rsi = 100 - (100 / (1 + (ma_up / ma_down)))
         
         last_rsi = rsi.iloc[-1]
-        
         if last_rsi >= overbought: return 'put'
         if last_rsi <= oversold: return 'call'
         return None
     except: return None
 
-# Aplica patches dos indicadores
 ti._convert_candles_to_dataframe = _convert_candles_to_dataframe_fix
 ti.validate_reversal_candle = _validate_reversal_candle_fix
 ti.check_candlestick_pattern = _check_candlestick_pattern_fix
@@ -159,21 +151,45 @@ async def _execute_trade_robust(self, amount, active, direction, duration):
                 return id
             elif not status and isinstance(id, str):
                 print(f"[EXEC] Falha Binary: {id}")
-    except Exception as e:
-        print(f"[EXEC] Erro ao tentar Binary: {e}")
+    except Exception as e: print(f"[EXEC] Erro Binary: {e}")
 
     try:
         if hasattr(self, 'api') and self.api:
-            print(f"[EXEC] Binary falhou. Tentando DIGITAL para {active}...")
+            print(f"[EXEC] Tentando DIGITAL para {active}...")
             status, id = await asyncio.to_thread(self.api.buy_digital_spot, active, amount, direction, duration)
             if status and id:
                 print(f"[EXEC] Sucesso via DIGITAL. ID: {id}")
                 return id
-    except Exception as e:
-        print(f"[EXEC] Erro ao tentar Digital: {e}")
+    except Exception as e: print(f"[EXEC] Erro Digital: {e}")
     return None
 
+# --- 3. CORREÇÃO GET_OPEN_ASSETS (FORÇAR LISTA SE VAZIA) ---
+async def _get_open_assets_fix(self):
+    """Retorna lista forçada de OTCs se a API falhar no fim de semana"""
+    try:
+        if hasattr(self, 'api') and self.api:
+            assets = await asyncio.to_thread(self.api.get_all_open_time)
+            # Processamento básico se a API retornar dict complexo (comum em iqoptionapi)
+            if assets and isinstance(assets, dict):
+                opened = []
+                for type_name, data in assets.items():
+                    if type_name in ['turbo', 'binary', 'digital']:
+                        for name, info in data.items():
+                            if info.get('open', False): opened.append(name)
+                # Se encontrou algo, retorna. Se não, continua para o fallback.
+                if opened: return list(set(opened))
+    except: pass
+    
+    # Fallback para Fim de Semana
+    if datetime.utcnow().weekday() >= 5:
+        return [
+            "EURUSD-OTC", "GBPUSD-OTC", "USDJPY-OTC", "EURJPY-OTC", 
+            "USDCHF-OTC", "AUDCAD-OTC", "NZDUSD-OTC", "EURGBP-OTC", "AUDUSD-OTC"
+        ]
+    return []
+
 AsyncExnovaService.execute_trade = _execute_trade_robust
+AsyncExnovaService.get_open_assets = _get_open_assets_fix # Patch no método de assets
 
 # ==============================================================================
 
@@ -196,7 +212,6 @@ class TradingBot:
         self.daily_losses = 0
 
     def _get_asset_id(self, asset_name):
-        """Converte Nome e Normaliza (EURUSD (OTC) -> EURUSD-OTC -> ID)."""
         name = asset_name.replace(" (OTC)", "-OTC")
         if name in ACTIVES_MAP: return ACTIVES_MAP[name]
         return name
@@ -204,9 +219,8 @@ class TradingBot:
     async def logger(self, level: str, message: str):
         ts = datetime.utcnow().isoformat()
         print(f"[{ts}] [{level.upper()}] {message}", flush=True)
-        try:
-            await asyncio.to_thread(self.supabase.insert_log, level, message)
-        except Exception: pass
+        try: await asyncio.to_thread(self.supabase.insert_log, level, message)
+        except: pass
 
     async def _hourly_cycle_reset(self):
         await self.logger('INFO', "CICLO HORÁRIO: Limpeza de stats.")
@@ -224,30 +238,20 @@ class TradingBot:
             self.last_daily_reset_date = current_date_utc
             try:
                 bal = await self.exnova.get_current_balance()
-                if bal > 0:
-                    await asyncio.to_thread(self.supabase.update_config, {'daily_initial_balance': bal, 'current_balance': bal})
-            except Exception as e:
-                await self.logger('ERROR', f"Erro ao atualizar saldo diário: {e}")
+                if bal > 0: await asyncio.to_thread(self.supabase.update_config, {'daily_initial_balance': bal, 'current_balance': bal})
+            except: pass
 
     async def run(self):
-        await self.logger('INFO', 'Bot a iniciar no modo NUCLEAR PATCH...')
-        
-        # --- RE-EXECUTA O PATCH APÓS CONEXÃO (Por segurança, caso carregue lazy modules) ---
-        if not await self.exnova.connect():
-            await self.logger('ERROR', 'Falha na conexão inicial.')
-        
-        _patch_library_constants_aggressive()
-        # ---------------------------------------------------------------------------------
-
+        await self.logger('INFO', 'Bot a iniciar no modo BIDIRECIONAL PATCH...')
+        if not await self.exnova.connect(): await self.logger('ERROR', 'Falha na conexão inicial.')
         await self._daily_reset_if_needed()
+        _patch_library_constants_aggressive() # Garante patch após importações internas
 
         while self.is_running:
             try:
-                # --- AUTO-RECONEXÃO ---
                 connected = False
                 try:
-                    if hasattr(self.exnova, 'is_connected'):
-                        connected = await self.exnova.is_connected()
+                    if hasattr(self.exnova, 'is_connected'): connected = await self.exnova.is_connected()
                     else: connected = True
                 except: pass
 
@@ -255,14 +259,12 @@ class TradingBot:
                     print("[AVISO] Conexão perdida. Reconectando...")
                     if await self.exnova.connect():
                         await self.logger('SUCCESS', 'Reconectado.')
-                        _patch_library_constants_aggressive() # Re-aplica patch na reconexão
+                        _patch_library_constants_aggressive()
                     else:
                         await asyncio.sleep(5)
                         continue
-                # -----------------------
 
                 await self._daily_reset_if_needed()
-                
                 if (datetime.utcnow() - self.last_reset_time).total_seconds() >= 3600:
                     await self._hourly_cycle_reset()
 
@@ -275,13 +277,10 @@ class TradingBot:
                         if pair not in self.active_trading_pairs:
                             asyncio.create_task(self._execute_martingale_trade(pair))
                     await self.trading_cycle()
-                
                 elif status != 'RUNNING':
-                    if len(self.active_trading_pairs) > 0:
-                        print(f"[PAUSA] Aguardando {len(self.active_trading_pairs)} trades.")
+                    if len(self.active_trading_pairs) > 0: print(f"[PAUSA] Aguardando {len(self.active_trading_pairs)} trades.")
                     await asyncio.sleep(2)
                 await asyncio.sleep(1)
-
             except Exception as e:
                 print(f"[LOOP ERROR] {e}")
                 await asyncio.sleep(5)
@@ -306,30 +305,19 @@ class TradingBot:
     async def run_analysis_for_timeframe(self, timeframe_seconds: int, expiration_minutes: int):
         try:
             await self.exnova.change_balance(self.bot_config.get('account_type', 'PRACTICE'))
-            assets = await self.exnova.get_open_assets()
+            assets = await self.exnova.get_open_assets() # Usa nosso patch se API falhar
             
             # --- DEBUG RAW ASSETS ---
             if timeframe_seconds == 60:
-                print(f"[DEBUG RAW] Ativos retornados pela API: {len(assets)}")
+                print(f"[DEBUG RAW] Ativos disponíveis (API+Fallback): {len(assets)}")
             
             is_weekend = datetime.utcnow().weekday() >= 5
             available_assets = []
-
-            # 1. Tenta filtrar do retorno da API
             for asset in assets:
                 if is_weekend and 'OTC' not in asset: continue
                 if not is_weekend and 'OTC' in asset: continue
                 if asset.split('-')[0] not in self.blacklisted_assets:
                     available_assets.append(asset)
-
-            # 2. FALLBACK CRÍTICO:
-            if is_weekend and len(available_assets) == 0:
-                print("[WARN] Usando lista de Fallback forçada (OTC).")
-                available_assets = [
-                    "EURUSD-OTC", "GBPUSD-OTC", "USDJPY-OTC", 
-                    "EURJPY-OTC", "USDCHF-OTC", "AUDCAD-OTC", 
-                    "NZDUSD-OTC", "EURGBP-OTC", "AUDUSD-OTC"
-                ]
 
             def get_asset_score(asset_name):
                 pair = asset_name.split('-')[0]
@@ -365,15 +353,13 @@ class TradingBot:
             else: return
 
             asset_id = self._get_asset_id(full_name)
-
             candles = await asyncio.gather(
                 self.exnova.get_historical_candles(asset_id, t1, 200),
                 self.exnova.get_historical_candles(asset_id, t2, 100)
             )
             analysis_candles, sr_candles = candles
             
-            if not analysis_candles:
-                return
+            if not analysis_candles: return
 
             analysis_candles_objs = []
             for c in analysis_candles:
@@ -397,10 +383,8 @@ class TradingBot:
                 if sr_signal:
                     print(f"[SINAL M1] {full_name}: SR {sr_signal} detetado. Analisando...")
                     confluences.append("SR_Zone")
-                    
                     pattern = ti.check_candlestick_pattern(analysis_candles_objs)
                     if pattern == sr_signal: confluences.append("Candle_Pattern")
-
                     rsi_sig = ti.check_rsi_condition(analysis_candles_objs)
                     if rsi_sig == sr_signal: confluences.append("RSI_Condition")
                     
@@ -413,7 +397,6 @@ class TradingBot:
                     temp_conf = m5_signal['confluences']
                     rsi_sig = ti.check_rsi_condition(analysis_candles_objs)
                     if rsi_sig == m5_signal['direction']: temp_conf.append("RSI_Condition")
-                    
                     print(f"[DEBUG M5] {full_name}: Sinal {m5_signal['direction']}. Conf: {temp_conf}")
                     if len(temp_conf) >= threshold:
                         final_direction = m5_signal['direction']
@@ -455,7 +438,6 @@ class TradingBot:
     async def _execute_martingale_trade(self, pair: str):
         trade_info = self.pending_martingale_trades.pop(pair, None)
         if not trade_info: return
-        
         self.active_trading_pairs.add(pair)
         now = datetime.utcnow()
         next_min = (now.timestamp() // 60 + 1) * 60
@@ -467,7 +449,6 @@ class TradingBot:
 
         strategy = f"M{trade_info['expiration_minutes']}_Gale_{lvl}"
         signal = TradeSignal(pair=trade_info['pair'], direction=trade_info['direction'], strategy=strategy)
-        
         await self.logger('SUCCESS', f"ENTRADA GALE {pair}!")
         trade_exp = 4 if trade_info['expiration_minutes'] == 5 else trade_info['expiration_minutes']
         await self._execute_and_wait(signal, trade_info['full_name'], trade_exp)
@@ -486,14 +467,12 @@ class TradingBot:
             is_gale = "Gale" in signal.strategy or "Martingale" in signal.strategy
             val = self._get_entry_value(signal.pair, is_martingale=is_gale)
             active_id = self._get_asset_id(full_name)
-            
             oid = None
             retries = 2
             
             for attempt in range(retries):
                 oid = await self.exnova.execute_trade(val, active_id, signal.direction.lower(), expiration)
                 if oid: break
-                
                 print(f"[DEBUG] Tentativa {attempt+1}/{retries} falhou para {full_name} (ID: {active_id}). Retrying...")
                 await asyncio.sleep(1)
             
@@ -518,14 +497,12 @@ class TradingBot:
 
     async def process_trade_result(self, pair, full_name, result, sid, is_martingale, expiration, direction):
         await self.logger('SUCCESS' if result == 'win' else 'ERROR', f"Resultado {pair}: {result.upper()}")
-
         mg_lv = self.martingale_state.get(pair, {}).get('level', 0)
         if sid: await asyncio.to_thread(self.supabase.update_trade_result, sid, result.upper(), mg_lv)
-        
         try:
             bal = await self.exnova.get_current_balance()
             if bal: await asyncio.to_thread(self.supabase.update_current_balance, bal)
-        except Exception: pass
+        except: pass
 
         self.asset_performance.setdefault(pair, {'wins': 0, 'losses': 0})
         self.consecutive_losses.setdefault(pair, 0)
