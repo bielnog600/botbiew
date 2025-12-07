@@ -2,6 +2,7 @@ import asyncio
 import traceback
 import sys
 import threading
+import logging
 from datetime import datetime
 from typing import Dict, Optional, Set, List
 from types import SimpleNamespace
@@ -40,7 +41,7 @@ ACTIVES_MAP = {
 #                      MONKEY PATCHES (AGRESSIVOS & BIDIRECIONAIS)
 # ==============================================================================
 
-# --- 0. PATCH NUCLEAR DE CONSTANTES (BIDIRECIONAL) ---
+# --- 0. PATCH NUCLEAR DE CONSTANTES ---
 def _patch_library_constants_aggressive():
     FULL_MAP = ACTIVES_MAP.copy()
     REVERSE_MAP = {v: k for k, v in ACTIVES_MAP.items()}
@@ -80,10 +81,10 @@ def _validate_reversal_candle_fix(candle, direction):
         is_green = c_close >= c_open
         is_red = c_close <= c_open
         if direction.lower() == 'call' and not is_green:
-            print(f"   [FILTRO] Call rejeitado. Vela Vermelha (O:{c_open} -> C:{c_close})")
+            # print(f"   [FILTRO] Call rejeitado. Vela Vermelha.") # Silenciado para menos spam
             return False
         if direction.lower() == 'put' and not is_red:
-            print(f"   [FILTRO] Put rejeitado. Vela Verde (O:{c_open} -> C:{c_close})")
+            # print(f"   [FILTRO] Put rejeitado. Vela Verde.")
             return False
         return True
     except: return False
@@ -140,9 +141,7 @@ async def _execute_trade_robust(self, amount, active, direction, duration):
             if status and id:
                 print(f"[EXEC] Sucesso via BINARY. ID: {id}")
                 return id
-            elif not status and isinstance(id, str):
-                print(f"[EXEC] Falha Binary: {id}")
-    except Exception as e: print(f"[EXEC] Erro Binary: {e}")
+    except Exception: pass
 
     try:
         if hasattr(self, 'api') and self.api:
@@ -151,7 +150,7 @@ async def _execute_trade_robust(self, amount, active, direction, duration):
             if status and id:
                 print(f"[EXEC] Sucesso via DIGITAL. ID: {id}")
                 return id
-    except Exception as e: print(f"[EXEC] Erro Digital: {e}")
+    except Exception: pass
     return None
 
 # --- 3. CORREÇÃO GET_OPEN_ASSETS ---
@@ -175,22 +174,32 @@ async def _get_open_assets_fix(self):
         ]
     return []
 
-# --- 4. PATCH ANTI-CRASH PARA THREADS INTERNAS ---
-# Isto impede que o erro 'KeyError: underlying' mate as threads da biblioteca
-def _safe_get_digital_open_patch(self):
+# --- 4. PATCH ANTI-CRASH (THREAD PROTECTION) ---
+# Patcheia o método MANGLED para evitar KeyError na thread
+def _safe_get_digital_open_patch_mangled(self):
     try:
-        if self.get_digital_underlying_list_data:
+        # Tenta pegar os dados de forma segura
+        if hasattr(self, 'get_digital_underlying_list_data'):
             data = self.get_digital_underlying_list_data()
-            if isinstance(data, dict) and "underlying" in data:
-                return data["underlying"]
-    except Exception: pass # Silencia erros internos para manter o bot vivo
+            if isinstance(data, dict):
+                return data.get("underlying", [])
+    except Exception: pass
     return []
 
-# Tentamos aplicar este patch se encontrarmos a classe
 try:
     import exnovaapi.stable_api
-    exnovaapi.stable_api.ExnovaAPI.__get_digital_open = _safe_get_digital_open_patch
-except: pass
+    # Aplica no nome correto (mangled)
+    exnovaapi.stable_api.ExnovaAPI._ExnovaAPI__get_digital_open = _safe_get_digital_open_patch_mangled
+    print("[PATCH] Thread protection applied to ExnovaAPI")
+except: 
+    pass
+
+try:
+    import iqoptionapi.stable_api
+    iqoptionapi.stable_api.IQOptionAPI._IQOptionAPI__get_digital_open = _safe_get_digital_open_patch_mangled
+    print("[PATCH] Thread protection applied to IQOptionAPI")
+except: 
+    pass
 
 AsyncExnovaService.execute_trade = _execute_trade_robust
 AsyncExnovaService.get_open_assets = _get_open_assets_fix
@@ -214,7 +223,11 @@ class TradingBot:
         self.last_daily_reset_date = None
         self.daily_wins = 0
         self.daily_losses = 0
-        # Removido Semaphore, vamos usar serialização pura
+
+        # SUPRESSÃO DE LOGS DE BIBLIOTECA
+        logging.getLogger("websocket").setLevel(logging.CRITICAL)
+        logging.getLogger("exnovaapi").setLevel(logging.CRITICAL)
+        logging.getLogger("iqoptionapi").setLevel(logging.CRITICAL)
 
     def _get_asset_id(self, asset_name):
         name = asset_name.replace(" (OTC)", "-OTC")
@@ -247,7 +260,7 @@ class TradingBot:
             except: pass
 
     async def run(self):
-        await self.logger('INFO', 'Bot a iniciar no modo ULTRA STABLE (SERIAL)...')
+        await self.logger('INFO', 'Bot a iniciar no modo TURTLE (SLOW & STABLE)...')
         if not await self.exnova.connect(): await self.logger('ERROR', 'Falha na conexão inicial.')
         await self._daily_reset_if_needed()
         _patch_library_constants_aggressive()
@@ -312,9 +325,6 @@ class TradingBot:
             await self.exnova.change_balance(self.bot_config.get('account_type', 'PRACTICE'))
             assets = await self.exnova.get_open_assets()
             
-            if timeframe_seconds == 60:
-                print(f"[DEBUG RAW] Ativos disponíveis: {len(assets)}")
-            
             is_weekend = datetime.utcnow().weekday() >= 5
             available_assets = []
             for asset in assets:
@@ -329,29 +339,26 @@ class TradingBot:
                 total = stats['wins'] + stats['losses']
                 return stats['wins'] / total if total > 0 else 0.5
 
-            # Limite: 15 ativos
+            # MANTÉM LIMITE DE 15 ATIVOS
             target_assets = sorted(available_assets, key=get_asset_score, reverse=True)[:15]
             
             if timeframe_seconds == 60:
-                print(f"[DEBUG SCAN] Alvo: {len(target_assets)} ativos.")
+                print(f"[SCAN] Analisando {len(target_assets)} ativos...")
 
             max_sim = self.bot_config.get('max_simultaneous_trades', 1)
             if len(self.active_trading_pairs) >= max_sim: return
 
-            # --- MUDANÇA CRÍTICA: EXECUÇÃO SERIAL (SEM ASYNCIO.GATHER) ---
-            # Para evitar sobrecarga de socket em OTC
+            # --- MODO TARTARUGA (SERIAL + SLOW) ---
             for asset in target_assets:
                 base = asset.split('-')[0]
                 if base in self.active_trading_pairs: continue
                 
-                # Executa um por um e espera um pouco
                 try:
                     await self._analyze_asset(asset, timeframe_seconds, expiration_minutes)
-                except Exception as e:
-                    print(f"[ERR] Análise {asset}: {e}")
+                except Exception: pass
                 
-                # Pausa obrigatória para o servidor "respirar"
-                await asyncio.sleep(1.5)
+                # DELAY CRÍTICO: 3.0s entre chamadas para evitar banimento/crash
+                await asyncio.sleep(3.0)
 
         except Exception as e:
             await self.logger('ERROR', f"Erro em run_analysis: {e}")
@@ -367,7 +374,6 @@ class TradingBot:
 
             asset_id = self._get_asset_id(full_name)
             
-            # Tenta obter velas (se falhar, não crasha o bot)
             try:
                 candles = await asyncio.gather(
                     self.exnova.get_historical_candles(asset_id, t1, 200),
@@ -421,7 +427,6 @@ class TradingBot:
             
             if final_direction:
                 if not ti.validate_reversal_candle(signal_candle_obj, final_direction): 
-                    print(f"[{full_name}] Vela inválida (Filtro de cor).")
                     return
                 
                 max_trades = self.bot_config.get('max_simultaneous_trades', 1)
@@ -448,7 +453,8 @@ class TradingBot:
                 asyncio.create_task(self._execute_and_wait(signal, full_name, trade_exp))
 
         except Exception as e:
-            await self.logger('ERROR', f"Erro execução {full_name}: {e}")
+            # Erros silenciosos para não spammar
+            pass
 
     async def _execute_martingale_trade(self, pair: str):
         trade_info = self.pending_martingale_trades.pop(pair, None)
@@ -488,7 +494,6 @@ class TradingBot:
             for attempt in range(retries):
                 oid = await self.exnova.execute_trade(val, active_id, signal.direction.lower(), expiration)
                 if oid: break
-                print(f"[DEBUG] Tentativa {attempt+1}/{retries} falhou para {full_name} (ID: {active_id}). Retrying...")
                 await asyncio.sleep(1)
             
             if not oid:
