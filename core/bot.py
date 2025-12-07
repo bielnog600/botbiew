@@ -60,62 +60,36 @@ def _patch_library_constants_aggressive():
 
 _patch_library_constants_aggressive()
 
-# --- 1. PROXY SEGURO PARA GET_CANDLES (SEM REINVENTAR) ---
-# Em vez de tentar enviar frames manuais, delegamos para a API interna que sabe fazer isso.
+# --- 1. PROXY SEGURO PARA GET_CANDLES ---
 def _proxy_get_candles(self, active, size, count=100, to=None):
-    """
-    Encaminha a chamada para a API interna (self.api),
-    que é onde o método get_candles original existe.
-    """
-    if not hasattr(self, "api") or self.api is None:
-        return []
+    if not hasattr(self, "api") or self.api is None: return []
+    if to is None: to = time.time()
+    try: return self.api.get_candles(active, size, count, to)
+    except Exception: return []
 
-    if to is None:
-        to = time.time()
-
-    try:
-        # A grande maioria dessas libs usa (active, size, count, to) na camada interna
-        return self.api.get_candles(active, size, count, to)
-    except Exception:
-        return []
-
-# Injeta o proxy na classe Stable
 try:
     import exnovaapi.stable_api
     if not hasattr(exnovaapi.stable_api.ExnovaAPI, 'get_candles'):
         exnovaapi.stable_api.ExnovaAPI.get_candles = _proxy_get_candles
-        print("[PATCH] Proxy get_candles adicionado na ExnovaAPI.")
 except: pass
 
 try:
     import iqoptionapi.stable_api
     if not hasattr(iqoptionapi.stable_api.IQOptionAPI, 'get_candles'):
         iqoptionapi.stable_api.IQOptionAPI.get_candles = _proxy_get_candles
-        print("[PATCH] Proxy get_candles adicionado na IQOptionAPI.")
 except: pass
 
 # --- 2. PATCH SERVICE GET_CANDLES ---
-# Atualiza o serviço para usar o proxy
 async def _get_historical_candles_patched(self, asset_id, duration, amount):
     try:
         if not self.api: return []
-        
-        # duration = timeframe (size), amount = count
-        # Chama o proxy que injetamos acima via thread
-        candles = await asyncio.to_thread(
-            self.api.get_candles,
-            asset_id,
-            duration,
-            amount,
-            time.time()
-        )
+        candles = await asyncio.to_thread(self.api.get_candles, asset_id, duration, amount, time.time())
         return candles or []
-    except Exception:
-        return []
+    except Exception: return []
 
 AsyncExnovaService.get_historical_candles = _get_historical_candles_patched
 
-# --- 3. CORREÇÃO INDICADORES ---
+# --- 3. CORREÇÃO INDICADORES (COM LOGS DETALHADOS) ---
 def _convert_candles_to_dataframe_fix(candles):
     if not candles: return pd.DataFrame()
     normalized = []
@@ -136,8 +110,12 @@ def _validate_reversal_candle_fix(candle, direction):
         c_open, c_close = float(candle.open), float(candle.close)
         is_green = c_close >= c_open
         is_red = c_close <= c_open
-        if direction.lower() == 'call' and not is_green: return False
-        if direction.lower() == 'put' and not is_red: return False
+        if direction.lower() == 'call' and not is_green:
+            print(f"   [FILTRO] Call rejeitado. Vela Vermelha.")
+            return False
+        if direction.lower() == 'put' and not is_red:
+            print(f"   [FILTRO] Put rejeitado. Vela Verde.")
+            return False
         return True
     except: return False
 
@@ -149,18 +127,26 @@ def _check_candlestick_pattern_fix(candles):
         l_open, l_close = get_val(last, 'open'), get_val(last, 'close')
         l_high, l_low = get_val(last, 'high'), get_val(last, 'low')
         p_open, p_close = get_val(prev, 'open'), get_val(prev, 'close')
+        
         l_body = abs(l_close - l_open) or 0.00001
         l_upper = l_high - max(l_close, l_open)
         l_lower = min(l_close, l_open) - l_low
         is_p_red, is_p_green = p_close < p_open, p_close > p_open
         is_l_green, is_l_red = l_close > l_open, l_close < l_open
-        if is_p_red and is_l_green and l_close > p_open and l_open < p_close: return 'call'
-        if is_p_green and is_l_red and l_close < p_open and l_open > p_close: return 'put'
+        
+        pattern = None
+        if is_p_red and is_l_green and l_close > p_open and l_open < p_close: pattern = 'call' # Engolfo Alta
+        elif is_p_green and is_l_red and l_close < p_open and l_open > p_close: pattern = 'put' # Engolfo Baixa
+        
         RATIO = 1.5
-        if l_lower >= (RATIO * l_body) and l_upper <= l_body: return 'call'
-        if l_upper >= (RATIO * l_body) and l_lower <= l_body: return 'put'
+        if l_lower >= (RATIO * l_body) and l_upper <= l_body: pattern = 'call' # Pinbar Alta
+        elif l_upper >= (RATIO * l_body) and l_lower <= l_body: pattern = 'put' # Pinbar Baixa
+        
+        if pattern:
+            # print(f"   [PATTERN] Detectado: {pattern}") # Opcional
+            pass
+        return pattern
     except: return None
-    return None
 
 def _check_rsi_condition_fix(candles, period=14, overbought=65, oversold=35):
     try:
@@ -172,6 +158,10 @@ def _check_rsi_condition_fix(candles, period=14, overbought=65, oversold=35):
         ma_down = down.ewm(com=period - 1, adjust=True, min_periods=period).mean()
         rsi = 100 - (100 / (1 + (ma_up / ma_down)))
         last_rsi = rsi.iloc[-1]
+        
+        # LOG DETALHADO DO RSI AQUI
+        print(f"   [RSI] {last_rsi:.2f}") 
+        
         if last_rsi >= overbought: return 'put'
         if last_rsi <= oversold: return 'call'
         return None
@@ -205,15 +195,12 @@ async def _execute_trade_robust(self, amount, active, direction, duration):
 
 # --- 5. CORREÇÃO GET_OPEN_ASSETS (FORÇAR OTC NO FIM DE SEMANA) ---
 async def _get_open_assets_fix(self):
-    # Se for Fim de Semana (Sáb=5, Dom=6), ignora API e força lista
     if datetime.utcnow().weekday() >= 5:
         return [
             "EURUSD-OTC", "GBPUSD-OTC", "USDJPY-OTC", "EURJPY-OTC", 
             "USDCHF-OTC", "AUDCAD-OTC", "NZDUSD-OTC", "EURGBP-OTC", "AUDUSD-OTC",
             "USDMXN-OTC", "FWONA-OTC", "XNGUSD-OTC"
         ]
-    
-    # Se for dia útil, tenta API
     try:
         if hasattr(self, 'api') and self.api:
             assets = await asyncio.to_thread(self.api.get_all_open_time)
@@ -225,10 +212,9 @@ async def _get_open_assets_fix(self):
                             if info.get('open', False): opened.append(name)
                 if opened: return list(set(opened))
     except: pass
-    
     return []
 
-# --- 6. PATCH ANTI-CRASH (DATA PROTECTION) ---
+# --- 6. PATCH ANTI-CRASH ---
 def _safe_get_digital_underlying_list_data(self):
     return {"underlying": []}
 
@@ -271,11 +257,9 @@ try:
     exnovaapi.api.ExnovaAPI.send_websocket_request = _safe_send_websocket_request
 except: pass
 
-# --- 9. PATCH: SILENCIADOR DE THREADS (Opcional, mas bom para estabilidade) ---
-# Faz get_instruments devolver uma estrutura vazia e NÃO tocar no websocket
+# --- 9. PATCH: SILENCIADOR DE THREADS ---
 def _safe_get_instruments(self, instruments_type=None):
     return {"instruments": []}
-
 def _noop_get_other_open(self, *args, **kwargs):
     return
 
@@ -283,7 +267,6 @@ try:
     import exnovaapi.stable_api as ex_stable
     ex_stable.ExnovaAPI.get_instruments = _safe_get_instruments
     ex_stable.ExnovaAPI._ExnovaAPI__get_other_open = _noop_get_other_open
-    print("[PATCH] Desativado get_instruments/__get_other_open.")
 except: pass
 
 AsyncExnovaService.execute_trade = _execute_trade_robust
@@ -346,10 +329,10 @@ class TradingBot:
             except: pass
 
     async def run(self):
-        await self.logger('INFO', 'Bot a iniciar no modo PROXY CANDLES...')
+        await self.logger('INFO', 'Bot a iniciar no modo DEEP DEBUG...')
         if not await self.exnova.connect(): await self.logger('ERROR', 'Falha na conexão inicial.')
         
-        # Patch na Instância (Dupla Segurança)
+        # Patch na Instância
         try:
             if hasattr(self.exnova, 'api'):
                 import types
@@ -419,9 +402,6 @@ class TradingBot:
             await self.exnova.change_balance(self.bot_config.get('account_type', 'PRACTICE'))
             assets = await self.exnova.get_open_assets()
             
-            if timeframe_seconds == 60:
-                print(f"[DEBUG RAW] Ativos disponíveis (API/Forced): {len(assets)}")
-            
             is_weekend = datetime.utcnow().weekday() >= 5
             available_assets = []
             for asset in assets:
@@ -429,6 +409,16 @@ class TradingBot:
                 if not is_weekend and 'OTC' in asset: continue
                 if asset.split('-')[0] not in self.blacklisted_assets:
                     available_assets.append(asset)
+
+            if is_weekend and len(available_assets) == 0:
+                forced_list = [
+                    "EURUSD-OTC", "GBPUSD-OTC", "USDJPY-OTC", "EURJPY-OTC", 
+                    "USDCHF-OTC", "AUDCAD-OTC", "NZDUSD-OTC", "EURGBP-OTC", "AUDUSD-OTC",
+                    "USDMXN-OTC", "FWONA-OTC", "XNGUSD-OTC"
+                ]
+                for asset in forced_list:
+                    if asset.split('-')[0] not in self.blacklisted_assets:
+                        available_assets.append(asset)
 
             def get_asset_score(asset_name):
                 pair = asset_name.split('-')[0]
@@ -438,9 +428,6 @@ class TradingBot:
 
             target_assets = sorted(available_assets, key=get_asset_score, reverse=True)[:15]
             
-            if timeframe_seconds == 60:
-                print(f"[SCAN] Analisando {len(target_assets)} ativos...")
-
             max_sim = self.bot_config.get('max_simultaneous_trades', 1)
             if len(self.active_trading_pairs) >= max_sim: return
 
@@ -474,6 +461,7 @@ class TradingBot:
 
             asset_id = self._get_asset_id(full_name)
             
+            # 1. Obter Velas
             try:
                 candles = await asyncio.gather(
                     self.exnova.get_historical_candles(asset_id, t1, 200),
@@ -482,7 +470,9 @@ class TradingBot:
             except: return
 
             analysis_candles, sr_candles = candles
-            if not analysis_candles: return
+            if not analysis_candles:
+                # print(f"[DEBUG] Sem dados para {full_name}") 
+                return
 
             analysis_candles_objs = []
             for c in analysis_candles:
@@ -501,26 +491,46 @@ class TradingBot:
             threshold = self.bot_config.get('confirmation_threshold', 2)
             final_direction, confluences = None, []
 
+            # 2. Análise Detalhada (Com Logs)
+            
+            # Calcula proximidade da zona para log
+            close_price = float(signal_candle_obj.close)
+            dist_res = abs(close_price - res) if res else 9999
+            dist_sup = abs(close_price - sup) if sup else 9999
+            nearest = "Resistência" if dist_res < dist_sup else "Suporte"
+            dist_val = min(dist_res, dist_sup)
+            
+            # Print para saberes que analisou
+            print(f"[{full_name}] Preço: {close_price:.5f} | Perto de: {nearest} (Dist: {dist_val:.5f})")
+
             if expiration_minutes == 1:
                 sr_signal = ti.check_price_near_sr(signal_candle_obj, zones)
+                
+                # Check RSI para log
+                # Hack: chamamos a função só para ver o print do RSI, mas ela devolve sinal
+                rsi_signal_check = ti.check_rsi_condition(analysis_candles_objs) # Vai imprimir o RSI
+                
+                pattern = ti.check_candlestick_pattern(analysis_candles_objs)
+                if pattern: print(f"   [PADRÃO] {pattern.upper()}")
+
                 if sr_signal:
-                    print(f"[SINAL M1] {full_name}: SR {sr_signal} detetado. Analisando...")
+                    print(f"   [SINAL SR] {sr_signal.upper()} detectado!")
                     confluences.append("SR_Zone")
-                    pattern = ti.check_candlestick_pattern(analysis_candles_objs)
-                    if pattern == sr_signal: confluences.append("Candle_Pattern")
-                    rsi_sig = ti.check_rsi_condition(analysis_candles_objs)
-                    if rsi_sig == sr_signal: confluences.append("RSI_Condition")
                     
-                    print(f"   >>> {full_name} Decisão: Padrão={pattern}, RSI_Sinal={rsi_sig} | Confluências={len(confluences)}/{threshold}")
+                    if pattern == sr_signal: confluences.append("Candle_Pattern")
+                    if rsi_signal_check == sr_signal: confluences.append("RSI_Condition")
+                    
                     if len(confluences) >= threshold: final_direction = sr_signal
 
             elif expiration_minutes == 5:
+                # Mesma lógica para M5
                 m5_signal = ti.check_m5_price_action(analysis_candles_objs, zones)
+                rsi_signal_check = ti.check_rsi_condition(analysis_candles_objs)
+                
                 if m5_signal:
+                    print(f"   [SINAL M5] {m5_signal['direction'].upper()} detectado!")
                     temp_conf = m5_signal['confluences']
-                    rsi_sig = ti.check_rsi_condition(analysis_candles_objs)
-                    if rsi_sig == m5_signal['direction']: temp_conf.append("RSI_Condition")
-                    print(f"[DEBUG M5] {full_name}: Sinal {m5_signal['direction']}. Conf: {temp_conf}")
+                    if rsi_signal_check == m5_signal['direction']: temp_conf.append("RSI_Condition")
                     if len(temp_conf) >= threshold:
                         final_direction = m5_signal['direction']
                         confluences = temp_conf
