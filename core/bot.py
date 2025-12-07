@@ -12,158 +12,133 @@ from analysis.technical import get_m15_sr_zones, get_h1_sr_zones
 from analysis import technical_indicators as ti
 from core.data_models import TradeSignal
 
-# --- MONKEY PATCH CORRECTIONS (CORREÇÕES INJETADAS) ---
+# ==============================================================================
+#                      MONKEY PATCHES (CORREÇÕES INJETADAS)
+# ==============================================================================
 
-# 1. Correção para conversão de DataFrame (Mantida)
+# --- 1. CORREÇÃO INDICADORES (Pandas & Padrões) ---
 def _convert_candles_to_dataframe_fix(candles):
-    if not candles:
-        return pd.DataFrame()
-
+    if not candles: return pd.DataFrame()
     normalized = []
     for c in candles:
-        if isinstance(c, dict):
-            normalized.append(c)
+        if isinstance(c, dict): normalized.append(c)
         else:
-            try:
-                normalized.append(vars(c))
+            try: normalized.append(vars(c))
             except TypeError:
-                try:
-                    normalized.append({
-                        'open': c.open, 'close': c.close, 
-                        'high': c.high, 'low': c.low, 'volume': getattr(c, 'volume', 0)
-                    })
-                except AttributeError:
-                    raise TypeError(f"Candle type not supported: {type(c)}")
-
+                try: normalized.append({'open': c.open, 'close': c.close, 'high': c.high, 'low': c.low, 'volume': getattr(c, 'volume', 0)})
+                except AttributeError: pass
     df = pd.DataFrame(normalized)
-    numeric_cols = ['open', 'close', 'high', 'low', 'volume']
-    for col in numeric_cols:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
+    for col in ['open', 'close', 'high', 'low', 'volume']:
+        if col in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce')
     return df
 
-# 2. Validação de vela simplificada (MELHORADA: Com Debug de Preços)
 def _validate_reversal_candle_fix(candle, direction):
     try:
-        c_open = float(candle.open)
-        c_close = float(candle.close)
-        
+        c_open, c_close = float(candle.open), float(candle.close)
         is_green = c_close >= c_open
         is_red = c_close <= c_open
-        
-        if direction.lower() == 'call':
-            if not is_green:
-                print(f"   [FILTRO] Call rejeitado. Vela Vermelha (O:{c_open} -> C:{c_close})")
-                return False
-            return True
-        elif direction.lower() == 'put':
-            if not is_red:
-                print(f"   [FILTRO] Put rejeitado. Vela Verde (O:{c_open} -> C:{c_close})")
-                return False
-            return True
-        return False
-    except Exception as e:
-        print(f"[DEBUG] Erro validação candle: {e}")
-        return False
+        if direction.lower() == 'call' and not is_green:
+            print(f"   [FILTRO] Call rejeitado. Vela Vermelha (O:{c_open} -> C:{c_close})")
+            return False
+        if direction.lower() == 'put' and not is_red:
+            print(f"   [FILTRO] Put rejeitado. Vela Verde (O:{c_open} -> C:{c_close})")
+            return False
+        return True
+    except: return False
 
-# 3. Reconhecimento de Padrões Manual (Mantida)
 def _check_candlestick_pattern_fix(candles):
     if len(candles) < 2: return None
-    
-    last = candles[-1]
-    prev = candles[-2]
-    
-    def get_val(c, attr):
-        if isinstance(c, dict): return float(c[attr])
-        return float(getattr(c, attr))
-
     try:
-        l_open = get_val(last, 'open')
-        l_close = get_val(last, 'close')
-        l_high = get_val(last, 'high')
-        l_low = get_val(last, 'low')
+        last, prev = candles[-1], candles[-2]
+        get_val = lambda c, a: float(c[a]) if isinstance(c, dict) else float(getattr(c, a))
         
-        p_open = get_val(prev, 'open')
-        p_close = get_val(prev, 'close')
+        l_open, l_close = get_val(last, 'open'), get_val(last, 'close')
+        l_high, l_low = get_val(last, 'high'), get_val(last, 'low')
+        p_open, p_close = get_val(prev, 'open'), get_val(prev, 'close')
         
-        l_body = abs(l_close - l_open)
-        if l_body == 0: l_body = 0.00001
+        l_body = abs(l_close - l_open) or 0.00001
+        l_upper = l_high - max(l_close, l_open)
+        l_lower = min(l_close, l_open) - l_low
         
-        l_upper_wick = l_high - max(l_close, l_open)
-        l_lower_wick = min(l_close, l_open) - l_low
-        
+        is_p_red = p_close < p_open
+        is_p_green = p_close > p_open
         is_l_green = l_close > l_open
         is_l_red = l_close < l_open
-        is_p_green = p_close > p_open
-        is_p_red = p_close < p_open
-
-        PINBAR_RATIO = 1.5
-
-        if is_p_red and is_l_green:
-            if l_close > p_open and l_open < p_close:
-                return 'call' # Bullish Engulfing
-
-        if is_p_green and is_l_red:
-            if l_close < p_open and l_open > p_close:
-                return 'put' # Bearish Engulfing
-
-        if l_lower_wick >= (PINBAR_RATIO * l_body) and l_upper_wick <= l_body:
-            return 'call' # Pinbar/Hammer
-
-        if l_upper_wick >= (PINBAR_RATIO * l_body) and l_lower_wick <= l_body:
-            return 'put' # Shooting Star
-            
-    except Exception as e:
-        print(f"[DEBUG Padrão] Erro: {e}")
-        return None
-
+        
+        # Engolfo
+        if is_p_red and is_l_green and l_close > p_open and l_open < p_close: return 'call'
+        if is_p_green and is_l_red and l_close < p_open and l_open > p_close: return 'put'
+        
+        # Pinbar (Ratio 1.5x)
+        RATIO = 1.5
+        if l_lower >= (RATIO * l_body) and l_upper <= l_body: return 'call'
+        if l_upper >= (RATIO * l_body) and l_lower <= l_body: return 'put'
+    except: return None
     return None
-
-# 4. RSI Manual (Mantida)
-def _calculate_rsi_pandas(series, period=14):
-    delta = series.diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-    rs = gain / loss
-    return 100 - (100 / (1 + rs))
 
 def _check_rsi_condition_fix(candles, period=14, overbought=65, oversold=35):
     try:
         df = _convert_candles_to_dataframe_fix(candles)
-        if df.empty or len(df) < period + 1:
-            return None
-            
-        close_delta = df['close'].diff()
-        up = close_delta.clip(lower=0)
-        down = -1 * close_delta.clip(upper=0)
+        if df.empty or len(df) < period + 1: return None
         
+        delta = df['close'].diff()
+        up, down = delta.clip(lower=0), -1 * delta.clip(upper=0)
         ma_up = up.ewm(com=period - 1, adjust=True, min_periods=period).mean()
         ma_down = down.ewm(com=period - 1, adjust=True, min_periods=period).mean()
-        
-        rsi = ma_up / ma_down
-        rsi = 100 - (100 / (1 + rsi))
+        rsi = 100 - (100 / (1 + (ma_up / ma_down)))
         
         last_rsi = rsi.iloc[-1]
+        print(f"   [RSI DEBUG] Valor: {last_rsi:.2f} (OB:{overbought}, OS:{oversold})")
         
-        # Log menos intrusivo (descomente se quiser ver todos os valores)
-        # print(f"   [RSI DEBUG] Valor: {last_rsi:.2f}") 
-        
-        if last_rsi >= overbought:
-            return 'put'
-        elif last_rsi <= oversold:
-            return 'call'
-            
+        if last_rsi >= overbought: return 'put'
+        if last_rsi <= oversold: return 'call'
         return None
-    except Exception as e:
-        return None
+    except: return None
 
-# Aplica TODOS os patches
+# Aplica patches dos indicadores
 ti._convert_candles_to_dataframe = _convert_candles_to_dataframe_fix
 ti.validate_reversal_candle = _validate_reversal_candle_fix
 ti.check_candlestick_pattern = _check_candlestick_pattern_fix
 ti.check_rsi_condition = _check_rsi_condition_fix
 
-# --- FIM DOS PATCHES ---
+# --- 2. CORREÇÃO SERVIÇO DE EXECUÇÃO (Híbrido Binary/Digital) ---
+# Substituímos o método execute_trade original por este mais robusto
+async def _execute_trade_robust(self, amount, active, direction, duration):
+    """
+    Tenta executar ordem em Binárias. Se falhar, tenta em Digital.
+    """
+    # 1. Tentar BINARY (Padrão)
+    try:
+        if hasattr(self, 'api') and self.api:
+            # Chama a API interna diretamente se acessível (iqoptionapi style)
+            # Nota: buy(amount, active, action, expiration)
+            print(f"[EXEC] Tentando BINARY para {active}...")
+            status, id = await asyncio.to_thread(self.api.buy, amount, active, direction, duration)
+            if status and id:
+                print(f"[EXEC] Sucesso via BINARY. ID: {id}")
+                return id
+    except Exception as e:
+        print(f"[EXEC] Erro ao tentar Binary: {e}")
+
+    # 2. Tentar DIGITAL (Fallback)
+    try:
+        if hasattr(self, 'api') and self.api:
+            print(f"[EXEC] Binary falhou. Tentando DIGITAL para {active}...")
+            # buy_digital_spot(active, amount, action, duration)
+            # Duration em digital geralmente é int (1, 5, 15)
+            status, id = await asyncio.to_thread(self.api.buy_digital_spot, active, amount, direction, duration)
+            if status and id:
+                print(f"[EXEC] Sucesso via DIGITAL. ID: {id}")
+                return id
+    except Exception as e:
+        print(f"[EXEC] Erro ao tentar Digital: {e}")
+        
+    return None
+
+# Injetamos o método robusto na classe AsyncExnovaService
+AsyncExnovaService.execute_trade = _execute_trade_robust
+
+# ==============================================================================
 
 class TradingBot:
     def __init__(self):
@@ -213,7 +188,7 @@ class TradingBot:
                 await self.logger('ERROR', f"Erro ao atualizar saldo diário: {e}")
 
     async def run(self):
-        await self.logger('INFO', 'Bot a iniciar no modo DEBUG...')
+        await self.logger('INFO', 'Bot a iniciar no modo DEBUG (Híbrido Bin/Dig)...')
         
         if not await self.exnova.connect():
             await self.logger('ERROR', 'Falha na conexão inicial.')
@@ -227,10 +202,8 @@ class TradingBot:
                 try:
                     if hasattr(self.exnova, 'is_connected'):
                         connected = await self.exnova.is_connected()
-                    else:
-                        connected = True # Fallback se o método não existir
-                except:
-                    pass
+                    else: connected = True
+                except: pass
 
                 if not connected:
                     print("[AVISO] Conexão perdida. Reconectando...")
@@ -254,32 +227,27 @@ class TradingBot:
                     for pair in pending:
                         if pair not in self.active_trading_pairs:
                             asyncio.create_task(self._execute_martingale_trade(pair))
-                    
                     await self.trading_cycle()
                 
                 elif status != 'RUNNING':
                     if len(self.active_trading_pairs) > 0:
                         print(f"[PAUSA] Aguardando {len(self.active_trading_pairs)} trades.")
                     await asyncio.sleep(2)
-
                 await asyncio.sleep(1)
 
             except Exception as e:
                 print(f"[LOOP ERROR] {e}")
-                # traceback.print_exc() # Descomente se quiser ver erros completos
                 await asyncio.sleep(5)
 
     async def trading_cycle(self):
         try:
-            if hasattr(self.exnova, 'is_connected') and not await self.exnova.is_connected():
-                return
+            if hasattr(self.exnova, 'is_connected') and not await self.exnova.is_connected(): return
         except: pass
 
         now = datetime.utcnow()
         if now.second >= 50:
             if now.minute != self.last_analysis_minute:
                 self.last_analysis_minute = now.minute
-                
                 is_m5 = (now.minute + 1) % 5 == 0
                 if is_m5:
                     await self.logger('INFO', f"Varredura M5...")
@@ -291,7 +259,6 @@ class TradingBot:
     async def run_analysis_for_timeframe(self, timeframe_seconds: int, expiration_minutes: int):
         try:
             await self.exnova.change_balance(self.bot_config.get('account_type', 'PRACTICE'))
-            
             assets = await self.exnova.get_open_assets()
             available_assets = [asset for asset in assets if asset.split('-')[0] not in self.blacklisted_assets]
 
@@ -299,12 +266,11 @@ class TradingBot:
                 pair = asset_name.split('-')[0]
                 stats = self.asset_performance.get(pair, {'wins': 0, 'losses': 0})
                 total = stats['wins'] + stats['losses']
-                if total == 0: return 0.5
-                return stats['wins'] / total
+                return stats['wins'] / total if total > 0 else 0.5
 
             target_assets = sorted(available_assets, key=get_asset_score, reverse=True)[:settings.MAX_ASSETS_TO_MONITOR]
-            
             max_sim = self.bot_config.get('max_simultaneous_trades', 1)
+            
             if len(self.active_trading_pairs) >= max_sim: return
 
             tasks = []
@@ -321,10 +287,8 @@ class TradingBot:
         if base in self.active_trading_pairs: return
 
         try:
-            if expiration_minutes == 1:
-                t1, t2, res_func = 60, 900, get_m15_sr_zones
-            elif expiration_minutes == 5:
-                t1, t2, res_func = 300, 3600, get_h1_sr_zones
+            if expiration_minutes == 1: t1, t2, res_func = 60, 900, get_m15_sr_zones
+            elif expiration_minutes == 5: t1, t2, res_func = 300, 3600, get_h1_sr_zones
             else: return
 
             candles = await asyncio.gather(
@@ -332,18 +296,15 @@ class TradingBot:
                 self.exnova.get_historical_candles(base, t2, 100)
             )
             analysis_candles, sr_candles = candles
-            
-            if not analysis_candles or not sr_candles:
-                return
+            if not analysis_candles or not sr_candles: return
 
-            # --- PREPARAÇÃO DE DADOS ---
+            # Prepara dados
             analysis_candles_objs = []
             for c in analysis_candles:
                 clean_c = c.copy()
                 for field in ['open', 'close', 'high', 'low', 'volume']:
                     if field in clean_c:
-                        try:
-                            clean_c[field] = float(clean_c[field])
+                        try: clean_c[field] = float(clean_c[field])
                         except: pass
                 analysis_candles_objs.append(SimpleNamespace(**clean_c))
             
@@ -353,15 +314,11 @@ class TradingBot:
             res, sup = res_func(sr_candles)
             zones = {'resistance': res, 'support': sup}
             threshold = self.bot_config.get('confirmation_threshold', 2)
-            
             final_direction, confluences = None, []
 
             if expiration_minutes == 1:
                 sr_signal = ti.check_price_near_sr(signal_candle_obj, zones)
-                
-                if not sr_signal:
-                    pass
-                else:
+                if sr_signal:
                     print(f"[SINAL M1] {base}: SR {sr_signal} detetado. Analisando...")
                     confluences.append("SR_Zone")
                     
@@ -371,9 +328,7 @@ class TradingBot:
                     rsi_sig = ti.check_rsi_condition(analysis_candles_objs)
                     if rsi_sig == sr_signal: confluences.append("RSI_Condition")
                     
-                    # --- DEBUG VISUAL ---
                     print(f"   >>> {base} Decisão: Padrão={pattern}, RSI_Sinal={rsi_sig} | Confluências={len(confluences)}/{threshold}")
-
                     if len(confluences) >= threshold: final_direction = sr_signal
 
             elif expiration_minutes == 5:
@@ -384,15 +339,13 @@ class TradingBot:
                     if rsi_sig == m5_signal['direction']: temp_conf.append("RSI_Condition")
                     
                     print(f"[DEBUG M5] {base}: Sinal {m5_signal['direction']}. Conf: {temp_conf}")
-                    
                     if len(temp_conf) >= threshold:
                         final_direction = m5_signal['direction']
                         confluences = temp_conf
             
             if final_direction:
-                # Usa validação simplificada (Monkey Patched)
                 if not ti.validate_reversal_candle(signal_candle_obj, final_direction): 
-                    print(f"[{base}] Vela inválida (Cancelado).")
+                    print(f"[{base}] Vela inválida (Filtro de cor).")
                     return
                 
                 max_trades = self.bot_config.get('max_simultaneous_trades', 1)
@@ -410,13 +363,9 @@ class TradingBot:
                 await self.logger('SUCCESS', f"ENTRADA: {base} | {final_direction.upper()} | {strategy}")
                 
                 signal = TradeSignal(
-                    pair=base, 
-                    direction=final_direction, 
-                    strategy=strategy,
-                    open=signal_candle_dict['open'], 
-                    high=signal_candle_dict['high'],
-                    low=signal_candle_dict['low'], 
-                    close=signal_candle_dict['close']
+                    pair=base, direction=final_direction, strategy=strategy,
+                    open=signal_candle_dict['open'], high=signal_candle_dict['high'],
+                    low=signal_candle_dict['low'], close=signal_candle_dict['close']
                 )
                 
                 trade_exp = 4 if expiration_minutes == 5 else expiration_minutes
@@ -461,24 +410,20 @@ class TradingBot:
             is_gale = "Gale" in signal.strategy or "Martingale" in signal.strategy
             val = self._get_entry_value(signal.pair, is_martingale=is_gale)
             
-            # --- RETRY LOGIC (Melhoria para Falha de Ordem) ---
+            # --- RETRY & FALLBACK LOGIC ---
             oid = None
             retries = 2
             
             for attempt in range(retries):
-                # Tenta executar (normal)
+                # Chama a nossa função robusta (Monkey Patched)
                 oid = await self.exnova.execute_trade(val, full_name, signal.direction.lower(), expiration)
+                if oid: break
                 
-                if oid:
-                    break
-                
-                # Se falhar, print debug e tenta de novo rapidinho
-                print(f"[DEBUG] Tentativa {attempt+1}/{retries} falhou para {full_name} (${val}).")
-                await asyncio.sleep(0.5)
+                print(f"[DEBUG] Tentativa {attempt+1}/{retries} falhou para {full_name}. Retrying...")
+                await asyncio.sleep(1)
             
             if not oid:
-                await self.logger('ERROR', f"FALHA FATAL na ordem {full_name} (${val}) após {retries} tentativas.")
-                # Reset estado para evitar travar o ativo
+                await self.logger('ERROR', f"FALHA FATAL na ordem {full_name} (${val}) - Ativo fechado ou indisponível.")
                 if is_gale: self.martingale_state[signal.pair] = {'level': 0}
                 self.active_trading_pairs.discard(signal.pair)
                 return
@@ -487,6 +432,7 @@ class TradingBot:
             sid = await asyncio.to_thread(self.supabase.insert_trade_signal, signal)
             
             await asyncio.sleep(expiration * 60 + 15)
+            # Check win standard
             result = await self.exnova.check_win(oid)
             
             await self.process_trade_result(signal.pair, full_name, result, sid, is_gale, expiration, signal.direction)
@@ -500,7 +446,6 @@ class TradingBot:
         await self.logger('SUCCESS' if result == 'win' else 'ERROR', f"Resultado {pair}: {result.upper()}")
 
         mg_lv = self.martingale_state.get(pair, {}).get('level', 0)
-        
         if sid: await asyncio.to_thread(self.supabase.update_trade_result, sid, result.upper(), mg_lv)
         
         try:
@@ -516,15 +461,12 @@ class TradingBot:
             self.asset_performance[pair]['wins'] += 1
             self.consecutive_losses[pair] = 0
             self.martingale_state[pair] = {'level': 0}
-            if pair in self.blacklisted_assets:
-                self.blacklisted_assets.remove(pair)
+            if pair in self.blacklisted_assets: self.blacklisted_assets.remove(pair)
         elif result == 'loss':
             self.daily_losses += 1
             self.asset_performance[pair]['losses'] += 1
             self.consecutive_losses[pair] += 1
-            
-            if self.consecutive_losses[pair] >= 2:
-                self.blacklisted_assets.add(pair)
+            if self.consecutive_losses[pair] >= 2: self.blacklisted_assets.add(pair)
 
             if self.bot_config.get('use_martingale', False):
                 cur_lv = self.martingale_state.get(pair, {}).get('level', 0)
