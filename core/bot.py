@@ -18,7 +18,7 @@ from analysis import technical_indicators as ti
 from core.data_models import TradeSignal
 
 # ==============================================================================
-#                      CONSTANTES OTC (FORNECIDAS)
+#                      CONSTANTES OTC (LISTA DE IDs ATUALIZADA)
 # ==============================================================================
 ACTIVES_MAP = {
     "EURUSD": 1, "EURGBP": 2, "GBPJPY": 3, "EURJPY": 4, "GBPUSD": 5, "USDJPY": 6, "AUDCAD": 7, "NZDUSD": 8, "USDCHF": 72,
@@ -45,6 +45,7 @@ ACTIVES_MAP = {
 # ==============================================================================
 
 # --- 0. PATCH NUCLEAR DE CONSTANTES ---
+# Injeta os IDs na biblioteca interna para evitar o erro "Asset not found"
 def _patch_library_constants_aggressive():
     FULL_MAP = ACTIVES_MAP.copy()
     REVERSE_MAP = {v: k for k, v in ACTIVES_MAP.items()}
@@ -61,6 +62,7 @@ def _patch_library_constants_aggressive():
 _patch_library_constants_aggressive()
 
 # --- 1. PROXY SEGURO PARA GET_CANDLES ---
+# Encaminha o pedido de velas para a API interna sem tentar reinventar o protocolo
 def _proxy_get_candles(self, active, size, count=100, to=None):
     if not hasattr(self, "api") or self.api is None: return []
     if to is None: to = time.time()
@@ -80,6 +82,7 @@ try:
 except: pass
 
 # --- 2. PATCH SERVICE GET_CANDLES ---
+# Wrapper com timeout para evitar que o bot fique preso à espera de velas
 async def _get_historical_candles_patched(self, asset_id, duration, amount):
     try:
         if not self.api: return []
@@ -93,7 +96,7 @@ async def _get_historical_candles_patched(self, asset_id, duration, amount):
 
 AsyncExnovaService.get_historical_candles = _get_historical_candles_patched
 
-# --- 3. CORREÇÃO INDICADORES ---
+# --- 3. CORREÇÃO INDICADORES (CONVERSÃO & VALIDAÇÃO) ---
 def _convert_candles_to_dataframe_fix(candles):
     if not candles: return pd.DataFrame()
     normalized = []
@@ -151,7 +154,7 @@ def _check_rsi_condition_fix(candles, period=14, overbought=65, oversold=35):
         rsi = 100 - (100 / (1 + (ma_up / ma_down)))
         last_rsi = rsi.iloc[-1]
         
-        # ATENÇÃO: Retorna Tupla (sinal, valor) para podermos logar
+        # IMPORTANTE: Retorna Tupla (sinal, valor) para podermos logar no front
         signal = None
         if last_rsi >= overbought: signal = 'put'
         elif last_rsi <= oversold: signal = 'call'
@@ -206,7 +209,7 @@ async def _get_open_assets_fix(self):
     except: pass
     return []
 
-# --- 6. PATCH ANTI-CRASH ---
+# --- 6. PATCH ANTI-CRASH (THREAD PROTECTION) ---
 def _safe_get_digital_underlying_list_data(self):
     return {"underlying": []}
 
@@ -225,6 +228,7 @@ async def _connect_fresh_instance(self):
             self.api = None 
 
         from exnovaapi.stable_api import ExnovaAPI
+        # Força o host correto
         self.api = ExnovaAPI("exnova.com", self.email, self.password)
         check = await asyncio.to_thread(self.api.connect)
         return check
@@ -319,7 +323,7 @@ class TradingBot:
             except: pass
 
     async def run(self):
-        await self.logger('INFO', 'Bot a iniciar no modo LIVE SCANNER...')
+        await self.logger('INFO', 'Bot a iniciar no modo FINAL STABLE...')
         if not await self.exnova.connect(): await self.logger('ERROR', 'Falha na conexão inicial.')
         
         try:
