@@ -18,7 +18,7 @@ from analysis import technical_indicators as ti
 from core.data_models import TradeSignal
 
 # ==============================================================================
-#                      CONSTANTES OTC ATUALIZADAS
+#                      CONSTANTES OTC (FORNECIDAS)
 # ==============================================================================
 ACTIVES_MAP = {
     "EURUSD": 1, "EURGBP": 2, "GBPJPY": 3, "EURJPY": 4, "GBPUSD": 5, "USDJPY": 6, "AUDCAD": 7, "NZDUSD": 8, "USDCHF": 72,
@@ -83,13 +83,17 @@ except: pass
 async def _get_historical_candles_patched(self, asset_id, duration, amount):
     try:
         if not self.api: return []
-        candles = await asyncio.to_thread(self.api.get_candles, asset_id, duration, amount, time.time())
+        # Adicionado timeout de 10s para evitar travamento
+        candles = await asyncio.wait_for(
+            asyncio.to_thread(self.api.get_candles, asset_id, duration, amount, time.time()),
+            timeout=10.0
+        )
         return candles or []
     except Exception: return []
 
 AsyncExnovaService.get_historical_candles = _get_historical_candles_patched
 
-# --- 3. CORREÇÃO INDICADORES (COM LOGS DETALHADOS) ---
+# --- 3. CORREÇÃO INDICADORES ---
 def _convert_candles_to_dataframe_fix(candles):
     if not candles: return pd.DataFrame()
     normalized = []
@@ -110,12 +114,8 @@ def _validate_reversal_candle_fix(candle, direction):
         c_open, c_close = float(candle.open), float(candle.close)
         is_green = c_close >= c_open
         is_red = c_close <= c_open
-        if direction.lower() == 'call' and not is_green:
-            print(f"   [FILTRO] Call rejeitado. Vela Vermelha.")
-            return False
-        if direction.lower() == 'put' and not is_red:
-            print(f"   [FILTRO] Put rejeitado. Vela Verde.")
-            return False
+        if direction.lower() == 'call' and not is_green: return False
+        if direction.lower() == 'put' and not is_red: return False
         return True
     except: return False
 
@@ -127,26 +127,18 @@ def _check_candlestick_pattern_fix(candles):
         l_open, l_close = get_val(last, 'open'), get_val(last, 'close')
         l_high, l_low = get_val(last, 'high'), get_val(last, 'low')
         p_open, p_close = get_val(prev, 'open'), get_val(prev, 'close')
-        
         l_body = abs(l_close - l_open) or 0.00001
         l_upper = l_high - max(l_close, l_open)
         l_lower = min(l_close, l_open) - l_low
         is_p_red, is_p_green = p_close < p_open, p_close > p_open
         is_l_green, is_l_red = l_close > l_open, l_close < l_open
-        
-        pattern = None
-        if is_p_red and is_l_green and l_close > p_open and l_open < p_close: pattern = 'call' # Engolfo Alta
-        elif is_p_green and is_l_red and l_close < p_open and l_open > p_close: pattern = 'put' # Engolfo Baixa
-        
+        if is_p_red and is_l_green and l_close > p_open and l_open < p_close: return 'call'
+        if is_p_green and is_l_red and l_close < p_open and l_open > p_close: return 'put'
         RATIO = 1.5
-        if l_lower >= (RATIO * l_body) and l_upper <= l_body: pattern = 'call' # Pinbar Alta
-        elif l_upper >= (RATIO * l_body) and l_lower <= l_body: pattern = 'put' # Pinbar Baixa
-        
-        if pattern:
-            # print(f"   [PATTERN] Detectado: {pattern}") # Opcional
-            pass
-        return pattern
+        if l_lower >= (RATIO * l_body) and l_upper <= l_body: return 'call'
+        if l_upper >= (RATIO * l_body) and l_lower <= l_body: return 'put'
     except: return None
+    return None
 
 def _check_rsi_condition_fix(candles, period=14, overbought=65, oversold=35):
     try:
@@ -159,18 +151,18 @@ def _check_rsi_condition_fix(candles, period=14, overbought=65, oversold=35):
         rsi = 100 - (100 / (1 + (ma_up / ma_down)))
         last_rsi = rsi.iloc[-1]
         
-        # LOG DETALHADO DO RSI AQUI
-        print(f"   [RSI] {last_rsi:.2f}") 
+        # ATENÇÃO: Retorna Tupla (sinal, valor) para podermos logar
+        signal = None
+        if last_rsi >= overbought: signal = 'put'
+        elif last_rsi <= oversold: signal = 'call'
         
-        if last_rsi >= overbought: return 'put'
-        if last_rsi <= oversold: return 'call'
-        return None
-    except: return None
+        return (signal, last_rsi) 
+    except: return (None, 50.0)
 
 ti._convert_candles_to_dataframe = _convert_candles_to_dataframe_fix
 ti.validate_reversal_candle = _validate_reversal_candle_fix
 ti.check_candlestick_pattern = _check_candlestick_pattern_fix
-ti.check_rsi_condition = _check_rsi_condition_fix
+ti.check_rsi_condition = _check_rsi_condition_fix # Agora retorna tupla!
 
 # --- 4. CORREÇÃO SERVIÇO DE EXECUÇÃO ---
 async def _execute_trade_robust(self, amount, active, direction, duration):
@@ -193,7 +185,7 @@ async def _execute_trade_robust(self, amount, active, direction, duration):
     except Exception: pass
     return None
 
-# --- 5. CORREÇÃO GET_OPEN_ASSETS (FORÇAR OTC NO FIM DE SEMANA) ---
+# --- 5. CORREÇÃO GET_OPEN_ASSETS ---
 async def _get_open_assets_fix(self):
     if datetime.utcnow().weekday() >= 5:
         return [
@@ -203,7 +195,7 @@ async def _get_open_assets_fix(self):
         ]
     try:
         if hasattr(self, 'api') and self.api:
-            assets = await asyncio.to_thread(self.api.get_all_open_time)
+            assets = await asyncio.wait_for(asyncio.to_thread(self.api.get_all_open_time), timeout=5.0)
             if assets and isinstance(assets, dict):
                 opened = []
                 for type_name, data in assets.items():
@@ -258,10 +250,8 @@ try:
 except: pass
 
 # --- 9. PATCH: SILENCIADOR DE THREADS ---
-def _safe_get_instruments(self, instruments_type=None):
-    return {"instruments": []}
-def _noop_get_other_open(self, *args, **kwargs):
-    return
+def _safe_get_instruments(self, instruments_type=None): return {"instruments": []}
+def _noop_get_other_open(self, *args, **kwargs): return
 
 try:
     import exnovaapi.stable_api as ex_stable
@@ -329,10 +319,9 @@ class TradingBot:
             except: pass
 
     async def run(self):
-        await self.logger('INFO', 'Bot a iniciar no modo DEEP DEBUG...')
+        await self.logger('INFO', 'Bot a iniciar no modo LIVE SCANNER...')
         if not await self.exnova.connect(): await self.logger('ERROR', 'Falha na conexão inicial.')
         
-        # Patch na Instância
         try:
             if hasattr(self.exnova, 'api'):
                 import types
@@ -399,7 +388,11 @@ class TradingBot:
 
     async def run_analysis_for_timeframe(self, timeframe_seconds: int, expiration_minutes: int):
         try:
-            await self.exnova.change_balance(self.bot_config.get('account_type', 'PRACTICE'))
+            # Protege contra travamento no balance
+            try:
+                await asyncio.wait_for(self.exnova.change_balance(self.bot_config.get('account_type', 'PRACTICE')), timeout=2.0)
+            except: pass
+
             assets = await self.exnova.get_open_assets()
             
             is_weekend = datetime.utcnow().weekday() >= 5
@@ -434,7 +427,6 @@ class TradingBot:
             for asset in target_assets:
                 try:
                     if hasattr(self.exnova, 'is_connected') and not await self.exnova.is_connected():
-                        print("[WARN] Conexão caiu. Abortando scan.")
                         break
                 except: break
 
@@ -461,7 +453,6 @@ class TradingBot:
 
             asset_id = self._get_asset_id(full_name)
             
-            # 1. Obter Velas
             try:
                 candles = await asyncio.gather(
                     self.exnova.get_historical_candles(asset_id, t1, 200),
@@ -470,9 +461,7 @@ class TradingBot:
             except: return
 
             analysis_candles, sr_candles = candles
-            if not analysis_candles:
-                # print(f"[DEBUG] Sem dados para {full_name}") 
-                return
+            if not analysis_candles: return
 
             analysis_candles_objs = []
             for c in analysis_candles:
@@ -491,46 +480,42 @@ class TradingBot:
             threshold = self.bot_config.get('confirmation_threshold', 2)
             final_direction, confluences = None, []
 
-            # 2. Análise Detalhada (Com Logs)
-            
-            # Calcula proximidade da zona para log
+            # --- ANÁLISE DETALHADA ---
             close_price = float(signal_candle_obj.close)
-            dist_res = abs(close_price - res) if res else 9999
-            dist_sup = abs(close_price - sup) if sup else 9999
-            nearest = "Resistência" if dist_res < dist_sup else "Suporte"
-            dist_val = min(dist_res, dist_sup)
             
-            # Print para saberes que analisou
-            print(f"[{full_name}] Preço: {close_price:.5f} | Perto de: {nearest} (Dist: {dist_val:.5f})")
+            # Chama indicadores
+            rsi_res = ti.check_rsi_condition(analysis_candles_objs) # Retorna (signal, value)
+            rsi_sig, rsi_val = rsi_res if isinstance(rsi_res, tuple) else (None, 50.0)
+            
+            # --- LOG PARA O FRONTEND (VISUALIZAÇÃO "MATRIX") ---
+            # Envia dados em tempo real para o banco como DEBUG
+            msg = f"ANALISE_DETALHADA::{full_name}::Preço:{close_price:.5f}::RSI:{rsi_val:.1f}"
+            await self.logger('DEBUG', msg)
+            # --------------------------------------------------
 
             if expiration_minutes == 1:
                 sr_signal = ti.check_price_near_sr(signal_candle_obj, zones)
                 
-                # Check RSI para log
-                # Hack: chamamos a função só para ver o print do RSI, mas ela devolve sinal
-                rsi_signal_check = ti.check_rsi_condition(analysis_candles_objs) # Vai imprimir o RSI
-                
                 pattern = ti.check_candlestick_pattern(analysis_candles_objs)
-                if pattern: print(f"   [PADRÃO] {pattern.upper()}")
+                if pattern: 
+                    # Loga Padrão também
+                    await self.logger('DEBUG', f"PADRAO_DETECTADO::{full_name}::{pattern.upper()}")
 
                 if sr_signal:
-                    print(f"   [SINAL SR] {sr_signal.upper()} detectado!")
+                    print(f"[SINAL M1] {full_name}: SR {sr_signal} detetado. Analisando...")
                     confluences.append("SR_Zone")
                     
                     if pattern == sr_signal: confluences.append("Candle_Pattern")
-                    if rsi_signal_check == sr_signal: confluences.append("RSI_Condition")
+                    if rsi_sig == sr_signal: confluences.append("RSI_Condition")
                     
                     if len(confluences) >= threshold: final_direction = sr_signal
 
             elif expiration_minutes == 5:
-                # Mesma lógica para M5
                 m5_signal = ti.check_m5_price_action(analysis_candles_objs, zones)
-                rsi_signal_check = ti.check_rsi_condition(analysis_candles_objs)
                 
                 if m5_signal:
-                    print(f"   [SINAL M5] {m5_signal['direction'].upper()} detectado!")
                     temp_conf = m5_signal['confluences']
-                    if rsi_signal_check == m5_signal['direction']: temp_conf.append("RSI_Condition")
+                    if rsi_sig == m5_signal['direction']: temp_conf.append("RSI_Condition")
                     if len(temp_conf) >= threshold:
                         final_direction = m5_signal['direction']
                         confluences = temp_conf
