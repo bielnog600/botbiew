@@ -51,12 +51,19 @@ def _patch_library_constants_aggressive():
 
 _patch_library_constants_aggressive()
 
-# --- 1. PROXY SEGURO PARA GET_CANDLES ---
+# --- 1. PROXY SEGURO PARA GET_CANDLES (COM CORREÇÃO DE INT) ---
 def _proxy_get_candles(self, active, size, count=100, to=None):
     if not hasattr(self, "api") or self.api is None: return []
-    if to is None: to = time.time()
-    try: return self.api.get_candles(active, size, count, to)
-    except Exception: return []
+    
+    # FIX CRÍTICO: Força timestamp inteiro (algumas APIs rejeitam float)
+    if to is None: to = int(time.time())
+    else: to = int(to)
+
+    try: 
+        return self.api.get_candles(active, size, count, to)
+    except Exception as e: 
+        print(f"[PROXY ERROR] Get Candles ID {active}: {e}")
+        return []
 
 try:
     import exnovaapi.stable_api
@@ -74,12 +81,16 @@ except: pass
 async def _get_historical_candles_patched(self, asset_id, duration, amount):
     try:
         if not self.api: return []
+        # Adicionado timeout de 10s para evitar travamento e int() no tempo
         candles = await asyncio.wait_for(
-            asyncio.to_thread(self.api.get_candles, asset_id, duration, amount, time.time()),
+            asyncio.to_thread(self.api.get_candles, asset_id, duration, amount, int(time.time())),
             timeout=10.0
         )
         return candles or []
-    except Exception: return []
+    except Exception as e:
+        # Debug ativado para entender o silêncio
+        print(f"[SERVICE ERROR] Falha velas ID {asset_id}: {e}")
+        return []
 
 AsyncExnovaService.get_historical_candles = _get_historical_candles_patched
 
@@ -221,6 +232,7 @@ async def _connect_fresh_instance(self):
             self.api = None 
 
         from exnovaapi.stable_api import ExnovaAPI
+        # Força o host correto
         self.api = ExnovaAPI("exnova.com", self.email, self.password)
         check = await asyncio.to_thread(self.api.connect)
         return check
@@ -316,7 +328,7 @@ class TradingBot:
             except: pass
 
     async def run(self):
-        await self.logger('INFO', 'Bot a iniciar no modo UNIVERSAL FALLBACK...')
+        await self.logger('INFO', 'Bot a iniciar no modo EXTREME DEBUG...')
         if not await self.exnova.connect(): await self.logger('ERROR', 'Falha na conexão inicial.')
         
         try:
@@ -410,7 +422,7 @@ class TradingBot:
                 else:
                     available_assets = ["EURUSD", "GBPUSD", "USDJPY", "AUDCAD", "USDCHF", "EURGBP", "EURJPY"]
                 
-                await self.logger('DEBUG', f"Usando lista de fallback ({len(available_assets)} ativos)")
+                print(f"[DEBUG] Usando lista de fallback ({len(available_assets)} ativos)")
 
             def get_asset_score(asset_name):
                 pair = asset_name.split('-')[0]
@@ -452,6 +464,9 @@ class TradingBot:
 
             asset_id = self._get_asset_id(full_name)
             
+            # DEBUG ATIVADO: Saber qual ID está sendo usado
+            print(f"[DEBUG] Analisando: {full_name} (ID: {asset_id})")
+
             try:
                 candles = await asyncio.gather(
                     self.exnova.get_historical_candles(asset_id, t1, 200),
@@ -461,6 +476,8 @@ class TradingBot:
 
             analysis_candles, sr_candles = candles
             if not analysis_candles:
+                # DEBUG ATIVADO: Saber se retornou vazio
+                print(f"[DEBUG] Velas vazias para {full_name}")
                 return
 
             analysis_candles_objs = []
@@ -497,9 +514,12 @@ class TradingBot:
                 sr_signal = ti.check_price_near_sr(signal_candle_obj, zones)
                 
                 pattern = ti.check_candlestick_pattern(analysis_candles_objs)
-                
+                if pattern: 
+                    # Loga Padrão também
+                    await self.logger('DEBUG', f"PADRAO_DETECTADO::{full_name}::{pattern.upper()}")
+
                 if sr_signal:
-                    print(f"[SINAL M1] {full_name}: SR {sr_signal} detetado.")
+                    print(f"[SINAL M1] {full_name}: SR {sr_signal} detetado. Analisando...")
                     confluences.append("SR_Zone")
                     
                     if pattern == sr_signal: confluences.append("Candle_Pattern")
