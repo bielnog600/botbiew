@@ -18,7 +18,7 @@ from analysis import technical_indicators as ti
 from core.data_models import TradeSignal
 
 # ==============================================================================
-#                      CONSTANTES OTC & PRESETS
+#                      CONSTANTES OTC (FORNECIDAS)
 # ==============================================================================
 ACTIVES_MAP = {
     "EURUSD": 1, "EURGBP": 2, "GBPJPY": 3, "EURJPY": 4, "GBPUSD": 5, "USDJPY": 6, "AUDCAD": 7, "NZDUSD": 8, "USDCHF": 72,
@@ -63,14 +63,9 @@ _patch_library_constants_aggressive()
 # --- 1. PROXY SEGURO PARA GET_CANDLES ---
 def _proxy_get_candles(self, active, size, count=100, to=None):
     if not hasattr(self, "api") or self.api is None: return []
-    # Se 'to' não for fornecido, usa tempo atual
-    if to is None: to = int(time.time())
-    else: to = int(to)
-
-    try: 
-        return self.api.get_candles(active, size, count, to)
-    except Exception: 
-        return []
+    if to is None: to = time.time()
+    try: return self.api.get_candles(active, size, count, to)
+    except Exception: return []
 
 try:
     import exnovaapi.stable_api
@@ -84,38 +79,17 @@ try:
         iqoptionapi.stable_api.IQOptionAPI.get_candles = _proxy_get_candles
 except: pass
 
-# --- 2. PATCH SERVICE GET_CANDLES (COM RETRY STRATEGY) ---
+# --- 2. PATCH SERVICE GET_CANDLES ---
 async def _get_historical_candles_patched(self, asset_id, duration, amount):
     try:
         if not self.api: return []
-        
-        # Tenta obter timestamp do servidor para precisão
-        end_time = int(time.time())
-        try:
-            ts = self.api.get_server_timestamp()
-            if ts: end_time = int(ts)
-        except: pass
-
-        # LOOP DE INSISTÊNCIA (Até 4 tentativas)
-        # Muitas vezes a API retorna vazio na primeira chamada a frio
-        for i in range(4):
-            candles = await asyncio.to_thread(
-                self.api.get_candles, 
-                asset_id, 
-                duration, 
-                amount, 
-                end_time
-            )
-            
-            if candles and len(candles) > 0:
-                return candles
-            
-            # Pequeno delay antes de tentar de novo
-            await asyncio.sleep(0.5)
-
-        return []
-    except Exception:
-        return []
+        # Adicionado timeout de 10s para evitar travamento
+        candles = await asyncio.wait_for(
+            asyncio.to_thread(self.api.get_candles, asset_id, duration, amount, int(time.time())),
+            timeout=10.0
+        )
+        return candles or []
+    except Exception: return []
 
 AsyncExnovaService.get_historical_candles = _get_historical_candles_patched
 
@@ -158,10 +132,8 @@ def _check_candlestick_pattern_fix(candles):
         l_lower = min(l_close, l_open) - l_low
         is_p_red, is_p_green = p_close < p_open, p_close > p_open
         is_l_green, is_l_red = l_close > l_open, l_close < l_open
-        
         if is_p_red and is_l_green and l_close > p_open and l_open < p_close: return 'call'
         if is_p_green and is_l_red and l_close < p_open and l_open > p_close: return 'put'
-        
         RATIO = 1.5
         if l_lower >= (RATIO * l_body) and l_upper <= l_body: return 'call'
         if l_upper >= (RATIO * l_body) and l_lower <= l_body: return 'put'
@@ -182,7 +154,6 @@ def _check_rsi_condition_fix(candles, period=14, overbought=65, oversold=35):
         signal = None
         if last_rsi >= overbought: signal = 'put'
         elif last_rsi <= oversold: signal = 'call'
-        
         return (signal, last_rsi) 
     except: return (None, 50.0)
 
@@ -208,33 +179,13 @@ async def _execute_trade_robust(self, amount, active, direction, duration):
     except Exception: pass
     return None
 
-# --- 5. CORREÇÃO GET_OPEN_ASSETS ---
+# --- 5. CORREÇÃO GET_OPEN_ASSETS (FORÇAR OTC SEMPRE) ---
 async def _get_open_assets_fix(self):
-    if datetime.utcnow().weekday() >= 5:
-        # Fim de Semana: Força OTC
-        return [
-            "EURUSD-OTC", "GBPUSD-OTC", "USDJPY-OTC", "EURJPY-OTC", 
-            "USDCHF-OTC", "AUDCAD-OTC", "NZDUSD-OTC", "EURGBP-OTC", "AUDUSD-OTC",
-            "USDMXN-OTC", "FWONA-OTC", "XNGUSD-OTC"
-        ]
-    
-    # Dia Útil
-    try:
-        if hasattr(self, 'api') and self.api:
-            assets = await asyncio.wait_for(asyncio.to_thread(self.api.get_all_open_time), timeout=5.0)
-            if assets and isinstance(assets, dict):
-                opened = []
-                for type_name, data in assets.items():
-                    if type_name in ['turbo', 'binary', 'digital']:
-                        for name, info in data.items():
-                            if info.get('open', False): opened.append(name)
-                if opened: return list(set(opened))
-    except: pass
-    
-    # Fallback se API falhar em dia útil
+    # Retorna SEMPRE a lista OTC para garantir funcionamento
     return [
-        "EURUSD", "GBPUSD", "USDJPY", "AUDCAD", "USDCHF", 
-        "EURGBP", "EURJPY", "NZDUSD", "AUDUSD", "USDCAD"
+        "EURUSD-OTC", "GBPUSD-OTC", "USDJPY-OTC", "EURJPY-OTC", 
+        "USDCHF-OTC", "AUDCAD-OTC", "NZDUSD-OTC", "EURGBP-OTC", "AUDUSD-OTC",
+        "USDMXN-OTC", "FWONA-OTC", "XNGUSD-OTC"
     ]
 
 # --- 6. PATCH ANTI-CRASH ---
@@ -319,7 +270,6 @@ class TradingBot:
             logger.propagate = False
 
     def _get_asset_id(self, asset_name):
-        # Mapeia OTC se necessário, ou retorna o próprio nome se não estiver no mapa
         name = asset_name.replace(" (OTC)", "-OTC")
         if name in ACTIVES_MAP: return ACTIVES_MAP[name]
         return name
@@ -350,7 +300,7 @@ class TradingBot:
             except: pass
 
     async def run(self):
-        await self.logger('INFO', 'Bot a iniciar no modo RETRY VELAS...')
+        await self.logger('INFO', 'Bot a iniciar no modo FORCE OTC...')
         if not await self.exnova.connect(): await self.logger('ERROR', 'Falha na conexão inicial.')
         
         try:
@@ -424,23 +374,19 @@ class TradingBot:
                 await asyncio.wait_for(self.exnova.change_balance(self.bot_config.get('account_type', 'PRACTICE')), timeout=2.0)
             except: pass
 
-            assets = await self.exnova.get_open_assets()
+            # --- FORÇA O USO DA LISTA OTC ---
+            # Ignora a API e dias da semana. O usuário quer APENAS OTC.
+            available_assets = await _get_open_assets_fix(None)
             
-            # Filtro Simples
-            available_assets = []
-            for asset in assets:
+            # Filtra blacklist
+            final_assets = []
+            for asset in available_assets:
                 if asset.split('-')[0] not in self.blacklisted_assets:
-                    available_assets.append(asset)
+                    final_assets.append(asset)
             
-            # Se vazio, usa Fallback
-            if len(available_assets) == 0:
-                is_weekend = datetime.utcnow().weekday() >= 5
-                if is_weekend:
-                    available_assets = ["EURUSD-OTC", "GBPUSD-OTC", "USDJPY-OTC", "AUDCAD-OTC", "USDCHF-OTC"]
-                else:
-                    available_assets = ["EURUSD", "GBPUSD", "USDJPY", "AUDCAD", "USDCHF", "EURGBP", "EURJPY"]
-                
-                print(f"[DEBUG] Usando lista de fallback ({len(available_assets)} ativos)")
+            if len(final_assets) == 0:
+                print("[DEBUG] Nenhuma ativo disponível na lista forçada.")
+                return
 
             def get_asset_score(asset_name):
                 pair = asset_name.split('-')[0]
@@ -448,7 +394,7 @@ class TradingBot:
                 total = stats['wins'] + stats['losses']
                 return stats['wins'] / total if total > 0 else 0.5
 
-            target_assets = sorted(available_assets, key=get_asset_score, reverse=True)[:15]
+            target_assets = sorted(final_assets, key=get_asset_score, reverse=True)[:15]
             
             max_sim = self.bot_config.get('max_simultaneous_trades', 1)
             if len(self.active_trading_pairs) >= max_sim: return
@@ -482,7 +428,7 @@ class TradingBot:
 
             asset_id = self._get_asset_id(full_name)
             
-            # DEBUG ATIVADO: Saber qual ID está sendo usado
+            # DEBUG ATIVADO
             print(f"[DEBUG] Analisando: {full_name} (ID: {asset_id})")
 
             try:
@@ -494,7 +440,6 @@ class TradingBot:
 
             analysis_candles, sr_candles = candles
             if not analysis_candles:
-                # DEBUG ATIVADO: Saber se retornou vazio
                 print(f"[DEBUG] Velas vazias para {full_name}")
                 return
 
