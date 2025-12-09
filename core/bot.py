@@ -18,16 +18,25 @@ from analysis import technical_indicators as ti
 from core.data_models import TradeSignal
 
 # ==============================================================================
-#                      CONSTANTES GERAIS (PARES REAIS + OTC)
+#                      CONSTANTES OTC & PRESETS
 # ==============================================================================
 ACTIVES_MAP = {
-    # Pares Reais (Dias Úteis)
-    "EURUSD": 1, "EURGBP": 2, "GBPJPY": 3, "EURJPY": 4, "GBPUSD": 5, "USDJPY": 6, "AUDCAD": 7, "NZDUSD": 8, 
-    "USDCHF": 72, "AUDUSD": 99, "USDCAD": 100, "AUDJPY": 101, "GBPCAD": 102, "GBPCHF": 103, "EURCAD": 105,
-    
-    # Pares OTC (Fim de Semana / Noite)
+    "EURUSD": 1, "EURGBP": 2, "GBPJPY": 3, "EURJPY": 4, "GBPUSD": 5, "USDJPY": 6, "AUDCAD": 7, "NZDUSD": 8, "USDCHF": 72,
     "EURUSD-OTC": 76, "EURGBP-OTC": 77, "USDCHF-OTC": 78, "EURJPY-OTC": 79, "NZDUSD-OTC": 80, "GBPUSD-OTC": 81,
-    "GBPJPY-OTC": 84, "USDJPY-OTC": 85, "AUDCAD-OTC": 86, "AUDUSD-OTC": 2111, "USDCAD-OTC": 2112, 
+    "GBPJPY-OTC": 84, "USDJPY-OTC": 85, "AUDCAD-OTC": 86, "AUDUSD": 99, "USDCAD": 100, "AUDJPY": 101, "GBPCAD": 102,
+    "GBPCHF": 103, "GBPAUD": 104, "EURCAD": 105, "CHFJPY": 106, "CADCHF": 107, "EURAUD": 108, "USDNOK": 168,
+    "EURNZD": 212, "USDSEK": 219, "USDTRY": 220, "AUDCHF": 943, "AUDNZD": 944, "CADJPY": 945, "EURCHF": 946,
+    "GBPNZD": 947, "NZDCAD": 948, "NZDJPY": 949, "EURSEK": 950, "EURNOK": 951, "CHFSGD": 952, "EURSGD": 955,
+    "USDMXN": 957, "USDDKK": 1045, "NZDCHF": 1048, "CADSGD": 1054, "EURCZK": 1056, "USDTHB": 1062, "USDBRL-OTC": 1546,
+    "USDMXN-OTC-L": 1548, "XAUUSD-OTC": 1857, "EURUSD-op": 1861, "EURGBP-op": 1862, "EURJPY-op": 1864, "USDJPY-op": 1865,
+    "GBPJPY-op": 1866, "GBPUSD-op": 1867, "AUDCAD-op": 1868, "AUDJPY-op": 1869, "AUDUSD-op": 1870, "CADCHF-op": 1871,
+    "EURAUD-op": 1874, "EURCAD-op": 1875, "EURCHF-op": 1876, "GBPAUD-op": 1877, "USDCAD-op": 1878, "GBPNZD-op": 1880,
+    "NZDCAD-op": 1881, "NZDJPY-op": 1882, "AUDCHF-op": 1884, "NZDUSD-op": 1896, "GBPCAD-op": 1897, "GBPCHF-op": 1898,
+    "AUDNZD-op": 1900, "EURNZD-op": 1901, "US30/JP225-OTC": 2079, "US100/JP225-OTC": 2080, "US500/JP225-OTC": 2081,
+    "AUDUSD-OTC": 2111, "USDCAD-OTC": 2112, "AUDJPY-OTC": 2113, "GBPCAD-OTC": 2114, "GBPCHF-OTC": 2115, "GBPAUD-OTC": 2116,
+    "EURCAD-OTC": 2117, "CHFJPY-OTC": 2118, "CADCHF-OTC": 2119, "EURAUD-OTC": 2120, "USDNOK-OTC": 2121, "EURNZD-OTC": 2122,
+    "USDSEK-OTC": 2123, "USDTRY-OTC": 2124, "USDPLN-OTC": 2128, "AUDCHF-OTC": 2129, "AUDNZD-OTC": 2130, "EURCHF-OTC": 2131,
+    "GBPNZD-OTC": 2132, "CADJPY-OTC": 2136, "NZDCAD-OTC": 2137, "NZDJPY-OTC": 2138, "NZDCHF-OTC": 2202,
     "USDMXN-OTC": 1548, "FWONA-OTC": 2169, "XNGUSD-OTC": 2170
 }
 
@@ -47,22 +56,20 @@ def _patch_library_constants_aggressive():
             if hasattr(module, 'ACTIVES') and isinstance(module.ACTIVES, dict):
                 try: module.ACTIVES.update(FULL_MAP); count += 1
                 except Exception: pass
-    # print(f"[PATCH] Constantes atualizadas em {count} módulos.") 
+    if count > 0: print(f"[PATCH] Constantes atualizadas em {count} módulos.")
 
 _patch_library_constants_aggressive()
 
-# --- 1. PROXY SEGURO PARA GET_CANDLES (COM CORREÇÃO DE INT) ---
+# --- 1. PROXY SEGURO PARA GET_CANDLES ---
 def _proxy_get_candles(self, active, size, count=100, to=None):
     if not hasattr(self, "api") or self.api is None: return []
-    
-    # FIX CRÍTICO: Força timestamp inteiro (algumas APIs rejeitam float)
+    # Se 'to' não for fornecido, usa tempo atual
     if to is None: to = int(time.time())
     else: to = int(to)
 
     try: 
         return self.api.get_candles(active, size, count, to)
-    except Exception as e: 
-        print(f"[PROXY ERROR] Get Candles ID {active}: {e}")
+    except Exception: 
         return []
 
 try:
@@ -77,19 +84,37 @@ try:
         iqoptionapi.stable_api.IQOptionAPI.get_candles = _proxy_get_candles
 except: pass
 
-# --- 2. PATCH SERVICE GET_CANDLES ---
+# --- 2. PATCH SERVICE GET_CANDLES (COM RETRY STRATEGY) ---
 async def _get_historical_candles_patched(self, asset_id, duration, amount):
     try:
         if not self.api: return []
-        # Adicionado timeout de 10s para evitar travamento e int() no tempo
-        candles = await asyncio.wait_for(
-            asyncio.to_thread(self.api.get_candles, asset_id, duration, amount, int(time.time())),
-            timeout=10.0
-        )
-        return candles or []
-    except Exception as e:
-        # Debug ativado para entender o silêncio
-        print(f"[SERVICE ERROR] Falha velas ID {asset_id}: {e}")
+        
+        # Tenta obter timestamp do servidor para precisão
+        end_time = int(time.time())
+        try:
+            ts = self.api.get_server_timestamp()
+            if ts: end_time = int(ts)
+        except: pass
+
+        # LOOP DE INSISTÊNCIA (Até 4 tentativas)
+        # Muitas vezes a API retorna vazio na primeira chamada a frio
+        for i in range(4):
+            candles = await asyncio.to_thread(
+                self.api.get_candles, 
+                asset_id, 
+                duration, 
+                amount, 
+                end_time
+            )
+            
+            if candles and len(candles) > 0:
+                return candles
+            
+            # Pequeno delay antes de tentar de novo
+            await asyncio.sleep(0.5)
+
+        return []
+    except Exception:
         return []
 
 AsyncExnovaService.get_historical_candles = _get_historical_candles_patched
@@ -133,8 +158,10 @@ def _check_candlestick_pattern_fix(candles):
         l_lower = min(l_close, l_open) - l_low
         is_p_red, is_p_green = p_close < p_open, p_close > p_open
         is_l_green, is_l_red = l_close > l_open, l_close < l_open
+        
         if is_p_red and is_l_green and l_close > p_open and l_open < p_close: return 'call'
         if is_p_green and is_l_red and l_close < p_open and l_open > p_close: return 'put'
+        
         RATIO = 1.5
         if l_lower >= (RATIO * l_body) and l_upper <= l_body: return 'call'
         if l_upper >= (RATIO * l_body) and l_lower <= l_body: return 'put'
@@ -172,6 +199,7 @@ async def _execute_trade_robust(self, amount, active, direction, duration):
             status, id = await asyncio.to_thread(self.api.buy, amount, active, direction, duration)
             if status and id: return id
     except Exception: pass
+
     try:
         if hasattr(self, 'api') and self.api:
             # print(f"[EXEC] Tentando DIGITAL para {active}...")
@@ -180,15 +208,17 @@ async def _execute_trade_robust(self, amount, active, direction, duration):
     except Exception: pass
     return None
 
-# --- 5. CORREÇÃO GET_OPEN_ASSETS (UNIVERSAL FALLBACK) ---
+# --- 5. CORREÇÃO GET_OPEN_ASSETS ---
 async def _get_open_assets_fix(self):
-    """
-    Tenta obter da API. Se falhar ou vier vazio:
-    - Se for FDS, devolve lista OTC.
-    - Se for Dia Útil, devolve lista STANDARD.
-    """
-    is_weekend = datetime.utcnow().weekday() >= 5
+    if datetime.utcnow().weekday() >= 5:
+        # Fim de Semana: Força OTC
+        return [
+            "EURUSD-OTC", "GBPUSD-OTC", "USDJPY-OTC", "EURJPY-OTC", 
+            "USDCHF-OTC", "AUDCAD-OTC", "NZDUSD-OTC", "EURGBP-OTC", "AUDUSD-OTC",
+            "USDMXN-OTC", "FWONA-OTC", "XNGUSD-OTC"
+        ]
     
+    # Dia Útil
     try:
         if hasattr(self, 'api') and self.api:
             assets = await asyncio.wait_for(asyncio.to_thread(self.api.get_all_open_time), timeout=5.0)
@@ -201,18 +231,11 @@ async def _get_open_assets_fix(self):
                 if opened: return list(set(opened))
     except: pass
     
-    # Fallback Lists
-    if is_weekend:
-        return [
-            "EURUSD-OTC", "GBPUSD-OTC", "USDJPY-OTC", "EURJPY-OTC", 
-            "USDCHF-OTC", "AUDCAD-OTC", "NZDUSD-OTC", "EURGBP-OTC", "AUDUSD-OTC"
-        ]
-    else:
-        # Lista para Dias Úteis
-        return [
-            "EURUSD", "GBPUSD", "USDJPY", "AUDCAD", "USDCHF", 
-            "EURGBP", "EURJPY", "NZDUSD", "AUDUSD", "USDCAD"
-        ]
+    # Fallback se API falhar em dia útil
+    return [
+        "EURUSD", "GBPUSD", "USDJPY", "AUDCAD", "USDCHF", 
+        "EURGBP", "EURJPY", "NZDUSD", "AUDUSD", "USDCAD"
+    ]
 
 # --- 6. PATCH ANTI-CRASH ---
 def _safe_get_digital_underlying_list_data(self): return {"underlying": []}
@@ -232,7 +255,6 @@ async def _connect_fresh_instance(self):
             self.api = None 
 
         from exnovaapi.stable_api import ExnovaAPI
-        # Força o host correto
         self.api = ExnovaAPI("exnova.com", self.email, self.password)
         check = await asyncio.to_thread(self.api.connect)
         return check
@@ -328,7 +350,7 @@ class TradingBot:
             except: pass
 
     async def run(self):
-        await self.logger('INFO', 'Bot a iniciar no modo EXTREME DEBUG...')
+        await self.logger('INFO', 'Bot a iniciar no modo RETRY VELAS...')
         if not await self.exnova.connect(): await self.logger('ERROR', 'Falha na conexão inicial.')
         
         try:
@@ -404,19 +426,15 @@ class TradingBot:
 
             assets = await self.exnova.get_open_assets()
             
-            # --- LÓGICA DE FILTRO ATUALIZADA ---
-            # Removemos a restrição estrita de "OTC apenas no FDS" para evitar lista vazia
+            # Filtro Simples
             available_assets = []
             for asset in assets:
                 if asset.split('-')[0] not in self.blacklisted_assets:
                     available_assets.append(asset)
             
-            # Se ainda estiver vazio (API falhou), usamos a lista forçada
+            # Se vazio, usa Fallback
             if len(available_assets) == 0:
                 is_weekend = datetime.utcnow().weekday() >= 5
-                # O fallback já foi definido na função _get_open_assets_fix, 
-                # então 'assets' já deve conter o fallback se a API falhou.
-                # Mas por segurança, verificamos de novo:
                 if is_weekend:
                     available_assets = ["EURUSD-OTC", "GBPUSD-OTC", "USDJPY-OTC", "AUDCAD-OTC", "USDCHF-OTC"]
                 else:
