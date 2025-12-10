@@ -18,15 +18,14 @@ from analysis import technical_indicators as ti
 from core.data_models import TradeSignal
 
 # ==============================================================================
-#                      MAPA DE ATIVOS (REAIS + OTC)
+#                      CONSTANTES GERAIS (PARES REAIS + OTC)
 # ==============================================================================
 ACTIVES_MAP = {
-    # --- PARES REAIS (DIAS ÚTEIS) ---
+    # Pares Reais (Dias Úteis)
     "EURUSD": 1, "EURGBP": 2, "GBPJPY": 3, "EURJPY": 4, "GBPUSD": 5, "USDJPY": 6, "AUDCAD": 7, "NZDUSD": 8, 
     "USDCHF": 72, "AUDUSD": 99, "USDCAD": 100, "AUDJPY": 101, "GBPCAD": 102, "GBPCHF": 103, "EURCAD": 105,
-    "CHFJPY": 106, "CADCHF": 107, "EURAUD": 108,
     
-    # --- PARES OTC (FIM DE SEMANA / NOITE) ---
+    # Pares OTC (Fim de Semana / Noite)
     "EURUSD-OTC": 76, "EURGBP-OTC": 77, "USDCHF-OTC": 78, "EURJPY-OTC": 79, "NZDUSD-OTC": 80, "GBPUSD-OTC": 81,
     "GBPJPY-OTC": 84, "USDJPY-OTC": 85, "AUDCAD-OTC": 86, "AUDUSD-OTC": 2111, "USDCAD-OTC": 2112, 
     "USDMXN-OTC": 1548, "FWONA-OTC": 2169, "XNGUSD-OTC": 2170, "AUDJPY-OTC": 2113, "GBPCAD-OTC": 2114,
@@ -38,19 +37,17 @@ ACTIVES_MAP = {
 # ==============================================================================
 
 # --- 0. PATCH NUCLEAR DE CONSTANTES ---
-# Injeta TODOS os IDs (Reais e OTC) na biblioteca para evitar erros.
 def _patch_library_constants_aggressive():
     FULL_MAP = ACTIVES_MAP.copy()
     REVERSE_MAP = {v: k for k, v in ACTIVES_MAP.items()}
     FULL_MAP.update(REVERSE_MAP)
-    targets = ['iqoptionapi', 'exnovaapi']
     count = 0
+    targets = ['iqoptionapi', 'exnovaapi']
     for module_name, module in list(sys.modules.items()):
         if any(t in module_name for t in targets):
             if hasattr(module, 'ACTIVES') and isinstance(module.ACTIVES, dict):
                 try: module.ACTIVES.update(FULL_MAP); count += 1
                 except Exception: pass
-    if count > 0: print(f"[PATCH] Constantes atualizadas em {count} módulos.")
 
 _patch_library_constants_aggressive()
 
@@ -78,10 +75,9 @@ except: pass
 async def _get_historical_candles_patched(self, asset_id, duration, amount):
     try:
         if not self.api: return []
-        # Timeout curto (4s) para pular rápido se o ativo estiver fechado
         candles = await asyncio.wait_for(
             asyncio.to_thread(self.api.get_candles, asset_id, duration, amount, int(time.time())),
-            timeout=4.0 
+            timeout=10.0
         )
         return candles or []
     except Exception: return []
@@ -149,6 +145,7 @@ def _check_rsi_condition_fix(candles, period=14, overbought=65, oversold=35):
         signal = None
         if last_rsi >= overbought: signal = 'put'
         elif last_rsi <= oversold: signal = 'call'
+        
         return (signal, last_rsi) 
     except: return (None, 50.0)
 
@@ -161,26 +158,20 @@ ti.check_rsi_condition = _check_rsi_condition_fix
 async def _execute_trade_robust(self, amount, active, direction, duration):
     try:
         if hasattr(self, 'api') and self.api:
-            # print(f"[EXEC] Tentando BINARY para {active}...")
             status, id = await asyncio.to_thread(self.api.buy, amount, active, direction, duration)
             if status and id: return id
     except Exception: pass
-
     try:
         if hasattr(self, 'api') and self.api:
-            # print(f"[EXEC] Tentando DIGITAL para {active}...")
             status, id = await asyncio.to_thread(self.api.buy_digital_spot, active, amount, direction, duration)
             if status and id: return id
     except Exception: pass
     return None
 
-# --- 5. CORREÇÃO GET_OPEN_ASSETS (LISTA HÍBRIDA) ---
-# Retorna uma lista mista de Reais e OTC. O bot filtra o que tem velas vazias.
+# --- 5. CORREÇÃO GET_OPEN_ASSETS (FORCE OTC SEMPRE) ---
 async def _get_open_assets_fix(self):
+    # IGNORA A DATA, IGNORA A API. RETORNA SEMPRE OTC.
     return [
-        # Pares Reais (Prioridade Dia Útil)
-        "EURUSD", "GBPUSD", "USDJPY", "AUDCAD", "USDCHF", "EURGBP", "EURJPY", "NZDUSD", "AUDUSD", "USDCAD",
-        # Pares OTC (Prioridade Fim de Semana)
         "EURUSD-OTC", "GBPUSD-OTC", "USDJPY-OTC", "EURJPY-OTC", 
         "USDCHF-OTC", "AUDCAD-OTC", "NZDUSD-OTC", "EURGBP-OTC", "AUDUSD-OTC",
         "USDMXN-OTC", "FWONA-OTC", "XNGUSD-OTC"
@@ -268,14 +259,9 @@ class TradingBot:
             logger.propagate = False
 
     def _get_asset_id(self, asset_name):
-        # Primeiro, normaliza o nome (remove espaços, etc)
+        # Mapeia OTC se necessário, ou retorna o próprio nome se não estiver no mapa
         name = asset_name.replace(" (OTC)", "-OTC").strip()
-        
-        # Tenta encontrar no mapa
-        if name in ACTIVES_MAP: 
-            return ACTIVES_MAP[name]
-            
-        # Se não encontrar, retorna o nome e espera que a API resolva
+        if name in ACTIVES_MAP: return ACTIVES_MAP[name]
         return name
 
     async def logger(self, level: str, message: str):
@@ -304,7 +290,7 @@ class TradingBot:
             except: pass
 
     async def run(self):
-        await self.logger('INFO', 'Bot a iniciar no modo HYBRID SCANNER...')
+        await self.logger('INFO', 'Bot a iniciar no modo FORCE OTC ALWAYS...')
         if not await self.exnova.connect(): await self.logger('ERROR', 'Falha na conexão inicial.')
         
         try:
@@ -378,14 +364,17 @@ class TradingBot:
                 await asyncio.wait_for(self.exnova.change_balance(self.bot_config.get('account_type', 'PRACTICE')), timeout=2.0)
             except: pass
 
-            # Obtém lista híbrida (Reais + OTC)
-            assets = await self.exnova.get_open_assets()
+            # --- FORÇA A LISTA OTC (IGNORA API) ---
+            assets = await _get_open_assets_fix(None)
             
-            # Filtra blacklist
             available_assets = []
             for asset in assets:
                 if asset.split('-')[0] not in self.blacklisted_assets:
                     available_assets.append(asset)
+            
+            # Garante que temos lista, mesmo se blacklist tirar tudo (impossível mas seguro)
+            if not available_assets:
+                available_assets = assets
 
             def get_asset_score(asset_name):
                 pair = asset_name.split('-')[0]
@@ -393,9 +382,11 @@ class TradingBot:
                 total = stats['wins'] + stats['losses']
                 return stats['wins'] / total if total > 0 else 0.5
 
-            # Analisa até 20 ativos (Mista)
-            target_assets = sorted(available_assets, key=get_asset_score, reverse=True)[:20]
+            target_assets = sorted(available_assets, key=get_asset_score, reverse=True)[:15]
             
+            # Print para sabermos que ele tem alvos
+            print(f"[DEBUG] Ativos Alvo: {len(target_assets)} (Ex: {target_assets[:2]})")
+
             max_sim = self.bot_config.get('max_simultaneous_trades', 1)
             if len(self.active_trading_pairs) >= max_sim: return
 
@@ -412,8 +403,7 @@ class TradingBot:
                     await self._analyze_asset(asset, timeframe_seconds, expiration_minutes)
                 except Exception: pass
                 
-                # Delay curto entre ativos para não sobrecarregar
-                await asyncio.sleep(2.0)
+                await asyncio.sleep(4.0)
 
         except Exception as e:
             await self.logger('ERROR', f"Erro em run_analysis: {e}")
@@ -429,6 +419,9 @@ class TradingBot:
 
             asset_id = self._get_asset_id(full_name)
             
+            # DEBUG ATIVADO
+            print(f"[DEBUG] Analisando: {full_name} (ID: {asset_id})")
+
             try:
                 candles = await asyncio.gather(
                     self.exnova.get_historical_candles(asset_id, t1, 200),
@@ -437,11 +430,8 @@ class TradingBot:
             except: return
 
             analysis_candles, sr_candles = candles
-            
-            # Se vier vazio, é porque o mercado está fechado para este ativo.
-            # Simplesmente ignoramos e passamos ao próximo da lista híbrida.
             if not analysis_candles:
-                # print(f"[DEBUG] Fechado: {full_name}") 
+                print(f"[DEBUG] Velas vazias para {full_name}")
                 return
 
             analysis_candles_objs = []
@@ -463,7 +453,7 @@ class TradingBot:
 
             # --- ANÁLISE DETALHADA ---
             close_price = float(signal_candle_obj.close)
-            rsi_res = ti.check_rsi_condition(analysis_candles_objs)
+            rsi_res = ti.check_rsi_condition(analysis_candles_objs) 
             rsi_sig, rsi_val = rsi_res if isinstance(rsi_res, tuple) else (None, 50.0)
             
             # LOG PARA FRONTEND
