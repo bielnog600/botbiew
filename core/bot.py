@@ -67,7 +67,8 @@ def _optimized_get_candles(self, active, duration, count, to):
         self.api.getcandles(active_id, duration, count, to)
         start = time.time()
         while self.api.candles.candles_data is None:
-            if time.time() - start > 20: 
+            if time.time() - start > 15: 
+                # print(f"[TIMEOUT PATCH] {active} ID:{active_id}")
                 return []
             time.sleep(0.05)
         return self.api.candles.candles_data
@@ -119,14 +120,27 @@ async def _get_historical_candles_patched(self, asset_name, duration, amount):
     if not hasattr(self, 'api') or not self.api: return []
     try:
         local_time = int(time.time())
-        req_time = local_time - GLOBAL_TIME_OFFSET - 15
+        # TENTA RECUAR 30s PARA EVITAR ERROS DE FUTURO
+        req_time = local_time - GLOBAL_TIME_OFFSET - 30
 
         candles = await asyncio.wait_for(
             asyncio.to_thread(self.api.get_candles, asset_name, duration, amount, req_time),
-            timeout=25.0
+            timeout=20.0
         )
+        
+        # DEBUG DIAGNÓSTICO
+        if not candles:
+            # Se for None, é timeout/rede. Se for [], é a API a dizer "não tenho dados".
+            is_none = candles is None
+            is_empty = isinstance(candles, list) and len(candles) == 0
+            if is_none:
+                print(f"[DEBUG VELAS] {asset_name}: Timeout (Sem resposta)")
+            elif is_empty:
+                print(f"[DEBUG VELAS] {asset_name}: Lista Vazia (Bloqueio ou Tempo Errado)")
+        
         return candles or []
-    except Exception:
+    except Exception as e:
+        print(f"[ERROR SERVICE] {asset_name}: {e}")
         return []
 
 AsyncExnovaService.get_historical_candles = _get_historical_candles_patched
@@ -298,7 +312,6 @@ class TradingBot:
                 print("[NET DEBUG] Não foi possível verificar o IP.")
 
     def _is_socket_connected(self):
-        # USA O MÉTODO OFICIAL DA BIBLIOTECA
         try:
             if not self.exnova.api:
                 return False
@@ -370,11 +383,27 @@ class TradingBot:
         await asyncio.sleep(5) 
         await self._sync_time()
 
+        # BLOCO DE DIAGNÓSTICO DE INICIALIZAÇÃO
+        # Tenta carregar perfil em loop. Se falhar, é Block.
+        print("[SYSTEM] Verificando Perfil...")
+        profile_ok = False
+        for i in range(10):
+            try:
+                prof = await asyncio.to_thread(self.exnova.api.get_profile_ansyc)
+                if prof:
+                    print(f"[SYSTEM] Perfil OK! Currency: {prof.get('currency')} (Tentativa {i+1})")
+                    profile_ok = True
+                    break
+            except: pass
+            await asyncio.sleep(1)
+        
+        if not profile_ok:
+            print("[ALERTA CRÍTICO] Falha ao carregar perfil. O IP pode estar bloqueado para dados.")
+
         print("[SYSTEM] Loop principal iniciado...")
         
         while self.is_running:
             try:
-                # Checagem simplificada e estável
                 if not self._is_socket_connected():
                     print("[AVISO] Conexão perdida. Tentando reconectar...")
                     reconnected = False
@@ -431,10 +460,8 @@ class TradingBot:
                 # DEBUG VISUAL ATIVO
                 bal = await self.exnova.get_current_balance()
                 print(f"[STATUS] Saldo: {bal} | {expiration_minutes}M Scan")
-                # Keep Alive
                 await asyncio.wait_for(self.exnova.change_balance(self.bot_config.get('account_type', 'PRACTICE')), timeout=2.0)
-            except Exception as e:
-                print(f"[STATUS ERROR] Falha no Saldo: {e}")
+            except: pass
 
             assets = await _get_open_assets_fix(None)
             available_assets = [a for a in assets if a not in self.blacklisted_assets]
@@ -482,8 +509,6 @@ class TradingBot:
 
             analysis_candles, sr_candles = candles
             if not analysis_candles:
-                # DEBUG VISUAL ATIVO
-                print(f"[DEBUG] Velas vazias: {full_name}")
                 return
 
             analysis_candles_objs = []
