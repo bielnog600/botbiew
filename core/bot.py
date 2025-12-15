@@ -52,9 +52,11 @@ _patch_library_constants_aggressive()
 # --- 1. PATCH: INJEÇÃO INTELIGENTE DE GET_CANDLES ---
 def _optimized_get_candles(self, active, duration, count, to):
     try:
-        # Check de Socket antes de pedir
-        if not self.api.websocket_client.wss.connected:
-            print("[PATCH ERROR] Socket desconectado. Abortando get_candles.")
+        # CORREÇÃO CRÍTICA: Check de Socket compatível
+        # Verifica se o objeto wss existe e se tem um socket conectado
+        wss = self.api.websocket_client.wss
+        if not wss or not hasattr(wss, 'sock') or not wss.sock or not wss.sock.connected:
+            print(f"[PATCH ERROR] Socket desconectado ao pedir {active}.")
             return []
 
         self.api.candles.candles_data = None
@@ -77,9 +79,6 @@ def _optimized_get_candles(self, active, duration, count, to):
         start = time.time()
         while self.api.candles.candles_data is None:
             if time.time() - start > 20: 
-                # Se der timeout, verifica se o socket ainda está vivo
-                is_conn = self.api.websocket_client.wss.connected
-                print(f"[PATCH TIMEOUT] 20s sem resposta para {active} (Socket ON: {is_conn})")
                 return []
             time.sleep(0.05)
             
@@ -133,14 +132,9 @@ except ImportError:
 async def _get_historical_candles_patched(self, asset_name, duration, amount):
     if not hasattr(self, 'api') or not self.api: return []
     try:
-        # ESTRATÉGIA DE SEGURANÇA MÁXIMA:
-        # Em vez de tentar adivinhar o tempo, usamos o tempo local do sistema
-        # mas recuamos 15 segundos para garantir que não pedimos o futuro.
-        # Se o relógio do servidor estiver errado em +10s, o -15s compensa.
+        # Tempo local - 15s para garantir histórico fechado
+        # Isso evita pedir velas do "futuro" se o relógio estiver adiantado
         req_time = int(time.time()) - 15
-
-        # Debug para confirmar o timestamp enviado
-        # print(f"[REQ VELAS] {asset_name} | TS: {req_time}")
 
         candles = await asyncio.wait_for(
             asyncio.to_thread(self.api.get_candles, asset_name, duration, amount, req_time),
@@ -360,7 +354,11 @@ class TradingBot:
                 connected = True
                 if hasattr(self.exnova, 'api') and self.exnova.api:
                     if hasattr(self.exnova.api, 'websocket_client') and self.exnova.api.websocket_client:
-                         if not self.exnova.api.websocket_client.wss.connected:
+                         # Uso seguro do sock
+                         if not self.exnova.api.websocket_client.wss or \
+                            not hasattr(self.exnova.api.websocket_client.wss, 'sock') or \
+                            not self.exnova.api.websocket_client.wss.sock or \
+                            not self.exnova.api.websocket_client.wss.sock.connected:
                              connected = False
                 
                 if not connected:
