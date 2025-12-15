@@ -52,16 +52,7 @@ _patch_library_constants_aggressive()
 # --- 1. PATCH: INJEÇÃO INTELIGENTE DE GET_CANDLES ---
 def _optimized_get_candles(self, active, duration, count, to):
     try:
-        # CORREÇÃO CRÍTICA: Check de Socket compatível
-        # Verifica se o objeto wss existe e se tem um socket conectado
-        wss = self.api.websocket_client.wss
-        if not wss or not hasattr(wss, 'sock') or not wss.sock or not wss.sock.connected:
-            print(f"[PATCH ERROR] Socket desconectado ao pedir {active}.")
-            return []
-
-        self.api.candles.candles_data = None
-        
-        # Resolução de ID
+        # Resolve ID
         active_id = active
         if isinstance(active, str):
             import exnovaapi.constants as OP_code
@@ -72,10 +63,9 @@ def _optimized_get_candles(self, active, duration, count, to):
         if active_id is None:
             return []
 
-        # Envia pedido
+        self.api.candles.candles_data = None
         self.api.getcandles(active_id, duration, count, to)
         
-        # Loop de espera com Diagnóstico
         start = time.time()
         while self.api.candles.candles_data is None:
             if time.time() - start > 20: 
@@ -128,12 +118,11 @@ try:
 except ImportError:
     pass
 
-# --- 3. PATCH SERVICE GET_CANDLES (ESTRATÉGIA DE TEMPO RELATIVO) ---
+# --- 3. PATCH SERVICE GET_CANDLES ---
 async def _get_historical_candles_patched(self, asset_name, duration, amount):
     if not hasattr(self, 'api') or not self.api: return []
     try:
         # Tempo local - 15s para garantir histórico fechado
-        # Isso evita pedir velas do "futuro" se o relógio estiver adiantado
         req_time = int(time.time()) - 15
 
         candles = await asyncio.wait_for(
@@ -314,6 +303,39 @@ class TradingBot:
             except:
                 print("[NET DEBUG] Não foi possível verificar o IP.")
 
+    def _is_socket_connected(self):
+        # VERIFICAÇÃO PROFUNDA E CORRETA DE CONEXÃO
+        try:
+            # 1. Verifica se a API de alto nível existe
+            if not self.exnova.api: 
+                return False
+            
+            # 2. Verifica se a API de baixo nível existe (self.api.api)
+            # A classe Exnova tem self.api que é a ExnovaAPI
+            if not hasattr(self.exnova.api, 'api') or not self.exnova.api.api:
+                return False
+            
+            # 3. Verifica o websocket_client
+            ws_client = self.exnova.api.api.websocket_client
+            if not ws_client:
+                return False
+                
+            # 4. Verifica o objeto wss (WebSocketApp)
+            if not ws_client.wss:
+                return False
+            
+            # 5. Verifica o socket real (sock)
+            if not ws_client.wss.sock:
+                return False
+            
+            # 6. Verifica se o file descriptor é válido (melhor que .connected)
+            if ws_client.wss.sock.fileno() == -1:
+                return False
+                
+            return True
+        except Exception:
+            return False
+
     async def _daily_reset_if_needed(self):
         current_date_utc = datetime.utcnow().date()
         if self.last_daily_reset_date != current_date_utc:
@@ -351,22 +373,20 @@ class TradingBot:
         
         while self.is_running:
             try:
-                connected = True
-                if hasattr(self.exnova, 'api') and self.exnova.api:
-                    if hasattr(self.exnova.api, 'websocket_client') and self.exnova.api.websocket_client:
-                         # Uso seguro do sock
-                         if not self.exnova.api.websocket_client.wss or \
-                            not hasattr(self.exnova.api.websocket_client.wss, 'sock') or \
-                            not self.exnova.api.websocket_client.wss.sock or \
-                            not self.exnova.api.websocket_client.wss.sock.connected:
-                             connected = False
-                
-                if not connected:
-                    print("[AVISO] Conexão perdida. Reconectando...")
-                    if await self.exnova.connect():
-                        await self.logger('SUCCESS', 'Reconectado.')
-                        await asyncio.sleep(3)
-                    else:
+                # NOVA VERIFICAÇÃO ROBUSTA DE CONEXÃO
+                if not self._is_socket_connected():
+                    print("[AVISO] Conexão perdida (Socket Fechado). Reconectando...")
+                    # Tenta reconectar em loop até conseguir
+                    reconnected = False
+                    for i in range(3):
+                        if await self.exnova.connect():
+                            await self.logger('SUCCESS', 'Reconectado.')
+                            await asyncio.sleep(3)
+                            reconnected = True
+                            break
+                        await asyncio.sleep(5)
+                    
+                    if not reconnected:
                         await asyncio.sleep(5)
                         continue
 
@@ -410,6 +430,7 @@ class TradingBot:
                 # DEBUG VISUAL ATIVO
                 bal = await self.exnova.get_current_balance()
                 print(f"[STATUS] Saldo: {bal} | {expiration_minutes}M Scan")
+                # Keep Alive
                 await asyncio.wait_for(self.exnova.change_balance(self.bot_config.get('account_type', 'PRACTICE')), timeout=2.0)
             except: pass
 
@@ -428,7 +449,7 @@ class TradingBot:
 
             for asset_name in target_assets:
                 try:
-                    if not self.exnova.api: break
+                    if not self._is_socket_connected(): break
                 except: break
                 if asset_name in self.active_trading_pairs: continue
                 try:
