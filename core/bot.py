@@ -51,30 +51,49 @@ def _patch_library_constants_aggressive():
 
 _patch_library_constants_aggressive()
 
-# --- 1. PATCH: INJEÇÃO DE GET_CANDLES (CRÍTICO - CORRIGE SEU ERRO) ---
-# Este patch injeta o método get_candles se ele não existir na biblioteca
-def _forced_get_candles_impl(self, active, duration, amount, to):
-    # Tenta acessar a API interna de baixo nível (self.api) que geralmente tem o método
-    if hasattr(self, 'api') and hasattr(self.api, 'get_candles'):
-        try:
-            return self.api.get_candles(active, duration, amount, to)
-        except Exception as e:
-            print(f"[PATCH ERROR] Falha interna em get_candles: {e}")
-            return []
+# --- 1. PATCH: INJEÇÃO INTELIGENTE DE GET_CANDLES ---
+# Modificamos a classe Exnova para aceitar IDs diretamente e não bloquear
+def _optimized_get_candles(self, active, duration, count, to):
+    # 'active' aqui chega como INT (ID) vindo do bot.
+    # O método original tentaria fazer OP_code.ACTIVES[active], o que daria erro.
+    # Por isso, bypassamos e chamamos a API de baixo nível diretamente.
     
-    print(f"[PATCH CRITICAL] Não foi possível encontrar método get_candles interno para {active}")
-    return []
+    try:
+        # Limpa dados antigos
+        self.api.candles.candles_data = None
+        
+        # Chama baixo nível passando o ID direto
+        self.api.getcandles(active, duration, count, to)
+        
+        # Espera ativa com timeout curto (simula o comportamento original mas mais seguro)
+        start = time.time()
+        while self.api.candles.candles_data is None:
+            if time.time() - start > 10:
+                return []
+            time.sleep(0.05) # Sleep curto para não queimar CPU
+            
+        return self.api.candles.candles_data
+    except Exception as e:
+        print(f"[PATCH ERROR] Falha em _optimized_get_candles: {e}")
+        return []
 
+# Aplicar o Patch na classe correta (Exnova ou ExnovaAPI dependendo da versão)
 try:
     import exnovaapi.stable_api
-    # Verifica se a classe ExnovaAPI (Stable) tem o método. Se não, injeta.
-    if not hasattr(exnovaapi.stable_api.ExnovaAPI, 'get_candles'):
-        print("[SYSTEM] Injetando método 'get_candles' ausente na biblioteca...")
-        exnovaapi.stable_api.ExnovaAPI.get_candles = _forced_get_candles_impl
+    
+    # No seu arquivo, a classe chama-se 'Exnova'
+    if hasattr(exnovaapi.stable_api, 'Exnova'):
+        print("[SYSTEM] Classe 'Exnova' detectada. Aplicando patch otimizado.")
+        exnovaapi.stable_api.Exnova.get_candles = _optimized_get_candles
+        TargetClass = exnovaapi.stable_api.Exnova
+    elif hasattr(exnovaapi.stable_api, 'ExnovaAPI'):
+        print("[SYSTEM] Classe 'ExnovaAPI' detectada. Aplicando patch otimizado.")
+        exnovaapi.stable_api.ExnovaAPI.get_candles = _optimized_get_candles
+        TargetClass = exnovaapi.stable_api.ExnovaAPI
+    else:
+        print("[SYSTEM WARN] Nenhuma classe conhecida encontrada em stable_api.")
 except ImportError:
     pass
-except Exception as e:
-    print(f"[SYSTEM ERROR] Falha ao aplicar patch get_candles: {e}")
 
 
 # --- 2. PATCH SERVICE GET_CANDLES (CAMADA DE SERVIÇO) ---
@@ -84,27 +103,14 @@ async def _get_historical_candles_patched(self, asset_id, duration, amount):
         return []
     
     try:
-        # Usa o tempo atual do servidor (timestamp unix)
         server_time = int(time.time())
-        
         # Chama a função (agora garantida pelo patch acima)
         candles = await asyncio.wait_for(
             asyncio.to_thread(self.api.get_candles, asset_id, duration, amount, server_time),
             timeout=15.0
         )
-        
-        if not candles:
-            return []
-            
-        return candles
+        return candles or []
 
-    except AttributeError as e:
-        # Este catch serve como backup final
-        print(f"[CRITICAL ATTRIBUTE ERROR] A biblioteca ainda não tem get_candles: {e}")
-        return []
-    except asyncio.TimeoutError:
-        print(f"[TIMEOUT] A API demorou mais de 15s para responder velas de {asset_id}")
-        return []
     except Exception as e:
         print(f"[ERROR SERVICE] Falha ao pegar velas ({asset_id}): {e}")
         return []
@@ -211,10 +217,14 @@ def _safe_get_digital_underlying_list_data(self): return {"underlying": []}
 try:
     import exnovaapi.stable_api
     import types
-    exnovaapi.stable_api.ExnovaAPI.get_digital_underlying_list_data = lambda self: {"underlying": []}
+    # Aplica na classe Exnova se existir
+    if hasattr(exnovaapi.stable_api, 'Exnova'):
+        exnovaapi.stable_api.Exnova.get_digital_underlying_list_data = lambda self: {"underlying": []}
+    elif hasattr(exnovaapi.stable_api, 'ExnovaAPI'):
+        exnovaapi.stable_api.ExnovaAPI.get_digital_underlying_list_data = lambda self: {"underlying": []}
 except: pass
 
-# --- 7. PATCH: RECONEXÃO LIMPA ---
+# --- 7. PATCH: RECONEXÃO LIMPA E CORRETA ---
 async def _connect_fresh_instance(self):
     try:
         if hasattr(self, 'api') and self.api is not None:
@@ -222,8 +232,15 @@ async def _connect_fresh_instance(self):
             except: pass
             self.api = None 
 
-        from exnovaapi.stable_api import ExnovaAPI
-        self.api = ExnovaAPI("exnova.com", self.email, self.password)
+        from exnovaapi.stable_api import Exnova, ExnovaAPI
+        
+        # Tenta instanciar a classe "Exnova" (que é a correta no seu arquivo)
+        # Se falhar, tenta ExnovaAPI como fallback
+        try:
+            self.api = Exnova("exnova.com", self.email, self.password)
+        except NameError:
+             self.api = ExnovaAPI("exnova.com", self.email, self.password)
+             
         check = await asyncio.to_thread(self.api.connect)
         return check
     except Exception as e:
@@ -253,8 +270,11 @@ def _noop_get_other_open(self, *args, **kwargs): return
 
 try:
     import exnovaapi.stable_api as ex_stable
-    ex_stable.ExnovaAPI.get_instruments = _safe_get_instruments
-    ex_stable.ExnovaAPI._ExnovaAPI__get_other_open = _noop_get_other_open
+    TargetClass = ex_stable.Exnova if hasattr(ex_stable, 'Exnova') else ex_stable.ExnovaAPI
+    TargetClass.get_instruments = _safe_get_instruments
+    TargetClass._ExnovaAPI__get_other_open = _noop_get_other_open # Nome mangled antigo
+    if hasattr(TargetClass, '_Exnova__get_other_open'): # Nome mangled novo (se classe for Exnova)
+         TargetClass._Exnova__get_other_open = _noop_get_other_open
 except: pass
 
 AsyncExnovaService.execute_trade = _execute_trade_robust
