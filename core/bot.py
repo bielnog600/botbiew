@@ -18,13 +18,73 @@ from analysis import technical_indicators as ti
 from core.data_models import TradeSignal
 
 # ==============================================================================
+#                       CONSTANTES GERAIS (PARES REAIS + OTC)
+# ==============================================================================
+ACTIVES_MAP = {
+    # Pares Reais (Dias Úteis)
+    "EURUSD": 1, "EURGBP": 2, "GBPJPY": 3, "EURJPY": 4, "GBPUSD": 5, "USDJPY": 6, "AUDCAD": 7, "NZDUSD": 8, 
+    "USDCHF": 72, "AUDUSD": 99, "USDCAD": 100, "AUDJPY": 101, "GBPCAD": 102, "GBPCHF": 103, "EURCAD": 105,
+    
+    # Pares OTC (Fim de Semana / Noite)
+    "EURUSD-OTC": 76, "EURGBP-OTC": 77, "USDCHF-OTC": 78, "EURJPY-OTC": 79, "NZDUSD-OTC": 80, "GBPUSD-OTC": 81,
+    "GBPJPY-OTC": 84, "USDJPY-OTC": 85, "AUDCAD-OTC": 86, "AUDUSD-OTC": 2111, "USDCAD-OTC": 2112, 
+    "USDMXN-OTC": 1548, "FWONA-OTC": 2169, "XNGUSD-OTC": 2170, "AUDJPY-OTC": 2113, "GBPCAD-OTC": 2114,
+    "GBPCHF-OTC": 2115, "GBPAUD-OTC": 2116, "EURCAD-OTC": 2117
+}
+
+# ==============================================================================
 #                       MONKEY PATCHES (SISTEMA DE SUPORTE DE VIDA)
 # ==============================================================================
 
-# --- 1. PATCH: CORREÇÃO DE TRAVAMENTO NO SALDO E PERFIL ---
-# Substituímos os loops infinitos originais por loops com timeout.
-# Isso impede que o bot congele se a API demorar a responder.
+# --- 0. PATCH NUCLEAR DE CONSTANTES ---
+# Garante que os dicionários internos tenham todos os IDs
+def _patch_library_constants_aggressive():
+    try:
+        import exnovaapi.constants as OP_code
+        OP_code.ACTIVES.update(ACTIVES_MAP)
+        # Reverso também para garantir
+        REVERSE_MAP = {v: k for k, v in ACTIVES_MAP.items()}
+        OP_code.ACTIVES.update(REVERSE_MAP)
+    except: pass
 
+_patch_library_constants_aggressive()
+
+# --- 1. PATCH: INJEÇÃO INTELIGENTE DE GET_CANDLES (CORRIGIDO) ---
+# Agora faz a conversão de NOME -> ID antes de chamar a API
+def _optimized_get_candles(self, active, duration, count, to):
+    try:
+        self.api.candles.candles_data = None
+        
+        # BUSCA O ID DO ATIVO (CRÍTICO!)
+        # Se 'active' já for int, usa. Se for string, procura no mapa.
+        active_id = active
+        if isinstance(active, str):
+            import exnovaapi.constants as OP_code
+            active_id = OP_code.ACTIVES.get(active, None)
+            if active_id is None:
+                # Fallback para o nosso mapa local se a lib falhar
+                active_id = ACTIVES_MAP.get(active, None)
+        
+        if active_id is None:
+            print(f"[PATCH WARN] ID não encontrado para o ativo: {active}")
+            return []
+
+        # Envia pedido com o ID (Inteiro)
+        self.api.getcandles(active_id, duration, count, to)
+        
+        # Loop de espera com timeout seguro
+        start = time.time()
+        while self.api.candles.candles_data is None:
+            if time.time() - start > 10:
+                return []
+            time.sleep(0.01)
+            
+        return self.api.candles.candles_data
+    except Exception as e:
+        print(f"[PATCH ERROR] Falha em _optimized_get_candles: {e}")
+        return []
+
+# --- 2. PATCH: CORREÇÃO DE TRAVAMENTO NO SALDO E PERFIL ---
 def _optimized_get_balances(self):
     self.api.balances_raw = None
     try:
@@ -41,7 +101,6 @@ def _optimized_get_balances(self):
 
 def _optimized_get_profile_ansyc(self):
     start = time.time()
-    # A biblioteca original não tem timeout aqui, adicionamos um de 5s
     while self.api.profile.msg is None:
         if time.time() - start > 5:
             return None
@@ -61,15 +120,11 @@ try:
         print("[SYSTEM] Classe 'ExnovaAPI' detectada. Aplicando patches de segurança.")
 
     if TargetClass:
-        # Patch crítico para evitar travamento no boot (Saldo/Perfil)
+        TargetClass.get_candles = _optimized_get_candles
         TargetClass.get_balances = _optimized_get_balances
         TargetClass.get_profile_ansyc = _optimized_get_profile_ansyc
-        
-        # Patches para métodos auxiliares que podem causar erros
         TargetClass.get_digital_underlying_list_data = lambda self: {"underlying": []}
         TargetClass.get_instruments = lambda self, *args: {"instruments": []}
-        
-        # Silenciar métodos privados problemáticos
         TargetClass._ExnovaAPI__get_other_open = lambda self, *args, **kwargs: None
         if hasattr(TargetClass, '_Exnova__get_other_open'):
              TargetClass._Exnova__get_other_open = lambda self, *args, **kwargs: None
@@ -78,25 +133,16 @@ except ImportError:
     pass
 
 
-# --- 2. PATCH SERVICE GET_CANDLES (ADAPTADO PARA NOMES) ---
+# --- 3. PATCH SERVICE GET_CANDLES (MODO SIMPLES) ---
 async def _get_historical_candles_patched(self, asset_name, duration, amount):
-    # ATENÇÃO: asset_name agora deve ser STRING (ex: "EURUSD-OTC")
     if not hasattr(self, 'api') or not self.api: 
         return []
     
     try:
+        # Usa APENAS o tempo do sistema (mais confiável que o server_timestamp bugado)
         req_time = int(time.time())
-        # Sincronia de tempo básica
-        try:
-            if hasattr(self.api, 'api') and hasattr(self.api.api, 'timesync'):
-                server_ts = self.api.api.timesync.server_timestamp
-                if server_ts > 0:
-                    req_time = int(server_ts)
-        except:
-            pass
-
-        # Executa na thread principal (biblioteca não é async)
-        # Passa o NOME (String), pois a biblioteca converte internamente
+        
+        # Executa na thread principal
         candles = await asyncio.wait_for(
             asyncio.to_thread(self.api.get_candles, asset_name, duration, amount, req_time),
             timeout=15.0
@@ -109,30 +155,24 @@ async def _get_historical_candles_patched(self, asset_name, duration, amount):
 
 AsyncExnovaService.get_historical_candles = _get_historical_candles_patched
 
-# --- 3. PATCH SERVICE EXECUTE TRADE (ADAPTADO PARA NOMES) ---
+# --- 4. PATCH SERVICE EXECUTE TRADE ---
 async def _execute_trade_robust(self, amount, active_name, direction, duration):
-    # A função buy/buy_digital da biblioteca também espera NOME (String)
     try:
         if hasattr(self, 'api') and self.api:
-            # Tenta binária normal
             status, id = await asyncio.to_thread(self.api.buy, amount, active_name, direction, duration)
             if status and id: return id
     except Exception: pass
-    
     try:
         if hasattr(self, 'api') and self.api:
-            # Tenta digital
             status, id = await asyncio.to_thread(self.api.buy_digital_spot, active_name, amount, direction, duration)
             if status and id: return id
     except Exception: pass
-    
     return None
 
 AsyncExnovaService.execute_trade = _execute_trade_robust
 
-# --- 4. CORREÇÃO GET_OPEN_ASSETS (RETORNA NOMES STRING) ---
+# --- 5. CORREÇÃO GET_OPEN_ASSETS ---
 async def _get_open_assets_fix(self):
-    # Retorna Strings compatíveis com a biblioteca
     return [
         "EURUSD-OTC", "GBPUSD-OTC", "USDJPY-OTC", "EURJPY-OTC", 
         "USDCHF-OTC", "AUDCAD-OTC", "NZDUSD-OTC", "EURGBP-OTC", "AUDUSD-OTC",
@@ -141,7 +181,7 @@ async def _get_open_assets_fix(self):
 
 AsyncExnovaService.get_open_assets = _get_open_assets_fix
 
-# --- 5. PATCH: RECONEXÃO LIMPA ---
+# --- 6. PATCH: RECONEXÃO LIMPA ---
 async def _connect_fresh_instance(self):
     try:
         if hasattr(self, 'api') and self.api is not None:
@@ -150,7 +190,6 @@ async def _connect_fresh_instance(self):
             self.api = None 
 
         from exnovaapi.stable_api import Exnova, ExnovaAPI
-        
         try:
             self.api = Exnova("exnova.com", self.email, self.password)
         except NameError:
@@ -164,7 +203,7 @@ async def _connect_fresh_instance(self):
 
 AsyncExnovaService.connect = _connect_fresh_instance
 
-# --- 6. PATCH: INDICADORES ---
+# --- 7. PATCH: INDICADORES E SOCKET ---
 def _convert_candles_to_dataframe_fix(candles):
     if not candles: return pd.DataFrame()
     normalized = []
@@ -234,7 +273,6 @@ ti.validate_reversal_candle = _validate_reversal_candle_fix
 ti.check_candlestick_pattern = _check_candlestick_pattern_fix
 ti.check_rsi_condition = _check_rsi_condition_fix
 
-# --- 7. PATCH: SOCKET SAFETY ---
 def _safe_send_websocket_request(self, name, msg, request_id=""):
     try:
         if self.websocket and self.websocket.sock and self.websocket.sock.connected:
@@ -275,6 +313,10 @@ class TradingBot:
             logger.setLevel(logging.CRITICAL)
             logger.propagate = False
 
+    def _get_asset_id(self, asset_name):
+        # Apenas retorna o nome limpo (STRING), não ID
+        return asset_name.replace(" (OTC)", "-OTC").strip()
+
     async def logger(self, level: str, message: str):
         ts = datetime.utcnow().isoformat()
         print(f"[{ts}] [{level.upper()}] {message}", flush=True)
@@ -296,7 +338,6 @@ class TradingBot:
             self.daily_losses = 0
             self.last_daily_reset_date = current_date_utc
             try:
-                # Agora usamos o método com timeout, não o loop infinito
                 bal = await self.exnova.get_current_balance()
                 if bal and float(bal) > 0: 
                     await asyncio.to_thread(self.supabase.update_config, {'daily_initial_balance': bal, 'current_balance': bal})
@@ -368,14 +409,12 @@ class TradingBot:
 
     async def run_analysis_for_timeframe(self, timeframe_seconds: int, expiration_minutes: int):
         try:
-            # Protege contra travamento no balance
             try:
                 await asyncio.wait_for(self.exnova.change_balance(self.bot_config.get('account_type', 'PRACTICE')), timeout=2.0)
             except: pass
 
             assets = await _get_open_assets_fix(None)
             
-            # Filtro de blacklist simples
             available_assets = []
             for asset in assets:
                 if asset not in self.blacklisted_assets:
@@ -385,7 +424,6 @@ class TradingBot:
                 available_assets = assets
 
             def get_asset_score(asset_name):
-                # asset_name aqui é STRING (ex: EURUSD-OTC)
                 stats = self.asset_performance.get(asset_name, {'wins': 0, 'losses': 0})
                 total = stats['wins'] + stats['losses']
                 return stats['wins'] / total if total > 0 else 0.5
@@ -412,7 +450,6 @@ class TradingBot:
             await self.logger('ERROR', f"Erro em run_analysis: {e}")
 
     async def _analyze_asset(self, full_name: str, timeframe_seconds: int, expiration_minutes: int):
-        # NÃO CONVERTE MAIS PARA ID. USA O NOME (STRING) DIRETO.
         if full_name in self.active_trading_pairs: return
 
         try:
@@ -420,8 +457,8 @@ class TradingBot:
             elif expiration_minutes == 5: t1, t2, res_func = 300, 3600, get_h1_sr_zones
             else: return
 
-            # DEBUG ATIVADO
-            print(f"[DEBUG] Analisando: {full_name}")
+            # DEBUG
+            # print(f"[DEBUG] Analisando: {full_name}")
 
             try:
                 candles = await asyncio.gather(
@@ -432,7 +469,6 @@ class TradingBot:
 
             analysis_candles, sr_candles = candles
             if not analysis_candles:
-                print(f"[DEBUG] Velas vazias para {full_name}")
                 return
 
             analysis_candles_objs = []
@@ -510,7 +546,6 @@ class TradingBot:
             pass
 
     async def _execute_martingale_trade(self, pair: str):
-        # pair aqui é o NOME (String)
         trade_info = self.pending_martingale_trades.pop(pair, None)
         if not trade_info: return
         self.active_trading_pairs.add(pair)
@@ -538,12 +573,9 @@ class TradingBot:
         return round(base_val * (factor ** level_calc), 2)
 
     async def _execute_and_wait(self, signal: TradeSignal, full_name: str, expiration: int):
-        # full_name é o nome do ativo (String)
         try:
             is_gale = "Gale" in signal.strategy or "Martingale" in signal.strategy
             val = self._get_entry_value(signal.pair, is_martingale=is_gale)
-            
-            # NÃO PEGA MAIS ID. USA O NOME DIRETO.
             active_name = full_name 
             
             oid = None
