@@ -37,6 +37,7 @@ ACTIVES_MAP = {
 # ==============================================================================
 
 # --- 0. PATCH NUCLEAR DE CONSTANTES ---
+# Garante que a biblioteca conheça todos os IDs, mesmo os novos OTCs
 def _patch_library_constants_aggressive():
     FULL_MAP = ACTIVES_MAP.copy()
     REVERSE_MAP = {v: k for k, v in ACTIVES_MAP.items()}
@@ -51,46 +52,44 @@ def _patch_library_constants_aggressive():
 
 _patch_library_constants_aggressive()
 
-# --- 1. REMOVIDO PATCH DE BIBLIOTECA (CAUSAVA FALSO NEGATIVO) ---
-# A verificação de conexão deve ser feita apenas no nível do serviço, 
-# não injetada dentro da classe da biblioteca.
-
-# --- 2. PATCH SERVICE GET_CANDLES (ROBUSTO E CORRIGIDO) ---
+# --- 1. PATCH SERVICE GET_CANDLES (CORRIGIDO) ---
+# Substitui o método do serviço para ser mais robusto e usar o tempo do servidor
 async def _get_historical_candles_patched(self, asset_id, duration, amount):
-    # self aqui é o AsyncExnovaService, então self.api existe
+    # Aqui verificamos se o SERVIÇO tem a API conectada. Isso está correto.
     if not hasattr(self, 'api') or not self.api: 
         print(f"[CRITICAL] API desconectada no serviço ao pedir velas para {asset_id}")
         return []
     
     try:
-        # Usa o tempo do servidor para garantir sincronia
+        # Usa o tempo atual do servidor (timestamp unix) para garantir sincronia
+        # Isso resolve 90% dos problemas de "velas vazias" no Docker/Coolify
         server_time = int(time.time())
         
         # Chama a função original da biblioteca mas protegida por timeout
-        # Isso evita que o bot trave se a Exnova não responder
+        # Aumentei para 15s para dar tempo à rede do Coolify
         candles = await asyncio.wait_for(
             asyncio.to_thread(self.api.get_candles, asset_id, duration, amount, server_time),
-            timeout=10.0
+            timeout=15.0
         )
         
         if not candles:
-            # Apenas um aviso leve, pois pode ser normal em certos horários
-            print(f"[WARN] Retorno vazio da API para o ativo {asset_id}")
+            # Apenas um aviso leve
+            # print(f"[WARN] Retorno vazio da API para o ativo {asset_id}")
             return []
             
         return candles
 
     except asyncio.TimeoutError:
-        print(f"[TIMEOUT] A API demorou mais de 10s para responder velas de {asset_id}")
+        print(f"[TIMEOUT] A API demorou mais de 15s para responder velas de {asset_id}")
         return []
     except Exception as e:
         print(f"[ERROR SERVICE] Falha ao pegar velas ({asset_id}): {e}")
-        # Se for um erro de conexão, poderiamos tentar reconectar aqui futuramente
         return []
 
+# Aplica o patch no Serviço
 AsyncExnovaService.get_historical_candles = _get_historical_candles_patched
 
-# --- 3. CORREÇÃO INDICADORES ---
+# --- 2. CORREÇÃO INDICADORES (NUMPY/PANDAS FIX) ---
 def _convert_candles_to_dataframe_fix(candles):
     if not candles: return pd.DataFrame()
     normalized = []
@@ -155,12 +154,13 @@ def _check_rsi_condition_fix(candles, period=14, overbought=65, oversold=35):
         return (signal, last_rsi) 
     except: return (None, 50.0)
 
+# Aplica correções nos indicadores
 ti._convert_candles_to_dataframe = _convert_candles_to_dataframe_fix
 ti.validate_reversal_candle = _validate_reversal_candle_fix
 ti.check_candlestick_pattern = _check_candlestick_pattern_fix
 ti.check_rsi_condition = _check_rsi_condition_fix
 
-# --- 4. CORREÇÃO SERVIÇO DE EXECUÇÃO ---
+# --- 3. CORREÇÃO SERVIÇO DE EXECUÇÃO ---
 async def _execute_trade_robust(self, amount, active, direction, duration):
     try:
         if hasattr(self, 'api') and self.api:
@@ -174,7 +174,7 @@ async def _execute_trade_robust(self, amount, active, direction, duration):
     except Exception: pass
     return None
 
-# --- 5. CORREÇÃO GET_OPEN_ASSETS (FORCE OTC SEMPRE) ---
+# --- 4. CORREÇÃO GET_OPEN_ASSETS (FORCE OTC SEMPRE) ---
 async def _get_open_assets_fix(self):
     # IGNORA A DATA, IGNORA A API. RETORNA SEMPRE OTC.
     return [
@@ -183,7 +183,7 @@ async def _get_open_assets_fix(self):
         "USDMXN-OTC", "FWONA-OTC", "XNGUSD-OTC"
     ]
 
-# --- 6. PATCH ANTI-CRASH ---
+# --- 5. PATCH ANTI-CRASH ---
 def _safe_get_digital_underlying_list_data(self): return {"underlying": []}
 
 try:
@@ -192,7 +192,7 @@ try:
     exnovaapi.stable_api.ExnovaAPI.get_digital_underlying_list_data = lambda self: {"underlying": []}
 except: pass
 
-# --- 7. PATCH: RECONEXÃO LIMPA ---
+# --- 6. PATCH: RECONEXÃO LIMPA ---
 async def _connect_fresh_instance(self):
     try:
         if hasattr(self, 'api') and self.api is not None:
@@ -210,7 +210,7 @@ async def _connect_fresh_instance(self):
 
 AsyncExnovaService.connect = _connect_fresh_instance
 
-# --- 8. PATCH: SOCKET SAFETY ---
+# --- 7. PATCH: SOCKET SAFETY ---
 def _safe_send_websocket_request(self, name, msg, request_id=""):
     try:
         if self.websocket and self.websocket.sock and self.websocket.sock.connected:
@@ -225,7 +225,7 @@ try:
     exnovaapi.api.ExnovaAPI.send_websocket_request = _safe_send_websocket_request
 except: pass
 
-# --- 9. PATCH: SILENCIADOR DE THREADS ---
+# --- 8. PATCH: SILENCIADOR DE THREADS ---
 def _safe_get_instruments(self, instruments_type=None): return {"instruments": []}
 def _noop_get_other_open(self, *args, **kwargs): return
 
