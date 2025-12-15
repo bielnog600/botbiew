@@ -20,7 +20,7 @@ class Settings:
     
     # Valor da Entrada Inicial
     try:
-        AMOUNT = float(os.getenv("AMOUNT", 400.0))
+        AMOUNT = float(os.getenv("AMOUNT", 500.0))
     except:
         AMOUNT = 1.0
 
