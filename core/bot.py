@@ -299,7 +299,6 @@ class TradingBot:
 
     def _is_socket_connected(self):
         # USA O MÉTODO OFICIAL DA BIBLIOTECA
-        # Isso evita falsos negativos que causam loops de reconexão
         try:
             if not self.exnova.api:
                 return False
@@ -331,7 +330,6 @@ class TradingBot:
                     GLOBAL_TIME_OFFSET = 0
                 else:
                     GLOBAL_TIME_OFFSET = int(offset)
-                    # print(f"[TIME SYNC] Sucesso. Offset: {GLOBAL_TIME_OFFSET}s")
             else:
                 GLOBAL_TIME_OFFSET = 0
 
@@ -430,10 +428,13 @@ class TradingBot:
     async def run_analysis_for_timeframe(self, timeframe_seconds: int, expiration_minutes: int):
         try:
             try:
+                # DEBUG VISUAL ATIVO
                 bal = await self.exnova.get_current_balance()
-                # print(f"[STATUS] Saldo: {bal}")
+                print(f"[STATUS] Saldo: {bal} | {expiration_minutes}M Scan")
+                # Keep Alive
                 await asyncio.wait_for(self.exnova.change_balance(self.bot_config.get('account_type', 'PRACTICE')), timeout=2.0)
-            except: pass
+            except Exception as e:
+                print(f"[STATUS ERROR] Falha no Saldo: {e}")
 
             assets = await _get_open_assets_fix(None)
             available_assets = [a for a in assets if a not in self.blacklisted_assets]
@@ -469,7 +470,8 @@ class TradingBot:
             elif expiration_minutes == 5: t1, t2, res_func = 300, 3600, get_h1_sr_zones
             else: return
 
-            # print(f"[DEBUG] Analisando: {full_name}")
+            # DEBUG VISUAL ATIVO
+            print(f"[DEBUG] Analisando: {full_name}")
 
             try:
                 candles = await asyncio.gather(
@@ -480,7 +482,8 @@ class TradingBot:
 
             analysis_candles, sr_candles = candles
             if not analysis_candles:
-                # print(f"[DEBUG] Velas vazias: {full_name}")
+                # DEBUG VISUAL ATIVO
+                print(f"[DEBUG] Velas vazias: {full_name}")
                 return
 
             analysis_candles_objs = []
@@ -504,6 +507,7 @@ class TradingBot:
             rsi_res = ti.check_rsi_condition(analysis_candles_objs) 
             rsi_sig, rsi_val = rsi_res if isinstance(rsi_res, tuple) else (None, 50.0)
             
+            # DEBUG VISUAL ATIVO
             msg = f"ANALISE_DETALHADA::{full_name}::Preço:{close_price:.5f}::RSI:{rsi_val:.1f}"
             await self.logger('DEBUG', msg)
 
