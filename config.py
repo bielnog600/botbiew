@@ -16,13 +16,13 @@ class Settings:
     
     # Tipo de Conta: "REAL" ou "PRACTICE"
     # Se não estiver definido no .env, usa PRACTICE por segurança
-    MODE = os.getenv("MODE", "REAL").upper()
+    MODE = os.getenv("MODE", "PRACTICE").upper()
     
     # Valor da Entrada Inicial
     try:
         AMOUNT = float(os.getenv("AMOUNT", 4.0))
     except:
-        AMOUNT = 4.0
+        AMOUNT = 40.0
 
     # Configurações de Martingale
     try:
