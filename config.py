@@ -20,17 +20,17 @@ class Settings:
     
     # Valor da Entrada Inicial
     try:
-        AMOUNT = float(os.getenv("AMOUNT", 4.0))
+        AMOUNT = float(os.getenv("AMOUNT", 400.0))
     except:
-        AMOUNT = 40.0
+        AMOUNT = 1.0
 
     # Configurações de Martingale
     try:
-        MARTINGALE_LEVELS = int(os.getenv("MARTINGALE_LEVELS", 2))
-        MARTINGALE_FACTOR = float(os.getenv("MARTINGALE_FACTOR", 2.2))
+        MARTINGALE_LEVELS = int(os.getenv("MARTINGALE_LEVELS", 1))
+        MARTINGALE_FACTOR = float(os.getenv("MARTINGALE_FACTOR", 2.3))
     except:
-        MARTINGALE_LEVELS = 1
-        MARTINGALE_FACTOR = 2.3
+        MARTINGALE_LEVELS = 2
+        MARTINGALE_FACTOR = 2.2
 
     # Proxy (Opcional)
     EXNOVA_PROXY = os.getenv("EXNOVA_PROXY")
