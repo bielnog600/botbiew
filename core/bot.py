@@ -21,11 +21,8 @@ from core.data_models import TradeSignal
 #                       CONSTANTES GERAIS (PARES REAIS + OTC)
 # ==============================================================================
 ACTIVES_MAP = {
-    # Pares Reais (Dias Úteis)
     "EURUSD": 1, "EURGBP": 2, "GBPJPY": 3, "EURJPY": 4, "GBPUSD": 5, "USDJPY": 6, "AUDCAD": 7, "NZDUSD": 8, 
     "USDCHF": 72, "AUDUSD": 99, "USDCAD": 100, "AUDJPY": 101, "GBPCAD": 102, "GBPCHF": 103, "EURCAD": 105,
-    
-    # Pares OTC (Fim de Semana / Noite)
     "EURUSD-OTC": 76, "EURGBP-OTC": 77, "USDCHF-OTC": 78, "EURJPY-OTC": 79, "NZDUSD-OTC": 80, "GBPUSD-OTC": 81,
     "GBPJPY-OTC": 84, "USDJPY-OTC": 85, "AUDCAD-OTC": 86, "AUDUSD-OTC": 2111, "USDCAD-OTC": 2112, 
     "USDMXN-OTC": 1548, "FWONA-OTC": 2169, "XNGUSD-OTC": 2170, "AUDJPY-OTC": 2113, "GBPCAD-OTC": 2114,
@@ -36,88 +33,82 @@ ACTIVES_MAP = {
 #                       MONKEY PATCHES (SISTEMA DE SUPORTE DE VIDA)
 # ==============================================================================
 
-# --- 0. PATCH NUCLEAR DE CONSTANTES ---
-# Garante que os dicionários internos tenham todos os IDs
+# Variável Global para correção de tempo
+GLOBAL_TIME_OFFSET = 0
+
 def _patch_library_constants_aggressive():
     try:
         import exnovaapi.constants as OP_code
         OP_code.ACTIVES.update(ACTIVES_MAP)
-        # Reverso também para garantir
         REVERSE_MAP = {v: k for k, v in ACTIVES_MAP.items()}
         OP_code.ACTIVES.update(REVERSE_MAP)
     except: pass
 
 _patch_library_constants_aggressive()
 
-# --- 1. PATCH: INJEÇÃO INTELIGENTE DE GET_CANDLES (CORRIGIDO) ---
-# Agora faz a conversão de NOME -> ID antes de chamar a API
+# --- 1. PATCH: INJEÇÃO INTELIGENTE DE GET_CANDLES ---
 def _optimized_get_candles(self, active, duration, count, to):
     try:
         self.api.candles.candles_data = None
         
-        # BUSCA O ID DO ATIVO (CRÍTICO!)
-        # Se 'active' já for int, usa. Se for string, procura no mapa.
+        # Resolução de ID
         active_id = active
         if isinstance(active, str):
             import exnovaapi.constants as OP_code
             active_id = OP_code.ACTIVES.get(active, None)
             if active_id is None:
-                # Fallback para o nosso mapa local se a lib falhar
                 active_id = ACTIVES_MAP.get(active, None)
         
         if active_id is None:
-            print(f"[PATCH WARN] ID não encontrado para o ativo: {active}")
+            print(f"[PATCH ERROR] ID não encontrado: {active}")
             return []
 
-        # Envia pedido com o ID (Inteiro)
+        # LOG DE DIAGNÓSTICO (Para entendermos o erro no Coolify)
+        # print(f"[PATCH DEBUG] Pedindo Velas -> ID: {active_id} | Time: {to} | Active: {active}")
+
         self.api.getcandles(active_id, duration, count, to)
         
-        # Loop de espera com timeout seguro
+        # Espera com timeout aumentado
         start = time.time()
         while self.api.candles.candles_data is None:
-            if time.time() - start > 10:
+            if time.time() - start > 20: # 20s timeout
+                print(f"[PATCH TIMEOUT] Sem resposta de velas para {active} (ID {active_id})")
                 return []
-            time.sleep(0.01)
+            time.sleep(0.05)
             
         return self.api.candles.candles_data
     except Exception as e:
-        print(f"[PATCH ERROR] Falha em _optimized_get_candles: {e}")
+        print(f"[PATCH EXCEPTION] {e}")
         return []
 
-# --- 2. PATCH: CORREÇÃO DE TRAVAMENTO NO SALDO E PERFIL ---
+# --- 2. PATCH: BALANCE ---
 def _optimized_get_balances(self):
     self.api.balances_raw = None
     try:
         self.api.get_balances()
     except Exception:
         return {"msg": []}
-        
     start = time.time()
     while self.api.balances_raw is None:
-        if time.time() - start > 5: 
-            return {"msg": []} 
+        if time.time() - start > 10: return {"msg": []} 
         time.sleep(0.1)
     return self.api.balances_raw
 
 def _optimized_get_profile_ansyc(self):
     start = time.time()
     while self.api.profile.msg is None:
-        if time.time() - start > 5:
-            return None
+        if time.time() - start > 10: return None
         time.sleep(0.1)
     return self.api.profile.msg
 
-# Aplicação dos Patches na Classe Detectada
+# Aplicação dos Patches
 try:
     import exnovaapi.stable_api
-    
     TargetClass = None
     if hasattr(exnovaapi.stable_api, 'Exnova'):
         TargetClass = exnovaapi.stable_api.Exnova
-        print("[SYSTEM] Classe 'Exnova' detectada. Aplicando patches de segurança.")
     elif hasattr(exnovaapi.stable_api, 'ExnovaAPI'):
         TargetClass = exnovaapi.stable_api.ExnovaAPI
-        print("[SYSTEM] Classe 'ExnovaAPI' detectada. Aplicando patches de segurança.")
 
     if TargetClass:
         TargetClass.get_candles = _optimized_get_candles
@@ -128,34 +119,34 @@ try:
         TargetClass._ExnovaAPI__get_other_open = lambda self, *args, **kwargs: None
         if hasattr(TargetClass, '_Exnova__get_other_open'):
              TargetClass._Exnova__get_other_open = lambda self, *args, **kwargs: None
-
 except ImportError:
     pass
 
-
-# --- 3. PATCH SERVICE GET_CANDLES (MODO SIMPLES) ---
+# --- 3. PATCH SERVICE GET_CANDLES ---
 async def _get_historical_candles_patched(self, asset_name, duration, amount):
-    if not hasattr(self, 'api') or not self.api: 
-        return []
-    
+    if not hasattr(self, 'api') or not self.api: return []
     try:
-        # Usa APENAS o tempo do sistema
-        req_time = int(time.time())
+        # Lógica de Tempo Sincronizado
+        # Se tivermos um offset calculado (sync_time), usamos ele
+        # Senão, usamos o tempo local
+        local_time = int(time.time())
+        req_time = local_time - GLOBAL_TIME_OFFSET
         
-        # Executa na thread principal
+        # Debug pontual para verificar drift
+        # print(f"[TIME DEBUG] Local: {local_time} | Offset: {GLOBAL_TIME_OFFSET} | Request: {req_time}")
+
         candles = await asyncio.wait_for(
             asyncio.to_thread(self.api.get_candles, asset_name, duration, amount, req_time),
-            timeout=15.0
+            timeout=25.0
         )
         return candles or []
-
     except Exception as e:
         print(f"[ERROR SERVICE] Falha velas ({asset_name}): {e}")
         return []
 
 AsyncExnovaService.get_historical_candles = _get_historical_candles_patched
 
-# --- 4. PATCH SERVICE EXECUTE TRADE ---
+# --- 4. PATCH EXECUTE TRADE ---
 async def _execute_trade_robust(self, amount, active_name, direction, duration):
     try:
         if hasattr(self, 'api') and self.api:
@@ -171,39 +162,33 @@ async def _execute_trade_robust(self, amount, active_name, direction, duration):
 
 AsyncExnovaService.execute_trade = _execute_trade_robust
 
-# --- 5. CORREÇÃO GET_OPEN_ASSETS ---
+# --- 5. PATCH ASSETS ---
 async def _get_open_assets_fix(self):
     return [
         "EURUSD-OTC", "GBPUSD-OTC", "USDJPY-OTC", "EURJPY-OTC", 
         "USDCHF-OTC", "AUDCAD-OTC", "NZDUSD-OTC", "EURGBP-OTC", "AUDUSD-OTC",
         "USDMXN-OTC", "FWONA-OTC", "XNGUSD-OTC"
     ]
-
 AsyncExnovaService.get_open_assets = _get_open_assets_fix
 
-# --- 6. PATCH: RECONEXÃO LIMPA ---
+# --- 6. PATCH CONNECT ---
 async def _connect_fresh_instance(self):
     try:
         if hasattr(self, 'api') and self.api is not None:
             try: self.api.websocket_client.close()
             except: pass
             self.api = None 
-
         from exnovaapi.stable_api import Exnova, ExnovaAPI
-        try:
-            self.api = Exnova("exnova.com", self.email, self.password)
-        except NameError:
-             self.api = ExnovaAPI("exnova.com", self.email, self.password)
-             
+        try: self.api = Exnova("exnova.com", self.email, self.password)
+        except NameError: self.api = ExnovaAPI("exnova.com", self.email, self.password)
         check = await asyncio.to_thread(self.api.connect)
         return check
     except Exception as e:
-        print(f"[EXNOVA EXCEPTION] Erro crítico ao conectar: {e}")
+        print(f"[EXNOVA EXCEPTION] Conexão: {e}")
         return False
-
 AsyncExnovaService.connect = _connect_fresh_instance
 
-# --- 7. PATCH: INDICADORES E SOCKET ---
+# --- 7. INDICADORES ---
 def _convert_candles_to_dataframe_fix(candles):
     if not candles: return pd.DataFrame()
     normalized = []
@@ -260,11 +245,9 @@ def _check_rsi_condition_fix(candles, period=14, overbought=65, oversold=35):
         ma_down = down.ewm(com=period - 1, adjust=True, min_periods=period).mean()
         rsi = 100 - (100 / (1 + (ma_up / ma_down)))
         last_rsi = rsi.iloc[-1]
-        
         signal = None
         if last_rsi >= overbought: signal = 'put'
         elif last_rsi <= oversold: signal = 'call'
-        
         return (signal, last_rsi) 
     except: return (None, 50.0)
 
@@ -307,14 +290,13 @@ class TradingBot:
         self.daily_wins = 0
         self.daily_losses = 0
 
-        # SUPRESSÃO AGRESSIVA DE LOGS
+        # SUPRESSÃO DE LOGS
         for logger_name in ["websocket", "exnovaapi", "iqoptionapi", "urllib3", "iqoptionapi.websocket.client"]:
             logger = logging.getLogger(logger_name)
             logger.setLevel(logging.CRITICAL)
             logger.propagate = False
 
     def _get_asset_id(self, asset_name):
-        # Apenas retorna o nome limpo (STRING), não ID
         return asset_name.replace(" (OTC)", "-OTC").strip()
 
     async def logger(self, level: str, message: str):
@@ -323,13 +305,35 @@ class TradingBot:
         try: await asyncio.to_thread(self.supabase.insert_log, level, message)
         except: pass
 
-    async def _hourly_cycle_reset(self):
-        await self.logger('INFO', "CICLO HORÁRIO: Limpeza de stats.")
-        self.asset_performance.clear()
-        self.consecutive_losses.clear()
-        self.blacklisted_assets.clear()
-        self.last_reset_time = datetime.utcnow()
-        
+    async def _sync_time(self):
+        # CALCULA O OFFSET DE TEMPO (CRÍTICO PARA DOCKER)
+        global GLOBAL_TIME_OFFSET
+        try:
+            if hasattr(self.exnova.api, 'get_server_timestamp'):
+                server_ts = self.exnova.api.get_server_timestamp()
+                local_ts = time.time()
+                # Se server_ts for muito pequeno (segundos) ou muito grande (ms), ajusta
+                # Geralmente exnova retorna em segundos ou ms. Vamos assumir segundos se < 3000000000
+                
+                # Se a lib não tiver get_server_timestamp implementado corretamente,
+                # tentamos forçar via propriedade
+                if server_ts == 0 and hasattr(self.exnova.api.api, 'timesync'):
+                     server_ts = self.exnova.api.api.timesync.server_timestamp
+
+                if server_ts > 0:
+                    # Ajuste de escala se necessário (ms para s)
+                    if server_ts > 3000000000: server_ts /= 1000
+                    
+                    offset = local_ts - server_ts
+                    GLOBAL_TIME_OFFSET = int(offset) # Arredonda para seg
+                    # print(f"[TIME SYNC] Local: {local_ts:.2f} | Server: {server_ts:.2f} | Offset: {GLOBAL_TIME_OFFSET}s")
+                    
+                    # Se o offset for muito grande (>1h), alerta
+                    if abs(GLOBAL_TIME_OFFSET) > 3600:
+                        print("[WARN] Diferença de horário muito grande entre VPS e Broker!")
+        except Exception as e:
+            print(f"[TIME SYNC ERROR] {e}")
+
     async def _daily_reset_if_needed(self):
         current_date_utc = datetime.utcnow().date()
         if self.last_daily_reset_date != current_date_utc:
@@ -341,17 +345,25 @@ class TradingBot:
                 bal = await self.exnova.get_current_balance()
                 if bal and float(bal) > 0: 
                     await asyncio.to_thread(self.supabase.update_config, {'daily_initial_balance': bal, 'current_balance': bal})
-            except Exception: 
-                pass
+            except: pass
+
+    async def _hourly_cycle_reset(self):
+        await self.logger('INFO', "CICLO HORÁRIO: Limpeza de stats.")
+        self.asset_performance.clear()
+        self.consecutive_losses.clear()
+        self.blacklisted_assets.clear()
+        self.last_reset_time = datetime.utcnow()
 
     async def run(self):
         await self.logger('INFO', 'Bot a iniciar no modo FORCE OTC ALWAYS...')
         if not await self.exnova.connect(): await self.logger('ERROR', 'Falha na conexão inicial.')
         
         await self._daily_reset_if_needed()
+        _patch_library_constants_aggressive()
 
-        print("[SYSTEM] Aqueçendo API (Warmup 5s)...")
-        await asyncio.sleep(5) 
+        print("[SYSTEM] Sincronizando Relógio e API...")
+        await asyncio.sleep(5)
+        await self._sync_time() # Sincroniza tempo antes de começar
 
         print("[SYSTEM] Loop principal iniciado...")
         
@@ -368,7 +380,8 @@ class TradingBot:
                     print("[AVISO] Conexão perdida. Reconectando...")
                     if await self.exnova.connect():
                         await self.logger('SUCCESS', 'Reconectado.')
-                        await asyncio.sleep(3) 
+                        await asyncio.sleep(3)
+                        await self._sync_time() # Re-sincroniza ao reconectar
                     else:
                         await asyncio.sleep(5)
                         continue
@@ -410,22 +423,15 @@ class TradingBot:
     async def run_analysis_for_timeframe(self, timeframe_seconds: int, expiration_minutes: int):
         try:
             try:
-                # DEBUG DE VIDA: Imprimir saldo para confirmar que a conexão está viva
-                bal = await self.exnova.get_current_balance()
-                print(f"[MONITOR] Saldo Atual: {bal} (Varredura Ativa)")
-                
+                # Refresh Saldo para manter conexão viva
                 await asyncio.wait_for(self.exnova.change_balance(self.bot_config.get('account_type', 'PRACTICE')), timeout=2.0)
+                bal = await self.exnova.get_current_balance()
+                print(f"[STATUS] Saldo: {bal} | {expiration_minutes}M Scan")
             except: pass
 
             assets = await _get_open_assets_fix(None)
-            
-            available_assets = []
-            for asset in assets:
-                if asset not in self.blacklisted_assets:
-                    available_assets.append(asset)
-            
-            if not available_assets:
-                available_assets = assets
+            available_assets = [a for a in assets if a not in self.blacklisted_assets]
+            if not available_assets: available_assets = assets
 
             def get_asset_score(asset_name):
                 stats = self.asset_performance.get(asset_name, {'wins': 0, 'losses': 0})
@@ -433,7 +439,6 @@ class TradingBot:
                 return stats['wins'] / total if total > 0 else 0.5
 
             target_assets = sorted(available_assets, key=get_asset_score, reverse=True)[:15]
-            
             max_sim = self.bot_config.get('max_simultaneous_trades', 1)
             if len(self.active_trading_pairs) >= max_sim: return
 
@@ -441,13 +446,10 @@ class TradingBot:
                 try:
                     if not self.exnova.api: break
                 except: break
-
                 if asset_name in self.active_trading_pairs: continue
-                
                 try:
                     await self._analyze_asset(asset_name, timeframe_seconds, expiration_minutes)
                 except Exception: pass
-                
                 await asyncio.sleep(4.0)
 
         except Exception as e:
@@ -461,8 +463,7 @@ class TradingBot:
             elif expiration_minutes == 5: t1, t2, res_func = 300, 3600, get_h1_sr_zones
             else: return
 
-            # DEBUG ATIVADO: Mostra que está a analisar
-            print(f"[DEBUG] Analisando: {full_name}")
+            # print(f"[DEBUG] Analisando: {full_name}")
 
             try:
                 candles = await asyncio.gather(
@@ -473,12 +474,8 @@ class TradingBot:
 
             analysis_candles, sr_candles = candles
             if not analysis_candles:
-                # DEBUG ATIVADO: Mostra se vier vazio
-                print(f"[DEBUG] Velas vazias para {full_name}")
+                # print(f"[DEBUG] Velas vazias: {full_name}")
                 return
-            
-            # DEBUG SUCESSO: Confirma que recebeu velas
-            print(f"[DEBUG] Recebidas {len(analysis_candles)} velas para {full_name}")
 
             analysis_candles_objs = []
             for c in analysis_candles:
@@ -509,7 +506,7 @@ class TradingBot:
                 pattern = ti.check_candlestick_pattern(analysis_candles_objs)
                 
                 if sr_signal:
-                    print(f"[SINAL M1] {full_name}: SR {sr_signal} detetado. Analisando...")
+                    print(f"[SINAL M1] {full_name}: SR {sr_signal}. RSI {rsi_val:.1f}")
                     confluences.append("SR_Zone")
                     if pattern == sr_signal: confluences.append("Candle_Pattern")
                     if rsi_sig == sr_signal: confluences.append("RSI_Condition")
