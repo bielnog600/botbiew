@@ -51,67 +51,41 @@ def _patch_library_constants_aggressive():
 
 _patch_library_constants_aggressive()
 
-# --- 1. PROXY SEGURO PARA GET_CANDLES (COM DEBUG ATIVADO) ---
-def _proxy_get_candles(self, active, size, count=100, to=None):
-    if not hasattr(self, "api") or self.api is None: 
-        print(f"[CRITICAL DEBUG] API não inicializada ao tentar pegar velas para {active}")
-        return []
-    
-    if to is None: to = int(time.time())
-    else: to = int(to)
-    
-    try: 
-        # Tenta pegar as velas
-        candles = self.api.get_candles(active, size, count, to)
-        # Se retornou vazio mas sem erro, avisa
-        if not candles:
-            # Tenta um fallback forçado se a lista vier vazia
-            print(f"[WARN DEBUG] Lista vazia nativa para {active}. Tentando reconexão rápida interna...")
-        return candles
-    except Exception as e:
-        # AQUI ESTÁ A CORREÇÃO: IMPRIMIR O ERRO REAL
-        print(f"[CRITICAL DEBUG] Erro interno get_candles({active}): {str(e)}")
-        # traceback.print_exc() # Descomentar se precisar de stack trace completo
-        return []
+# --- 1. REMOVIDO PATCH DE BIBLIOTECA (CAUSAVA FALSO NEGATIVO) ---
+# A verificação de conexão deve ser feita apenas no nível do serviço, 
+# não injetada dentro da classe da biblioteca.
 
-try:
-    import exnovaapi.stable_api
-    if not hasattr(exnovaapi.stable_api.ExnovaAPI, 'get_candles'):
-        exnovaapi.stable_api.ExnovaAPI.get_candles = _proxy_get_candles
-    else:
-        # Forçamos o override mesmo se existir, para capturar o erro
-        exnovaapi.stable_api.ExnovaAPI.get_candles = _proxy_get_candles
-except: pass
-
-try:
-    import iqoptionapi.stable_api
-    if not hasattr(iqoptionapi.stable_api.IQOptionAPI, 'get_candles'):
-        iqoptionapi.stable_api.IQOptionAPI.get_candles = _proxy_get_candles
-    else:
-        iqoptionapi.stable_api.IQOptionAPI.get_candles = _proxy_get_candles
-except: pass
-
-# --- 2. PATCH SERVICE GET_CANDLES (COM DEBUG ATIVADO) ---
+# --- 2. PATCH SERVICE GET_CANDLES (ROBUSTO E CORRIGIDO) ---
 async def _get_historical_candles_patched(self, asset_id, duration, amount):
+    # self aqui é o AsyncExnovaService, então self.api existe
+    if not hasattr(self, 'api') or not self.api: 
+        print(f"[CRITICAL] API desconectada no serviço ao pedir velas para {asset_id}")
+        return []
+    
     try:
-        if not self.api: 
-            print("[CRITICAL DEBUG] Self.api é None no Service")
-            return []
-        
-        # Log de tempo para verificar dessincronização no Coolify
+        # Usa o tempo do servidor para garantir sincronia
         server_time = int(time.time())
-        # print(f"[DEBUG TIME] Server Time: {server_time} | Asset: {asset_id}")
-
+        
+        # Chama a função original da biblioteca mas protegida por timeout
+        # Isso evita que o bot trave se a Exnova não responder
         candles = await asyncio.wait_for(
             asyncio.to_thread(self.api.get_candles, asset_id, duration, amount, server_time),
-            timeout=12.0 # Aumentei um pouco o timeout
+            timeout=10.0
         )
-        return candles or []
+        
+        if not candles:
+            # Apenas um aviso leve, pois pode ser normal em certos horários
+            print(f"[WARN] Retorno vazio da API para o ativo {asset_id}")
+            return []
+            
+        return candles
+
     except asyncio.TimeoutError:
-        print(f"[CRITICAL DEBUG] Timeout ao buscar velas para {asset_id}")
+        print(f"[TIMEOUT] A API demorou mais de 10s para responder velas de {asset_id}")
         return []
     except Exception as e:
-        print(f"[CRITICAL DEBUG] Erro Async Service ({asset_id}): {e}")
+        print(f"[ERROR SERVICE] Falha ao pegar velas ({asset_id}): {e}")
+        # Se for um erro de conexão, poderiamos tentar reconectar aqui futuramente
         return []
 
 AsyncExnovaService.get_historical_candles = _get_historical_candles_patched
