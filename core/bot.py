@@ -52,51 +52,69 @@ def _patch_library_constants_aggressive():
 _patch_library_constants_aggressive()
 
 # --- 1. PATCH: INJEÇÃO INTELIGENTE DE GET_CANDLES ---
-# Modificamos a classe Exnova para aceitar IDs diretamente e não bloquear
 def _optimized_get_candles(self, active, duration, count, to):
-    # 'active' aqui chega como INT (ID) vindo do bot.
-    # O método original tentaria fazer OP_code.ACTIVES[active], o que daria erro.
-    # Por isso, bypassamos e chamamos a API de baixo nível diretamente.
-    
     try:
-        # Limpa dados antigos
         self.api.candles.candles_data = None
-        
-        # Chama baixo nível passando o ID direto
         self.api.getcandles(active, duration, count, to)
-        
-        # Espera ativa com timeout curto (simula o comportamento original mas mais seguro)
         start = time.time()
         while self.api.candles.candles_data is None:
             if time.time() - start > 10:
                 return []
-            time.sleep(0.05) # Sleep curto para não queimar CPU
-            
+            time.sleep(0.05)
         return self.api.candles.candles_data
     except Exception as e:
         print(f"[PATCH ERROR] Falha em _optimized_get_candles: {e}")
         return []
 
-# Aplicar o Patch na classe correta (Exnova ou ExnovaAPI dependendo da versão)
+# --- 2. PATCH: CORREÇÃO DE TRAVAMENTO NO SALDO (NOVO) ---
+# A função original get_balances() tem um loop infinito. Corrigimos aqui.
+def _optimized_get_balances(self):
+    self.api.balances_raw = None
+    try:
+        self.api.get_balances()
+    except Exception:
+        return {"msg": []}
+        
+    start = time.time()
+    while self.api.balances_raw is None:
+        if time.time() - start > 5: # Timeout de 5 segundos
+            print("[WARN] Timeout ao buscar saldo (API lenta). Ignorando.")
+            return {"msg": []} 
+        time.sleep(0.1)
+    return self.api.balances_raw
+
+# Aplicação dos Patches na Classe Detectada
 try:
     import exnovaapi.stable_api
     
-    # No seu arquivo, a classe chama-se 'Exnova'
+    TargetClass = None
     if hasattr(exnovaapi.stable_api, 'Exnova'):
-        print("[SYSTEM] Classe 'Exnova' detectada. Aplicando patch otimizado.")
-        exnovaapi.stable_api.Exnova.get_candles = _optimized_get_candles
         TargetClass = exnovaapi.stable_api.Exnova
+        print("[SYSTEM] Classe 'Exnova' detectada. Aplicando patches de performance.")
     elif hasattr(exnovaapi.stable_api, 'ExnovaAPI'):
-        print("[SYSTEM] Classe 'ExnovaAPI' detectada. Aplicando patch otimizado.")
-        exnovaapi.stable_api.ExnovaAPI.get_candles = _optimized_get_candles
         TargetClass = exnovaapi.stable_api.ExnovaAPI
-    else:
-        print("[SYSTEM WARN] Nenhuma classe conhecida encontrada em stable_api.")
+        print("[SYSTEM] Classe 'ExnovaAPI' detectada. Aplicando patches de performance.")
+
+    if TargetClass:
+        # Aplica Candle Fix
+        TargetClass.get_candles = _optimized_get_candles
+        # Aplica Balance Fix (CRÍTICO PARA O SEU PROBLEMA)
+        TargetClass.get_balances = _optimized_get_balances
+        # Aplica Digital Fix
+        TargetClass.get_digital_underlying_list_data = lambda self: {"underlying": []}
+        # Aplica Instrument Fix
+        TargetClass.get_instruments = lambda self, *args: {"instruments": []}
+        
+        # Patch para métodos mangled (privados) que podem travar threads
+        TargetClass._ExnovaAPI__get_other_open = lambda self, *args, **kwargs: None
+        if hasattr(TargetClass, '_Exnova__get_other_open'):
+             TargetClass._Exnova__get_other_open = lambda self, *args, **kwargs: None
+
 except ImportError:
     pass
 
 
-# --- 2. PATCH SERVICE GET_CANDLES (CAMADA DE SERVIÇO) ---
+# --- 3. PATCH SERVICE GET_CANDLES (CAMADA DE SERVIÇO) ---
 async def _get_historical_candles_patched(self, asset_id, duration, amount):
     if not hasattr(self, 'api') or not self.api: 
         print(f"[CRITICAL] API desconectada no serviço ao pedir velas para {asset_id}")
@@ -104,7 +122,6 @@ async def _get_historical_candles_patched(self, asset_id, duration, amount):
     
     try:
         server_time = int(time.time())
-        # Chama a função (agora garantida pelo patch acima)
         candles = await asyncio.wait_for(
             asyncio.to_thread(self.api.get_candles, asset_id, duration, amount, server_time),
             timeout=15.0
@@ -117,7 +134,7 @@ async def _get_historical_candles_patched(self, asset_id, duration, amount):
 
 AsyncExnovaService.get_historical_candles = _get_historical_candles_patched
 
-# --- 3. CORREÇÃO INDICADORES (NUMPY/PANDAS FIX) ---
+# --- 4. CORREÇÃO INDICADORES (NUMPY/PANDAS FIX) ---
 def _convert_candles_to_dataframe_fix(candles):
     if not candles: return pd.DataFrame()
     normalized = []
@@ -188,7 +205,7 @@ ti.validate_reversal_candle = _validate_reversal_candle_fix
 ti.check_candlestick_pattern = _check_candlestick_pattern_fix
 ti.check_rsi_condition = _check_rsi_condition_fix
 
-# --- 4. CORREÇÃO SERVIÇO DE EXECUÇÃO ---
+# --- 5. CORREÇÃO SERVIÇO DE EXECUÇÃO ---
 async def _execute_trade_robust(self, amount, active, direction, duration):
     try:
         if hasattr(self, 'api') and self.api:
@@ -202,27 +219,13 @@ async def _execute_trade_robust(self, amount, active, direction, duration):
     except Exception: pass
     return None
 
-# --- 5. CORREÇÃO GET_OPEN_ASSETS (FORCE OTC SEMPRE) ---
+# --- 6. CORREÇÃO GET_OPEN_ASSETS (FORCE OTC SEMPRE) ---
 async def _get_open_assets_fix(self):
-    # IGNORA A DATA, IGNORA A API. RETORNA SEMPRE OTC.
     return [
         "EURUSD-OTC", "GBPUSD-OTC", "USDJPY-OTC", "EURJPY-OTC", 
         "USDCHF-OTC", "AUDCAD-OTC", "NZDUSD-OTC", "EURGBP-OTC", "AUDUSD-OTC",
         "USDMXN-OTC", "FWONA-OTC", "XNGUSD-OTC"
     ]
-
-# --- 6. PATCH ANTI-CRASH ---
-def _safe_get_digital_underlying_list_data(self): return {"underlying": []}
-
-try:
-    import exnovaapi.stable_api
-    import types
-    # Aplica na classe Exnova se existir
-    if hasattr(exnovaapi.stable_api, 'Exnova'):
-        exnovaapi.stable_api.Exnova.get_digital_underlying_list_data = lambda self: {"underlying": []}
-    elif hasattr(exnovaapi.stable_api, 'ExnovaAPI'):
-        exnovaapi.stable_api.ExnovaAPI.get_digital_underlying_list_data = lambda self: {"underlying": []}
-except: pass
 
 # --- 7. PATCH: RECONEXÃO LIMPA E CORRETA ---
 async def _connect_fresh_instance(self):
@@ -234,8 +237,6 @@ async def _connect_fresh_instance(self):
 
         from exnovaapi.stable_api import Exnova, ExnovaAPI
         
-        # Tenta instanciar a classe "Exnova" (que é a correta no seu arquivo)
-        # Se falhar, tenta ExnovaAPI como fallback
         try:
             self.api = Exnova("exnova.com", self.email, self.password)
         except NameError:
@@ -262,19 +263,6 @@ def _safe_send_websocket_request(self, name, msg, request_id=""):
 try:
     import exnovaapi.api
     exnovaapi.api.ExnovaAPI.send_websocket_request = _safe_send_websocket_request
-except: pass
-
-# --- 9. PATCH: SILENCIADOR DE THREADS ---
-def _safe_get_instruments(self, instruments_type=None): return {"instruments": []}
-def _noop_get_other_open(self, *args, **kwargs): return
-
-try:
-    import exnovaapi.stable_api as ex_stable
-    TargetClass = ex_stable.Exnova if hasattr(ex_stable, 'Exnova') else ex_stable.ExnovaAPI
-    TargetClass.get_instruments = _safe_get_instruments
-    TargetClass._ExnovaAPI__get_other_open = _noop_get_other_open # Nome mangled antigo
-    if hasattr(TargetClass, '_Exnova__get_other_open'): # Nome mangled novo (se classe for Exnova)
-         TargetClass._Exnova__get_other_open = _noop_get_other_open
 except: pass
 
 AsyncExnovaService.execute_trade = _execute_trade_robust
@@ -307,7 +295,6 @@ class TradingBot:
             logger.propagate = False
 
     def _get_asset_id(self, asset_name):
-        # Mapeia OTC se necessário, ou retorna o próprio nome se não estiver no mapa
         name = asset_name.replace(" (OTC)", "-OTC").strip()
         if name in ACTIVES_MAP: return ACTIVES_MAP[name]
         return name
@@ -333,9 +320,13 @@ class TradingBot:
             self.daily_losses = 0
             self.last_daily_reset_date = current_date_utc
             try:
+                # DEBUG: Verificar se está travando aqui
+                print("[DEBUG] Buscando saldo diário...")
                 bal = await self.exnova.get_current_balance()
+                print(f"[DEBUG] Saldo obtido: {bal}")
                 if bal > 0: await asyncio.to_thread(self.supabase.update_config, {'daily_initial_balance': bal, 'current_balance': bal})
-            except: pass
+            except Exception as e: 
+                print(f"[DEBUG WARN] Falha ao atualizar saldo diário: {e}")
 
     async def run(self):
         await self.logger('INFO', 'Bot a iniciar no modo FORCE OTC ALWAYS...')
@@ -350,14 +341,17 @@ class TradingBot:
         await self._daily_reset_if_needed()
         _patch_library_constants_aggressive()
 
+        print("[SYSTEM] Loop principal iniciado...")
+        
         while self.is_running:
             try:
-                connected = False
-                try:
-                    if hasattr(self.exnova, 'is_connected'): connected = await self.exnova.is_connected()
-                    else: connected = True
-                except: pass
-
+                # Check rápido de conexão sem bloquear
+                connected = True
+                if hasattr(self.exnova, 'api') and self.exnova.api:
+                    if hasattr(self.exnova.api, 'websocket_client') and self.exnova.api.websocket_client:
+                         if not self.exnova.api.websocket_client.wss.connected:
+                             connected = False
+                
                 if not connected:
                     print("[AVISO] Conexão perdida. Reconectando...")
                     if await self.exnova.connect():
@@ -389,10 +383,6 @@ class TradingBot:
                 await asyncio.sleep(5)
 
     async def trading_cycle(self):
-        try:
-            if hasattr(self.exnova, 'is_connected') and not await self.exnova.is_connected(): return
-        except: pass
-
         now = datetime.utcnow()
         if now.second >= 50:
             if now.minute != self.last_analysis_minute:
@@ -412,7 +402,6 @@ class TradingBot:
                 await asyncio.wait_for(self.exnova.change_balance(self.bot_config.get('account_type', 'PRACTICE')), timeout=2.0)
             except: pass
 
-            # --- FORÇA A LISTA OTC (IGNORA API) ---
             assets = await _get_open_assets_fix(None)
             
             available_assets = []
@@ -420,7 +409,6 @@ class TradingBot:
                 if asset.split('-')[0] not in self.blacklisted_assets:
                     available_assets.append(asset)
             
-            # Garante que temos lista, mesmo se blacklist tirar tudo (impossível mas seguro)
             if not available_assets:
                 available_assets = assets
 
@@ -432,16 +420,13 @@ class TradingBot:
 
             target_assets = sorted(available_assets, key=get_asset_score, reverse=True)[:15]
             
-            # Print para sabermos que ele tem alvos
-            # print(f"[DEBUG] Ativos Alvo: {len(target_assets)} (Ex: {target_assets[:2]})")
-
             max_sim = self.bot_config.get('max_simultaneous_trades', 1)
             if len(self.active_trading_pairs) >= max_sim: return
 
             for asset in target_assets:
                 try:
-                    if hasattr(self.exnova, 'is_connected') and not await self.exnova.is_connected():
-                        break
+                    # Checagem leve de conexão
+                    if not self.exnova.api: break
                 except: break
 
                 base = asset.split('-')[0]
@@ -499,34 +484,26 @@ class TradingBot:
             threshold = self.bot_config.get('confirmation_threshold', 2)
             final_direction, confluences = None, []
 
-            # --- ANÁLISE DETALHADA ---
             close_price = float(signal_candle_obj.close)
             rsi_res = ti.check_rsi_condition(analysis_candles_objs) 
             rsi_sig, rsi_val = rsi_res if isinstance(rsi_res, tuple) else (None, 50.0)
             
-            # LOG PARA FRONTEND
             msg = f"ANALISE_DETALHADA::{full_name}::Preço:{close_price:.5f}::RSI:{rsi_val:.1f}"
             await self.logger('DEBUG', msg)
 
             if expiration_minutes == 1:
                 sr_signal = ti.check_price_near_sr(signal_candle_obj, zones)
-                
                 pattern = ti.check_candlestick_pattern(analysis_candles_objs)
-                if pattern: 
-                    await self.logger('DEBUG', f"PADRAO_DETECTADO::{full_name}::{pattern.upper()}")
-
+                
                 if sr_signal:
                     print(f"[SINAL M1] {full_name}: SR {sr_signal} detetado. Analisando...")
                     confluences.append("SR_Zone")
-                    
                     if pattern == sr_signal: confluences.append("Candle_Pattern")
                     if rsi_sig == sr_signal: confluences.append("RSI_Condition")
-                    
                     if len(confluences) >= threshold: final_direction = sr_signal
 
             elif expiration_minutes == 5:
                 m5_signal = ti.check_m5_price_action(analysis_candles_objs, zones)
-                
                 if m5_signal:
                     temp_conf = m5_signal['confluences']
                     if rsi_sig == m5_signal['direction']: temp_conf.append("RSI_Condition")
