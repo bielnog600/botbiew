@@ -58,19 +58,19 @@ def _optimized_get_candles(self, active, duration, count, to):
         # Envia pedido
         self.api.getcandles(active, duration, count, to)
         
-        # Loop de espera mais agressivo
+        # Loop de espera com timeout seguro
         start = time.time()
         while self.api.candles.candles_data is None:
             if time.time() - start > 10:
                 return []
-            time.sleep(0.01) # Check mais rápido
+            time.sleep(0.01)
             
         return self.api.candles.candles_data
     except Exception as e:
         print(f"[PATCH ERROR] Falha em _optimized_get_candles: {e}")
         return []
 
-# --- 2. PATCH: CORREÇÃO DE TRAVAMENTO NO SALDO ---
+# --- 2. PATCH: CORREÇÃO DE TRAVAMENTO NO SALDO E PERFIL ---
 def _optimized_get_balances(self):
     self.api.balances_raw = None
     try:
@@ -84,6 +84,15 @@ def _optimized_get_balances(self):
             return {"msg": []} 
         time.sleep(0.1)
     return self.api.balances_raw
+
+def _optimized_get_profile_ansyc(self):
+    # Substitui o loop infinito original por um com timeout
+    start = time.time()
+    while self.api.profile.msg is None:
+        if time.time() - start > 5:
+            return None
+        time.sleep(0.1)
+    return self.api.profile.msg
 
 # Aplicação dos Patches na Classe Detectada
 try:
@@ -100,6 +109,9 @@ try:
     if TargetClass:
         TargetClass.get_candles = _optimized_get_candles
         TargetClass.get_balances = _optimized_get_balances
+        # Patch crítico para evitar travamento no boot
+        TargetClass.get_profile_ansyc = _optimized_get_profile_ansyc
+        
         TargetClass.get_digital_underlying_list_data = lambda self: {"underlying": []}
         TargetClass.get_instruments = lambda self, *args: {"instruments": []}
         TargetClass._ExnovaAPI__get_other_open = lambda self, *args, **kwargs: None
@@ -117,10 +129,9 @@ async def _get_historical_candles_patched(self, asset_id, duration, amount):
     
     try:
         # Tenta obter o tempo do servidor da API (Sync)
-        # Se falhar, usa o tempo local menos um buffer de segurança (5s)
+        # Se falhar, usa o tempo local
         req_time = int(time.time())
         try:
-            # Tenta pegar timestamp sincronizado se disponível
             if hasattr(self.api, 'api') and hasattr(self.api.api, 'timesync'):
                 server_ts = self.api.api.timesync.server_timestamp
                 if server_ts > 0:
@@ -128,9 +139,10 @@ async def _get_historical_candles_patched(self, asset_id, duration, amount):
         except:
             pass
 
-        # Garante que não estamos pedindo futuro (subtrai 2 segundos por segurança)
-        # Isso ajuda muito em ambientes cloud com lag de relógio
-        req_time = req_time - 2
+        # FIX FINAL DE VELAS VAZIAS:
+        # Subtrai 10 segundos para garantir que não estamos pedindo velas que ainda não fecharam
+        # (Isso resolve problemas de clock drift no Coolify/Docker)
+        req_time = req_time - 10
 
         candles = await asyncio.wait_for(
             asyncio.to_thread(self.api.get_candles, asset_id, duration, amount, req_time),
@@ -209,6 +221,7 @@ def _check_rsi_condition_fix(candles, period=14, overbought=65, oversold=35):
         return (signal, last_rsi) 
     except: return (None, 50.0)
 
+# Aplica correções nos indicadores
 ti._convert_candles_to_dataframe = _convert_candles_to_dataframe_fix
 ti.validate_reversal_candle = _validate_reversal_candle_fix
 ti.check_candlestick_pattern = _check_candlestick_pattern_fix
@@ -329,11 +342,8 @@ class TradingBot:
             self.daily_losses = 0
             self.last_daily_reset_date = current_date_utc
             try:
-                # Tenta pegar saldo com nova proteção de timeout
-                # Força update de profile para garantir dados recentes
-                if hasattr(self.exnova.api, 'get_profile_ansyc'):
-                    await asyncio.to_thread(self.exnova.api.get_profile_ansyc)
-                
+                # REPROJETADO PARA NÃO TRAVAR
+                # Removemos a chamada direta ao get_profile_ansyc problemático
                 bal = await self.exnova.get_current_balance()
                 if bal and float(bal) > 0: 
                     await asyncio.to_thread(self.supabase.update_config, {'daily_initial_balance': bal, 'current_balance': bal})
@@ -354,13 +364,13 @@ class TradingBot:
         _patch_library_constants_aggressive()
 
         print("[SYSTEM] Aqueçendo API (Warmup 5s)...")
-        await asyncio.sleep(5) # WARMUP IMPORTANTE
+        await asyncio.sleep(5) 
 
         print("[SYSTEM] Loop principal iniciado...")
         
         while self.is_running:
             try:
-                # Check rápido de conexão sem bloquear
+                # Check rápido de conexão
                 connected = True
                 if hasattr(self.exnova, 'api') and self.exnova.api:
                     if hasattr(self.exnova.api, 'websocket_client') and self.exnova.api.websocket_client:
@@ -372,7 +382,7 @@ class TradingBot:
                     if await self.exnova.connect():
                         await self.logger('SUCCESS', 'Reconectado.')
                         _patch_library_constants_aggressive()
-                        await asyncio.sleep(3) # Pausa pós-conexão
+                        await asyncio.sleep(3) 
                     else:
                         await asyncio.sleep(5)
                         continue
@@ -413,7 +423,6 @@ class TradingBot:
 
     async def run_analysis_for_timeframe(self, timeframe_seconds: int, expiration_minutes: int):
         try:
-            # Protege contra travamento no balance
             try:
                 await asyncio.wait_for(self.exnova.change_balance(self.bot_config.get('account_type', 'PRACTICE')), timeout=2.0)
             except: pass
@@ -441,7 +450,6 @@ class TradingBot:
 
             for asset in target_assets:
                 try:
-                    # Checagem leve de conexão
                     if not self.exnova.api: break
                 except: break
 
@@ -468,9 +476,6 @@ class TradingBot:
 
             asset_id = self._get_asset_id(full_name)
             
-            # DEBUG ATIVADO
-            # print(f"[DEBUG] Analisando: {full_name} (ID: {asset_id})")
-
             try:
                 candles = await asyncio.gather(
                     self.exnova.get_historical_candles(asset_id, t1, 200),
@@ -480,7 +485,6 @@ class TradingBot:
 
             analysis_candles, sr_candles = candles
             if not analysis_candles:
-                # print(f"[DEBUG] Velas vazias para {full_name}")
                 return
 
             analysis_candles_objs = []
@@ -504,7 +508,6 @@ class TradingBot:
             rsi_res = ti.check_rsi_condition(analysis_candles_objs) 
             rsi_sig, rsi_val = rsi_res if isinstance(rsi_res, tuple) else (None, 50.0)
             
-            # LOG PARA FRONTEND
             msg = f"ANALISE_DETALHADA::{full_name}::Preço:{close_price:.5f}::RSI:{rsi_val:.1f}"
             await self.logger('DEBUG', msg)
 
