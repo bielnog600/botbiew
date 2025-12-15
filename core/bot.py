@@ -10,6 +10,12 @@ from typing import Dict, Optional, Set, List
 from types import SimpleNamespace
 import pandas as pd
 
+# Tentativa de importar requests para check de IP
+try:
+    import requests
+except ImportError:
+    requests = None
+
 from config import settings
 from services.exnova_service import AsyncExnovaService
 from services.supabase_service import SupabaseService
@@ -33,8 +39,6 @@ ACTIVES_MAP = {
 #                       MONKEY PATCHES (SISTEMA DE SUPORTE DE VIDA)
 # ==============================================================================
 
-GLOBAL_TIME_OFFSET = 0
-
 def _patch_library_constants_aggressive():
     try:
         import exnovaapi.constants as OP_code
@@ -48,6 +52,11 @@ _patch_library_constants_aggressive()
 # --- 1. PATCH: INJEÇÃO INTELIGENTE DE GET_CANDLES ---
 def _optimized_get_candles(self, active, duration, count, to):
     try:
+        # Check de Socket antes de pedir
+        if not self.api.websocket_client.wss.connected:
+            print("[PATCH ERROR] Socket desconectado. Abortando get_candles.")
+            return []
+
         self.api.candles.candles_data = None
         
         # Resolução de ID
@@ -59,17 +68,18 @@ def _optimized_get_candles(self, active, duration, count, to):
                 active_id = ACTIVES_MAP.get(active, None)
         
         if active_id is None:
-            print(f"[PATCH ERROR] ID não encontrado para: {active}")
             return []
 
-        # DEBUG CRÍTICO: Mostra o que está sendo enviado
-        # print(f"[REQ] ID:{active_id} Time:{to}")
-
+        # Envia pedido
         self.api.getcandles(active_id, duration, count, to)
         
+        # Loop de espera com Diagnóstico
         start = time.time()
         while self.api.candles.candles_data is None:
             if time.time() - start > 20: 
+                # Se der timeout, verifica se o socket ainda está vivo
+                is_conn = self.api.websocket_client.wss.connected
+                print(f"[PATCH TIMEOUT] 20s sem resposta para {active} (Socket ON: {is_conn})")
                 return []
             time.sleep(0.05)
             
@@ -98,6 +108,7 @@ def _optimized_get_profile_ansyc(self):
         time.sleep(0.1)
     return self.api.profile.msg
 
+# Aplicação dos Patches
 try:
     import exnovaapi.stable_api
     TargetClass = None
@@ -118,15 +129,18 @@ try:
 except ImportError:
     pass
 
-# --- 3. PATCH SERVICE GET_CANDLES ---
+# --- 3. PATCH SERVICE GET_CANDLES (ESTRATÉGIA DE TEMPO RELATIVO) ---
 async def _get_historical_candles_patched(self, asset_name, duration, amount):
     if not hasattr(self, 'api') or not self.api: return []
     try:
-        local_time = int(time.time())
-        # CORREÇÃO AGRESSIVA DE TEMPO:
-        # 1. Aplica o offset detectado
-        # 2. Subtrai 30 segundos adicionais para garantir "passado"
-        req_time = local_time - GLOBAL_TIME_OFFSET - 30
+        # ESTRATÉGIA DE SEGURANÇA MÁXIMA:
+        # Em vez de tentar adivinhar o tempo, usamos o tempo local do sistema
+        # mas recuamos 15 segundos para garantir que não pedimos o futuro.
+        # Se o relógio do servidor estiver errado em +10s, o -15s compensa.
+        req_time = int(time.time()) - 15
+
+        # Debug para confirmar o timestamp enviado
+        # print(f"[REQ VELAS] {asset_name} | TS: {req_time}")
 
         candles = await asyncio.wait_for(
             asyncio.to_thread(self.api.get_candles, asset_name, duration, amount, req_time),
@@ -298,38 +312,13 @@ class TradingBot:
         try: await asyncio.to_thread(self.supabase.insert_log, level, message)
         except: pass
 
-    async def _sync_time(self):
-        global GLOBAL_TIME_OFFSET
-        try:
-            server_ts = 0
-            if hasattr(self.exnova.api, 'get_server_timestamp'):
-                server_ts = self.exnova.api.get_server_timestamp()
-            
-            if server_ts == 0 and hasattr(self.exnova.api.api, 'timesync'):
-                 server_ts = self.exnova.api.api.timesync.server_timestamp
-
-            if server_ts > 0:
-                local_ts = time.time()
-                if server_ts > 3000000000: 
-                    server_ts /= 1000
-                elif server_ts < 2000000000 and server_ts > 1000000:
-                     if server_ts < local_ts / 100:
-                         server_ts *= 1000
-
-                offset = local_ts - server_ts
-                if abs(offset) > 86400:
-                    print(f"[TIME WARN] Offset louco detectado: {offset}s. Ignorando sincronia e usando tempo local.")
-                    GLOBAL_TIME_OFFSET = 0
-                else:
-                    GLOBAL_TIME_OFFSET = int(offset)
-                    print(f"[TIME SYNC] Sucesso. Offset: {GLOBAL_TIME_OFFSET}s (Server: {server_ts:.0f} vs Local: {local_ts:.0f})")
-            else:
-                print("[TIME SYNC] Não foi possível obter tempo do servidor. Usando local.")
-                GLOBAL_TIME_OFFSET = 0
-
-        except Exception as e:
-            print(f"[TIME SYNC ERROR] {e}. Usando tempo local.")
-            GLOBAL_TIME_OFFSET = 0
+    def _check_ip_reputation(self):
+        if requests:
+            try:
+                ip = requests.get('https://api.ipify.org', timeout=5).text
+                print(f"[NET DEBUG] IP Público do Bot: {ip}")
+            except:
+                print("[NET DEBUG] Não foi possível verificar o IP.")
 
     async def _daily_reset_if_needed(self):
         current_date_utc = datetime.utcnow().date()
@@ -353,14 +342,16 @@ class TradingBot:
 
     async def run(self):
         await self.logger('INFO', 'Bot a iniciar no modo FORCE OTC ALWAYS...')
+        
+        self._check_ip_reputation()
+
         if not await self.exnova.connect(): await self.logger('ERROR', 'Falha na conexão inicial.')
         
         await self._daily_reset_if_needed()
         _patch_library_constants_aggressive()
 
-        print("[SYSTEM] Sincronizando Relógio e API...")
-        await asyncio.sleep(3)
-        await self._sync_time()
+        print("[SYSTEM] Aqueçendo API (Warmup 5s)...")
+        await asyncio.sleep(5) 
 
         print("[SYSTEM] Loop principal iniciado...")
         
@@ -377,7 +368,6 @@ class TradingBot:
                     if await self.exnova.connect():
                         await self.logger('SUCCESS', 'Reconectado.')
                         await asyncio.sleep(3)
-                        await self._sync_time()
                     else:
                         await asyncio.sleep(5)
                         continue
@@ -419,9 +409,10 @@ class TradingBot:
     async def run_analysis_for_timeframe(self, timeframe_seconds: int, expiration_minutes: int):
         try:
             try:
-                await asyncio.wait_for(self.exnova.change_balance(self.bot_config.get('account_type', 'PRACTICE')), timeout=2.0)
+                # DEBUG VISUAL ATIVO
                 bal = await self.exnova.get_current_balance()
                 print(f"[STATUS] Saldo: {bal} | {expiration_minutes}M Scan")
+                await asyncio.wait_for(self.exnova.change_balance(self.bot_config.get('account_type', 'PRACTICE')), timeout=2.0)
             except: pass
 
             assets = await _get_open_assets_fix(None)
@@ -458,7 +449,8 @@ class TradingBot:
             elif expiration_minutes == 5: t1, t2, res_func = 300, 3600, get_h1_sr_zones
             else: return
 
-            # print(f"[DEBUG] Analisando: {full_name}")
+            # DEBUG VISUAL ATIVO
+            print(f"[DEBUG] Analisando: {full_name}")
 
             try:
                 candles = await asyncio.gather(
@@ -469,6 +461,7 @@ class TradingBot:
 
             analysis_candles, sr_candles = candles
             if not analysis_candles:
+                # DEBUG VISUAL ATIVO
                 print(f"[DEBUG] Velas vazias: {full_name}")
                 return
 
@@ -493,6 +486,7 @@ class TradingBot:
             rsi_res = ti.check_rsi_condition(analysis_candles_objs) 
             rsi_sig, rsi_val = rsi_res if isinstance(rsi_res, tuple) else (None, 50.0)
             
+            # DEBUG VISUAL ATIVO
             msg = f"ANALISE_DETALHADA::{full_name}::Preço:{close_price:.5f}::RSI:{rsi_val:.1f}"
             await self.logger('DEBUG', msg)
 
