@@ -139,7 +139,7 @@ async def _get_historical_candles_patched(self, asset_name, duration, amount):
         return []
     
     try:
-        # Usa APENAS o tempo do sistema (mais confiável que o server_timestamp bugado)
+        # Usa APENAS o tempo do sistema
         req_time = int(time.time())
         
         # Executa na thread principal
@@ -410,6 +410,10 @@ class TradingBot:
     async def run_analysis_for_timeframe(self, timeframe_seconds: int, expiration_minutes: int):
         try:
             try:
+                # DEBUG DE VIDA: Imprimir saldo para confirmar que a conexão está viva
+                bal = await self.exnova.get_current_balance()
+                print(f"[MONITOR] Saldo Atual: {bal} (Varredura Ativa)")
+                
                 await asyncio.wait_for(self.exnova.change_balance(self.bot_config.get('account_type', 'PRACTICE')), timeout=2.0)
             except: pass
 
@@ -457,8 +461,8 @@ class TradingBot:
             elif expiration_minutes == 5: t1, t2, res_func = 300, 3600, get_h1_sr_zones
             else: return
 
-            # DEBUG
-            # print(f"[DEBUG] Analisando: {full_name}")
+            # DEBUG ATIVADO: Mostra que está a analisar
+            print(f"[DEBUG] Analisando: {full_name}")
 
             try:
                 candles = await asyncio.gather(
@@ -469,7 +473,12 @@ class TradingBot:
 
             analysis_candles, sr_candles = candles
             if not analysis_candles:
+                # DEBUG ATIVADO: Mostra se vier vazio
+                print(f"[DEBUG] Velas vazias para {full_name}")
                 return
+            
+            # DEBUG SUCESSO: Confirma que recebeu velas
+            print(f"[DEBUG] Recebidas {len(analysis_candles)} velas para {full_name}")
 
             analysis_candles_objs = []
             for c in analysis_candles:
