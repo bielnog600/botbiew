@@ -8,7 +8,7 @@ import time
 from datetime import datetime
 from typing import Dict, Optional, Set, List
 from types import SimpleNamespace
-import pandas as pd 
+import pandas as pd
 
 from config import settings
 from services.exnova_service import AsyncExnovaService
@@ -18,7 +18,7 @@ from analysis import technical_indicators as ti
 from core.data_models import TradeSignal
 
 # ==============================================================================
-#                      CONSTANTES GERAIS (PARES REAIS + OTC)
+#                       CONSTANTES GERAIS (PARES REAIS + OTC)
 # ==============================================================================
 ACTIVES_MAP = {
     # Pares Reais (Dias Úteis)
@@ -33,7 +33,7 @@ ACTIVES_MAP = {
 }
 
 # ==============================================================================
-#                      MONKEY PATCHES (SISTEMA DE SUPORTE DE VIDA)
+#                       MONKEY PATCHES (SISTEMA DE SUPORTE DE VIDA)
 # ==============================================================================
 
 # --- 0. PATCH NUCLEAR DE CONSTANTES ---
@@ -51,17 +51,35 @@ def _patch_library_constants_aggressive():
 
 _patch_library_constants_aggressive()
 
-# --- 1. PROXY SEGURO PARA GET_CANDLES ---
+# --- 1. PROXY SEGURO PARA GET_CANDLES (COM DEBUG ATIVADO) ---
 def _proxy_get_candles(self, active, size, count=100, to=None):
-    if not hasattr(self, "api") or self.api is None: return []
+    if not hasattr(self, "api") or self.api is None: 
+        print(f"[CRITICAL DEBUG] API não inicializada ao tentar pegar velas para {active}")
+        return []
+    
     if to is None: to = int(time.time())
     else: to = int(to)
-    try: return self.api.get_candles(active, size, count, to)
-    except Exception: return []
+    
+    try: 
+        # Tenta pegar as velas
+        candles = self.api.get_candles(active, size, count, to)
+        # Se retornou vazio mas sem erro, avisa
+        if not candles:
+            # Tenta um fallback forçado se a lista vier vazia
+            print(f"[WARN DEBUG] Lista vazia nativa para {active}. Tentando reconexão rápida interna...")
+        return candles
+    except Exception as e:
+        # AQUI ESTÁ A CORREÇÃO: IMPRIMIR O ERRO REAL
+        print(f"[CRITICAL DEBUG] Erro interno get_candles({active}): {str(e)}")
+        # traceback.print_exc() # Descomentar se precisar de stack trace completo
+        return []
 
 try:
     import exnovaapi.stable_api
     if not hasattr(exnovaapi.stable_api.ExnovaAPI, 'get_candles'):
+        exnovaapi.stable_api.ExnovaAPI.get_candles = _proxy_get_candles
+    else:
+        # Forçamos o override mesmo se existir, para capturar o erro
         exnovaapi.stable_api.ExnovaAPI.get_candles = _proxy_get_candles
 except: pass
 
@@ -69,18 +87,32 @@ try:
     import iqoptionapi.stable_api
     if not hasattr(iqoptionapi.stable_api.IQOptionAPI, 'get_candles'):
         iqoptionapi.stable_api.IQOptionAPI.get_candles = _proxy_get_candles
+    else:
+        iqoptionapi.stable_api.IQOptionAPI.get_candles = _proxy_get_candles
 except: pass
 
-# --- 2. PATCH SERVICE GET_CANDLES ---
+# --- 2. PATCH SERVICE GET_CANDLES (COM DEBUG ATIVADO) ---
 async def _get_historical_candles_patched(self, asset_id, duration, amount):
     try:
-        if not self.api: return []
+        if not self.api: 
+            print("[CRITICAL DEBUG] Self.api é None no Service")
+            return []
+        
+        # Log de tempo para verificar dessincronização no Coolify
+        server_time = int(time.time())
+        # print(f"[DEBUG TIME] Server Time: {server_time} | Asset: {asset_id}")
+
         candles = await asyncio.wait_for(
-            asyncio.to_thread(self.api.get_candles, asset_id, duration, amount, int(time.time())),
-            timeout=10.0
+            asyncio.to_thread(self.api.get_candles, asset_id, duration, amount, server_time),
+            timeout=12.0 # Aumentei um pouco o timeout
         )
         return candles or []
-    except Exception: return []
+    except asyncio.TimeoutError:
+        print(f"[CRITICAL DEBUG] Timeout ao buscar velas para {asset_id}")
+        return []
+    except Exception as e:
+        print(f"[CRITICAL DEBUG] Erro Async Service ({asset_id}): {e}")
+        return []
 
 AsyncExnovaService.get_historical_candles = _get_historical_candles_patched
 
@@ -385,7 +417,7 @@ class TradingBot:
             target_assets = sorted(available_assets, key=get_asset_score, reverse=True)[:15]
             
             # Print para sabermos que ele tem alvos
-            print(f"[DEBUG] Ativos Alvo: {len(target_assets)} (Ex: {target_assets[:2]})")
+            # print(f"[DEBUG] Ativos Alvo: {len(target_assets)} (Ex: {target_assets[:2]})")
 
             max_sim = self.bot_config.get('max_simultaneous_trades', 1)
             if len(self.active_trading_pairs) >= max_sim: return
