@@ -10,7 +10,6 @@ from typing import Dict, Optional, Set, List
 from types import SimpleNamespace
 import pandas as pd
 
-# Tentativa de importar requests para check de IP
 try:
     import requests
 except ImportError:
@@ -36,7 +35,7 @@ ACTIVES_MAP = {
 }
 
 # ==============================================================================
-#                       MONKEY PATCHES (SISTEMA DE SUPORTE DE VIDA)
+#                       MONKEY PATCHES
 # ==============================================================================
 
 GLOBAL_TIME_OFFSET = 0
@@ -72,8 +71,7 @@ def _optimized_get_candles(self, active, duration, count, to):
                 return []
             time.sleep(0.05)
         return self.api.candles.candles_data
-    except Exception as e:
-        print(f"[PATCH EXCEPTION] {e}")
+    except Exception:
         return []
 
 # --- 2. PATCH: BALANCE ---
@@ -121,16 +119,14 @@ async def _get_historical_candles_patched(self, asset_name, duration, amount):
     if not hasattr(self, 'api') or not self.api: return []
     try:
         local_time = int(time.time())
-        req_time = local_time - GLOBAL_TIME_OFFSET
-        req_time = req_time - 1
+        req_time = local_time - GLOBAL_TIME_OFFSET - 15
 
         candles = await asyncio.wait_for(
             asyncio.to_thread(self.api.get_candles, asset_name, duration, amount, req_time),
             timeout=25.0
         )
         return candles or []
-    except Exception as e:
-        print(f"[ERROR SERVICE] Falha velas ({asset_name}): {e}")
+    except Exception:
         return []
 
 AsyncExnovaService.get_historical_candles = _get_historical_candles_patched
@@ -172,8 +168,7 @@ async def _connect_fresh_instance(self):
         except NameError: self.api = ExnovaAPI("exnova.com", self.email, self.password)
         check = await asyncio.to_thread(self.api.connect)
         return check
-    except Exception as e:
-        print(f"[EXNOVA EXCEPTION] Conexão: {e}")
+    except Exception:
         return False
 AsyncExnovaService.connect = _connect_fresh_instance
 
@@ -303,36 +298,14 @@ class TradingBot:
                 print("[NET DEBUG] Não foi possível verificar o IP.")
 
     def _is_socket_connected(self):
-        # VERIFICAÇÃO COM DIAGNÓSTICO
+        # USA O MÉTODO OFICIAL DA BIBLIOTECA
+        # Isso evita falsos negativos que causam loops de reconexão
         try:
-            if not self.exnova.api: 
-                # print("[DEBUG CON] High level API missing")
+            if not self.exnova.api:
                 return False
-            
-            if not hasattr(self.exnova.api, 'api') or not self.exnova.api.api:
-                # print("[DEBUG CON] Low level API missing")
-                return False
-            
-            ws_client = self.exnova.api.api.websocket_client
-            if not ws_client:
-                # print("[DEBUG CON] WS Client missing")
-                return False
-                
-            if not ws_client.wss:
-                # print("[DEBUG CON] WSS object missing")
-                return False
-            
-            if not ws_client.wss.sock:
-                # print("[DEBUG CON] Sock object missing (Connection lost)")
-                return False
-            
-            # REMOVIDO check de fileno() que pode ser problematico no Docker
-            # if ws_client.wss.sock.fileno() == -1:
-            #    return False
-                
-            return True
-        except Exception as e:
-            print(f"[DEBUG CON] Exception check: {e}")
+            # check_connect() verifica global_value.check_websocket_if_connect
+            return self.exnova.api.check_connect()
+        except:
             return False
 
     async def _sync_time(self):
@@ -355,11 +328,10 @@ class TradingBot:
 
                 offset = local_ts - server_ts
                 if abs(offset) > 86400:
-                    print(f"[TIME WARN] Offset louco detectado: {offset}s. Ignorando.")
                     GLOBAL_TIME_OFFSET = 0
                 else:
                     GLOBAL_TIME_OFFSET = int(offset)
-                    print(f"[TIME SYNC] Sucesso. Offset: {GLOBAL_TIME_OFFSET}s")
+                    # print(f"[TIME SYNC] Sucesso. Offset: {GLOBAL_TIME_OFFSET}s")
             else:
                 GLOBAL_TIME_OFFSET = 0
 
@@ -404,7 +376,7 @@ class TradingBot:
         
         while self.is_running:
             try:
-                # NOVA VERIFICAÇÃO ROBUSTA DE CONEXÃO
+                # Checagem simplificada e estável
                 if not self._is_socket_connected():
                     print("[AVISO] Conexão perdida. Tentando reconectar...")
                     reconnected = False
@@ -458,10 +430,8 @@ class TradingBot:
     async def run_analysis_for_timeframe(self, timeframe_seconds: int, expiration_minutes: int):
         try:
             try:
-                # DEBUG VISUAL ATIVO
                 bal = await self.exnova.get_current_balance()
-                print(f"[STATUS] Saldo: {bal} | {expiration_minutes}M Scan")
-                # Keep Alive
+                # print(f"[STATUS] Saldo: {bal}")
                 await asyncio.wait_for(self.exnova.change_balance(self.bot_config.get('account_type', 'PRACTICE')), timeout=2.0)
             except: pass
 
@@ -499,8 +469,7 @@ class TradingBot:
             elif expiration_minutes == 5: t1, t2, res_func = 300, 3600, get_h1_sr_zones
             else: return
 
-            # DEBUG VISUAL ATIVO
-            print(f"[DEBUG] Analisando: {full_name}")
+            # print(f"[DEBUG] Analisando: {full_name}")
 
             try:
                 candles = await asyncio.gather(
@@ -511,8 +480,7 @@ class TradingBot:
 
             analysis_candles, sr_candles = candles
             if not analysis_candles:
-                # DEBUG VISUAL ATIVO
-                print(f"[DEBUG] Velas vazias: {full_name}")
+                # print(f"[DEBUG] Velas vazias: {full_name}")
                 return
 
             analysis_candles_objs = []
@@ -536,7 +504,6 @@ class TradingBot:
             rsi_res = ti.check_rsi_condition(analysis_candles_objs) 
             rsi_sig, rsi_val = rsi_res if isinstance(rsi_res, tuple) else (None, 50.0)
             
-            # DEBUG VISUAL ATIVO
             msg = f"ANALISE_DETALHADA::{full_name}::Preço:{close_price:.5f}::RSI:{rsi_val:.1f}"
             await self.logger('DEBUG', msg)
 
