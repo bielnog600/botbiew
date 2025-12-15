@@ -20,29 +20,36 @@ import {
   Search,
   Zap,
   Lock,
-  Eye,
-  EyeOff
+  User
 } from 'lucide-react';
 
-// --- MOCK DATA & SERVICES (Simulação do Backend) ---
+// --- CONFIGURAÇÃO SUPABASE (API REST) ---
+const SUPABASE_URL = 'https://ioduahwknfsktujthfyc.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlvZHVhaHdrbmZza3R1anRoZnljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEzMDc0NDcsImV4cCI6MjA2Njg4MzQ0N30.96f8wZO6SvABKFMWjIiw1pSugAB4Isldj7yxLcLJRSE';
 
-const MOCK_SIGNALS = [
-  { id: 1, pair: 'EUR/USD-OTC', direction: 'call', strategy: 'MHI 2 Majority', result: 'WIN', created_at: new Date(Date.now() - 1000 * 60 * 2).toISOString(), martingale_level: 0 },
-  { id: 2, pair: 'GBP/JPY-OTC', direction: 'put', strategy: 'Torre Gemea', result: 'LOSS', created_at: new Date(Date.now() - 1000 * 60 * 15).toISOString(), martingale_level: 0 },
-  { id: 3, pair: 'GBP/JPY-OTC', direction: 'put', strategy: 'Torre Gemea (G1)', result: 'WIN', created_at: new Date(Date.now() - 1000 * 60 * 12).toISOString(), martingale_level: 1 },
-  { id: 4, pair: 'USD/BRL-OTC', direction: 'call', strategy: 'Padrão 23', result: 'WIN', created_at: new Date(Date.now() - 1000 * 60 * 45).toISOString(), martingale_level: 0 },
-  { id: 5, pair: 'AUD/CAD-OTC', direction: 'put', strategy: 'MHI 1', result: 'PENDING', created_at: new Date().toISOString(), martingale_level: 0 },
-];
+// Helper para chamadas API
+const supabaseFetch = async (endpoint, options = {}) => {
+  const headers = {
+    'apikey': SUPABASE_ANON_KEY,
+    'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+    'Content-Type': 'application/json',
+    ...options.headers
+  };
 
-const MOCK_CATALOG = [
-  { pair: 'EUR/USD-OTC', win_rate: 92.5, wins: 34, losses: 2, best_strategy: 'MHI 2' },
-  { pair: 'GBP/USD-OTC', win_rate: 88.0, wins: 22, losses: 3, best_strategy: 'Torre' },
-  { pair: 'USD/JPY-OTC', win_rate: 75.4, wins: 15, losses: 5, best_strategy: 'Padrão 23' },
-  { pair: 'AUD/CAD-OTC', win_rate: 45.0, wins: 9, losses: 11, best_strategy: 'N/A' },
-];
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${endpoint}`, {
+      ...options,
+      headers
+    });
+    if (!res.ok) throw new Error(`API Error: ${res.statusText}`);
+    return await res.json();
+  } catch (err) {
+    console.error("Supabase API Error:", err);
+    return null;
+  }
+};
 
 // --- Styles & Animations ---
-// Injected via style tag for specific scanner animations
 const CustomStyles = () => (
   <style>{`
     @keyframes scanMove {
@@ -65,10 +72,8 @@ const CustomStyles = () => (
       backdrop-filter: blur(12px);
       border: 1px solid rgba(55, 65, 81, 0.5);
     }
-    .animate-spin-slow {
-      animation: spin 3s linear infinite;
-    }
-    @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    .pulse-text { animation: pulseText 0.5s ease-in-out; }
+    @keyframes pulseText { 0% { opacity: 0.6; transform: scale(0.98); } 50% { opacity: 1; transform: scale(1.02); } 100% { opacity: 1; transform: scale(1); } }
   `}</style>
 );
 
@@ -86,23 +91,36 @@ const Toast = ({ message, type, onClose }) => (
 );
 
 const ScannerWidget = ({ botStatus }) => {
-  const [data, setData] = useState({ pair: 'EUR/USD', price: '1.05432', rsi: '45.4' });
-  const [pulse, setPulse] = useState(false);
+  const [data, setData] = useState({ pair: '---', price: '0.00000', rsi: '0.0' });
+  const [anim, setAnim] = useState(false);
+  const lastMsgRef = useRef('');
 
-  // Simulate price updates
   useEffect(() => {
-    if (botStatus !== 'RUNNING') return;
-    const interval = setInterval(() => {
-      setPulse(true);
-      setData(prev => ({
-        pair: Math.random() > 0.5 ? 'EUR/USD-OTC' : 'GBP/JPY-OTC',
-        price: (1.05 + Math.random() * 0.01).toFixed(5),
-        rsi: (30 + Math.random() * 40).toFixed(1)
-      }));
-      setTimeout(() => setPulse(false), 500);
-    }, 3000);
+    // Polling para o Scanner (substitui Realtime)
+    const fetchLogs = async () => {
+        const logs = await supabaseFetch('logs?select=message&order=created_at.desc&limit=1');
+        if (logs && logs.length > 0) {
+            const msg = logs[0].message;
+            if (msg !== lastMsgRef.current && msg.startsWith('ANALISE_DETALHADA::')) {
+                lastMsgRef.current = msg;
+                const parts = msg.split('::');
+                if (parts.length >= 4) {
+                    setData({
+                        pair: parts[1],
+                        price: parts[2].split(':')[1] || '0.00000',
+                        rsi: parts[3].split(':')[1] || '0.0'
+                    });
+                    setAnim(true);
+                    setTimeout(() => setAnim(false), 500);
+                }
+            }
+        }
+    };
+
+    const interval = setInterval(fetchLogs, 2000); // Check a cada 2s
+    fetchLogs();
     return () => clearInterval(interval);
-  }, [botStatus]);
+  }, []);
 
   return (
     <div className="glass-card rounded-xl p-6 relative overflow-hidden group">
@@ -116,12 +134,12 @@ const ScannerWidget = ({ botStatus }) => {
               {botStatus === 'RUNNING' ? 'SCANNER LIVE' : 'OFFLINE'}
             </span>
           </div>
-          <div className={`text-3xl font-black text-white tracking-tight transition-all duration-300 ${pulse ? 'scale-105 text-amber-400' : ''}`}>
+          <div className={`text-3xl font-black text-white tracking-tight transition-all duration-300 ${anim ? 'text-amber-400 scale-105' : ''}`}>
             {data.pair}
           </div>
           <div className="flex items-center gap-3 mt-2">
             <span className="px-2 py-0.5 rounded bg-zinc-800 border border-zinc-700 text-xs text-zinc-400 font-mono">
-              RSI: <span className={Number(data.rsi) > 70 || Number(data.rsi) < 30 ? 'text-amber-400 font-bold' : 'text-zinc-300'}>{data.rsi}</span>
+              RSI: <span className={parseFloat(data.rsi) > 65 || parseFloat(data.rsi) < 35 ? 'text-amber-400 font-bold' : 'text-zinc-300'}>{data.rsi}</span>
             </span>
             <span className="px-2 py-0.5 rounded bg-zinc-800 border border-zinc-700 text-xs text-zinc-400 font-mono">
               M5
@@ -166,15 +184,38 @@ const LoginView = ({ onLogin }) => {
   const [loading, setLoading] = useState(false);
   const [email, setEmail] = useState('');
   const [pass, setPass] = useState('');
+  const [error, setError] = useState('');
 
-  const handleSubmit = (e) => {
+  const handleDemoLogin = () => {
+    onLogin({ id: 'demo-user', email: 'demo@marombiew.com', role: 'authenticated' });
+  };
+
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
-    // Simulate Supabase Auth
-    setTimeout(() => {
-      setLoading(false);
-      onLogin({ email });
-    }, 1500);
+    setError('');
+    
+    try {
+        // Chamada direta Auth API
+        const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+            method: 'POST',
+            headers: { 
+              'apikey': SUPABASE_ANON_KEY, 
+              'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+              'Content-Type': 'application/json' 
+            },
+            body: JSON.stringify({ email, password: pass })
+        });
+        const data = await res.json();
+        
+        if (!res.ok) throw new Error(data.error_description || data.msg || 'Credenciais inválidas ou erro no servidor');
+        
+        onLogin(data.user);
+    } catch (err) {
+        setError(err.message);
+    } finally {
+        setLoading(false);
+    }
   };
 
   return (
@@ -188,6 +229,12 @@ const LoginView = ({ onLogin }) => {
           <h2 className="text-3xl font-bold text-white tracking-tight">Marombiew Bot</h2>
           <p className="text-zinc-500 text-sm mt-2 font-medium">Painel de Controlo Inteligente</p>
         </div>
+        
+        {error && (
+          <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-sm p-3 rounded-xl mb-4 text-center">
+            {error}
+          </div>
+        )}
         
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-1">
@@ -218,15 +265,26 @@ const LoginView = ({ onLogin }) => {
               <div className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500"><Lock size={16}/></div>
             </div>
           </div>
-          <button 
-            type="submit" 
-            disabled={loading}
-            className="w-full bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-amber-900/20 transition-all active:scale-[0.98] flex justify-center items-center gap-2 mt-4"
-          >
-            {loading ? <RefreshCw className="animate-spin" size={20} /> : 'Aceder ao Sistema'}
-          </button>
+          
+          <div className="flex flex-col gap-3 mt-6">
+            <button 
+              type="submit" 
+              disabled={loading}
+              className="w-full bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-amber-900/20 transition-all active:scale-[0.98] flex justify-center items-center gap-2"
+            >
+              {loading ? <RefreshCw className="animate-spin" size={20} /> : 'Aceder ao Sistema'}
+            </button>
+            
+            <button 
+              type="button"
+              onClick={handleDemoLogin}
+              className="w-full bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-medium py-3.5 rounded-xl border border-zinc-700 transition-all flex justify-center items-center gap-2"
+            >
+              <User size={18} /> Entrar como Demo
+            </button>
+          </div>
         </form>
-        <p className="text-center text-xs text-zinc-600 mt-6">v2.5.0 Stable Build</p>
+        <p className="text-center text-xs text-zinc-600 mt-6">v2.5.2 API-Connected (Rest)</p>
       </div>
     </div>
   );
@@ -236,10 +294,51 @@ export default function BotDashboard() {
   const [user, setUser] = useState(null);
   const [view, setView] = useState('home');
   const [botStatus, setBotStatus] = useState('PAUSED');
-  const [signals, setSignals] = useState(MOCK_SIGNALS);
+  const [signals, setSignals] = useState([]);
+  const [catalog, setCatalog] = useState([]);
+  const [config, setConfig] = useState(null);
   const [toast, setToast] = useState(null);
-  const [balance, setBalance] = useState(12450.50);
-  const [initialBalance] = useState(12400.00);
+  const [balance, setBalance] = useState({ current: 0, initial: 0 });
+  const [logs, setLogs] = useState([]);
+
+  // --- Data Fetching & Realtime Polling ---
+  
+  useEffect(() => {
+    if (!user) return;
+
+    const refreshData = async () => {
+        try {
+            // Se for demo user e a API falhar, não crashar
+            // Signals
+            const sData = await supabaseFetch('trade_signals?select=*&order=created_at.desc&limit=50');
+            if (sData) setSignals(sData);
+
+            // Config
+            const cData = await supabaseFetch('bot_config?select=*&id=eq.1');
+            if (cData && cData.length > 0) {
+                const cfg = cData[0];
+                setConfig(cfg);
+                setBotStatus(cfg.status || 'PAUSED');
+                setBalance({ current: cfg.current_balance || 0, initial: cfg.daily_initial_balance || 0 });
+            }
+
+            // Catalog
+            const catData = await supabaseFetch('cataloged_assets?select=*&order=win_rate.desc');
+            if (catData) setCatalog(catData);
+
+            // Logs
+            const lData = await supabaseFetch('logs?select=*&order=created_at.desc&limit=50');
+            if (lData) setLogs(lData.reverse());
+
+        } catch (error) {
+            console.error("Refresh error", error);
+        }
+    };
+
+    refreshData();
+    const interval = setInterval(refreshData, 3000); // Poll a cada 3s para simular realtime
+    return () => clearInterval(interval);
+  }, [user]);
 
   // Stats calculation
   const stats = useMemo(() => {
@@ -249,38 +348,53 @@ export default function BotDashboard() {
   }, [signals]);
 
   const assertiveness = stats.total > 0 ? ((stats.wins / stats.total) * 100).toFixed(0) : 0;
-  const profit = balance - initialBalance;
-
-  // Simulate receiving a new signal
-  useEffect(() => {
-    if (botStatus !== 'RUNNING') return;
-    const interval = setInterval(() => {
-      if (Math.random() > 0.7) {
-        const newSignal = {
-          id: Date.now(),
-          pair: Math.random() > 0.5 ? 'EUR/USD-OTC' : 'USD/JPY-OTC',
-          direction: Math.random() > 0.5 ? 'call' : 'put',
-          strategy: 'MHI 3 Majority',
-          result: 'PENDING',
-          created_at: new Date().toISOString(),
-          martingale_level: 0
-        };
-        setSignals(prev => [newSignal, ...prev]);
-        setToast({ msg: `Novo sinal detetado: ${newSignal.pair}`, type: 'info' });
-        
-        // Resolve signal after delay
-        setTimeout(() => {
-          setSignals(prev => prev.map(s => s.id === newSignal.id ? {...s, result: Math.random() > 0.3 ? 'WIN' : 'LOSS'} : s));
-        }, 5000);
-      }
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [botStatus]);
+  const profit = balance.current - balance.initial;
 
   const handleLogout = () => setUser(null);
+
   const showToast = (msg, type = 'info') => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3000);
+  };
+
+  const toggleBotStatus = async () => {
+      // Se for demo user sem config real, simular
+      if (!config && user?.id === 'demo-user') {
+         const newS = botStatus === 'RUNNING' ? 'PAUSED' : 'RUNNING';
+         setBotStatus(newS);
+         showToast(`Modo Demo: Bot ${newS}`, 'success');
+         return;
+      }
+
+      if (!config) return;
+      const newStatus = botStatus === 'RUNNING' ? 'PAUSED' : 'RUNNING';
+      
+      const res = await supabaseFetch('bot_config?id=eq.1', {
+          method: 'PATCH',
+          body: JSON.stringify({ status: newStatus })
+      });
+
+      if (res === null) {
+          // Fallback para demo se falhar a escrita
+          setBotStatus(newStatus);
+          showToast(`Estado atualizado localmente (Erro API)`, 'warning');
+      } else {
+          setBotStatus(newStatus);
+          showToast(`Bot ${newStatus === 'RUNNING' ? 'Iniciado' : 'Pausado'}`, newStatus === 'RUNNING' ? 'success' : 'info');
+      }
+  };
+
+  const updateConfig = async (key, value) => {
+      setConfig(prev => ({ ...prev, [key]: value })); // Optimistic update
+      
+      // Se for demo user, não tentar salvar na API se não tiver permissão
+      if (user?.id === 'demo-user') return;
+
+      const res = await supabaseFetch('bot_config?id=eq.1', {
+          method: 'PATCH',
+          body: JSON.stringify({ [key]: value })
+      });
+      if (res === null) showToast("Erro ao salvar (Verifique permissões)", "error");
   };
 
   const NavItem = ({ id, icon: Icon, label }) => (
@@ -319,6 +433,9 @@ export default function BotDashboard() {
         </nav>
 
         <div className="p-4 border-t border-zinc-800/50">
+          <div className="px-4 py-2 mb-2 text-xs text-zinc-500">
+             Logado como: <span className="text-zinc-300 block truncate">{user.email}</span>
+          </div>
           <button onClick={handleLogout} className="flex items-center gap-3 px-4 py-3 text-sm text-red-400 hover:bg-red-500/10 rounded-xl w-full transition-colors">
             <LogOut size={18} /> Sair
           </button>
@@ -339,11 +456,7 @@ export default function BotDashboard() {
                 </div>
                 <div className="flex gap-2">
                    <button 
-                    onClick={() => {
-                        const next = botStatus === 'RUNNING' ? 'PAUSED' : 'RUNNING';
-                        setBotStatus(next);
-                        showToast(`Bot ${next === 'RUNNING' ? 'Iniciado' : 'Pausado'}`, next === 'RUNNING' ? 'success' : 'info');
-                    }}
+                    onClick={toggleBotStatus}
                     className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold shadow-lg transition-all ${
                         botStatus === 'RUNNING' 
                         ? 'bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20' 
@@ -366,7 +479,7 @@ export default function BotDashboard() {
                      <Wallet size={80} />
                    </div>
                    <p className="text-xs text-zinc-500 font-bold uppercase tracking-wider mb-1">Saldo Atual</p>
-                   <p className="text-2xl font-bold text-white">${balance.toFixed(2)}</p>
+                   <p className="text-2xl font-bold text-white">${Number(balance.current).toFixed(2)}</p>
                 </div>
                 <div className="glass-card p-5 rounded-xl relative overflow-hidden group">
                    <div className={`absolute -right-4 -top-4 opacity-50 group-hover:opacity-100 group-hover:scale-110 transition-all duration-500 ${profit >= 0 ? 'text-green-900' : 'text-red-900'}`}>
@@ -407,7 +520,9 @@ export default function BotDashboard() {
                   <Activity size={14} /> Histórico de Sinais
                 </h3>
                 <div className="space-y-3">
-                  {signals.map((signal) => (
+                  {signals.length === 0 ? (
+                    <p className="text-center text-zinc-600 py-10">A aguardar primeiros sinais...</p>
+                  ) : signals.map((signal) => (
                     <div key={signal.id} className="glass-card p-4 rounded-xl flex items-center justify-between hover:bg-zinc-800/50 transition-colors border-l-4" style={{borderLeftColor: signal.direction === 'call' ? '#22c55e' : '#ef4444'}}>
                       <div className="flex items-center gap-4">
                         <div className={`w-10 h-10 rounded-full flex items-center justify-center ${signal.direction === 'call' ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'}`}>
@@ -424,7 +539,7 @@ export default function BotDashboard() {
                       <div className="text-right">
                         {signal.result === 'WIN' && <span className="text-green-400 font-bold text-sm flex items-center gap-1"><Check size={14} /> WIN</span>}
                         {signal.result === 'LOSS' && <span className="text-red-400 font-bold text-sm flex items-center gap-1"><X size={14} /> LOSS</span>}
-                        {signal.result === 'PENDING' && <span className="text-amber-400 text-xs font-bold animate-pulse flex items-center gap-1"><RefreshCw size={12} className="animate-spin"/> Em Curso</span>}
+                        {(!signal.result || signal.result === 'PENDING') && <span className="text-amber-400 text-xs font-bold animate-pulse flex items-center gap-1"><RefreshCw size={12} className="animate-spin"/> Em Curso</span>}
                         {signal.martingale_level > 0 && <span className="block text-[9px] text-orange-400 font-mono mt-0.5">Gale {signal.martingale_level}</span>}
                       </div>
                     </div>
@@ -442,15 +557,21 @@ export default function BotDashboard() {
                <div className="glass-card p-6 rounded-xl">
                  <div className="flex justify-between items-center mb-6">
                    <h2 className="text-sm font-bold text-zinc-300">Filtro de Assertividade</h2>
-                   <span className="text-amber-400 font-bold text-2xl">80%</span>
+                   <span className="text-amber-400 font-bold text-2xl">{config?.min_win_rate || 80}%</span>
                  </div>
-                 <input type="range" className="w-full h-2 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-amber-500" min="50" max="99" defaultValue="80" />
+                 <input 
+                    type="range" 
+                    className="w-full h-2 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-amber-500" 
+                    min="50" max="99" 
+                    value={config?.min_win_rate || 80}
+                    onChange={(e) => updateConfig('min_win_rate', Number(e.target.value))}
+                 />
                  <p className="text-xs text-zinc-500 mt-2">Apenas pares com assertividade acima do selecionado serão operados.</p>
                </div>
 
                <div className="space-y-3">
                  <h2 className="text-sm font-bold text-zinc-500 uppercase tracking-wide">Melhores Ativos (M5)</h2>
-                 {MOCK_CATALOG.map(asset => (
+                 {catalog.map(asset => (
                    <div key={asset.pair} className="glass-card p-4 rounded-xl flex items-center justify-between group hover:border-amber-500/30 transition-all">
                      <div>
                        <div className="flex items-center gap-2">
@@ -463,7 +584,7 @@ export default function BotDashboard() {
                      </div>
                      <div className="text-right">
                        <div className={`text-xl font-bold ${asset.win_rate >= 80 ? 'text-green-400' : asset.win_rate >= 60 ? 'text-amber-400' : 'text-red-400'}`}>
-                         {asset.win_rate}%
+                         {asset.win_rate.toFixed(1)}%
                        </div>
                        <div className="text-[10px] space-x-2">
                          <span className="text-green-500">{asset.wins}W</span>
@@ -478,7 +599,7 @@ export default function BotDashboard() {
           )}
 
           {/* VIEW: SETTINGS */}
-          {view === 'settings' && (
+          {view === 'settings' && (config || user?.id === 'demo-user') && (
             <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-3xl mx-auto">
               <h1 className="text-2xl font-bold text-white">Configurações</h1>
 
@@ -489,12 +610,22 @@ export default function BotDashboard() {
                    </h3>
                    <div className="grid grid-cols-2 gap-4">
                      <div className="space-y-2">
-                       <label className="text-xs text-zinc-400 block">Stop Win ($)</label>
-                       <input type="number" defaultValue={500} className="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-3 text-green-400 font-bold outline-none focus:border-green-500" />
+                       <label className="text-xs text-zinc-400 block">Stop Win</label>
+                       <input 
+                        type="number" 
+                        value={config?.stop_win || 500}
+                        onChange={(e) => updateConfig('stop_win', Number(e.target.value))}
+                        className="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-3 text-green-400 font-bold outline-none focus:border-green-500" 
+                       />
                      </div>
                      <div className="space-y-2">
-                       <label className="text-xs text-zinc-400 block">Stop Loss ($)</label>
-                       <input type="number" defaultValue={200} className="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-3 text-red-400 font-bold outline-none focus:border-red-500" />
+                       <label className="text-xs text-zinc-400 block">Stop Loss</label>
+                       <input 
+                        type="number" 
+                        value={config?.stop_loss || 200}
+                        onChange={(e) => updateConfig('stop_loss', Number(e.target.value))}
+                        className="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-3 text-red-400 font-bold outline-none focus:border-red-500" 
+                       />
                      </div>
                    </div>
                 </div>
@@ -505,26 +636,39 @@ export default function BotDashboard() {
                        <Layers size={14} /> Martingale
                      </h3>
                      <div className="flex items-center gap-2">
-                       <span className="text-xs text-zinc-400">Ativado</span>
-                       <div className="w-10 h-5 bg-amber-500 rounded-full relative cursor-pointer">
-                         <div className="w-3 h-3 bg-white rounded-full absolute top-1 right-1 shadow-sm"></div>
-                       </div>
+                       <span className="text-xs text-zinc-400">{config?.use_martingale ? 'Ativado' : 'Desativado'}</span>
+                       <button 
+                        onClick={() => updateConfig('use_martingale', !config?.use_martingale)}
+                        className={`w-10 h-5 rounded-full relative cursor-pointer transition-colors ${config?.use_martingale ? 'bg-amber-500' : 'bg-zinc-700'}`}
+                       >
+                         <div className={`w-3 h-3 bg-white rounded-full absolute top-1 transition-all shadow-sm ${config?.use_martingale ? 'right-1' : 'left-1'}`}></div>
+                       </button>
                      </div>
                   </div>
                   
-                  <div className="grid grid-cols-2 gap-4">
-                     <div className="space-y-2">
-                       <label className="text-xs text-zinc-400 block">Níveis de Gale</label>
-                       <select className="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-3 text-white outline-none">
-                         <option>1 Nível</option>
-                         <option>2 Níveis</option>
-                       </select>
-                     </div>
-                     <div className="space-y-2">
-                       <label className="text-xs text-zinc-400 block">Fator Multiplicador</label>
-                       <input type="number" defaultValue={2.0} step="0.1" className="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-3 text-white font-bold outline-none focus:border-amber-500" />
-                     </div>
-                  </div>
+                  {config?.use_martingale && (
+                    <div className="grid grid-cols-2 gap-4">
+                       <div className="space-y-2">
+                         <label className="text-xs text-zinc-400 block">Níveis de Gale</label>
+                         <input 
+                            type="number" 
+                            value={config.martingale_levels} 
+                            onChange={(e) => updateConfig('martingale_levels', Number(e.target.value))}
+                            className="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-3 text-white outline-none" 
+                         />
+                       </div>
+                       <div className="space-y-2">
+                         <label className="text-xs text-zinc-400 block">Fator Multiplicador</label>
+                         <input 
+                            type="number" 
+                            step="0.1"
+                            value={config.martingale_factor} 
+                            onChange={(e) => updateConfig('martingale_factor', Number(e.target.value))}
+                            className="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-3 text-white font-bold outline-none focus:border-amber-500" 
+                         />
+                       </div>
+                    </div>
+                  )}
                 </div>
 
                 <div className="border-t border-zinc-700/50 pt-6">
@@ -534,25 +678,27 @@ export default function BotDashboard() {
                    <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
                        <label className="text-xs text-zinc-400 block">Valor Entrada ($)</label>
-                       <input type="number" defaultValue={10} className="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-3 text-white font-bold outline-none focus:border-amber-500" />
+                       <input 
+                        type="number" 
+                        value={config?.entry_value || 10} 
+                        onChange={(e) => updateConfig('entry_value', Number(e.target.value))}
+                        className="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-3 text-white font-bold outline-none focus:border-amber-500" 
+                       />
                      </div>
                      <div className="space-y-2">
                        <label className="text-xs text-zinc-400 block">Conta</label>
-                       <select className="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-3 text-white outline-none">
-                         <option value="DEMO">DEMO (Treino)</option>
+                       <select 
+                        value={config?.account_type || 'PRACTICE'} 
+                        onChange={(e) => updateConfig('account_type', e.target.value)}
+                        className="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-3 text-white outline-none"
+                       >
+                         <option value="PRACTICE">DEMO (Treino)</option>
                          <option value="REAL">REAL</option>
                        </select>
                      </div>
                    </div>
                 </div>
               </div>
-
-              <button 
-                onClick={() => showToast('Configurações salvas com sucesso!', 'success')}
-                className="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-4 rounded-xl shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2 transition-all active:scale-95"
-              >
-                <Save size={20} /> Salvar Alterações
-              </button>
             </div>
           )}
 
@@ -562,14 +708,14 @@ export default function BotDashboard() {
                <h1 className="text-2xl font-bold text-white mb-4">Terminal do Sistema</h1>
                <div className="flex-1 glass-card rounded-xl p-4 overflow-y-auto font-mono text-xs space-y-2 border border-zinc-700 bg-black/60 shadow-inner">
                  <div className="text-zinc-500 mb-4 pb-2 border-b border-zinc-800">
-                   Marombiew Bot v2.5.0 - System initialized
-                   <br/>Connected to server: ioduahwknfsktujthfyc.supabase.co
+                   Marombiew Bot v2.5.2 - Connected via REST
+                   <br/>Server: {SUPABASE_URL.split('//')[1]}
                  </div>
-                 {[...Array(15)].map((_, i) => (
-                   <div key={i} className="flex gap-2 opacity-80 hover:opacity-100 transition-opacity">
-                     <span className="text-zinc-600">[{new Date(Date.now() - i * 5000).toLocaleTimeString()}]</span>
-                     <span className={i % 3 === 0 ? 'text-green-400' : i % 2 === 0 ? 'text-blue-400' : 'text-zinc-300'}>
-                       {i % 3 === 0 ? 'INFO: Analyzing market data...' : i % 2 === 0 ? 'DEBUG: RSI calculation valid (45.5)' : 'SYSTEM: Heartbeat check OK'}
+                 {logs.map((log) => (
+                   <div key={log.id} className="flex gap-2 opacity-80 hover:opacity-100 transition-opacity">
+                     <span className="text-zinc-600 shrink-0">[{new Date(log.created_at).toLocaleTimeString()}]</span>
+                     <span className={`${log.level === 'ERROR' ? 'text-red-400' : log.level === 'WARNING' ? 'text-amber-400' : log.level === 'SUCCESS' ? 'text-green-400' : 'text-zinc-300'}`}>
+                       {log.level}: {log.message}
                      </span>
                    </div>
                  ))}
