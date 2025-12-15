@@ -1,749 +1,615 @@
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>MAROMBIEW BOT</title>
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { 
+  LayoutDashboard, 
+  Layers, 
+  Settings, 
+  Terminal, 
+  LogOut, 
+  Wallet, 
+  TrendingUp, 
+  TrendingDown, 
+  Activity, 
+  Play, 
+  Pause, 
+  Save, 
+  RefreshCw, 
+  ArrowUp, 
+  ArrowDown, 
+  Check, 
+  X, 
+  Search,
+  Zap,
+  Lock,
+  Eye,
+  EyeOff
+} from 'lucide-react';
 
-    <meta name="theme-color" content="#111827">
-    <link rel="manifest" href="/manifest.json">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="MarombiewBot">
-    
-    <!-- Scripts e Estilos -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
-    
-    <!-- React & Supabase -->
-    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+// --- MOCK DATA & SERVICES (Simulação do Backend) ---
 
-    <style>
-        :root {
-            --bg-dark: #111827; --bg-medium: #1f2937; --border-color: #374151;
-            --text-primary: #f9fafb; --text-secondary: #9ca3af; --accent-primary: #f59e0b;
-            --accent-primary-hover: #fbbf24; --accent-red: #ef4444; 
-            --accent-win: #22c55e; --accent-loss: #f87171; --accent-info: #3b82f6;
-        }
-        body { background-color: var(--bg-dark); color: var(--text-primary); font-family: 'Poppins', sans-serif; overflow: hidden; }
-        
-        /* Glassmorphism */
-        .glass-card { background: rgba(31, 41, 55, 0.7); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid var(--border-color); }
-        
-        /* Form Elements */
-        .form-input, .form-select { background-color: var(--bg-dark); border: 1px solid var(--border-color); color: var(--text-primary); transition: all 0.2s; }
-        .form-input:focus, .form-select:focus { outline: none; border-color: var(--accent-primary); box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.2); }
-        
-        /* Utility */
-        .btn { transition: all 0.2s; border: none; font-weight: 600; cursor: pointer; }
-        .btn:active { transform: scale(0.98); }
-        .nav-link-active { background-color: var(--accent-primary); color: var(--bg-dark); }
-        
-        /* Toggles */
-        .toggle-bg:after { content: ''; position: absolute; top: 2px; left: 2px; background: white; border-radius: 9999px; height: 1.25rem; width: 1.25rem; transition: all 0.2s; }
-        input:checked + .toggle-bg:after { transform: translateX(100%); }
-        input:checked + .toggle-bg { background-color: var(--accent-primary); }
-        
-        /* Loading */
-        .spinner { border: 3px solid rgba(245, 158, 11, 0.2); border-top-color: var(--accent-primary); border-radius: 50%; width: 1.5rem; height: 1.5rem; animation: spin 1s linear infinite; }
-        @keyframes spin { to { transform: rotate(360deg); } }
-        
-        /* Splash Screen */
-        #static-splash { position: fixed; inset: 0; background-color: var(--bg-dark); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 9999; transition: opacity 0.4s ease-out; }
+const MOCK_SIGNALS = [
+  { id: 1, pair: 'EUR/USD-OTC', direction: 'call', strategy: 'MHI 2 Majority', result: 'WIN', created_at: new Date(Date.now() - 1000 * 60 * 2).toISOString(), martingale_level: 0 },
+  { id: 2, pair: 'GBP/JPY-OTC', direction: 'put', strategy: 'Torre Gemea', result: 'LOSS', created_at: new Date(Date.now() - 1000 * 60 * 15).toISOString(), martingale_level: 0 },
+  { id: 3, pair: 'GBP/JPY-OTC', direction: 'put', strategy: 'Torre Gemea (G1)', result: 'WIN', created_at: new Date(Date.now() - 1000 * 60 * 12).toISOString(), martingale_level: 1 },
+  { id: 4, pair: 'USD/BRL-OTC', direction: 'call', strategy: 'Padrão 23', result: 'WIN', created_at: new Date(Date.now() - 1000 * 60 * 45).toISOString(), martingale_level: 0 },
+  { id: 5, pair: 'AUD/CAD-OTC', direction: 'put', strategy: 'MHI 1', result: 'PENDING', created_at: new Date().toISOString(), martingale_level: 0 },
+];
 
-        /* Toast Notifications */
-        .toast-container { position: fixed; top: 1rem; right: 1rem; z-index: 50; display: flex; flex-direction: column; gap: 0.5rem; }
-        .toast { animation: slideIn 0.3s ease-out forwards; }
-        @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+const MOCK_CATALOG = [
+  { pair: 'EUR/USD-OTC', win_rate: 92.5, wins: 34, losses: 2, best_strategy: 'MHI 2' },
+  { pair: 'GBP/USD-OTC', win_rate: 88.0, wins: 22, losses: 3, best_strategy: 'Torre' },
+  { pair: 'USD/JPY-OTC', win_rate: 75.4, wins: 15, losses: 5, best_strategy: 'Padrão 23' },
+  { pair: 'AUD/CAD-OTC', win_rate: 45.0, wins: 9, losses: 11, best_strategy: 'N/A' },
+];
 
-        /* --- ANIMAÇÕES DO SCANNER --- */
-        .scan-line {
-            position: absolute;
-            width: 100%;
-            height: 2px;
-            background: linear-gradient(90deg, transparent, var(--accent-primary), transparent);
-            animation: scanMove 1.5s linear infinite;
-            opacity: 0.8;
-            box-shadow: 0 0 10px var(--accent-primary);
-        }
-        @keyframes scanMove {
-            0% { top: 0%; opacity: 0; }
-            10% { opacity: 1; }
-            90% { opacity: 1; }
-            100% { top: 100%; opacity: 0; }
-        }
-        
-        .pulse-ring {
-            position: absolute;
-            border-radius: 50%;
-            border: 2px solid var(--accent-primary);
-            opacity: 0;
-            animation: pulseEffect 2s ease-out infinite;
-        }
-        @keyframes pulseEffect {
-            0% { transform: scale(0.5); opacity: 0.8; }
-            100% { transform: scale(1.5); opacity: 0; }
-        }
+// --- Styles & Animations ---
+// Injected via style tag for specific scanner animations
+const CustomStyles = () => (
+  <style>{`
+    @keyframes scanMove {
+      0% { top: 0%; opacity: 0; }
+      10% { opacity: 1; }
+      90% { opacity: 1; }
+      100% { top: 100%; opacity: 0; }
+    }
+    .scan-line {
+      position: absolute;
+      width: 100%;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, #f59e0b, transparent);
+      animation: scanMove 2s linear infinite;
+      opacity: 0.8;
+      box-shadow: 0 0 10px #f59e0b;
+    }
+    .glass-card {
+      background: rgba(31, 41, 55, 0.6);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(55, 65, 81, 0.5);
+    }
+    .animate-spin-slow {
+      animation: spin 3s linear infinite;
+    }
+    @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+  `}</style>
+);
 
-        .ticker-text {
-            font-family: 'Roboto Mono', monospace;
-            animation: fadeSwitch 0.2s ease-in-out;
-        }
-        @keyframes fadeSwitch {
-            0% { opacity: 0.5; transform: translateY(2px); }
-            100% { opacity: 1; transform: translateY(0); }
-        }
-    </style>
-</head>
-<body>
-    <div id="static-splash">
-        <i class="fas fa-robot" style="color: #f59e0b; font-size: 60px; margin-bottom: 1rem;"></i>
-        <h1 style="font-size: 1.875rem; font-weight: 700; color: white; margin-bottom: 0.5rem;">MAROMBIEW BOT</h1>
-        <div class="spinner"></div>
+// --- Components ---
+
+const Toast = ({ message, type, onClose }) => (
+  <div className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-xl shadow-2xl flex items-center gap-3 animate-in slide-in-from-right fade-in duration-300 ${
+    type === 'error' ? 'bg-red-500/90 text-white' : 
+    type === 'success' ? 'bg-green-500/90 text-white' : 'bg-zinc-800/90 text-white border border-zinc-700'
+  }`}>
+    {type === 'success' ? <Check size={16} /> : type === 'error' ? <X size={16} /> : <Zap size={16} />}
+    <span className="text-sm font-medium">{message}</span>
+    <button onClick={onClose} className="ml-2 hover:bg-white/20 rounded-full p-1"><X size={12} /></button>
+  </div>
+);
+
+const ScannerWidget = ({ botStatus }) => {
+  const [data, setData] = useState({ pair: 'EUR/USD', price: '1.05432', rsi: '45.4' });
+  const [pulse, setPulse] = useState(false);
+
+  // Simulate price updates
+  useEffect(() => {
+    if (botStatus !== 'RUNNING') return;
+    const interval = setInterval(() => {
+      setPulse(true);
+      setData(prev => ({
+        pair: Math.random() > 0.5 ? 'EUR/USD-OTC' : 'GBP/JPY-OTC',
+        price: (1.05 + Math.random() * 0.01).toFixed(5),
+        rsi: (30 + Math.random() * 40).toFixed(1)
+      }));
+      setTimeout(() => setPulse(false), 500);
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [botStatus]);
+
+  return (
+    <div className="glass-card rounded-xl p-6 relative overflow-hidden group">
+      {botStatus === 'RUNNING' && <div className="scan-line top-0 left-0 z-0"></div>}
+      
+      <div className="relative z-10 flex justify-between items-start">
+        <div>
+          <div className="flex items-center gap-2 mb-2">
+            <div className={`w-2 h-2 rounded-full ${botStatus === 'RUNNING' ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></div>
+            <span className="text-[10px] font-bold tracking-widest text-zinc-400 uppercase">
+              {botStatus === 'RUNNING' ? 'SCANNER LIVE' : 'OFFLINE'}
+            </span>
+          </div>
+          <div className={`text-3xl font-black text-white tracking-tight transition-all duration-300 ${pulse ? 'scale-105 text-amber-400' : ''}`}>
+            {data.pair}
+          </div>
+          <div className="flex items-center gap-3 mt-2">
+            <span className="px-2 py-0.5 rounded bg-zinc-800 border border-zinc-700 text-xs text-zinc-400 font-mono">
+              RSI: <span className={Number(data.rsi) > 70 || Number(data.rsi) < 30 ? 'text-amber-400 font-bold' : 'text-zinc-300'}>{data.rsi}</span>
+            </span>
+            <span className="px-2 py-0.5 rounded bg-zinc-800 border border-zinc-700 text-xs text-zinc-400 font-mono">
+              M5
+            </span>
+          </div>
+        </div>
+        <div className="text-right">
+          <p className="text-[10px] text-zinc-500 uppercase font-bold mb-1">PREÇO ATUAL</p>
+          <p className="text-2xl font-mono text-zinc-200">{data.price}</p>
+          {botStatus === 'RUNNING' && (
+             <div className="flex justify-end mt-2 gap-1">
+               <span className="w-1 h-3 bg-amber-500/20 rounded-full animate-pulse"></span>
+               <span className="w-1 h-5 bg-amber-500/40 rounded-full animate-pulse delay-75"></span>
+               <span className="w-1 h-2 bg-amber-500/60 rounded-full animate-pulse delay-100"></span>
+               <span className="w-1 h-4 bg-amber-500 rounded-full animate-pulse delay-150"></span>
+             </div>
+          )}
+        </div>
+      </div>
     </div>
+  );
+};
 
-    <div id="root"></div>
+const CountdownTimer = () => {
+  const [seconds, setSeconds] = useState(60 - new Date().getSeconds());
+  useEffect(() => {
+    const t = setInterval(() => setSeconds(60 - new Date().getSeconds()), 1000);
+    return () => clearInterval(t);
+  }, []);
 
-    <script type="text/babel">
-        const { useState, useEffect, useCallback, useMemo, useRef, createContext, useContext } = React;
-        const { createClient } = supabase;
+  return (
+    <div className="flex flex-col items-center justify-center bg-zinc-800/50 rounded-lg p-2 border border-zinc-700/50">
+      <span className="text-[9px] text-zinc-500 uppercase font-bold">Vela M1</span>
+      <span className="text-lg font-mono font-bold text-amber-400">{String(seconds).padStart(2, '0')}s</span>
+    </div>
+  );
+};
 
-        // Configuração Supabase
-        const SUPABASE_URL = 'https://ioduahwknfsktujthfyc.supabase.co';
-        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlvZHVhaHdrbmZza3R1anRoZnljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEzMDc0NDcsImV4cCI6MjA2Njg4MzQ0N30.96f8wZO6SvABKFMWjIiw1pSugAB4Isldj7yxLcLJRSE';
-        const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+// --- View Components ---
 
-        // --- Contexto de Toast (Notificações) ---
-        const ToastContext = createContext();
-        const useToast = () => useContext(ToastContext);
+const LoginView = ({ onLogin }) => {
+  const [loading, setLoading] = useState(false);
+  const [email, setEmail] = useState('');
+  const [pass, setPass] = useState('');
 
-        const ToastProvider = ({ children }) => {
-            const [toasts, setToasts] = useState([]);
-            const addToast = (msg, type = 'info') => {
-                const id = Date.now();
-                setToasts(prev => [...prev, { id, msg, type }]);
-                setTimeout(() => removeToast(id), 3000);
-            };
-            const removeToast = (id) => setToasts(prev => prev.filter(t => t.id !== id));
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    setLoading(true);
+    // Simulate Supabase Auth
+    setTimeout(() => {
+      setLoading(false);
+      onLogin({ email });
+    }, 1500);
+  };
 
-            return (
-                <ToastContext.Provider value={{ addToast }}>
-                    {children}
-                    <div className="toast-container">
-                        {toasts.map(t => (
-                            <div key={t.id} className={`toast px-4 py-3 rounded-lg shadow-lg text-sm font-medium flex items-center gap-2 ${
-                                t.type === 'error' ? 'bg-red-600 text-white' : 
-                                t.type === 'success' ? 'bg-green-600 text-white' : 'bg-gray-800 text-white border border-gray-700'
-                            }`}>
-                                <i className={`fas ${t.type === 'error' ? 'fa-exclamation-circle' : t.type === 'success' ? 'fa-check-circle' : 'fa-info-circle'}`}></i>
-                                {t.msg}
-                            </div>
-                        ))}
-                    </div>
-                </ToastContext.Provider>
-            );
-        };
-
-        // --- Componentes Visual ---
+  return (
+    <div className="min-h-screen flex items-center justify-center p-4 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-gray-800 via-gray-950 to-black">
+      <CustomStyles />
+      <div className="w-full max-w-md glass-card p-8 rounded-2xl shadow-2xl border-t border-zinc-700">
+        <div className="text-center mb-8">
+          <div className="w-20 h-20 bg-amber-500/10 rounded-2xl flex items-center justify-center mx-auto mb-6 border border-amber-500/20 shadow-[0_0_30px_rgba(245,158,11,0.2)]">
+            <Zap className="text-amber-400" size={40} />
+          </div>
+          <h2 className="text-3xl font-bold text-white tracking-tight">Marombiew Bot</h2>
+          <p className="text-zinc-500 text-sm mt-2 font-medium">Painel de Controlo Inteligente</p>
+        </div>
         
-        // WIDGET SCANNER INTELIGENTE
-        const ScannerWidget = ({ lastLog, botStatus }) => {
-            const [data, setData] = useState({ pair: '---', price: '0.00000', rsi: '0.0' });
-            const [anim, setAnim] = useState(false);
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-1">
+            <label className="text-xs text-zinc-400 font-medium ml-1">Email</label>
+            <div className="relative">
+               <input 
+                type="email" 
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                required
+                className="w-full bg-zinc-900/50 border border-zinc-700 text-zinc-200 text-sm rounded-xl pl-10 pr-4 py-3 focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500 outline-none transition-all placeholder:text-zinc-600" 
+                placeholder="admin@marombiew.com" 
+               />
+               <div className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500"><Search size={16}/></div>
+            </div>
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs text-zinc-400 font-medium ml-1">Senha</label>
+            <div className="relative">
+              <input 
+                type="password"
+                value={pass}
+                onChange={e => setPass(e.target.value)} 
+                required
+                className="w-full bg-zinc-900/50 border border-zinc-700 text-zinc-200 text-sm rounded-xl pl-10 pr-4 py-3 focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500 outline-none transition-all placeholder:text-zinc-600" 
+                placeholder="••••••••" 
+              />
+              <div className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500"><Lock size={16}/></div>
+            </div>
+          </div>
+          <button 
+            type="submit" 
+            disabled={loading}
+            className="w-full bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-amber-900/20 transition-all active:scale-[0.98] flex justify-center items-center gap-2 mt-4"
+          >
+            {loading ? <RefreshCw className="animate-spin" size={20} /> : 'Aceder ao Sistema'}
+          </button>
+        </form>
+        <p className="text-center text-xs text-zinc-600 mt-6">v2.5.0 Stable Build</p>
+      </div>
+    </div>
+  );
+};
 
-            useEffect(() => {
-                if (!lastLog || botStatus !== 'RUNNING') return;
+export default function BotDashboard() {
+  const [user, setUser] = useState(null);
+  const [view, setView] = useState('home');
+  const [botStatus, setBotStatus] = useState('PAUSED');
+  const [signals, setSignals] = useState(MOCK_SIGNALS);
+  const [toast, setToast] = useState(null);
+  const [balance, setBalance] = useState(12450.50);
+  const [initialBalance] = useState(12400.00);
 
-                // Log formato: ANALISE_DETALHADA::EURUSD-OTC::Preço:1.05432::RSI:55.4
-                if (lastLog.message.startsWith('ANALISE_DETALHADA::')) {
-                    const parts = lastLog.message.split('::');
-                    if (parts.length >= 4) {
-                        setData({
-                            pair: parts[1],
-                            price: parts[2].split(':')[1],
-                            rsi: parts[3].split(':')[1]
-                        });
-                        setAnim(true);
-                        setTimeout(() => setAnim(false), 500);
-                    }
-                }
-            }, [lastLog, botStatus]);
+  // Stats calculation
+  const stats = useMemo(() => {
+    const wins = signals.filter(s => s.result === 'WIN').length;
+    const losses = signals.filter(s => s.result === 'LOSS').length;
+    return { wins, losses, total: wins + losses };
+  }, [signals]);
 
-            return (
-                <div className="glass-card rounded-xl p-5 border border-gray-700 relative overflow-hidden">
-                    <div className="flex justify-between items-start relative z-10">
-                        <div>
-                            <div className="flex items-center gap-2 mb-1">
-                                <div className={`w-2 h-2 rounded-full ${botStatus === 'RUNNING' ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></div>
-                                <span className="text-[10px] font-bold tracking-widest text-gray-400 uppercase">
-                                    {botStatus === 'RUNNING' ? 'SCANNER LIVE' : 'OFFLINE'}
-                                </span>
-                            </div>
-                            <div className={`text-3xl font-black text-white tracking-tight ${anim ? 'pulse-text' : ''}`}>
-                                {data.pair}
-                            </div>
-                            <p className="text-xs text-gray-400 mt-1 font-mono">
-                                RSI: <span className={parseFloat(data.rsi) > 65 || parseFloat(data.rsi) < 35 ? 'text-amber-400 font-bold' : 'text-gray-300'}>{data.rsi}</span>
-                            </p>
-                        </div>
-                        <div className="text-right">
-                            <p className="text-[10px] text-gray-500 uppercase font-bold">PREÇO ATUAL</p>
-                            <p className="text-xl font-mono text-white">{data.price}</p>
-                        </div>
-                    </div>
-                </div>
-            );
+  const assertiveness = stats.total > 0 ? ((stats.wins / stats.total) * 100).toFixed(0) : 0;
+  const profit = balance - initialBalance;
+
+  // Simulate receiving a new signal
+  useEffect(() => {
+    if (botStatus !== 'RUNNING') return;
+    const interval = setInterval(() => {
+      if (Math.random() > 0.7) {
+        const newSignal = {
+          id: Date.now(),
+          pair: Math.random() > 0.5 ? 'EUR/USD-OTC' : 'USD/JPY-OTC',
+          direction: Math.random() > 0.5 ? 'call' : 'put',
+          strategy: 'MHI 3 Majority',
+          result: 'PENDING',
+          created_at: new Date().toISOString(),
+          martingale_level: 0
         };
+        setSignals(prev => [newSignal, ...prev]);
+        setToast({ msg: `Novo sinal detetado: ${newSignal.pair}`, type: 'info' });
+        
+        // Resolve signal after delay
+        setTimeout(() => {
+          setSignals(prev => prev.map(s => s.id === newSignal.id ? {...s, result: Math.random() > 0.3 ? 'WIN' : 'LOSS'} : s));
+        }, 5000);
+      }
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [botStatus]);
 
-        function CountdownTimer() {
-            const [countdown, setCountdown] = useState(60 - new Date().getSeconds());
-            useEffect(() => {
-                const timer = setInterval(() => setCountdown(60 - new Date().getSeconds()), 1000);
-                return () => clearInterval(timer);
-            }, []);
-            return (
-                <div className="text-center bg-gray-800/50 rounded-lg p-2">
-                    <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-1">Próxima Vela</p>
-                    <p className="text-xl font-bold text-amber-400 font-mono">{String(countdown).padStart(2, '0')}s</p>
+  const handleLogout = () => setUser(null);
+  const showToast = (msg, type = 'info') => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 3000);
+  };
+
+  const NavItem = ({ id, icon: Icon, label }) => (
+    <button 
+      onClick={() => setView(id)}
+      className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all w-full md:w-auto md:justify-start justify-center
+        ${view === id 
+          ? 'bg-amber-500/10 text-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.1)] border border-amber-500/20' 
+          : 'text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800/50'
+        }`}
+    >
+      <Icon size={20} className={view === id ? 'text-amber-400' : ''} />
+      <span className="hidden md:block font-medium text-sm">{label}</span>
+    </button>
+  );
+
+  if (!user) return <LoginView onLogin={setUser} />;
+
+  return (
+    <div className="min-h-screen bg-[#111827] text-zinc-100 font-sans flex flex-col md:flex-row overflow-hidden selection:bg-amber-500/30">
+      <CustomStyles />
+      {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
+
+      {/* Sidebar Desktop */}
+      <aside className="hidden md:flex flex-col w-64 bg-[#1f2937]/50 backdrop-blur-md border-r border-zinc-800 h-screen z-20">
+        <div className="h-20 flex items-center px-6 border-b border-zinc-800/50">
+          <Zap className="text-amber-400 mr-3" size={24} fill="currentColor" />
+          <span className="font-bold text-lg tracking-wider text-white">MAROMBIEW</span>
+        </div>
+        
+        <nav className="flex-1 p-4 space-y-2">
+          <NavItem id="home" icon={LayoutDashboard} label="Dashboard" />
+          <NavItem id="strategies" icon={Layers} label="Estratégias" />
+          <NavItem id="settings" icon={Settings} label="Configurações" />
+          <NavItem id="logs" icon={Terminal} label="Logs do Sistema" />
+        </nav>
+
+        <div className="p-4 border-t border-zinc-800/50">
+          <button onClick={handleLogout} className="flex items-center gap-3 px-4 py-3 text-sm text-red-400 hover:bg-red-500/10 rounded-xl w-full transition-colors">
+            <LogOut size={18} /> Sair
+          </button>
+        </div>
+      </aside>
+
+      {/* Main Content */}
+      <main className="flex-1 flex flex-col h-screen overflow-hidden relative">
+        <div className="flex-1 overflow-y-auto p-4 md:p-8 scroll-smooth pb-24 md:pb-8">
+          
+          {/* VIEW: DASHBOARD */}
+          {view === 'home' && (
+            <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-5xl mx-auto">
+              <div className="flex justify-between items-end">
+                <div>
+                  <h1 className="text-2xl font-bold text-white">Dashboard</h1>
+                  <p className="text-zinc-500 text-xs">Visão geral das operações de hoje.</p>
                 </div>
-            );
-        }
-
-        const NavLink = ({ viewName, currentView, setView, icon, text, isMobile = false }) => {
-            const isActive = currentView === viewName;
-            return (
-                <button 
-                    onClick={() => setView(viewName)} 
-                    className={`flex items-center transition-all duration-200 ${
-                        isMobile 
-                        ? `flex-1 flex-col py-3 text-[10px] ${isActive ? 'text-amber-400' : 'text-gray-500 hover:text-gray-300'}` 
-                        : `w-full space-x-3 px-4 py-3 rounded-lg text-sm font-medium ${isActive ? 'nav-link-active shadow-lg shadow-amber-500/20' : 'text-gray-400 hover:bg-gray-800 hover:text-white'}`
+                <div className="flex gap-2">
+                   <button 
+                    onClick={() => {
+                        const next = botStatus === 'RUNNING' ? 'PAUSED' : 'RUNNING';
+                        setBotStatus(next);
+                        showToast(`Bot ${next === 'RUNNING' ? 'Iniciado' : 'Pausado'}`, next === 'RUNNING' ? 'success' : 'info');
+                    }}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold shadow-lg transition-all ${
+                        botStatus === 'RUNNING' 
+                        ? 'bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20' 
+                        : 'bg-green-500 text-white hover:bg-green-400 shadow-green-500/20'
                     }`}
-                >
-                    <i className={`fa-solid ${icon} text-lg ${isMobile ? 'mb-1 text-xl' : 'w-6 text-center'}`}></i>
-                    <span className={isMobile ? '' : ''}>{text}</span>
-                </button>
-            );
-        };
-
-        // --- Páginas ---
-
-        function LoginPage({ onLogin }) {
-            const [email, setEmail] = useState('');
-            const [password, setPassword] = useState('');
-            const [loading, setLoading] = useState(false);
-            const { addToast } = useToast();
-
-            const handleLogin = async (e) => {
-                e.preventDefault();
-                setLoading(true);
-                const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
-                if (error) addToast(error.message, 'error');
-                else if (data.user) {
-                    addToast('Bem-vindo de volta!', 'success');
-                    onLogin(data.user);
-                }
-                setLoading(false);
-            };
-
-            return (
-                <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-gray-900 to-black">
-                    <div className="w-full max-w-md p-8 glass-card rounded-2xl shadow-2xl">
-                        <div className="text-center mb-8">
-                            <div className="w-16 h-16 bg-amber-500/10 rounded-full flex items-center justify-center mx-auto mb-4">
-                                <i className="fas fa-robot text-3xl text-amber-400"></i>
-                            </div>
-                            <h2 className="text-2xl font-bold text-white">Acesso Admin</h2>
-                            <p className="text-gray-400 text-sm mt-1">Marombiew Bot Control</p>
-                        </div>
-                        <form className="space-y-5" onSubmit={handleLogin}>
-                            <div><input type="email" required className="form-input w-full px-4 py-3 rounded-xl" placeholder="admin@exemplo.com" value={email} onChange={e => setEmail(e.target.value)} /></div>
-                            <div><input type="password" required className="form-input w-full px-4 py-3 rounded-xl" placeholder="••••••••" value={password} onChange={e => setPassword(e.target.value)} /></div>
-                            <button type="submit" className="btn bg-amber-500 hover:bg-amber-600 w-full py-3 rounded-xl text-white shadow-lg shadow-amber-500/20 flex justify-center items-center gap-2" disabled={loading}>
-                                {loading && <div className="spinner w-4 h-4 border-2"></div>}
-                                {loading ? 'Autenticando...' : 'Entrar no Sistema'}
-                            </button>
-                        </form>
-                    </div>
+                   >
+                     {botStatus === 'RUNNING' ? <Pause size={16} fill="currentColor"/> : <Play size={16} fill="currentColor"/>}
+                     {botStatus === 'RUNNING' ? 'PAUSAR BOT' : 'INICIAR BOT'}
+                   </button>
                 </div>
-            );
-        }
+              </div>
 
-        function HomeView() {
-            const [signals, setSignals] = useState([]);
-            const [balanceInfo, setBalanceInfo] = useState({ current: 0, initial: 0 });
-            const [botStatus, setBotStatus] = useState('PAUSED'); // Novo estado
-            const [isResetting, setIsResetting] = useState(false);
-            const [lastLog, setLastLog] = useState(null); 
-            const { addToast } = useToast();
+              {/* Scanner */}
+              <ScannerWidget botStatus={botStatus} />
 
-            const scores = useMemo(() => {
-                const wins = signals.filter(s => s.result === 'WIN').length;
-                const losses = signals.filter(s => s.result === 'LOSS').length;
-                return { wins, losses, total: wins + losses };
-            }, [signals]);
+              {/* Financial Cards */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="glass-card p-5 rounded-xl relative overflow-hidden group">
+                   <div className="absolute -right-4 -top-4 text-zinc-800 opacity-50 group-hover:opacity-100 group-hover:scale-110 transition-all duration-500">
+                     <Wallet size={80} />
+                   </div>
+                   <p className="text-xs text-zinc-500 font-bold uppercase tracking-wider mb-1">Saldo Atual</p>
+                   <p className="text-2xl font-bold text-white">${balance.toFixed(2)}</p>
+                </div>
+                <div className="glass-card p-5 rounded-xl relative overflow-hidden group">
+                   <div className={`absolute -right-4 -top-4 opacity-50 group-hover:opacity-100 group-hover:scale-110 transition-all duration-500 ${profit >= 0 ? 'text-green-900' : 'text-red-900'}`}>
+                     <Activity size={80} />
+                   </div>
+                   <p className="text-xs text-zinc-500 font-bold uppercase tracking-wider mb-1">Resultado (Dia)</p>
+                   <p className={`text-2xl font-bold flex items-center gap-1 ${profit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                     {profit >= 0 ? <TrendingUp size={20} /> : <TrendingDown size={20} />}
+                     {profit >= 0 ? '+' : ''}{profit.toFixed(2)}
+                   </p>
+                </div>
+              </div>
 
-            const assertividade = scores.total > 0 ? ((scores.wins / scores.total) * 100).toFixed(0) : 0;
-            const profit = balanceInfo.current - balanceInfo.initial;
+              {/* Scoreboard */}
+              <div className="glass-card p-4 rounded-xl border-t-4 border-amber-500">
+                <div className="flex divide-x divide-zinc-700">
+                  <div className="flex-1 px-2 text-center">
+                    <p className="text-[10px] text-green-500 font-bold mb-1">WINS</p>
+                    <span className="text-2xl font-bold text-white">{stats.wins}</span>
+                  </div>
+                  <div className="flex-1 px-2 text-center">
+                    <p className="text-[10px] text-red-500 font-bold mb-1">LOSS</p>
+                    <span className="text-2xl font-bold text-white">{stats.losses}</span>
+                  </div>
+                  <div className="flex-1 px-2 text-center">
+                    <p className="text-[10px] text-blue-400 font-bold mb-1">ASSERT.</p>
+                    <span className="text-2xl font-bold text-white">{assertiveness}%</span>
+                  </div>
+                  <div className="flex-1 px-2 flex justify-center items-center">
+                     <CountdownTimer />
+                  </div>
+                </div>
+              </div>
 
-            const handleResetScores = async () => {
-                if (!confirm("Confirmar reset do histórico diário?")) return;
-                setIsResetting(true);
-                const { error } = await supabaseClient.rpc('reset_daily_stats');
-                if (error) addToast("Erro ao zerar: " + error.message, 'error');
-                else {
-                    setSignals([]);
-                    addToast("Placar zerado com sucesso", 'success');
-                }
-                setIsResetting(false);
-            };
-            
-            useEffect(() => {
-                const fetchData = async () => {
-                    const { data: sData } = await supabaseClient.from('trade_signals').select('*').order('created_at', { ascending: false }).limit(50);
-                    if (sData) setSignals(sData);
-                    
-                    const { data: cData } = await supabaseClient.from('bot_config').select('current_balance, daily_initial_balance, status').eq('id', 1).single();
-                    if (cData) {
-                        setBalanceInfo({ current: cData.current_balance || 0, initial: cData.daily_initial_balance || 0 });
-                        setBotStatus(cData.status || 'PAUSED');
-                    }
-                };
-                fetchData();
-
-                const subSignals = supabaseClient.channel('signals_realtime')
-                    .on('postgres_changes', { event: '*', schema: 'public', table: 'trade_signals' }, (payload) => {
-                        if (payload.eventType === 'INSERT') setSignals(prev => [payload.new, ...prev]);
-                        else if (payload.eventType === 'UPDATE') setSignals(prev => prev.map(s => s.id === payload.new.id ? payload.new : s));
-                    }).subscribe();
-
-                const subConfig = supabaseClient.channel('config_realtime')
-                    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'bot_config' }, (payload) => {
-                        setBalanceInfo({ current: payload.new.current_balance || 0, initial: payload.new.daily_initial_balance || 0 });
-                        setBotStatus(payload.new.status || 'PAUSED');
-                    }).subscribe();
-
-                // Assinar logs para o Scanner
-                const subLogs = supabaseClient.channel('logs_home')
-                    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'logs' }, (payload) => {
-                        setLastLog(payload.new);
-                    }).subscribe();
-
-                return () => { 
-                    supabaseClient.removeChannel(subSignals); 
-                    supabaseClient.removeChannel(subConfig); 
-                    supabaseClient.removeChannel(subLogs);
-                };
-            }, []);
-
-            return (
-                <div className="space-y-6 pb-20 md:pb-0">
-                    <div className="flex justify-between items-center">
+              {/* Signals List */}
+              <div>
+                <h3 className="text-sm font-bold text-zinc-400 uppercase tracking-wide mb-3 flex items-center gap-2">
+                  <Activity size={14} /> Histórico de Sinais
+                </h3>
+                <div className="space-y-3">
+                  {signals.map((signal) => (
+                    <div key={signal.id} className="glass-card p-4 rounded-xl flex items-center justify-between hover:bg-zinc-800/50 transition-colors border-l-4" style={{borderLeftColor: signal.direction === 'call' ? '#22c55e' : '#ef4444'}}>
+                      <div className="flex items-center gap-4">
+                        <div className={`w-10 h-10 rounded-full flex items-center justify-center ${signal.direction === 'call' ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'}`}>
+                          {signal.direction === 'call' ? <ArrowUp size={20} /> : <ArrowDown size={20} />}
+                        </div>
                         <div>
-                            <h1 className="text-2xl font-bold text-white">Dashboard</h1>
-                            <p className="text-xs text-gray-400">Visão geral do dia</p>
+                          <p className="font-bold text-white text-sm">{signal.pair}</p>
+                          <div className="flex items-center gap-2">
+                             <span className="text-[10px] text-zinc-500 bg-zinc-900 px-1.5 py-0.5 rounded">{new Date(signal.created_at).toLocaleTimeString()}</span>
+                             <span className="text-[10px] text-zinc-400">{signal.strategy}</span>
+                          </div>
                         </div>
-                        <button onClick={handleResetScores} className="btn bg-gray-800 hover:bg-gray-700 border border-gray-600 text-white px-3 py-2 rounded-lg text-xs flex items-center gap-2" disabled={isResetting}>
-                            <i className={`fas fa-undo ${isResetting ? 'fa-spin' : ''}`}></i> Reset
-                        </button>
+                      </div>
+                      <div className="text-right">
+                        {signal.result === 'WIN' && <span className="text-green-400 font-bold text-sm flex items-center gap-1"><Check size={14} /> WIN</span>}
+                        {signal.result === 'LOSS' && <span className="text-red-400 font-bold text-sm flex items-center gap-1"><X size={14} /> LOSS</span>}
+                        {signal.result === 'PENDING' && <span className="text-amber-400 text-xs font-bold animate-pulse flex items-center gap-1"><RefreshCw size={12} className="animate-spin"/> Em Curso</span>}
+                        {signal.martingale_level > 0 && <span className="block text-[9px] text-orange-400 font-mono mt-0.5">Gale {signal.martingale_level}</span>}
+                      </div>
                     </div>
-                    
-                    {/* WIDGET DO SCANNER (Passamos o status real) */}
-                    <ScannerWidget lastLog={lastLog} botStatus={botStatus} />
-
-                    {/* Cards Topo */}
-                    <div className="grid grid-cols-2 gap-4">
-                        <div className="glass-card p-4 rounded-xl relative overflow-hidden">
-                            <div className="absolute top-0 right-0 p-2 opacity-10"><i className="fas fa-wallet text-6xl"></i></div>
-                            <p className="text-xs text-gray-400 font-medium">SALDO ATUAL</p>
-                            <p className="text-2xl font-bold text-white mt-1">${Number(balanceInfo.current).toFixed(2)}</p>
-                        </div>
-                        <div className="glass-card p-4 rounded-xl relative overflow-hidden">
-                            <div className={`absolute top-0 right-0 p-2 opacity-10 ${profit >= 0 ? 'text-green-500' : 'text-red-500'}`}><i className="fas fa-chart-line text-6xl"></i></div>
-                            <p className="text-xs text-gray-400 font-medium">RESULTADO DO DIA</p>
-                            <p className={`text-2xl font-bold mt-1 ${profit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                                {profit >= 0 ? '+' : ''}${profit.toFixed(2)}
-                            </p>
-                        </div>
-                    </div>
-
-                    {/* Placar */}
-                    <div className="glass-card p-4 rounded-xl">
-                        <div className="flex justify-between items-center text-center divide-x divide-gray-700">
-                            <div className="flex-1 px-2">
-                                <p className="text-xs text-green-500 font-bold mb-1">WINS</p>
-                                <span className="text-2xl font-bold text-white">{scores.wins}</span>
-                            </div>
-                            <div className="flex-1 px-2">
-                                <p className="text-xs text-red-500 font-bold mb-1">LOSS</p>
-                                <span className="text-2xl font-bold text-white">{scores.losses}</span>
-                            </div>
-                            <div className="flex-1 px-2">
-                                <p className="text-xs text-blue-400 font-bold mb-1">ASSERT.</p>
-                                <span className="text-2xl font-bold text-white">{assertividade}%</span>
-                            </div>
-                            <div className="flex-1 px-2">
-                                <CountdownTimer />
-                            </div>
-                        </div>
-                    </div>
-                    
-                    {/* Lista de Sinais */}
-                    <div>
-                        <h2 className="text-sm font-bold text-gray-400 mb-3 uppercase tracking-wide">Últimos Sinais</h2>
-                        <div className="space-y-3">
-                            {signals.length > 0 ? signals.map(signal => (
-                                <div key={signal.id} className="glass-card p-3 rounded-lg flex items-center justify-between border-l-4" style={{borderLeftColor: signal.direction === 'call' ? '#22c55e' : '#ef4444'}}>
-                                    <div className="flex items-center gap-3">
-                                        <div className={`w-8 h-8 rounded-full flex items-center justify-center ${signal.direction === 'call' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
-                                            <i className={`fas fa-arrow-${signal.direction === 'call' ? 'up' : 'down'}`}></i>
-                                        </div>
-                                        <div>
-                                            <p className="font-bold text-white text-sm">{signal.pair}</p>
-                                            <p className="text-[10px] text-gray-400">{new Date(signal.created_at).toLocaleTimeString()} • {signal.strategy}</p>
-                                        </div>
-                                    </div>
-                                    <div className="text-right">
-                                        {signal.result === 'WIN' && <span className="text-green-400 font-bold text-sm"><i className="fas fa-check mr-1"></i>WIN</span>}
-                                        {signal.result === 'LOSS' && <span className="text-red-400 font-bold text-sm"><i className="fas fa-times mr-1"></i>LOSS</span>}
-                                        {signal.result === 'DRAW' && <span className="text-gray-400 font-bold text-sm">EMPATE</span>}
-                                        {(!signal.result || signal.result === 'PENDING') && <span className="text-amber-400 text-xs font-medium animate-pulse"><i className="fas fa-circle-notch fa-spin mr-1"></i>Em curso</span>}
-                                        {signal.martingale_level > 0 && <span className="block text-[9px] text-orange-400">Gale {signal.martingale_level}</span>}
-                                    </div>
-                                </div>
-                            )) : (
-                                <div className="text-center py-10 glass-card rounded-xl">
-                                    <i className="fas fa-radar text-gray-600 text-4xl mb-3"></i>
-                                    <p className="text-gray-500 text-sm">A aguardar sinais...</p>
-                                </div>
-                            )}
-                        </div>
-                    </div>
+                  ))}
                 </div>
-            );
-        }
+              </div>
+            </div>
+          )}
 
-        function StrategiesView() {
-            const [config, setConfig] = useState(null);
-            const [catalog, setCatalog] = useState([]);
-            const { addToast } = useToast();
-            const [saving, setSaving] = useState(false);
+          {/* VIEW: STRATEGIES */}
+          {view === 'strategies' && (
+            <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-3xl mx-auto">
+               <h1 className="text-2xl font-bold text-white">Catalogador</h1>
+               
+               <div className="glass-card p-6 rounded-xl">
+                 <div className="flex justify-between items-center mb-6">
+                   <h2 className="text-sm font-bold text-zinc-300">Filtro de Assertividade</h2>
+                   <span className="text-amber-400 font-bold text-2xl">80%</span>
+                 </div>
+                 <input type="range" className="w-full h-2 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-amber-500" min="50" max="99" defaultValue="80" />
+                 <p className="text-xs text-zinc-500 mt-2">Apenas pares com assertividade acima do selecionado serão operados.</p>
+               </div>
 
-            useEffect(() => {
-                const fetch = async () => {
-                    const { data: cfg } = await supabaseClient.from('bot_config').select('min_win_rate').eq('id', 1).single();
-                    if (cfg) setConfig(cfg);
-                    const { data: cat } = await supabaseClient.from('cataloged_assets').select('*').order('win_rate', { ascending: false });
-                    if (cat) setCatalog(cat);
-                };
-                fetch();
-            }, []);
+               <div className="space-y-3">
+                 <h2 className="text-sm font-bold text-zinc-500 uppercase tracking-wide">Melhores Ativos (M5)</h2>
+                 {MOCK_CATALOG.map(asset => (
+                   <div key={asset.pair} className="glass-card p-4 rounded-xl flex items-center justify-between group hover:border-amber-500/30 transition-all">
+                     <div>
+                       <div className="flex items-center gap-2">
+                         <p className="font-bold text-white">{asset.pair}</p>
+                         {asset.win_rate > 90 && <Zap size={12} className="text-amber-400 fill-amber-400" />}
+                       </div>
+                       <p className="text-xs text-zinc-400 mt-1">
+                         Melhor Estratégia: <span className="text-amber-400">{asset.best_strategy}</span>
+                       </p>
+                     </div>
+                     <div className="text-right">
+                       <div className={`text-xl font-bold ${asset.win_rate >= 80 ? 'text-green-400' : asset.win_rate >= 60 ? 'text-amber-400' : 'text-red-400'}`}>
+                         {asset.win_rate}%
+                       </div>
+                       <div className="text-[10px] space-x-2">
+                         <span className="text-green-500">{asset.wins}W</span>
+                         <span className="text-zinc-600">|</span>
+                         <span className="text-red-500">{asset.losses}L</span>
+                       </div>
+                     </div>
+                   </div>
+                 ))}
+               </div>
+            </div>
+          )}
 
-            const saveWinRate = async () => {
-                setSaving(true);
-                const { error } = await supabaseClient.from('bot_config').update({ min_win_rate: config.min_win_rate }).eq('id', 1);
-                if (error) addToast("Erro ao salvar: " + error.message, 'error');
-                else addToast("Assertividade mínima atualizada!", 'success');
-                setSaving(false);
-            };
+          {/* VIEW: SETTINGS */}
+          {view === 'settings' && (
+            <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-3xl mx-auto">
+              <h1 className="text-2xl font-bold text-white">Configurações</h1>
 
-            if (!config) return <div className="flex justify-center p-10"><div className="spinner"></div></div>;
-
-            return (
-                <div className="space-y-6 pb-20 md:pb-0">
-                    <h1 className="text-2xl font-bold text-white">Catalogador</h1>
-                    
-                    <div className="glass-card p-5 rounded-xl">
-                        <div className="flex justify-between items-center mb-4">
-                            <h2 className="text-sm font-bold text-gray-300">Assertividade Mínima</h2>
-                            <span className="text-amber-400 font-bold text-xl">{config.min_win_rate}%</span>
-                        </div>
-                        <input type="range" min="50" max="95" value={config.min_win_rate} onChange={e => setConfig({...config, min_win_rate: parseInt(e.target.value)})} className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-amber-500" />
-                        <button onClick={saveWinRate} className="btn bg-gray-700 hover:bg-gray-600 w-full mt-4 py-2 rounded-lg text-sm text-white" disabled={saving}>
-                            {saving ? 'Salvando...' : 'Atualizar Filtro'}
-                        </button>
-                    </div>
-
-                    <div className="space-y-3">
-                        <h2 className="text-sm font-bold text-gray-400 uppercase tracking-wide">Melhores Ativos (M5/M1)</h2>
-                        {catalog.length > 0 ? catalog.map(asset => (
-                            <div key={asset.pair} className="glass-card p-3 rounded-lg flex items-center justify-between">
-                                <div>
-                                    <p className="font-bold text-white">{asset.pair}</p>
-                                    <p className="text-xs text-gray-400">{asset.best_strategy} • <span className="text-green-400">{asset.wins}W</span> / <span className="text-red-400">{asset.losses}L</span></p>
-                                </div>
-                                <div className={`text-lg font-bold ${asset.win_rate >= 80 ? 'text-green-400' : asset.win_rate >= 60 ? 'text-amber-400' : 'text-red-400'}`}>
-                                    {asset.win_rate.toFixed(1)}%
-                                </div>
-                            </div>
-                        )) : (
-                            <p className="text-center text-gray-500 py-10">Nenhum dado catalogado ainda.</p>
-                        )}
-                    </div>
+              <div className="glass-card p-6 rounded-xl space-y-8">
+                <div>
+                   <h3 className="text-sm font-bold text-amber-500 uppercase tracking-wide mb-4 flex items-center gap-2">
+                     <Lock size={14} /> Gerenciamento de Risco
+                   </h3>
+                   <div className="grid grid-cols-2 gap-4">
+                     <div className="space-y-2">
+                       <label className="text-xs text-zinc-400 block">Stop Win ($)</label>
+                       <input type="number" defaultValue={500} className="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-3 text-green-400 font-bold outline-none focus:border-green-500" />
+                     </div>
+                     <div className="space-y-2">
+                       <label className="text-xs text-zinc-400 block">Stop Loss ($)</label>
+                       <input type="number" defaultValue={200} className="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-3 text-red-400 font-bold outline-none focus:border-red-500" />
+                     </div>
+                   </div>
                 </div>
-            );
-        }
 
-        function SettingsView() {
-            const [config, setConfig] = useState(null);
-            const { addToast } = useToast();
-            const [saving, setSaving] = useState(false);
-            
-            const debounceRef = useRef(null);
-
-            useEffect(() => {
-                const fetch = async () => {
-                    const { data } = await supabaseClient.from('bot_config').select('*').eq('id', 1).single();
-                    if (data) setConfig(data);
-                };
-                fetch();
-            }, []);
-
-            const updateField = (field, value) => {
-                setConfig(prev => ({ ...prev, [field]: value }));
-            };
-
-            const toggleBotStatus = async () => {
-                const newStatus = config.status === 'RUNNING' ? 'PAUSED' : 'RUNNING';
-                if (newStatus === 'RUNNING') {
-                    if (!confirm("Iniciar o bot irá resetar o placar diário. Continuar?")) return;
-                    await supabaseClient.rpc('reset_daily_stats');
-                }
-                const { error } = await supabaseClient.from('bot_config').update({ status: newStatus }).eq('id', 1);
-                if (error) addToast("Erro: " + error.message, 'error');
-                else {
-                    setConfig(prev => ({ ...prev, status: newStatus }));
-                    addToast(`Bot ${newStatus === 'RUNNING' ? 'INICIADO' : 'PAUSADO'}`, newStatus === 'RUNNING' ? 'success' : 'info');
-                }
-            };
-
-            const saveSettings = async () => {
-                setSaving(true);
-                const { error } = await supabaseClient.from('bot_config').update(config).eq('id', 1);
-                if (error) addToast("Erro ao salvar: " + error.message, 'error');
-                else addToast("Configurações atualizadas!", 'success');
-                setSaving(false);
-            };
-
-            if (!config) return <div className="flex justify-center p-10"><div className="spinner"></div></div>;
-
-            return (
-                <div className="space-y-6 pb-20 md:pb-0">
-                    <h1 className="text-2xl font-bold text-white">Configurações</h1>
-
-                    {/* Status Card */}
-                    <div className="glass-card p-5 rounded-xl flex items-center justify-between border border-gray-700">
-                        <div>
-                            <p className="text-sm text-gray-400 font-medium">STATUS DO SISTEMA</p>
-                            <p className={`text-xl font-bold ${config.status === 'RUNNING' ? 'text-green-400' : 'text-amber-400'}`}>
-                                {config.status === 'RUNNING' ? 'ONLINE' : 'PAUSADO'}
-                            </p>
-                        </div>
-                        <button onClick={toggleBotStatus} className={`btn w-12 h-12 rounded-full flex items-center justify-center shadow-lg ${config.status === 'RUNNING' ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'}`}>
-                            <i className={`fas ${config.status === 'RUNNING' ? 'fa-pause' : 'fa-play'} text-white text-lg`}></i>
-                        </button>
-                    </div>
-
-                    <div className="glass-card p-6 rounded-xl space-y-6">
-                        <h2 className="text-sm font-bold text-amber-400 uppercase tracking-wide mb-4">Gerenciamento de Risco</h2>
-                        
-                        <div>
-                            <label className="block text-xs text-gray-400 mb-2 uppercase">Modo de Stop</label>
-                            <div className="grid grid-cols-2 gap-2 bg-gray-900 p-1 rounded-lg">
-                                <button onClick={() => updateField('stop_mode', 'operations')} className={`py-2 text-xs font-bold rounded-md transition-all ${config.stop_mode === 'operations' ? 'bg-gray-700 text-white shadow' : 'text-gray-500 hover:text-gray-300'}`}>POR SINAIS</button>
-                                <button onClick={() => updateField('stop_mode', 'percentage')} className={`py-2 text-xs font-bold rounded-md transition-all ${config.stop_mode === 'percentage' ? 'bg-gray-700 text-white shadow' : 'text-gray-500 hover:text-gray-300'}`}>PORCENTAGEM</button>
-                            </div>
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label className="block text-xs text-gray-400 mb-1">Stop Win ({config.stop_mode === 'operations' ? 'Qtd' : '%'})</label>
-                                <input type="number" className="form-input w-full p-3 rounded-lg text-green-400 font-bold" value={config.stop_mode === 'operations' ? config.stop_win : config.stop_win_percent} onChange={e => updateField(config.stop_mode === 'operations' ? 'stop_win' : 'stop_win_percent', Number(e.target.value))} />
-                            </div>
-                            <div>
-                                <label className="block text-xs text-gray-400 mb-1">Stop Loss ({config.stop_mode === 'operations' ? 'Qtd' : '%'})</label>
-                                <input type="number" className="form-input w-full p-3 rounded-lg text-red-400 font-bold" value={config.stop_mode === 'operations' ? config.stop_loss : config.stop_loss_percent} onChange={e => updateField(config.stop_mode === 'operations' ? 'stop_loss' : 'stop_loss_percent', Number(e.target.value))} />
-                            </div>
-                        </div>
-                    </div>
-
-                    <div className="glass-card p-6 rounded-xl space-y-6">
-                        <div className="flex justify-between items-center">
-                            <h2 className="text-sm font-bold text-amber-400 uppercase tracking-wide">Estratégia & Martingale</h2>
-                            <label className="flex items-center cursor-pointer">
-                                <span className="text-xs mr-2 text-gray-400">{config.use_martingale ? 'Gale ON' : 'Gale OFF'}</span>
-                                <div className="relative">
-                                    <input type="checkbox" className="hidden" checked={config.use_martingale} onChange={() => updateField('use_martingale', !config.use_martingale)} />
-                                    <div className="toggle-bg w-10 h-6 bg-gray-700 rounded-full shadow-inner"></div>
-                                </div>
-                            </label>
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label className="block text-xs text-gray-400 mb-1">Valor Entrada ($)</label>
-                                <input type="number" className="form-input w-full p-3 rounded-lg font-bold" value={config.entry_value} onChange={e => updateField('entry_value', Number(e.target.value))} />
-                            </div>
-                            <div>
-                                <label className="block text-xs text-gray-400 mb-1">Conta</label>
-                                <select className="form-select w-full p-3 rounded-lg font-bold" value={config.account_type} onChange={e => updateField('account_type', e.target.value)}>
-                                    <option value="PRACTICE">DEMO</option>
-                                    <option value="REAL">REAL</option>
-                                </select>
-                            </div>
-                        </div>
-
-                        {config.use_martingale && (
-                            <div className="grid grid-cols-2 gap-4 p-4 bg-gray-900/50 rounded-lg border border-gray-800">
-                                <div>
-                                    <label className="block text-xs text-gray-500 mb-1">Níveis</label>
-                                    <input type="number" className="form-input w-full p-2 rounded text-sm" value={config.martingale_levels} onChange={e => updateField('martingale_levels', Number(e.target.value))} />
-                                </div>
-                                <div>
-                                    <label className="block text-xs text-gray-500 mb-1">Fator</label>
-                                    <input type="number" step="0.1" className="form-input w-full p-2 rounded text-sm" value={config.martingale_factor} onChange={e => updateField('martingale_factor', Number(e.target.value))} />
-                                </div>
-                            </div>
-                        )}
-                    </div>
-
-                    <button onClick={saveSettings} className="btn w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-4 rounded-xl shadow-lg shadow-amber-500/20 flex justify-center items-center gap-2" disabled={saving}>
-                        {saving ? <div className="spinner w-5 h-5 border-white"></div> : <i className="fas fa-save"></i>}
-                        {saving ? 'Salvando...' : 'Salvar Alterações'}
-                    </button>
+                <div className="border-t border-zinc-700/50 pt-6">
+                  <div className="flex justify-between items-center mb-4">
+                     <h3 className="text-sm font-bold text-amber-500 uppercase tracking-wide flex items-center gap-2">
+                       <Layers size={14} /> Martingale
+                     </h3>
+                     <div className="flex items-center gap-2">
+                       <span className="text-xs text-zinc-400">Ativado</span>
+                       <div className="w-10 h-5 bg-amber-500 rounded-full relative cursor-pointer">
+                         <div className="w-3 h-3 bg-white rounded-full absolute top-1 right-1 shadow-sm"></div>
+                       </div>
+                     </div>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-4">
+                     <div className="space-y-2">
+                       <label className="text-xs text-zinc-400 block">Níveis de Gale</label>
+                       <select className="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-3 text-white outline-none">
+                         <option>1 Nível</option>
+                         <option>2 Níveis</option>
+                       </select>
+                     </div>
+                     <div className="space-y-2">
+                       <label className="text-xs text-zinc-400 block">Fator Multiplicador</label>
+                       <input type="number" defaultValue={2.0} step="0.1" className="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-3 text-white font-bold outline-none focus:border-amber-500" />
+                     </div>
+                  </div>
                 </div>
-            );
-        }
 
-        function LogsView() {
-            const [logs, setLogs] = useState([]);
-            const endRef = useRef(null);
-
-            useEffect(() => {
-                const fetch = async () => {
-                    const { data } = await supabaseClient.from('logs').select('*').order('created_at', { ascending: false }).limit(100);
-                    if (data) setLogs(data.reverse());
-                };
-                fetch();
-                const sub = supabaseClient.channel('logs_rt').on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'logs' }, payload => {
-                    setLogs(prev => [...prev.slice(-99), payload.new]);
-                }).subscribe();
-                return () => supabaseClient.removeChannel(sub);
-            }, []);
-
-            useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [logs]);
-
-            return (
-                <div className="flex flex-col h-full pb-20 md:pb-0">
-                    <h1 className="text-2xl font-bold text-white mb-4">Terminal de Logs</h1>
-                    <div className="flex-1 glass-card rounded-xl p-4 overflow-y-auto font-mono text-xs space-y-2 border border-gray-700 bg-black/40">
-                        {logs.length === 0 && <p className="text-gray-500 text-center mt-10">Aguardando logs do sistema...</p>}
-                        {logs.map(log => (
-                            <div key={log.id} className="flex gap-2">
-                                <span className="text-gray-500 shrink-0">[{new Date(log.created_at).toLocaleTimeString()}]</span>
-                                <span className={`${log.level === 'ERROR' ? 'text-red-400' : log.level === 'WARNING' ? 'text-amber-400' : log.level === 'SUCCESS' ? 'text-green-400' : 'text-blue-300'}`}>
-                                    {log.level}:
-                                </span>
-                                <span className="text-gray-300 break-all">{log.message}</span>
-                            </div>
-                        ))}
-                        <div ref={endRef}></div>
-                    </div>
+                <div className="border-t border-zinc-700/50 pt-6">
+                   <h3 className="text-sm font-bold text-amber-500 uppercase tracking-wide mb-4 flex items-center gap-2">
+                     <Wallet size={14} /> Operacional
+                   </h3>
+                   <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                       <label className="text-xs text-zinc-400 block">Valor Entrada ($)</label>
+                       <input type="number" defaultValue={10} className="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-3 text-white font-bold outline-none focus:border-amber-500" />
+                     </div>
+                     <div className="space-y-2">
+                       <label className="text-xs text-zinc-400 block">Conta</label>
+                       <select className="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-3 text-white outline-none">
+                         <option value="DEMO">DEMO (Treino)</option>
+                         <option value="REAL">REAL</option>
+                       </select>
+                     </div>
+                   </div>
                 </div>
-            );
-        }
+              </div>
 
-        function App() {
-            const [session, setSession] = useState(null);
-            const [loading, setLoading] = useState(true);
-            const [view, setView] = useState('home');
+              <button 
+                onClick={() => showToast('Configurações salvas com sucesso!', 'success')}
+                className="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-4 rounded-xl shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2 transition-all active:scale-95"
+              >
+                <Save size={20} /> Salvar Alterações
+              </button>
+            </div>
+          )}
 
-            useEffect(() => {
-                supabaseClient.auth.getSession().then(({ data: { session } }) => {
-                    setSession(session);
-                    setLoading(false);
-                });
-                const { data: { subscription } } = supabaseClient.auth.onAuthStateChange((_event, session) => setSession(session));
-                return () => subscription.unsubscribe();
-            }, []);
+          {/* VIEW: LOGS */}
+          {view === 'logs' && (
+            <div className="h-full flex flex-col animate-in fade-in slide-in-from-bottom-4 duration-500">
+               <h1 className="text-2xl font-bold text-white mb-4">Terminal do Sistema</h1>
+               <div className="flex-1 glass-card rounded-xl p-4 overflow-y-auto font-mono text-xs space-y-2 border border-zinc-700 bg-black/60 shadow-inner">
+                 <div className="text-zinc-500 mb-4 pb-2 border-b border-zinc-800">
+                   Marombiew Bot v2.5.0 - System initialized
+                   <br/>Connected to server: ioduahwknfsktujthfyc.supabase.co
+                 </div>
+                 {[...Array(15)].map((_, i) => (
+                   <div key={i} className="flex gap-2 opacity-80 hover:opacity-100 transition-opacity">
+                     <span className="text-zinc-600">[{new Date(Date.now() - i * 5000).toLocaleTimeString()}]</span>
+                     <span className={i % 3 === 0 ? 'text-green-400' : i % 2 === 0 ? 'text-blue-400' : 'text-zinc-300'}>
+                       {i % 3 === 0 ? 'INFO: Analyzing market data...' : i % 2 === 0 ? 'DEBUG: RSI calculation valid (45.5)' : 'SYSTEM: Heartbeat check OK'}
+                     </span>
+                   </div>
+                 ))}
+                 <div className="animate-pulse text-amber-500">_</div>
+               </div>
+            </div>
+          )}
 
-            useEffect(() => {
-                if (!loading) {
-                    const splash = document.getElementById('static-splash');
-                    if (splash) {
-                        splash.style.opacity = '0';
-                        setTimeout(() => splash.remove(), 400);
-                    }
-                }
-            }, [loading]);
+        </div>
 
-            if (loading) return null;
-            if (!session) return (
-                <ToastProvider>
-                    <LoginPage onLogin={() => {}} />
-                </ToastProvider>
-            );
+        {/* Mobile Navigation (Bottom Bar) */}
+        <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-[#1f2937]/95 backdrop-blur-xl border-t border-zinc-800 flex justify-around px-2 pb-safe z-40 h-16 items-center">
+           <button onClick={() => setView('home')} className={`flex flex-col items-center p-2 ${view === 'home' ? 'text-amber-400' : 'text-zinc-500'}`}>
+             <LayoutDashboard size={20} />
+             <span className="text-[10px] mt-1">Dash</span>
+           </button>
+           <button onClick={() => setView('strategies')} className={`flex flex-col items-center p-2 ${view === 'strategies' ? 'text-amber-400' : 'text-zinc-500'}`}>
+             <Layers size={20} />
+             <span className="text-[10px] mt-1">Estrat.</span>
+           </button>
+           
+           <div className="relative -top-6">
+             <button 
+               onClick={() => setView('settings')}
+               className={`w-14 h-14 rounded-full flex items-center justify-center shadow-lg border-4 border-[#111827] transition-all ${view === 'settings' ? 'bg-amber-500 text-white' : 'bg-zinc-700 text-zinc-300'}`}
+             >
+               <Settings size={24} />
+             </button>
+           </div>
 
-            const handleLogout = () => supabaseClient.auth.signOut();
-
-            return (
-                <ToastProvider>
-                    <div className="flex h-screen bg-bg-dark text-text-primary overflow-hidden">
-                        {/* Sidebar Desktop */}
-                        <aside className="hidden md:flex w-64 bg-bg-medium border-r border-border-color flex-col">
-                            <div className="h-20 flex items-center px-6 border-b border-gray-800">
-                                <i className="fas fa-robot text-amber-400 text-2xl mr-3"></i>
-                                <span className="font-bold text-lg tracking-wider">MAROMBIEW</span>
-                            </div>
-                            <nav className="flex-1 p-4 space-y-2">
-                                <NavLink viewName="home" currentView={view} setView={setView} icon="fa-chart-pie" text="Dashboard" />
-                                <NavLink viewName="strategies" currentView={view} setView={setView} icon="fa-layer-group" text="Estratégias" />
-                                <NavLink viewName="settings" currentView={view} setView={setView} icon="fa-sliders" text="Configurações" />
-                                <NavLink viewName="logs" currentView={view} setView={setView} icon="fa-terminal" text="Logs do Sistema" />
-                            </nav>
-                            <div className="p-4 border-t border-gray-800">
-                                <button onClick={handleLogout} className="w-full flex items-center px-4 py-3 text-sm text-red-400 hover:bg-red-500/10 rounded-lg transition-colors">
-                                    <i className="fa-solid fa-right-from-bracket w-6"></i> Sair
-                                </button>
-                            </div>
-                        </aside>
-
-                        {/* Conteúdo Principal */}
-                        <main className="flex-1 flex flex-col h-full overflow-hidden relative">
-                            <div className="flex-1 overflow-y-auto p-4 md:p-8 scroll-smooth">
-                                {view === 'home' && <HomeView />}
-                                {view === 'strategies' && <StrategiesView />}
-                                {view === 'settings' && <SettingsView />}
-                                {view === 'logs' && <LogsView />}
-                            </div>
-                        </main>
-
-                        {/* Menu Mobile (Fixo em baixo) */}
-                        <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-bg-medium/95 backdrop-blur-lg border-t border-gray-800 flex justify-around px-2 pb-safe z-40 h-16">
-                            <NavLink viewName="home" currentView={view} setView={setView} icon="fa-chart-pie" text="Dash" isMobile={true} />
-                            <NavLink viewName="strategies" currentView={view} setView={setView} icon="fa-layer-group" text="Estrat." isMobile={true} />
-                            <div className="relative -top-5">
-                                <button onClick={() => setView('settings')} className={`w-14 h-14 rounded-full flex items-center justify-center shadow-lg border-4 border-bg-dark ${view === 'settings' ? 'bg-amber-500 text-white' : 'bg-gray-700 text-gray-300'}`}>
-                                    <i className="fas fa-sliders text-xl"></i>
-                                </button>
-                            </div>
-                            <NavLink viewName="logs" currentView={view} setView={setView} icon="fa-terminal" text="Logs" isMobile={true} />
-                            <button onClick={handleLogout} className="flex-1 flex flex-col items-center justify-center py-2 text-[10px] text-gray-500">
-                                <i className="fa-solid fa-power-off text-lg mb-1"></i>
-                                <span>Sair</span>
-                            </button>
-                        </nav>
-                    </div>
-                </ToastProvider>
-            );
-        }
-
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
-    </script>
-</body>
-</html>
+           <button onClick={() => setView('logs')} className={`flex flex-col items-center p-2 ${view === 'logs' ? 'text-amber-400' : 'text-zinc-500'}`}>
+             <Terminal size={20} />
+             <span className="text-[10px] mt-1">Logs</span>
+           </button>
+           <button onClick={handleLogout} className="flex flex-col items-center p-2 text-zinc-500">
+             <LogOut size={20} />
+             <span className="text-[10px] mt-1">Sair</span>
+           </button>
+        </nav>
+      </main>
+    </div>
+  );
+}
