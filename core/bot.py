@@ -39,6 +39,8 @@ ACTIVES_MAP = {
 #                       MONKEY PATCHES (SISTEMA DE SUPORTE DE VIDA)
 # ==============================================================================
 
+GLOBAL_TIME_OFFSET = 0
+
 def _patch_library_constants_aggressive():
     try:
         import exnovaapi.constants as OP_code
@@ -52,7 +54,7 @@ _patch_library_constants_aggressive()
 # --- 1. PATCH: INJEÇÃO INTELIGENTE DE GET_CANDLES ---
 def _optimized_get_candles(self, active, duration, count, to):
     try:
-        # Resolve ID
+        self.api.candles.candles_data = None
         active_id = active
         if isinstance(active, str):
             import exnovaapi.constants as OP_code
@@ -63,15 +65,12 @@ def _optimized_get_candles(self, active, duration, count, to):
         if active_id is None:
             return []
 
-        self.api.candles.candles_data = None
         self.api.getcandles(active_id, duration, count, to)
-        
         start = time.time()
         while self.api.candles.candles_data is None:
             if time.time() - start > 20: 
                 return []
             time.sleep(0.05)
-            
         return self.api.candles.candles_data
     except Exception as e:
         print(f"[PATCH EXCEPTION] {e}")
@@ -97,7 +96,6 @@ def _optimized_get_profile_ansyc(self):
         time.sleep(0.1)
     return self.api.profile.msg
 
-# Aplicação dos Patches
 try:
     import exnovaapi.stable_api
     TargetClass = None
@@ -122,8 +120,9 @@ except ImportError:
 async def _get_historical_candles_patched(self, asset_name, duration, amount):
     if not hasattr(self, 'api') or not self.api: return []
     try:
-        # Tempo local - 15s para garantir histórico fechado
-        req_time = int(time.time()) - 15
+        local_time = int(time.time())
+        req_time = local_time - GLOBAL_TIME_OFFSET
+        req_time = req_time - 1
 
         candles = await asyncio.wait_for(
             asyncio.to_thread(self.api.get_candles, asset_name, duration, amount, req_time),
@@ -304,37 +303,68 @@ class TradingBot:
                 print("[NET DEBUG] Não foi possível verificar o IP.")
 
     def _is_socket_connected(self):
-        # VERIFICAÇÃO PROFUNDA E CORRETA DE CONEXÃO
+        # VERIFICAÇÃO COM DIAGNÓSTICO
         try:
-            # 1. Verifica se a API de alto nível existe
             if not self.exnova.api: 
+                # print("[DEBUG CON] High level API missing")
                 return False
             
-            # 2. Verifica se a API de baixo nível existe (self.api.api)
-            # A classe Exnova tem self.api que é a ExnovaAPI
             if not hasattr(self.exnova.api, 'api') or not self.exnova.api.api:
+                # print("[DEBUG CON] Low level API missing")
                 return False
             
-            # 3. Verifica o websocket_client
             ws_client = self.exnova.api.api.websocket_client
             if not ws_client:
+                # print("[DEBUG CON] WS Client missing")
                 return False
                 
-            # 4. Verifica o objeto wss (WebSocketApp)
             if not ws_client.wss:
+                # print("[DEBUG CON] WSS object missing")
                 return False
             
-            # 5. Verifica o socket real (sock)
             if not ws_client.wss.sock:
+                # print("[DEBUG CON] Sock object missing (Connection lost)")
                 return False
             
-            # 6. Verifica se o file descriptor é válido (melhor que .connected)
-            if ws_client.wss.sock.fileno() == -1:
-                return False
+            # REMOVIDO check de fileno() que pode ser problematico no Docker
+            # if ws_client.wss.sock.fileno() == -1:
+            #    return False
                 
             return True
-        except Exception:
+        except Exception as e:
+            print(f"[DEBUG CON] Exception check: {e}")
             return False
+
+    async def _sync_time(self):
+        global GLOBAL_TIME_OFFSET
+        try:
+            server_ts = 0
+            if hasattr(self.exnova.api, 'get_server_timestamp'):
+                server_ts = self.exnova.api.get_server_timestamp()
+            
+            if server_ts == 0 and hasattr(self.exnova.api.api, 'timesync'):
+                 server_ts = self.exnova.api.api.timesync.server_timestamp
+
+            if server_ts > 0:
+                local_ts = time.time()
+                if server_ts > 3000000000: 
+                    server_ts /= 1000
+                elif server_ts < 2000000000 and server_ts > 1000000:
+                     if server_ts < local_ts / 100:
+                         server_ts *= 1000
+
+                offset = local_ts - server_ts
+                if abs(offset) > 86400:
+                    print(f"[TIME WARN] Offset louco detectado: {offset}s. Ignorando.")
+                    GLOBAL_TIME_OFFSET = 0
+                else:
+                    GLOBAL_TIME_OFFSET = int(offset)
+                    print(f"[TIME SYNC] Sucesso. Offset: {GLOBAL_TIME_OFFSET}s")
+            else:
+                GLOBAL_TIME_OFFSET = 0
+
+        except Exception:
+            GLOBAL_TIME_OFFSET = 0
 
     async def _daily_reset_if_needed(self):
         current_date_utc = datetime.utcnow().date()
@@ -368,6 +398,7 @@ class TradingBot:
 
         print("[SYSTEM] Aqueçendo API (Warmup 5s)...")
         await asyncio.sleep(5) 
+        await self._sync_time()
 
         print("[SYSTEM] Loop principal iniciado...")
         
@@ -375,13 +406,13 @@ class TradingBot:
             try:
                 # NOVA VERIFICAÇÃO ROBUSTA DE CONEXÃO
                 if not self._is_socket_connected():
-                    print("[AVISO] Conexão perdida (Socket Fechado). Reconectando...")
-                    # Tenta reconectar em loop até conseguir
+                    print("[AVISO] Conexão perdida. Tentando reconectar...")
                     reconnected = False
                     for i in range(3):
                         if await self.exnova.connect():
                             await self.logger('SUCCESS', 'Reconectado.')
                             await asyncio.sleep(3)
+                            await self._sync_time()
                             reconnected = True
                             break
                         await asyncio.sleep(5)
