@@ -49,6 +49,8 @@ _patch_library_constants_aggressive()
 def _optimized_get_candles(self, active, duration, count, to):
     try:
         self.api.candles.candles_data = None
+        
+        # Resolução de ID
         active_id = active
         if isinstance(active, str):
             import exnovaapi.constants as OP_code
@@ -57,14 +59,20 @@ def _optimized_get_candles(self, active, duration, count, to):
                 active_id = ACTIVES_MAP.get(active, None)
         
         if active_id is None:
+            print(f"[PATCH ERROR] ID não encontrado para: {active}")
             return []
 
+        # DEBUG CRÍTICO: Mostra o que está sendo enviado
+        # print(f"[REQ] ID:{active_id} Time:{to}")
+
         self.api.getcandles(active_id, duration, count, to)
+        
         start = time.time()
         while self.api.candles.candles_data is None:
             if time.time() - start > 20: 
                 return []
             time.sleep(0.05)
+            
         return self.api.candles.candles_data
     except Exception as e:
         print(f"[PATCH EXCEPTION] {e}")
@@ -115,8 +123,10 @@ async def _get_historical_candles_patched(self, asset_name, duration, amount):
     if not hasattr(self, 'api') or not self.api: return []
     try:
         local_time = int(time.time())
-        req_time = local_time - GLOBAL_TIME_OFFSET
-        req_time = req_time - 1
+        # CORREÇÃO AGRESSIVA DE TEMPO:
+        # 1. Aplica o offset detectado
+        # 2. Subtrai 30 segundos adicionais para garantir "passado"
+        req_time = local_time - GLOBAL_TIME_OFFSET - 30
 
         candles = await asyncio.wait_for(
             asyncio.to_thread(self.api.get_candles, asset_name, duration, amount, req_time),
@@ -409,10 +419,9 @@ class TradingBot:
     async def run_analysis_for_timeframe(self, timeframe_seconds: int, expiration_minutes: int):
         try:
             try:
-                # DEBUG VISUAL ATIVO
+                await asyncio.wait_for(self.exnova.change_balance(self.bot_config.get('account_type', 'PRACTICE')), timeout=2.0)
                 bal = await self.exnova.get_current_balance()
                 print(f"[STATUS] Saldo: {bal} | {expiration_minutes}M Scan")
-                await asyncio.wait_for(self.exnova.change_balance(self.bot_config.get('account_type', 'PRACTICE')), timeout=2.0)
             except: pass
 
             assets = await _get_open_assets_fix(None)
@@ -449,8 +458,7 @@ class TradingBot:
             elif expiration_minutes == 5: t1, t2, res_func = 300, 3600, get_h1_sr_zones
             else: return
 
-            # DEBUG VISUAL ATIVO
-            print(f"[DEBUG] Analisando: {full_name}")
+            # print(f"[DEBUG] Analisando: {full_name}")
 
             try:
                 candles = await asyncio.gather(
@@ -461,7 +469,6 @@ class TradingBot:
 
             analysis_candles, sr_candles = candles
             if not analysis_candles:
-                # DEBUG VISUAL ATIVO
                 print(f"[DEBUG] Velas vazias: {full_name}")
                 return
 
@@ -486,7 +493,6 @@ class TradingBot:
             rsi_res = ti.check_rsi_condition(analysis_candles_objs) 
             rsi_sig, rsi_val = rsi_res if isinstance(rsi_res, tuple) else (None, 50.0)
             
-            # DEBUG VISUAL ATIVO
             msg = f"ANALISE_DETALHADA::{full_name}::Preço:{close_price:.5f}::RSI:{rsi_val:.1f}"
             await self.logger('DEBUG', msg)
 
