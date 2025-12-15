@@ -3,6 +3,9 @@ import time
 import logging
 import json
 import threading
+import http.server
+import socketserver
+import os
 from datetime import datetime
 
 # --- IMPORTAÇÃO SEGURA DA BIBLIOTECA ---
@@ -29,7 +32,7 @@ logging.getLogger("urllib3").setLevel(logging.WARNING)
 logging.getLogger("websocket").setLevel(logging.WARNING)
 
 # ==============================================================================
-#                       CORREÇÕES (MONKEY PATCHES)
+#                       MONKEY PATCHES (CORREÇÕES)
 # ==============================================================================
 
 try:
@@ -80,12 +83,12 @@ class SimpleBot:
         try:
             balance = self.api.get_balance()
             print(f"💰 Saldo Atual: {balance} ({self.balance_type})")
-        except: pass
+        except:
+            print("⚠️ Não foi possível ler o saldo inicial.")
         return True
 
     def get_candles_safe(self, asset):
         try:
-            # -10s para garantir vela fechada
             timestamp = int(time.time()) - 10
             candles = self.api.get_candles(asset, 60, 280, timestamp)
             return candles if candles else []
@@ -95,7 +98,6 @@ class SimpleBot:
             return []
 
     def safe_buy(self, asset, amount, direction, type="digital"):
-        """Compra com timeout de 10s."""
         try:
             result = [None]
             def target():
@@ -112,71 +114,46 @@ class SimpleBot:
             t.join(timeout=10.0)
             
             if t.is_alive():
-                print(f"⚠️ Timeout na ordem {asset}")
+                print(f"⚠️ Timeout ao enviar ordem para {asset}")
                 return False, None
             
             return result[0] if result[0] else (False, None)
-        except Exception:
+        except:
             return False, None
 
-    def execute_trade(self, asset, direction, is_martingale=False):
-        """Executa trade e gere Martingale recursivamente."""
-        
-        # 1. Calcula Valor
+    def execute_trade(self, asset, direction):
         amount = self.money_manager.get_amount(asset, self.amount, self.martingale_factor)
-        step = self.money_manager.get_current_step(asset)
+        print(f"➡️ ABRINDO: {asset} | {direction.upper()} | ${amount}")
         
-        trade_type = "ENTRADA" if step == 0 else f"GALE {step}"
-        print(f"➡️ {trade_type}: {asset} | {direction.upper()} | ${amount}")
-        
-        # 2. Envia Ordem
         status, id = self.safe_buy(asset, amount, direction, "digital")
         if not status:
              status, id = self.safe_buy(asset, amount, direction, "binary")
         
         if status:
-            print(f"✅ Ordem {id} aberta. Aguardando...")
+            print(f"✅ Ordem {id} aceite. Aguardando...")
             self.active_trades.add(asset)
+            time.sleep(65)
             
-            # Espera Vela Fechar (62s para garantir)
-            time.sleep(62)
-            
-            # 3. Verifica Resultado
-            win, profit = False, 0
-            
-            try:
-                res = self.api.check_win_digital_v2(id)
-                if isinstance(res, tuple) and res[1] > 0: win, profit = True, res[1]
-                elif isinstance(res, (int, float)) and res > 0: win, profit = True, res
-            except: pass
-            
-            if not win:
-                try:
-                    res = self.api.check_win_v4(id)
-                    if isinstance(res, tuple) and res[0] == 'win': win, profit = True, res[1]
-                except: pass
+            win_dig = self.api.check_win_digital_v2(id)
+            win_bin = self.api.check_win_v4(id) if isinstance(id, int) else None
 
-            # 4. Processa Resultado e Decide Próximo Passo
-            if win:
+            is_win = False
+            profit = 0
+            
+            if isinstance(win_dig, tuple) and win_dig[1] > 0: is_win, profit = True, win_dig[1]
+            elif isinstance(win_dig, (int, float)) and win_dig > 0: is_win, profit = True, win_dig
+            elif isinstance(win_bin, tuple) and win_bin[0] == 'win': is_win, profit = True, win_bin[1]
+                
+            if is_win:
                 print(f"🏆 WIN em {asset}! +${profit:.2f}")
                 self.money_manager.register_result(asset, 'win', self.martingale_levels)
-                self.active_trades.discard(asset)
             else:
                 print(f"🔻 LOSS em {asset}.")
-                # Regista loss e verifica se deve fazer Gale
-                should_gale = self.money_manager.register_result(asset, 'loss', self.martingale_levels)
-                
-                if should_gale:
-                    print(f"🔄 Preparando Martingale Imediato para {asset}...")
-                    # Recursividade: Chama a si mesma para entrar na próxima vela IMEDIATAMENTE
-                    self.execute_trade(asset, direction, is_martingale=True)
-                else:
-                    print(f"⛔ Stop Loss no par {asset}. Voltando a analisar.")
-                    self.active_trades.discard(asset)
-        else:
-            print(f"❌ Falha na ordem {asset}. Cancelando Gale.")
-            self.money_manager.register_result(asset, 'win', self.martingale_levels) # Reset para não travar
+                self.money_manager.register_result(asset, 'loss', self.martingale_levels)
+            
             self.active_trades.discard(asset)
+        else:
+            print(f"❌ Falha ao abrir ordem em {asset}.")
 
     def start(self):
         if not self.connect(): return
@@ -187,7 +164,7 @@ class SimpleBot:
             "AUDUSD-OTC", "USDMXN-OTC"
         ]
 
-        print("\n🚀 Bot Iniciado! Aguardando o início do minuto...")
+        print("\n🚀 Bot Iniciado! Monitorando...")
         
         while True:
             try:
@@ -198,15 +175,12 @@ class SimpleBot:
                     continue
 
                 now = datetime.now()
-                # Executa nos primeiros 5 segundos do minuto
                 if now.second <= 5:
                     print(f"\n--- 🔎 Varredura {now.strftime('%H:%M:%S')} ---")
                     for asset in ASSETS:
-                        # Se já houver trade ativo (incluindo gale em andamento), pula
                         if asset in self.blacklist or asset in self.active_trades: continue
                         
                         print(f"Analisando {asset}...", end=" ", flush=True)
-
                         candles = self.get_candles_safe(asset)
                         if not candles or len(candles) < 30: 
                             print("❌ Velas Vazias")
@@ -216,19 +190,11 @@ class SimpleBot:
                         
                         if signal:
                             print(f"\n🔔 SINAL: {asset} -> {signal.upper()}")
-                            # Inicia a cadeia de trades (Entrada -> Win ou Gale -> Gale...)
-                            # Como é síncrono e recursivo, o bot vai ficar "preso" aqui cuidando
-                            # deste par até terminar o ciclo de vitórias ou gales.
-                            # Para operar múltiplos pares simultâneos com Gale, precisaríamos de Threads.
-                            # Nesta versão simples, ele foca num par até resolver.
                             self.execute_trade(asset, signal)
-                            
-                            # Após terminar o trade (seja win ou stop gale), volta ao loop
-                            break # Sai do for para esperar o próximo minuto e não pegar sinais atrasados
+                            time.sleep(1)
                     
                     print("\n⏳ Aguardando próximo minuto...")
                     time.sleep(50)
-                
                 time.sleep(1)
 
             except KeyboardInterrupt:
@@ -238,6 +204,44 @@ class SimpleBot:
                 print(f"Erro Loop: {e}")
                 time.sleep(5)
 
+# --- SERVIDOR WEB INTEGRADO ---
+def run_dashboard():
+    """Serve a pasta 'public' na porta 8000."""
+    PORT = 8000
+    DIRECTORY = "public"
+    
+    # Cria diretório public se não existir (segurança)
+    if not os.path.exists(DIRECTORY):
+        os.makedirs(DIRECTORY)
+        print(f"[SERVER] Criando pasta {DIRECTORY}...")
+        
+    class Handler(http.server.SimpleHTTPRequestHandler):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, directory=DIRECTORY, **kwargs)
+    
+    # Permite reuso da porta para evitar erros em restarts rápidos
+    socketserver.TCPServer.allow_reuse_address = True
+    
+    try:
+        with socketserver.TCPServer(("", PORT), Handler) as httpd:
+            print(f"🌐 Painel Web Online na porta {PORT}")
+            httpd.serve_forever()
+    except Exception as e:
+        print(f"[SERVER ERROR] Falha ao iniciar servidor web: {e}")
+
 if __name__ == "__main__":
-    bot = SimpleBot()
-    bot.start()
+    print("[INIT] Inicializando Sistema Híbrido (Bot + Web)...")
+    
+    # 1. Inicia o Servidor Web em Background (Thread)
+    web_thread = threading.Thread(target=run_dashboard, daemon=True)
+    web_thread.start()
+    
+    # 2. Inicia o Bot na Thread Principal
+    try:
+        bot = SimpleBot()
+        bot.start()
+    except KeyboardInterrupt:
+        print("\n[END] Sistema encerrado.")
+    except Exception as e:
+        print(f"\n[CRITICAL ERROR] O Bot falhou: {e}")
+        traceback.print_exc()
