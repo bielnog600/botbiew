@@ -116,16 +116,21 @@ async def _get_historical_candles_patched(self, asset_id, duration, amount):
         return []
     
     try:
-        # Tenta usar o horário SINCRONIZADO DA CORRETORA em vez do PC local
-        # Isso resolve o problema de "Velas Vazias" em Docker/VPS
+        # Tenta obter o tempo do servidor da API (Sync)
+        # Se falhar, usa o tempo local menos um buffer de segurança (5s)
         req_time = int(time.time())
         try:
+            # Tenta pegar timestamp sincronizado se disponível
             if hasattr(self.api, 'api') and hasattr(self.api.api, 'timesync'):
                 server_ts = self.api.api.timesync.server_timestamp
                 if server_ts > 0:
                     req_time = int(server_ts)
         except:
             pass
+
+        # Garante que não estamos pedindo futuro (subtrai 2 segundos por segurança)
+        # Isso ajuda muito em ambientes cloud com lag de relógio
+        req_time = req_time - 2
 
         candles = await asyncio.wait_for(
             asyncio.to_thread(self.api.get_candles, asset_id, duration, amount, req_time),
@@ -325,6 +330,10 @@ class TradingBot:
             self.last_daily_reset_date = current_date_utc
             try:
                 # Tenta pegar saldo com nova proteção de timeout
+                # Força update de profile para garantir dados recentes
+                if hasattr(self.exnova.api, 'get_profile_ansyc'):
+                    await asyncio.to_thread(self.exnova.api.get_profile_ansyc)
+                
                 bal = await self.exnova.get_current_balance()
                 if bal and float(bal) > 0: 
                     await asyncio.to_thread(self.supabase.update_config, {'daily_initial_balance': bal, 'current_balance': bal})
@@ -345,7 +354,7 @@ class TradingBot:
         _patch_library_constants_aggressive()
 
         print("[SYSTEM] Aqueçendo API (Warmup 5s)...")
-        await asyncio.sleep(5) # WARMUP IMPORTANTE: Deixa o saldo sincronizar
+        await asyncio.sleep(5) # WARMUP IMPORTANTE
 
         print("[SYSTEM] Loop principal iniciado...")
         
