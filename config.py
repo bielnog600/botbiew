@@ -1,36 +1,38 @@
-from pydantic_settings import BaseSettings
-from pydantic import Field, ConfigDict
+import os
+from dotenv import load_dotenv
 
-class Settings(BaseSettings):
-    # Ignora variáveis de ambiente extras não definidas aqui
-    model_config = ConfigDict(
-        extra="ignore",
-        env_file=".env",
-        env_file_encoding="utf-8"
-    )
+# Carrega as variáveis do arquivo .env
+load_dotenv()
 
-    # Exnova API credentials
-    EXNOVA_EMAIL: str    = Field(..., env="EXNOVA_EMAIL")
-    EXNOVA_PASSWORD: str = Field(..., env="EXNOVA_PASSWORD")
+class Settings:
+    # Credenciais
+    EXNOVA_EMAIL = os.getenv("EXNOVA_EMAIL")
+    EXNOVA_PASSWORD = os.getenv("EXNOVA_PASSWORD")
+    
+    SUPABASE_URL = os.getenv("SUPABASE_URL")
+    SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+    
+    # --- CONFIGURAÇÕES DE TRADING ---
+    
+    # Tipo de Conta: "REAL" ou "PRACTICE"
+    # Se não estiver definido no .env, usa PRACTICE por segurança
+    MODE = os.getenv("MODE", "REAL").upper()
+    
+    # Valor da Entrada Inicial
+    try:
+        AMOUNT = float(os.getenv("AMOUNT", 4.0))
+    except:
+        AMOUNT = 4.0
 
-    # Supabase credentials
-    SUPABASE_URL: str = Field(..., env="SUPABASE_URL")
-    SUPABASE_KEY: str = Field(..., env="SUPABASE_KEY")
+    # Configurações de Martingale
+    try:
+        MARTINGALE_LEVELS = int(os.getenv("MARTINGALE_LEVELS", 2))
+        MARTINGALE_FACTOR = float(os.getenv("MARTINGALE_FACTOR", 2.2))
+    except:
+        MARTINGALE_LEVELS = 1
+        MARTINGALE_FACTOR = 2.3
 
-    # Bot behavior settings
-    MAX_ASSETS_TO_MONITOR: int = 180
-    MAX_CONCURRENT_TRADES: int = 1
+    # Proxy (Opcional)
+    EXNOVA_PROXY = os.getenv("EXNOVA_PROXY")
 
-    ENTRY_VALUE: float        = Field(1.0, env="ENTRY_VALUE")
-    USE_MARTINGALE: bool      = Field(False, env="USE_MARTINGALE")
-    MARTINGALE_FACTOR: float  = Field(2.3, env="MARTINGALE_FACTOR")
-    MARTINGALE_LEVELS: int    = Field(2, env="MARTINGALE_LEVELS")
-
-    # Operation mode: CONSERVADOR or AGRESSIVO
-    OPERATION_MODE: str = Field("CONSERVADOR", env="OPERATION_MODE")
-
-    # Intervalos
-    BOT_CONFIG_POLL_INTERVAL: int = Field(15, env="BOT_CONFIG_POLL_INTERVAL")
-
-# Instancia as configurações:
 settings = Settings()
