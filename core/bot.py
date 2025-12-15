@@ -60,19 +60,15 @@ def _optimized_get_candles(self, active, duration, count, to):
                 active_id = ACTIVES_MAP.get(active, None)
         
         if active_id is None:
-            print(f"[PATCH ERROR] ID não encontrado: {active}")
+            # print(f"[PATCH ERROR] ID não encontrado: {active}")
             return []
-
-        # LOG DE DIAGNÓSTICO (Para entendermos o erro no Coolify)
-        # print(f"[PATCH DEBUG] Pedindo Velas -> ID: {active_id} | Time: {to} | Active: {active}")
 
         self.api.getcandles(active_id, duration, count, to)
         
-        # Espera com timeout aumentado
         start = time.time()
         while self.api.candles.candles_data is None:
-            if time.time() - start > 20: # 20s timeout
-                print(f"[PATCH TIMEOUT] Sem resposta de velas para {active} (ID {active_id})")
+            if time.time() - start > 20: 
+                # print(f"[PATCH TIMEOUT] Sem resposta para {active}")
                 return []
             time.sleep(0.05)
             
@@ -127,13 +123,12 @@ async def _get_historical_candles_patched(self, asset_name, duration, amount):
     if not hasattr(self, 'api') or not self.api: return []
     try:
         # Lógica de Tempo Sincronizado
-        # Se tivermos um offset calculado (sync_time), usamos ele
-        # Senão, usamos o tempo local
         local_time = int(time.time())
+        # Aplica o offset calculado na inicialização
         req_time = local_time - GLOBAL_TIME_OFFSET
         
-        # Debug pontual para verificar drift
-        # print(f"[TIME DEBUG] Local: {local_time} | Offset: {GLOBAL_TIME_OFFSET} | Request: {req_time}")
+        # Subtrai margem de segurança para garantir vela fechada
+        req_time = req_time - 1
 
         candles = await asyncio.wait_for(
             asyncio.to_thread(self.api.get_candles, asset_name, duration, amount, req_time),
@@ -306,33 +301,51 @@ class TradingBot:
         except: pass
 
     async def _sync_time(self):
-        # CALCULA O OFFSET DE TEMPO (CRÍTICO PARA DOCKER)
+        # CALCULA O OFFSET DE TEMPO (CRÍTICO PARA DOCKER/VPS)
         global GLOBAL_TIME_OFFSET
         try:
+            # Tenta pegar timestamp do servidor
+            server_ts = 0
             if hasattr(self.exnova.api, 'get_server_timestamp'):
                 server_ts = self.exnova.api.get_server_timestamp()
-                local_ts = time.time()
-                # Se server_ts for muito pequeno (segundos) ou muito grande (ms), ajusta
-                # Geralmente exnova retorna em segundos ou ms. Vamos assumir segundos se < 3000000000
-                
-                # Se a lib não tiver get_server_timestamp implementado corretamente,
-                # tentamos forçar via propriedade
-                if server_ts == 0 and hasattr(self.exnova.api.api, 'timesync'):
-                     server_ts = self.exnova.api.api.timesync.server_timestamp
+            
+            if server_ts == 0 and hasattr(self.exnova.api.api, 'timesync'):
+                 server_ts = self.exnova.api.api.timesync.server_timestamp
 
-                if server_ts > 0:
-                    # Ajuste de escala se necessário (ms para s)
-                    if server_ts > 3000000000: server_ts /= 1000
-                    
-                    offset = local_ts - server_ts
-                    GLOBAL_TIME_OFFSET = int(offset) # Arredonda para seg
-                    # print(f"[TIME SYNC] Local: {local_ts:.2f} | Server: {server_ts:.2f} | Offset: {GLOBAL_TIME_OFFSET}s")
-                    
-                    # Se o offset for muito grande (>1h), alerta
-                    if abs(GLOBAL_TIME_OFFSET) > 3600:
-                        print("[WARN] Diferença de horário muito grande entre VPS e Broker!")
+            if server_ts > 0:
+                local_ts = time.time()
+                
+                # CORREÇÃO DE ESCALA (Magia Aqui)
+                # Se o server_ts for muito pequeno (ex: 1.7M em vez de 1.7B), está em formato compactado ou errado
+                # 3000000000000 = 3 Trillion (ms). 3000000000 = 3 Billion (s).
+                
+                # Caso 1: Timestamp em Milissegundos (padrão IQ/Exnova em alguns endpoints)
+                if server_ts > 3000000000: 
+                    server_ts /= 1000
+                
+                # Caso 2: Timestamp "truncado" (apareceu no seu log ~1.7M)
+                # 1765764 (1.7M) -> precisa multiplicar por 1000 para virar 1.7B
+                elif server_ts < 2000000000 and server_ts > 1000000:
+                     # Se for menor que 2 Bilhões mas maior que 1 Milhão, provavelmente foi dividido por 1000 antes
+                     if server_ts < local_ts / 100: # Se for muito menor que o local
+                         server_ts *= 1000
+
+                offset = local_ts - server_ts
+                
+                # SAFETY CHECK: Se o offset for absurdo (> 1 dia), ignora e usa local
+                if abs(offset) > 86400:
+                    print(f"[TIME WARN] Offset louco detectado: {offset}s. Ignorando sincronia e usando tempo local.")
+                    GLOBAL_TIME_OFFSET = 0
+                else:
+                    GLOBAL_TIME_OFFSET = int(offset)
+                    print(f"[TIME SYNC] Sucesso. Offset: {GLOBAL_TIME_OFFSET}s (Server: {server_ts:.0f} vs Local: {local_ts:.0f})")
+            else:
+                print("[TIME SYNC] Não foi possível obter tempo do servidor. Usando local.")
+                GLOBAL_TIME_OFFSET = 0
+
         except Exception as e:
-            print(f"[TIME SYNC ERROR] {e}")
+            print(f"[TIME SYNC ERROR] {e}. Usando tempo local.")
+            GLOBAL_TIME_OFFSET = 0
 
     async def _daily_reset_if_needed(self):
         current_date_utc = datetime.utcnow().date()
@@ -362,8 +375,8 @@ class TradingBot:
         _patch_library_constants_aggressive()
 
         print("[SYSTEM] Sincronizando Relógio e API...")
-        await asyncio.sleep(5)
-        await self._sync_time() # Sincroniza tempo antes de começar
+        await asyncio.sleep(3)
+        await self._sync_time()
 
         print("[SYSTEM] Loop principal iniciado...")
         
@@ -381,7 +394,7 @@ class TradingBot:
                     if await self.exnova.connect():
                         await self.logger('SUCCESS', 'Reconectado.')
                         await asyncio.sleep(3)
-                        await self._sync_time() # Re-sincroniza ao reconectar
+                        await self._sync_time()
                     else:
                         await asyncio.sleep(5)
                         continue
@@ -423,10 +436,10 @@ class TradingBot:
     async def run_analysis_for_timeframe(self, timeframe_seconds: int, expiration_minutes: int):
         try:
             try:
-                # Refresh Saldo para manter conexão viva
+                # Refresh Saldo
                 await asyncio.wait_for(self.exnova.change_balance(self.bot_config.get('account_type', 'PRACTICE')), timeout=2.0)
                 bal = await self.exnova.get_current_balance()
-                print(f"[STATUS] Saldo: {bal} | {expiration_minutes}M Scan")
+                # print(f"[STATUS] Saldo: {bal} | {expiration_minutes}M Scan")
             except: pass
 
             assets = await _get_open_assets_fix(None)
@@ -474,7 +487,6 @@ class TradingBot:
 
             analysis_candles, sr_candles = candles
             if not analysis_candles:
-                # print(f"[DEBUG] Velas vazias: {full_name}")
                 return
 
             analysis_candles_objs = []
