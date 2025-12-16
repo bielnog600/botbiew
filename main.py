@@ -33,50 +33,23 @@ class MoneyManager:
 class TechnicalAnalysis:
     @staticmethod
     def calculate_sma(candles, period):
-        """Calcula a Média Móvel Simples (SMA)"""
-        if len(candles) < period:
-            return 0
-        # Pega as últimas 'period' velas
+        if len(candles) < period: return 0
         slice_candles = candles[-period:]
-        # Soma os preços de fechamento
         total_close = sum([c['close'] for c in slice_candles])
         return total_close / period
 
     @staticmethod
     def get_signal(candles):
-        """
-        Estratégia: Micro Tendência com SMA 20
-        """
-        # Precisamos de pelo menos 25 velas para calcular a SMA 20 com segurança
-        if len(candles) < 25: 
-            return None
-        
-        # 1. Identificar Micro Tendência (SMA 20)
+        if len(candles) < 25: return None
         sma_20 = TechnicalAnalysis.calculate_sma(candles, 20)
         if sma_20 == 0: return None
-
         last_candle = candles[-1]
-        last_close = last_candle['close']
-        last_open = last_candle['open']
         
-        # Define a cor da última vela
-        is_green = last_close > last_open
-        is_red = last_close < last_open
-        
-        # 2. Lógica de Entrada a Favor da Tendência
-        
-        # TENDÊNCIA DE ALTA (Preço acima da média)
-        if last_close > sma_20:
-            # Se a vela for verde (confirmação de força), entra CALL para a próxima
-            if is_green:
-                return 'call'
-                
-        # TENDÊNCIA DE BAIXA (Preço abaixo da média)
-        elif last_close < sma_20:
-            # Se a vela for vermelha (confirmação de força), entra PUT para a próxima
-            if is_red:
-                return 'put'
-                
+        # Estratégia: A favor da tendência
+        if last_candle['close'] > sma_20:
+            if last_candle['close'] > last_candle['open']: return 'call' # Tendencia Alta + Vela Verde
+        elif last_candle['close'] < sma_20:
+            if last_candle['close'] < last_candle['open']: return 'put' # Tendencia Baixa + Vela Vermelha
         return None
 
 # --- CORREÇÕES OTC ---
@@ -102,7 +75,7 @@ class SimpleBot:
         self.money_manager = MoneyManager()
         self.blacklist = set()
         self.active_trades = set()
-        self.active_account_type = "PRACTICE" 
+        self.active_account_type = None # Inicia nulo para forçar leitura
         self.config = {
             "status": "PAUSED",
             "account_type": "PRACTICE",
@@ -146,7 +119,9 @@ class SimpleBot:
             if response.data:
                 data = response.data[0]
                 self.config["status"] = data.get("status", "PAUSED")
-                self.config["account_type"] = data.get("account_type", "PRACTICE")
+                # Garante que lê string correta e limpa espaços
+                acc_type = data.get("account_type", "PRACTICE").strip().upper()
+                self.config["account_type"] = acc_type
                 self.config["entry_value"] = float(data.get("entry_value", 1.0))
             else:
                 self.supabase.table("bot_config").insert({"id": 1, "status": "PAUSED"}).execute()
@@ -170,10 +145,14 @@ class SimpleBot:
             
             self.log_to_db("✅ Conectado com sucesso!", "SUCCESS")
             
-            self.active_account_type = self.config["account_type"]
-            self.api.change_balance(self.active_account_type)
-            self.update_balance_remote()
+            # --- CORREÇÃO CONTA ---
+            # Define explicitamente a conta baseada na config carregada
+            target_account = self.config["account_type"]
+            self.api.change_balance(target_account)
+            self.active_account_type = target_account
             
+            self.log_to_db(f"💳 Conta definida para: {target_account}", "SYSTEM")
+            self.update_balance_remote()
             return True
         except Exception as e:
             self.log_to_db(f"❌ Erro crítico connect: {e}", "ERROR")
@@ -205,18 +184,26 @@ class SimpleBot:
         amount = self.config["entry_value"]
         self.log_to_db(f"➡️ ABRINDO: {asset} | {direction.upper()} | ${amount}", "INFO")
         
+        # 1. Sinal PENDING (Tenta garantir retorno do ID)
         sig_id = None
         try:
-            sig = self.supabase.table("trade_signals").insert({
+            sig_data = {
                 "pair": asset,
                 "direction": direction,
                 "strategy": "Micro Tendência",
                 "result": "PENDING",
                 "created_at": datetime.now().isoformat()
-            }).execute()
-            if sig.data: sig_id = sig.data[0]['id']
-        except: pass
+            }
+            # .execute() retorna objeto com .data
+            sig = self.supabase.table("trade_signals").insert(sig_data).execute()
+            if sig.data and len(sig.data) > 0:
+                sig_id = sig.data[0]['id']
+            else:
+                self.log_to_db("Aviso: ID do sinal não retornado na criação.", "WARNING")
+        except Exception as e:
+            self.log_to_db(f"Erro ao criar sinal DB: {e}", "WARNING")
 
+        # 2. Ordem
         status, id = self.safe_buy(asset, amount, direction, "digital")
         if not status: status, id = self.safe_buy(asset, amount, direction, "binary")
 
@@ -225,13 +212,17 @@ class SimpleBot:
             self.active_trades.add(asset)
             time.sleep(60) 
             
+            # 3. Resultado
             is_win = False
             profit = 0.0
             try:
                 win_dig = self.api.check_win_digital_v2(id)
-                if isinstance(win_dig, tuple) and win_dig[1] > 0: is_win, profit = True, float(win_dig[1])
-                elif isinstance(win_dig, (int, float)) and win_dig > 0: is_win, profit = True, float(win_dig)
-                elif self.api.check_win_v4(id)[0] == 'win': is_win, profit = True, float(self.api.check_win_v4(id)[1])
+                if isinstance(win_dig, tuple) and win_dig[1] > 0: 
+                    is_win, profit = True, float(win_dig[1])
+                elif isinstance(win_dig, (int, float)) and win_dig > 0:
+                    is_win, profit = True, float(win_dig)
+                elif self.api.check_win_v4(id)[0] == 'win': 
+                    is_win, profit = True, float(self.api.check_win_v4(id)[1])
             except: pass
 
             result_str = 'WIN' if is_win else 'LOSS'
@@ -240,14 +231,30 @@ class SimpleBot:
             if is_win: self.log_to_db(f"🏆 WIN! +${profit:.2f}", "SUCCESS")
             else: self.log_to_db(f"🔻 LOSS. ${profit:.2f}", "ERROR")
 
+            # 4. Atualiza DB (CORREÇÃO DE PENDENTE)
+            # Tenta pelo ID, se falhar, tenta pelo último registro pendente desse par
+            updated = False
             if sig_id:
-                try: self.supabase.table("trade_signals").update({"result": result_str, "profit": profit}).eq("id", sig_id).execute()
+                try: 
+                    res = self.supabase.table("trade_signals").update({"result": result_str, "profit": profit}).eq("id", sig_id).execute()
+                    if res.data: updated = True
                 except: pass
-            else:
+            
+            if not updated:
+                # Fallback: Atualiza o último sinal pendente deste par criado nos ultimos 2 minutos
+                self.log_to_db("Usando método alternativo de atualização...", "SYSTEM")
                 try:
-                    self.supabase.table("trade_signals").update({"result": result_str, "profit": profit})\
-                        .eq("pair", asset).eq("result", "PENDING").execute()
-                except: pass
+                    # Busca sinais pendentes recentes
+                    recent = self.supabase.table("trade_signals").select("id")\
+                        .eq("pair", asset).eq("result", "PENDING")\
+                        .order("created_at", desc=True).limit(1).execute()
+                    
+                    if recent.data:
+                        rec_id = recent.data[0]['id']
+                        self.supabase.table("trade_signals").update({"result": result_str, "profit": profit}).eq("id", rec_id).execute()
+                        self.log_to_db("Sinal atualizado com sucesso (Fallback).", "SUCCESS")
+                except Exception as e:
+                    self.log_to_db(f"Falha total ao atualizar sinal: {e}", "ERROR")
             
             self.update_balance_remote()
             self.active_trades.discard(asset)
@@ -258,6 +265,11 @@ class SimpleBot:
                 except: pass
 
     def start(self):
+        # 1. Carrega Configuração ANTES de conectar
+        # Isto garante que 'active_account_type' seja definido corretamente
+        self.fetch_config()
+        self.log_to_db(f"Configuração carregada: Conta {self.config['account_type']}", "SYSTEM")
+
         while True:
             try:
                 if not self.connect():
@@ -271,6 +283,13 @@ class SimpleBot:
                 while True:
                     self.fetch_config()
                     
+                    # --- TROCA DE CONTA DINÂMICA ---
+                    if self.config["account_type"] != self.active_account_type:
+                        self.log_to_db(f"🔄 Trocando conta para {self.config['account_type']}...", "SYSTEM")
+                        self.api.change_balance(self.config["account_type"])
+                        self.active_account_type = self.config["account_type"]
+                        self.update_balance_remote()
+
                     if self.config["status"] == "RESTARTING":
                         self.log_to_db("🔄 Reiniciando...", "WARNING")
                         self.supabase.table("bot_config").update({"status": "RUNNING"}).eq("id", 1).execute()
@@ -282,13 +301,9 @@ class SimpleBot:
 
                     if time.time() - last_scan > 5:
                         try:
-                            # Tenta ler velas para verificar latência e atualizar scanner
-                            candles = self.api.get_candles("EURUSD-OTC", 60, 25, int(time.time()))
-                            if candles:
-                                price = candles[-1]['close']
-                                # Calculo de RSI simples apenas para display (opcional)
-                                rsi_val = "--" 
-                                self.log_to_db(f"ANALISE_DETALHADA::EUR/USD-OTC::Preço:{price}::RSI:{rsi_val}", "SYSTEM")
+                            candles = self.api.get_candles("EURUSD-OTC", 60, 1, int(time.time()))
+                            price = candles[-1]['close'] if candles else 0
+                            self.log_to_db(f"ANALISE_DETALHADA::EUR/USD-OTC::Preço:{price}::RSI:--", "SYSTEM")
                         except: pass
                         last_scan = time.time()
 
@@ -300,7 +315,6 @@ class SimpleBot:
                         time.sleep(2)
                         continue
 
-                    # OPERAÇÃO
                     if datetime.now().second <= 5:
                         for asset in ASSETS:
                             if asset in self.active_trades: continue
@@ -308,7 +322,7 @@ class SimpleBot:
                                 candles = self.api.get_candles(asset, 60, 30, int(time.time()))
                                 signal = TechnicalAnalysis.get_signal(candles)
                                 if signal:
-                                    self.log_to_db(f"🔔 SINAL (Micro Tendência): {asset} -> {signal.upper()}", "INFO")
+                                    self.log_to_db(f"🔔 SINAL: {asset} -> {signal}", "INFO")
                                     self.execute_trade(asset, signal)
                             except: pass
                         time.sleep(50)
