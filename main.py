@@ -23,7 +23,7 @@ EXNOVA_PASSWORD = os.environ.get("EXNOVA_PASSWORD", "sua_senha")
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
 logging.getLogger("urllib3").setLevel(logging.WARNING)
 
-# --- ANÁLISE TÉCNICA (SMA 9 + Rejeição) ---
+# --- ANÁLISE TÉCNICA AVANÇADA ---
 class TechnicalAnalysis:
     @staticmethod
     def calculate_sma(candles, period):
@@ -50,31 +50,72 @@ class TechnicalAnalysis:
             'body': body,
             'upper_wick': upper_wick,
             'lower_wick': lower_wick,
-            'close': close_p
+            'close': close_p,
+            'open': open_p
         }
 
     @staticmethod
     def get_signal(candles):
-        if len(candles) < 15: return None, "Dados insuficientes"
+        """
+        Estratégia: Nano Tendência (SMA 9) + Filtro de Lateralização
+        """
+        if len(candles) < 20: return None, "Dados insuficientes"
         
         sma_9 = TechnicalAnalysis.calculate_sma(candles, 9)
         last = TechnicalAnalysis.analyze_candle(candles[-1])
         
-        if last['body'] < 0.000001: return None, "Sem volume"
+        # --- FILTRO 1: LATERALIZAÇÃO (CONSISTÊNCIA) ---
+        # Verifica se as 2 velas anteriores também respeitam a SMA.
+        # Se o preço cruza a média constantemente, é lateral.
+        candle_prev1 = candles[-2]
+        candle_prev2 = candles[-3]
+        
+        # Tendência de Alta Consistente: Últimas 3 velas ACIMA da média
+        trend_up_consistent = (
+            last['close'] > sma_9 and 
+            candle_prev1['close'] > sma_9 and 
+            candle_prev2['close'] > sma_9
+        )
+        
+        # Tendência de Baixa Consistente: Últimas 3 velas ABAIXO da média
+        trend_down_consistent = (
+            last['close'] < sma_9 and 
+            candle_prev1['close'] < sma_9 and 
+            candle_prev2['close'] < sma_9
+        )
 
-        # TENDÊNCIA DE ALTA
-        if last['close'] > sma_9:
+        if not trend_up_consistent and not trend_down_consistent:
+            return None, "Mercado Lateralizado (Preço cruzando SMA)"
+
+        # Filtro de Volatilidade (evita Dojis e mercado parado)
+        if last['body'] < 0.000001: 
+            return None, "Sem volume"
+
+        # --- LÓGICA CALL (Tendência de Alta Confirmada) ---
+        if trend_up_consistent:
+            # 1. Vela anterior Verde (Força a favor)
             if last['color'] == 'green':
+                # 2. Filtro de Rejeição Superior
                 if last['upper_wick'] < (last['body'] * 0.6):
-                    return 'call', f"Alta (P > SMA9)"
+                    return 'call', f"Alta Forte (Preço > SMA9, s/ lat)"
+                else:
+                    return None, "Rejeição Alta (Pavio)"
+            else:
+                return None, "Correção na alta (Vela vermelha)"
 
-        # TENDÊNCIA DE BAIXA
-        elif last['close'] < sma_9:
+        # --- LÓGICA PUT (Tendência de Baixa Confirmada) ---
+        elif trend_down_consistent:
+            # 1. Vela anterior Vermelha (Força a favor)
             if last['color'] == 'red':
+                # 2. Filtro de Rejeição Inferior
                 if last['lower_wick'] < (last['body'] * 0.6):
-                    return 'put', f"Baixa (P < SMA9)"
+                    return 'put', f"Baixa Forte (Preço < SMA9, s/ lat)"
+                else:
+                    return None, "Rejeição Baixa (Pavio)"
+            else:
+                return None, "Correção na baixa (Vela verde)"
                     
-        return None, "Sem tendência"
+        return None, "Sem tendência clara"
 
 # --- CORREÇÕES OTC ---
 try:
@@ -94,13 +135,14 @@ try:
     update_consts()
 except: pass
 
+# --- BOT PRINCIPAL ---
 class SimpleBot:
     def __init__(self):
         self.api = None
         self.supabase = None
         self.active_trades = set()
         self.active_account_type = None
-        self.best_assets = [] 
+        self.best_assets = [] # Agora é uma LISTA de ativos
         self.config = { "status": "PAUSED", "account_type": "PRACTICE", "entry_value": 1.0 }
         self.init_supabase()
 
@@ -220,7 +262,7 @@ class SimpleBot:
     def execute_trade(self, asset, direction):
         if not self.api: return
         amount = self.config["entry_value"]
-        self.log_to_db(f"➡️ ABRINDO: {asset} | {direction} | ${amount}", "INFO")
+        self.log_to_db(f"➡️ ABRINDO: {asset} | {direction.upper()} | ${amount}", "INFO")
         
         sig_id = None
         try:
@@ -333,21 +375,14 @@ class SimpleBot:
                         time.sleep(2)
                         continue
 
-                    # --- ENTRADA DE PRECISÃO (55s) ---
-                    # Para antecipar o sinal, usamos >= 55.
-                    # Removemos delays artificiais para ser rápido.
+                    # ENTRADA DE PRECISÃO (55s)
                     if datetime.now().second >= 55:
-                        
                         current_assets = self.best_assets.copy()
                         random.shuffle(current_assets)
-                        
                         trade_executed = False
                         
                         for asset in current_assets:
                             if asset in self.active_trades: continue
-                            
-                            # SEM DELAY AQUI PARA NÃO PERDER O SEGUNDO 58/59
-                            
                             try:
                                 candles = self.api.get_candles(asset, 60, 20, int(time.time()))
                                 sig, reason = TechnicalAnalysis.get_signal(candles)
@@ -358,11 +393,10 @@ class SimpleBot:
                                     break 
                             except: pass
                         
-                        # Se operou, dorme para não repetir no mesmo minuto
                         if trade_executed: time.sleep(50) 
-                        else: time.sleep(4) # Tenta nos próximos segundos (55, 56, 57...) até virar o minuto
+                        else: time.sleep(4) 
                     
-                    time.sleep(0.5) # Loop mais rápido para precisão
+                    time.sleep(0.5)
             except: time.sleep(5)
 
 if __name__ == "__main__":
