@@ -14,17 +14,11 @@ try:
 except ImportError:
     print("[ERRO] Biblioteca 'exnovaapi' não instalada.")
 
-# --- CONFIGURAÇÃO SUPABASE ---
+# --- CONFIGURAÇÃO ---
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://ioduahwknfsktujthfyc.supabase.co")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlvZHVhaHdrbmZza3R1anRoZnljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEzMDc0NDcsImV4cCI6MjA2Njg4MzQ0N30.96f8wZO6SvABKFMWjIiw1pSugAB4Isldj7yxLcLJRSE")
 EXNOVA_EMAIL = os.environ.get("EXNOVA_EMAIL", "seu_email@exemplo.com")
 EXNOVA_PASSWORD = os.environ.get("EXNOVA_PASSWORD", "sua_senha")
-
-try:
-    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-except Exception as e:
-    print(f"[CRÍTICO] Falha ao iniciar Supabase: {e}")
-    sys.exit(1)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
 logging.getLogger("urllib3").setLevel(logging.WARNING)
@@ -65,6 +59,7 @@ except: pass
 class SimpleBot:
     def __init__(self):
         self.api = None
+        self.supabase = None
         self.money_manager = MoneyManager()
         self.blacklist = set()
         self.active_trades = set()
@@ -75,42 +70,58 @@ class SimpleBot:
             "martingale_factor": 2.0,
             "martingale_levels": 1
         }
+        self.init_supabase()
+
+    def init_supabase(self):
+        try:
+            self.supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+            print("✅ Supabase conectado.")
+        except Exception as e:
+            print(f"❌ Erro Supabase: {e}")
 
     def log_to_db(self, message, level="INFO"):
         print(f"[{level}] {message}")
+        if not self.supabase: return
         try:
-            supabase.table("logs").insert({
+            self.supabase.table("logs").insert({
                 "message": message,
                 "level": level,
                 "created_at": datetime.now().isoformat()
             }).execute()
-        except: pass
+        except Exception as e:
+            print(f"Falha no log DB: {e}")
+            # Se falhar o log, pode ser conexão perdida. Tenta reconectar Supabase.
+            self.init_supabase()
 
     def update_balance_remote(self):
-        """Lê o saldo da API e atualiza a base de dados"""
+        if not self.api: return
         try:
             balance = self.api.get_balance()
-            supabase.table("bot_config").update({"current_balance": balance}).eq("id", 1).execute()
-        except Exception as e:
-            print(f"Erro ao atualizar saldo: {e}")
+            self.supabase.table("bot_config").update({"current_balance": balance}).eq("id", 1).execute()
+        except: pass
 
     def fetch_config(self):
+        if not self.supabase: self.init_supabase()
         try:
-            response = supabase.table("bot_config").select("*").eq("id", 1).execute()
+            response = self.supabase.table("bot_config").select("*").eq("id", 1).execute()
             if response.data:
                 data = response.data[0]
                 self.config["status"] = data.get("status", "PAUSED")
                 self.config["account_type"] = data.get("account_type", "PRACTICE")
                 self.config["entry_value"] = float(data.get("entry_value", 1.0))
             else:
-                supabase.table("bot_config").insert({"id": 1, "status": "PAUSED"}).execute()
-        except: pass
+                self.supabase.table("bot_config").insert({"id": 1, "status": "PAUSED"}).execute()
+        except Exception as e:
+            print(f"Erro config: {e}")
 
     def connect(self):
-        self.log_to_db(f"🔌 Conectando à Exnova...", "SYSTEM")
+        self.log_to_db(f"🔌 A conectar à Exnova...", "SYSTEM")
         try:
-            if self.api and self.api.check_connect():
-                self.api.api.close()
+            # Limpeza completa da instância anterior
+            if self.api:
+                try: self.api.api.close()
+                except: pass
+                self.api = None
             
             self.api = Exnova(EXNOVA_EMAIL, EXNOVA_PASSWORD)
             check, reason = self.api.connect()
@@ -120,33 +131,32 @@ class SimpleBot:
                 return False
             
             self.log_to_db("✅ Conectado com sucesso!", "SUCCESS")
-            
-            # Atualiza tipo de conta e saldo IMEDIATAMENTE
             self.api.change_balance(self.config["account_type"])
             self.update_balance_remote()
-            
             return True
         except Exception as e:
-            self.log_to_db(f"❌ Erro crítico: {e}", "ERROR")
+            self.log_to_db(f"❌ Erro crítico connect: {e}", "ERROR")
             return False
 
     def execute_trade(self, asset, direction):
+        if not self.api: return
         amount = self.config["entry_value"]
         self.log_to_db(f"➡️ ABRINDO: {asset} | {direction.upper()} | ${amount}", "INFO")
         
-        # 1. Cria sinal PENDING
+        # 1. Sinal PENDING
+        sig_id = None
         try:
-            sig = supabase.table("trade_signals").insert({
+            sig = self.supabase.table("trade_signals").insert({
                 "pair": asset,
                 "direction": direction,
                 "strategy": "Técnica",
                 "result": "PENDING",
                 "created_at": datetime.now().isoformat()
             }).execute()
-            sig_id = sig.data[0]['id'] if sig.data else None
-        except: sig_id = None
+            if sig.data: sig_id = sig.data[0]['id']
+        except: pass
 
-        # 2. Envia Ordem
+        # 2. Ordem
         id = None
         try: status, id = self.api.buy_digital_spot(asset, amount, direction, 1)
         except: status = False
@@ -156,11 +166,11 @@ class SimpleBot:
             except: status = False
 
         if status:
-            self.log_to_db(f"✅ Ordem {id} aceita. Aguardando...", "INFO")
+            self.log_to_db(f"✅ Ordem {id} aceite.", "INFO")
             self.active_trades.add(asset)
             time.sleep(60) 
             
-            # 3. Verifica Win
+            # 3. Resultado
             is_win = False
             profit = 0
             try:
@@ -175,79 +185,89 @@ class SimpleBot:
 
             # 4. Atualiza DB
             if sig_id:
-                supabase.table("trade_signals").update({"result": result_str, "profit": profit}).eq("id", sig_id).execute()
+                try: self.supabase.table("trade_signals").update({"result": result_str, "profit": profit}).eq("id", sig_id).execute()
+                except: pass
             
-            # Atualiza saldo após operação
             self.update_balance_remote()
             self.active_trades.discard(asset)
         else:
             self.log_to_db("❌ Falha na ordem.", "ERROR")
-            if sig_id: supabase.table("trade_signals").delete().eq("id", sig_id).execute()
+            if sig_id:
+                try: self.supabase.table("trade_signals").delete().eq("id", sig_id).execute()
+                except: pass
 
     def start(self):
-        if not self.connect(): return
-        
-        ASSETS = ["EURUSD-OTC", "GBPUSD-OTC", "USDJPY-OTC", "USDCHF-OTC", "AUDCAD-OTC"]
-        last_scan = 0
-        last_balance_check = 0
-
+        # Loop infinito resiliente
         while True:
             try:
-                self.fetch_config()
-                
-                # --- REINÍCIO ---
-                if self.config["status"] == "RESTARTING":
-                    self.log_to_db("🔄 Reiniciando...", "WARNING")
-                    time.sleep(1)
-                    if self.connect():
-                        supabase.table("bot_config").update({"status": "RUNNING"}).eq("id", 1).execute()
-                    else: time.sleep(5)
+                # 1. Tentar conectar inicial
+                if not self.connect():
+                    time.sleep(10)
                     continue
                 
-                # --- CHECK CONEXÃO ---
-                if not self.api.check_connect():
-                    self.log_to_db("⚠️ Reconectando...", "WARNING")
-                    self.connect()
-                    time.sleep(5)
-                    continue
+                ASSETS = ["EURUSD-OTC", "GBPUSD-OTC", "USDJPY-OTC", "USDCHF-OTC", "AUDCAD-OTC"]
+                last_scan = 0
+                last_bal = 0
 
-                # --- SINCRONIZAÇÃO PERIÓDICA DE SALDO (1 min) ---
-                if time.time() - last_balance_check > 60:
-                    self.update_balance_remote()
-                    last_balance_check = time.time()
+                # 2. Loop Operacional
+                while True:
+                    self.fetch_config()
+                    
+                    # --- RESTART COMANDADO ---
+                    if self.config["status"] == "RESTARTING":
+                        self.log_to_db("🔄 Reiniciando sistema...", "WARNING")
+                        self.supabase.table("bot_config").update({"status": "RUNNING"}).eq("id", 1).execute()
+                        break # Quebra loop interno para reconectar do zero
 
-                # --- HEARTBEAT ---
-                if time.time() - last_scan > 5:
-                    try:
-                        candles = self.api.get_candles("EURUSD-OTC", 60, 1, int(time.time()))
-                        price = candles[-1]['close']
-                        self.log_to_db(f"ANALISE_DETALHADA::EUR/USD-OTC::Preço:{price}::RSI:--", "SYSTEM")
-                    except: pass
-                    last_scan = time.time()
+                    # --- CHECK CONEXÃO ---
+                    if not self.api.check_connect():
+                        self.log_to_db("⚠️ Conexão perdida. Tentando recuperar...", "WARNING")
+                        break # Quebra loop para reconectar
 
-                if self.config["status"] == "PAUSED":
-                    time.sleep(2)
-                    continue
-
-                # --- OPERACIONAL ---
-                if datetime.now().second <= 5:
-                    for asset in ASSETS:
-                        if asset in self.active_trades: continue
+                    # --- HEARTBEAT ---
+                    if time.time() - last_scan > 5:
                         try:
-                            candles = self.api.get_candles(asset, 60, 60, int(time.time()))
-                            signal = TechnicalAnalysis.get_signal(candles)
-                            if signal:
-                                self.log_to_db(f"🔔 SINAL: {asset} -> {signal}", "INFO")
-                                self.execute_trade(asset, signal)
+                            # Tenta ler mercado para provar que está vivo
+                            candles = self.api.get_candles("EURUSD-OTC", 60, 1, int(time.time()))
+                            price = candles[-1]['close'] if candles else 0
+                            self.log_to_db(f"ANALISE_DETALHADA::EUR/USD-OTC::Preço:{price}::RSI:--", "SYSTEM")
                         except: pass
-                    time.sleep(50)
-                
-                time.sleep(1)
+                        last_scan = time.time()
 
-            except KeyboardInterrupt: break
+                    # --- SYNC SALDO ---
+                    if time.time() - last_bal > 60:
+                        self.update_balance_remote()
+                        last_bal = time.time()
+
+                    if self.config["status"] == "PAUSED":
+                        time.sleep(2)
+                        continue
+
+                    # --- OPERAÇÃO ---
+                    if datetime.now().second <= 5:
+                        for asset in ASSETS:
+                            if asset in self.active_trades: continue
+                            try:
+                                candles = self.api.get_candles(asset, 60, 60, int(time.time()))
+                                signal = TechnicalAnalysis.get_signal(candles)
+                                if signal:
+                                    self.log_to_db(f"🔔 SINAL: {asset} -> {signal}", "INFO")
+                                    self.execute_trade(asset, signal)
+                            except: pass
+                        time.sleep(50)
+                    
+                    time.sleep(1)
+
             except Exception as e:
-                print(f"Erro Loop: {e}")
-                time.sleep(5)
+                print(f"Crash Loop Principal: {e}")
+                time.sleep(10) # Espera antes de reiniciar tudo
 
 if __name__ == "__main__":
-    SimpleBot().start()
+    # Garante que o processo nunca morre
+    while True:
+        try:
+            bot = SimpleBot()
+            bot.start()
+        except Exception as e:
+            print(f"Reinício forçado do processo: {e}")
+            time.sleep(5)
