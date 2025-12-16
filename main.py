@@ -51,7 +51,8 @@ class TechnicalAnalysis:
             'body': body,
             'upper_wick': upper_wick,
             'lower_wick': lower_wick,
-            'close': close_p
+            'close': close_p,
+            'open': open_p
         }
 
     @staticmethod
@@ -59,33 +60,40 @@ class TechnicalAnalysis:
         """
         Estratégia: Nano Tendência (SMA 9) + Força de Vela
         """
-        if len(candles) < 10: return None
+        if len(candles) < 10: return None, "Dados insuficientes"
         
         sma_9 = TechnicalAnalysis.calculate_sma(candles, 9)
         last = TechnicalAnalysis.analyze_candle(candles[-1])
         
-        # Filtro de Volatilidade Mínima (evita Dojis e mercado parado)
-        if last['body'] < 0.000005: return None
+        # Filtro de Volatilidade (evita Dojis e mercado parado)
+        if last['body'] < 0.000001: 
+            return None, "Mercado sem volatilidade"
 
         # --- LÓGICA CALL (Tendência de Alta) ---
         if last['close'] > sma_9:
             # 1. Vela anterior Verde (Força a favor)
             if last['color'] == 'green':
-                # 2. Confluência: Pavio superior não pode ser muito grande (Rejeição)
-                # O pavio superior deve ser menor que 40% do corpo (indica que não houve muita força vendedora no topo)
-                if last['upper_wick'] < (last['body'] * 0.5):
-                    return 'call'
+                # 2. Filtro de Rejeição Superior
+                if last['upper_wick'] < (last['body'] * 0.6):
+                    return 'call', f"Alta (Preço {last['close']} > SMA {sma_9:.5f})"
+                else:
+                    return None, "Rejeição superior (Pavio alto)"
+            else:
+                return None, "Vela vermelha em tendência de alta"
 
         # --- LÓGICA PUT (Tendência de Baixa) ---
         elif last['close'] < sma_9:
             # 1. Vela anterior Vermelha (Força a favor)
             if last['color'] == 'red':
-                # 2. Confluência: Pavio inferior não pode ser muito grande (Rejeição)
-                # O pavio inferior deve ser menor que 40% do corpo
-                if last['lower_wick'] < (last['body'] * 0.5):
-                    return 'put'
+                # 2. Filtro de Rejeição Inferior
+                if last['lower_wick'] < (last['body'] * 0.6):
+                    return 'put', f"Baixa (Preço {last['close']} < SMA {sma_9:.5f})"
+                else:
+                    return None, "Rejeição inferior (Pavio baixo)"
+            else:
+                return None, "Vela verde em tendência de baixa"
                     
-        return None
+        return None, "Lateralizado ou Doji"
 
 # --- CORREÇÕES OTC ---
 try:
@@ -185,68 +193,60 @@ class SimpleBot:
             self.log_to_db(f"❌ Erro crítico connect: {e}", "ERROR")
             return False
 
-    # --- CATALOGAÇÃO INTELIGENTE ---
+    # --- CATALOGAÇÃO DETALHADA ---
     def catalog_assets(self, assets_list):
-        self.log_to_db("📊 Iniciando catalogação de ativos (100 velas)...", "SYSTEM")
+        self.log_to_db("📊 Iniciando catalogação completa...", "SYSTEM")
         best_winrate = -1
         best_pair = None
         
         for asset in assets_list:
             try:
-                # Pega 100 velas
                 candles = self.api.get_candles(asset, 60, 100, int(time.time()))
                 if not candles or len(candles) < 100: continue
                 
                 wins = 0
                 total = 0
                 
-                # Backtest simples nas ultimas 100 velas
-                # Começa na vela 10 (precisa de 9 para SMA)
+                # Backtest nas ultimas 100 velas
                 for i in range(10, len(candles)-1):
-                    # Fatia de análise (simula o passado)
                     subset = candles[i-10:i+1]
-                    signal = TechnicalAnalysis.get_signal(subset)
+                    signal, reason = TechnicalAnalysis.get_signal(subset)
                     
                     if signal:
                         total += 1
-                        # Verifica resultado na vela seguinte
                         next_candle = candles[i+1]
                         is_win = False
                         if signal == 'call' and next_candle['close'] > next_candle['open']: is_win = True
                         elif signal == 'put' and next_candle['close'] < next_candle['open']: is_win = True
-                        
                         if is_win: wins += 1
                 
                 if total > 0:
                     wr = (wins / total) * 100
-                    # self.log_to_db(f"Backtest {asset}: {wr:.1f}% ({wins}/{total})", "INFO") # Opcional: logar tudo
+                    # LOG DETALHADO DA CATALOGAÇÃO
+                    self.log_to_db(f"🔎 {asset}: {wins}/{total} wins ({wr:.1f}%)", "INFO")
                     
-                    # Critério de escolha: Maior Winrate com Minimo de 5 entradas no histórico
                     if wr > best_winrate and total >= 5:
                         best_winrate = wr
                         best_pair = asset
             
             except: pass
-            time.sleep(0.1) # Evitar flood api
+            time.sleep(0.1) 
             
         if best_pair:
-            self.log_to_db(f"💎 Melhor par encontrado: {best_pair} com {best_winrate:.1f}% de assertividade.", "SUCCESS")
-            # Salva na tabela de catálogo do Supabase (para o front ver)
+            self.log_to_db(f"💎 Par Escolhido: {best_pair} | Assertividade: {best_winrate:.1f}%", "SUCCESS")
             try:
-                # Limpa catálogo antigo e insere o novo campeão
                 self.supabase.table("cataloged_assets").delete().neq("pair", "XYZ").execute() 
                 self.supabase.table("cataloged_assets").insert({
                     "pair": best_pair,
                     "win_rate": best_winrate,
-                    "wins": 0, "losses": 0, # Placeholder
+                    "wins": 0, "losses": 0,
                     "best_strategy": "Nano SMA9"
                 }).execute()
             except: pass
-            
             return best_pair
         
-        self.log_to_db("⚠️ Nenhum par bom encontrado na catalogação.", "WARNING")
-        return assets_list[0] # Retorna o primeiro por padrão
+        self.log_to_db("⚠️ Catalogação inconclusiva, usando padrão.", "WARNING")
+        return assets_list[0]
 
     def safe_buy(self, asset, amount, direction, type="digital"):
         result = [None]
@@ -286,7 +286,7 @@ class SimpleBot:
         if not status: status, id = self.safe_buy(asset, amount, direction, "binary")
 
         if status:
-            self.log_to_db(f"✅ Ordem {id} aceite.", "INFO")
+            self.log_to_db(f"✅ Ordem {id} aberta. Aguardando fecho...", "INFO")
             self.active_trades.add(asset)
             time.sleep(60) 
             
@@ -294,38 +294,33 @@ class SimpleBot:
             profit = 0.0
             try:
                 win_dig = self.api.check_win_digital_v2(id)
-                if isinstance(win_dig, tuple) and win_dig[1] > 0: 
-                    is_win, profit = True, float(win_dig[1])
-                elif isinstance(win_dig, (int, float)) and win_dig > 0:
-                    is_win, profit = True, float(win_dig)
-                elif self.api.check_win_v4(id)[0] == 'win': 
-                    is_win, profit = True, float(self.api.check_win_v4(id)[1])
+                if isinstance(win_dig, tuple) and win_dig[1] > 0: is_win, profit = True, float(win_dig[1])
+                elif isinstance(win_dig, (int, float)) and win_dig > 0: is_win, profit = True, float(win_dig)
+                elif self.api.check_win_v4(id)[0] == 'win': is_win, profit = True, float(self.api.check_win_v4(id)[1])
             except: pass
 
             result_str = 'WIN' if is_win else 'LOSS'
             if not is_win: profit = -float(amount)
 
-            if is_win: self.log_to_db(f"🏆 WIN! +${profit:.2f}", "SUCCESS")
-            else: self.log_to_db(f"🔻 LOSS. ${profit:.2f}", "ERROR")
+            # Log de Resultado
+            if is_win: self.log_to_db(f"🏆 WIN em {asset}! +${profit:.2f}", "SUCCESS")
+            else: self.log_to_db(f"🔻 LOSS em {asset}. ${profit:.2f}", "ERROR")
 
+            # Update DB
             if sig_id:
                 try: 
-                    self.supabase.table("trade_signals").update({
-                        "status": result_str, "result": result_str, "profit": profit
-                    }).eq("id", sig_id).execute()
+                    self.supabase.table("trade_signals").update({"status": result_str, "result": result_str, "profit": profit}).eq("id", sig_id).execute()
                 except: pass
             else:
-                 # Fallback
-                 try:
-                    recent = self.supabase.table("trade_signals").select("id").eq("pair", asset).eq("status", "PENDING").order("created_at", desc=True).limit(1).execute()
-                    if recent.data:
-                        self.supabase.table("trade_signals").update({"status": result_str, "profit": profit}).eq("id", recent.data[0]['id']).execute()
-                 except: pass
+                try: # Fallback
+                    rec = self.supabase.table("trade_signals").select("id").eq("pair", asset).eq("status", "PENDING").order("created_at", desc=True).limit(1).execute()
+                    if rec.data: self.supabase.table("trade_signals").update({"status": result_str, "profit": profit}).eq("id", rec.data[0]['id']).execute()
+                except: pass
 
             self.update_balance_remote()
             self.active_trades.discard(asset)
         else:
-            self.log_to_db("❌ Falha na ordem.", "ERROR")
+            self.log_to_db("❌ Falha crítica na abertura da ordem.", "ERROR")
             if sig_id:
                 try: self.supabase.table("trade_signals").delete().eq("id", sig_id).execute()
                 except: pass
@@ -360,20 +355,30 @@ class SimpleBot:
                         self.log_to_db("⚠️ Reconectando API...", "WARNING")
                         break 
 
-                    # Re-cataloga a cada 15 minutos para garantir que estamos no melhor par
+                    # Re-cataloga a cada 15 min
                     if time.time() - last_catalog > 900:
                         self.best_asset = self.catalog_assets(ASSETS_POOL)
                         last_catalog = time.time()
 
+                    # LOG DA ANÁLISE EM TEMPO REAL
                     if time.time() - last_scan > 5:
                         try:
-                            # Heartbeat com o par atual
+                            # Heartbeat
                             candles = self.api.get_candles(self.best_asset, 60, 25, int(time.time()))
                             if candles:
                                 price = candles[-1]['close']
-                                # Mostra SMA9 no painel como info extra no lugar do RSI
                                 sma = TechnicalAnalysis.calculate_sma(candles, 9)
+                                trend = "ALTA" if price > sma else "BAIXA"
+                                
+                                # Log especial para o frontend ver o status
                                 self.log_to_db(f"ANALISE_DETALHADA::{self.best_asset}::Preço:{price}::SMA9:{sma:.5f}", "SYSTEM")
+                                
+                                # Log explicativo para o utilizador (só se estiver a correr)
+                                if self.config["status"] == "RUNNING":
+                                    # Verifica porque não deu sinal agora
+                                    _, reason = TechnicalAnalysis.get_signal(candles)
+                                    self.log_to_db(f"🧠 {self.best_asset}: {trend} (SMA {sma:.5f}) | {reason}", "DEBUG")
+                                    
                         except: pass
                         last_scan = time.time()
 
@@ -385,16 +390,15 @@ class SimpleBot:
                         time.sleep(2)
                         continue
 
-                    # OPERAÇÃO NO MELHOR ATIVO
+                    # OPERAÇÃO
                     if datetime.now().second <= 5:
-                        # Analisa apenas o melhor par catalogado
                         asset = self.best_asset
                         if asset not in self.active_trades:
                             try:
                                 candles = self.api.get_candles(asset, 60, 30, int(time.time()))
-                                signal = TechnicalAnalysis.get_signal(candles)
+                                signal, reason = TechnicalAnalysis.get_signal(candles)
                                 if signal:
-                                    self.log_to_db(f"🔔 SINAL EM {asset}: {signal.upper()}", "INFO")
+                                    self.log_to_db(f"🔔 SINAL EM {asset}: {signal.upper()} (Motivo: {reason})", "INFO")
                                     self.execute_trade(asset, signal)
                             except: pass
                         time.sleep(50)
