@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Marombiew Bot</title>
+    <title>MAROMBIEW BOT</title>
     
     <!-- PWA Settings -->
     <meta name="theme-color" content="#0f172a">
@@ -31,6 +31,10 @@
         .active-nav { color: var(--gold); }
         .live-indicator { animation: pulse-green 2s infinite; }
         @keyframes pulse-green { 0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4); } 70% { box-shadow: 0 0 0 6px rgba(34, 197, 94, 0); } 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); } }
+        
+        /* Scanner Feed Animation */
+        .feed-item { animation: slideUp 0.3s ease-out forwards; }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
     </style>
 </head>
 <body class="flex flex-col h-screen">
@@ -42,7 +46,7 @@
                 <div class="w-16 h-16 bg-amber-500/10 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-amber-500/20 shadow-[0_0_30px_rgba(245,158,11,0.2)]">
                     <i data-lucide="zap" class="text-amber-500 w-8 h-8"></i>
                 </div>
-                <h1 class="text-2xl font-bold text-white">Marombiew Bot</h1>
+                <h1 class="text-2xl font-bold text-white">MAROMBIEW BOT</h1>
             </div>
             <form id="login-form" class="space-y-4">
                 <input type="email" id="email" class="w-full bg-slate-900/50 border border-slate-700 text-white text-sm rounded-xl pl-4 py-3" placeholder="Email" required>
@@ -67,7 +71,7 @@
         </aside>
 
         <main class="flex-1 overflow-y-auto p-4 md:p-8 scroll-smooth pb-24 md:pb-8">
-            <div id="connection-warning" class="hidden mb-4 bg-red-500/10 border border-red-500/20 text-red-400 p-3 rounded-xl flex items-center gap-2 text-sm animate-pulse"><i data-lucide="wifi-off" class="w-4 h-4"></i> Bot Offline</div>
+            <div id="connection-warning" class="hidden mb-4 bg-red-500/10 border border-red-500/20 text-red-400 p-3 rounded-xl flex items-center gap-2 text-sm animate-pulse"><i data-lucide="wifi-off" class="w-4 h-4"></i> Bot Offline: Sem sinal há mais de 3 minutos.</div>
 
             <!-- HOME -->
             <div id="view-home" class="view-section space-y-6 max-w-5xl mx-auto">
@@ -82,14 +86,34 @@
                     </div>
                 </div>
 
+                <!-- LIVE SCANNER MONITOR -->
                 <div class="glass-card rounded-xl p-6 relative overflow-hidden group">
                     <div id="scanner-line" class="scan-line hidden"></div>
-                    <div class="relative z-10 flex justify-between items-start">
+                    
+                    <!-- Cabeçalho do Scanner -->
+                    <div class="relative z-10 flex justify-between items-start mb-6">
                         <div>
-                            <div class="flex items-center gap-2 mb-2"><div id="scanner-led" class="w-2 h-2 rounded-full bg-red-500"></div><span id="scanner-status-text" class="text-[10px] font-bold text-slate-400">OFFLINE</span></div>
-                            <div id="scanner-pair" class="text-3xl font-black text-white">---</div>
+                            <div class="flex items-center gap-2 mb-2"><div id="scanner-led" class="w-2 h-2 rounded-full bg-red-500"></div><span id="scanner-status-text" class="text-[10px] font-bold tracking-widest text-slate-400 uppercase">OFFLINE</span></div>
+                            <div class="flex items-baseline gap-3">
+                                <div id="scanner-pair" class="text-3xl font-black text-white tracking-tight transition-all duration-300">---</div>
+                                <div class="text-sm text-slate-400 font-mono" id="scanner-price">0.00000</div>
+                            </div>
+                            <div class="flex items-center gap-2 mt-1">
+                                <span class="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-[10px] text-slate-400 font-mono">
+                                    <span id="scanner-rsi" class="text-amber-400">--</span>
+                                </span>
+                                <span class="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-[10px] text-slate-400 font-mono">M1/M5</span>
+                            </div>
                         </div>
-                        <div class="text-right"><p class="text-[10px] text-slate-500 font-bold mb-1">PREÇO</p><p id="scanner-price" class="text-2xl font-mono text-slate-200">0.00000</p></div>
+                    </div>
+
+                    <!-- Live Feed Area -->
+                    <div class="relative z-10 bg-black/40 rounded-lg border border-slate-800 p-3 h-24 overflow-hidden flex flex-col justify-end">
+                        <div id="scanner-feed" class="flex flex-col gap-1 text-[11px] font-mono text-slate-400">
+                            <!-- JS vai injetar linhas aqui -->
+                            <div class="opacity-50">A aguardar dados do bot...</div>
+                        </div>
+                        <div class="absolute top-0 left-0 w-full h-8 bg-gradient-to-b from-black/40 to-transparent pointer-events-none"></div>
                     </div>
                 </div>
 
@@ -109,7 +133,10 @@
                 <div>
                     <div class="flex justify-between items-center mb-3">
                         <h3 class="text-sm font-bold text-slate-400 flex items-center gap-2"><i data-lucide="history" class="w-4 h-4"></i> Histórico</h3>
-                        <button id="clear-history-btn" class="p-1.5 text-red-400 hover:bg-red-500/10 rounded-lg"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                        <div class="flex gap-2">
+                             <button onclick="fetchData()" class="p-1.5 text-slate-500 hover:text-white hover:bg-slate-800 rounded-lg"><i data-lucide="refresh-cw" class="w-4 h-4"></i></button>
+                             <button id="clear-history-btn" class="p-1.5 text-red-400 hover:bg-red-500/10 rounded-lg"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                        </div>
                     </div>
                     <div id="signals-list" class="space-y-3 pb-8"><div class="text-center text-slate-600 text-xs">A carregar...</div></div>
                 </div>
@@ -150,8 +177,6 @@
     <script>
         const SUPABASE_URL = 'https://ioduahwknfsktujthfyc.supabase.co';
         const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlvZHVhaHdrbmZza3R1anRoZnljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEzMDc0NDcsImV4cCI6MjA2Njg4MzQ0N30.96f8wZO6SvABKFMWjIiw1pSugAB4Isldj7yxLcLJRSE';
-        
-        // CORREÇÃO: Usar um nome único para o cliente para evitar conflitos com a lib global
         const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
         const state = { user: null, config: {}, lastLogTime: null };
         lucide.createIcons();
@@ -181,7 +206,11 @@
             if(logs && logs.length > 0) {
                 const term = document.getElementById('terminal-output');
                 term.innerHTML = '<div class="text-slate-500 mb-2 border-b border-slate-800 pb-2">Marombiew Bot Terminal v2.0 <br> Carregando histórico...</div>';
-                [...logs].reverse().forEach(l => appendLog(l));
+                [...logs].reverse().forEach(l => {
+                    appendLog(l);
+                    // Also populate scanner feed with initial data
+                    addScannerFeedItem(l);
+                });
                 state.lastLogTime = new Date(logs[0].created_at);
                 processScannerLog(logs[0]);
                 updateBotStatus();
@@ -229,7 +258,11 @@
             fetchData();
             supabaseClient.channel('dash').on('postgres_changes', { event: '*', schema: 'public', table: 'bot_config' }, p => updateConfigUI(p.new))
                 .on('postgres_changes', { event: '*', schema: 'public', table: 'trade_signals' }, () => refreshSignals())
-                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'logs' }, p => { appendLog(p.new); processScannerLog(p.new); })
+                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'logs' }, p => { 
+                    appendLog(p.new); 
+                    processScannerLog(p.new);
+                    addScannerFeedItem(p.new); // Feed ao vivo no card
+                })
                 .subscribe();
             setInterval(fetchData, 3000);
             setInterval(updateBotStatus, 5000);
@@ -365,6 +398,26 @@
             scrollToBottom();
         }
 
+        // --- NEW: Add items to the Scanner Card Feed ---
+        function addScannerFeedItem(log) {
+            const feed = document.getElementById('scanner-feed');
+            const msg = log.message || "";
+            // Filtra mensagens irrelevantes para o feed principal
+            if (!msg.includes('ANALISE_DETALHADA') && !msg.includes('SINAL') && !msg.includes('Catalogando') && !msg.includes('Trocando')) return;
+            
+            const item = document.createElement('div');
+            item.className = 'feed-item truncate';
+            // Clean up message for display
+            let cleanMsg = msg.replace('ANALISE_DETALHADA::', '').replace('::', ' | ').replace('SYSTEM', '').replace('INFO', '');
+            if(cleanMsg.length > 50) cleanMsg = cleanMsg.substring(0, 50) + '...';
+            
+            item.textContent = `> ${cleanMsg}`;
+            feed.appendChild(item);
+            
+            // Keep only last 3 items
+            if(feed.children.length > 3) feed.firstChild.remove();
+        }
+
         function scrollToBottom() {
             const term = document.getElementById('terminal-output');
             term.scrollTop = term.scrollHeight;
@@ -384,6 +437,11 @@
                 document.getElementById('scanner-led').className = 'w-2 h-2 rounded-full bg-green-500 animate-pulse';
                 document.getElementById('scanner-status-text').textContent = 'LIVE';
                 document.getElementById('scanner-line').classList.remove('hidden');
+                
+                // Animation for update
+                const priceEl = document.getElementById('scanner-price');
+                priceEl.classList.add('text-green-400');
+                setTimeout(() => priceEl.classList.remove('text-green-400'), 500);
             }
         }
 
@@ -393,6 +451,7 @@
             const ind = document.getElementById('bot-status-indicator');
             const warn = document.getElementById('connection-warning');
             const isPaused = state.config.status === 'PAUSED';
+            
             if (diff < (isPaused ? 86400000 : 180000)) { 
                 ind.innerHTML = '<span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span> ONLINE';
                 ind.className = 'text-xs font-bold flex items-center gap-1 text-green-400';
