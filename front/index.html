@@ -1,761 +1,724 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { 
-  LayoutDashboard, 
-  Layers, 
-  Settings, 
-  Terminal, 
-  LogOut, 
-  Wallet, 
-  TrendingUp, 
-  TrendingDown, 
-  Activity, 
-  Play, 
-  Pause, 
-  Save, 
-  RefreshCw, 
-  ArrowUp, 
-  ArrowDown, 
-  Check, 
-  X, 
-  Search,
-  Zap,
-  Lock,
-  User
-} from 'lucide-react';
+<!DOCTYPE html>
+<html lang="pt-PT" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Marombiew Bot Control</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Supabase JS -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    
+    <!-- Icons (Lucide) -->
+    <script src="https://unpkg.com/lucide@latest"></script>
 
-// --- CONFIGURAÇÃO SUPABASE (API REST) ---
-const SUPABASE_URL = 'https://ioduahwknfsktujthfyc.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlvZHVhaHdrbmZza3R1anRoZnljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEzMDc0NDcsImV4cCI6MjA2Njg4MzQ0N30.96f8wZO6SvABKFMWjIiw1pSugAB4Isldj7yxLcLJRSE';
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 
-// Helper para chamadas API
-const supabaseFetch = async (endpoint, options = {}) => {
-  const headers = {
-    'apikey': SUPABASE_ANON_KEY,
-    'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-    'Content-Type': 'application/json',
-    ...options.headers
-  };
+    <style>
+        :root {
+            --bg-dark: #0f172a;
+            --glass: rgba(30, 41, 59, 0.7);
+            --gold: #f59e0b;
+            --gold-glow: rgba(245, 158, 11, 0.2);
+        }
+        
+        body { 
+            font-family: 'Inter', sans-serif; 
+            background-color: #020617; 
+            color: #e2e8f0;
+            overflow: hidden; /* App-like feel */
+        }
 
-  try {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/${endpoint}`, {
-      ...options,
-      headers
-    });
-    if (!res.ok) throw new Error(`API Error: ${res.statusText}`);
-    return await res.json();
-  } catch (err) {
-    console.error("Supabase API Error:", err);
-    return null;
-  }
-};
+        .font-mono { font-family: 'JetBrains Mono', monospace; }
 
-// --- Styles & Animations ---
-const CustomStyles = () => (
-  <style>{`
-    @keyframes scanMove {
-      0% { top: 0%; opacity: 0; }
-      10% { opacity: 1; }
-      90% { opacity: 1; }
-      100% { top: 100%; opacity: 0; }
-    }
-    .scan-line {
-      position: absolute;
-      width: 100%;
-      height: 2px;
-      background: linear-gradient(90deg, transparent, #f59e0b, transparent);
-      animation: scanMove 2s linear infinite;
-      opacity: 0.8;
-      box-shadow: 0 0 10px #f59e0b;
-    }
-    .glass-card {
-      background: rgba(31, 41, 55, 0.6);
-      backdrop-filter: blur(12px);
-      border: 1px solid rgba(55, 65, 81, 0.5);
-    }
-    .pulse-text { animation: pulseText 0.5s ease-in-out; }
-    @keyframes pulseText { 0% { opacity: 0.6; transform: scale(0.98); } 50% { opacity: 1; transform: scale(1.02); } 100% { opacity: 1; transform: scale(1); } }
-  `}</style>
-);
+        /* Glassmorphism */
+        .glass-card {
+            background: var(--glass);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
 
-// --- Components ---
+        /* Scanner Animation */
+        .scan-line {
+            position: absolute;
+            width: 100%;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, var(--gold), transparent);
+            animation: scanMove 2s linear infinite;
+            opacity: 0.8;
+            box-shadow: 0 0 15px var(--gold);
+            z-index: 0;
+        }
+        @keyframes scanMove {
+            0% { top: 0%; opacity: 0; } 10% { opacity: 1; } 90% { opacity: 1; } 100% { top: 100%; opacity: 0; }
+        }
 
-const Toast = ({ message, type, onClose }) => (
-  <div className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-xl shadow-2xl flex items-center gap-3 animate-in slide-in-from-right fade-in duration-300 ${
-    type === 'error' ? 'bg-red-500/90 text-white' : 
-    type === 'success' ? 'bg-green-500/90 text-white' : 'bg-zinc-800/90 text-white border border-zinc-700'
-  }`}>
-    {type === 'success' ? <Check size={16} /> : type === 'error' ? <X size={16} /> : <Zap size={16} />}
-    <span className="text-sm font-medium">{message}</span>
-    <button onClick={onClose} className="ml-2 hover:bg-white/20 rounded-full p-1"><X size={12} /></button>
-  </div>
-);
+        /* Pulse */
+        .pulse-dot { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
 
-const ScannerWidget = ({ botStatus }) => {
-  const [data, setData] = useState({ pair: '---', price: '0.00000', rsi: '0.0' });
-  const [anim, setAnim] = useState(false);
-  const lastMsgRef = useRef('');
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #0f172a; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #475569; }
 
-  useEffect(() => {
-    // Polling para o Scanner (substitui Realtime)
-    const fetchLogs = async () => {
-        const logs = await supabaseFetch('logs?select=message&order=created_at.desc&limit=1');
-        if (logs && logs.length > 0) {
-            const msg = logs[0].message;
-            if (msg !== lastMsgRef.current && msg.startsWith('ANALISE_DETALHADA::')) {
-                lastMsgRef.current = msg;
-                const parts = msg.split('::');
+        /* Utility */
+        .hidden { display: none !important; }
+        .active-nav { color: var(--gold); }
+    </style>
+</head>
+<body class="flex flex-col h-screen">
+
+    <!-- LOGIN SCREEN -->
+    <div id="login-screen" class="fixed inset-0 z-50 flex items-center justify-center bg-[#020617] p-4">
+        <div class="glass-card w-full max-w-md p-8 rounded-2xl border-t border-slate-700">
+            <div class="text-center mb-8">
+                <div class="w-16 h-16 bg-amber-500/10 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-amber-500/20 shadow-[0_0_30px_rgba(245,158,11,0.2)]">
+                    <i data-lucide="zap" class="text-amber-500 w-8 h-8"></i>
+                </div>
+                <h1 class="text-2xl font-bold text-white tracking-tight">Marombiew Bot</h1>
+                <p class="text-slate-500 text-sm mt-1">Acesso ao Painel de Controlo</p>
+            </div>
+            
+            <form id="login-form" class="space-y-4">
+                <div>
+                    <label class="block text-xs font-medium text-slate-400 mb-1">Email</label>
+                    <div class="relative">
+                        <input type="email" id="email" class="w-full bg-slate-900/50 border border-slate-700 text-white text-sm rounded-xl pl-10 pr-4 py-3 focus:outline-none focus:border-amber-500 transition-colors" placeholder="admin@exemplo.com" required>
+                        <div class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">
+                            <i data-lucide="mail" class="w-4 h-4"></i>
+                        </div>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-slate-400 mb-1">Senha</label>
+                    <div class="relative">
+                        <input type="password" id="password" class="w-full bg-slate-900/50 border border-slate-700 text-white text-sm rounded-xl pl-10 pr-4 py-3 focus:outline-none focus:border-amber-500 transition-colors" placeholder="••••••••" required>
+                        <div class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">
+                            <i data-lucide="lock" class="w-4 h-4"></i>
+                        </div>
+                    </div>
+                </div>
+                <button type="submit" id="login-btn" class="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-amber-900/20 transition-all active:scale-95 flex justify-center items-center gap-2">
+                    <span>Entrar</span>
+                    <i data-lucide="arrow-right" class="w-4 h-4"></i>
+                </button>
+                <div id="login-error" class="text-red-400 text-xs text-center hidden"></div>
+            </form>
+        </div>
+    </div>
+
+    <!-- MAIN APP -->
+    <div id="app" class="flex-1 flex flex-col md:flex-row overflow-hidden hidden opacity-0 transition-opacity duration-500">
+        
+        <!-- SIDEBAR (Desktop) -->
+        <aside class="hidden md:flex flex-col w-64 glass-card border-r border-slate-800 z-20">
+            <div class="h-20 flex items-center px-6 border-b border-slate-800/50">
+                <i data-lucide="zap" class="text-amber-500 w-6 h-6 mr-3"></i>
+                <span class="font-bold text-lg tracking-wider text-white">MAROMBIEW</span>
+            </div>
+            <nav class="flex-1 p-4 space-y-2">
+                <button onclick="router.navigate('home')" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800/50 hover:text-white transition-all" data-target="home">
+                    <i data-lucide="layout-dashboard" class="w-5 h-5"></i> <span class="text-sm font-medium">Dashboard</span>
+                </button>
+                <button onclick="router.navigate('strategies')" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800/50 hover:text-white transition-all" data-target="strategies">
+                    <i data-lucide="layers" class="w-5 h-5"></i> <span class="text-sm font-medium">Estratégias</span>
+                </button>
+                <button onclick="router.navigate('settings')" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800/50 hover:text-white transition-all" data-target="settings">
+                    <i data-lucide="settings" class="w-5 h-5"></i> <span class="text-sm font-medium">Configurações</span>
+                </button>
+                <button onclick="router.navigate('logs')" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800/50 hover:text-white transition-all" data-target="logs">
+                    <i data-lucide="terminal" class="w-5 h-5"></i> <span class="text-sm font-medium">Terminal</span>
+                </button>
+            </nav>
+            <div class="p-4 border-t border-slate-800/50">
+                <button id="logout-btn" class="flex items-center gap-3 px-4 py-3 text-sm text-red-400 hover:bg-red-500/10 rounded-xl w-full transition-colors">
+                    <i data-lucide="log-out" class="w-5 h-5"></i> Sair
+                </button>
+            </div>
+        </aside>
+
+        <!-- CONTENT AREA -->
+        <main class="flex-1 overflow-y-auto p-4 md:p-8 scroll-smooth pb-24 md:pb-8 relative">
+            
+            <!-- Connection Status -->
+            <div id="connection-warning" class="hidden mb-4 bg-red-500/10 border border-red-500/20 text-red-400 p-3 rounded-xl flex items-center gap-2 text-sm animate-pulse">
+                <i data-lucide="wifi-off" class="w-4 h-4"></i>
+                <span>Bot Offline: Sem sinal há mais de 1 minuto. Verifique o script Python.</span>
+            </div>
+
+            <!-- VIEW: HOME -->
+            <div id="view-home" class="view-section space-y-6 max-w-5xl mx-auto">
+                <div class="flex justify-between items-end">
+                    <div>
+                        <h1 class="text-2xl font-bold text-white">Dashboard</h1>
+                        <div class="flex items-center gap-2 mt-1">
+                            <span class="text-slate-500 text-xs">Status do Bot:</span>
+                            <span id="bot-status-indicator" class="text-xs font-bold flex items-center gap-1">
+                                <span class="w-2 h-2 rounded-full bg-slate-500"></span> A CARREGAR...
+                            </span>
+                        </div>
+                    </div>
+                    <div>
+                        <button id="toggle-bot-btn" class="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold shadow-lg transition-all bg-slate-700 text-white">
+                            <i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> A carregar...
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Scanner Widget -->
+                <div class="glass-card rounded-xl p-6 relative overflow-hidden group">
+                    <div id="scanner-line" class="scan-line hidden"></div>
+                    <div class="relative z-10 flex justify-between items-start">
+                        <div>
+                            <div class="flex items-center gap-2 mb-2">
+                                <div id="scanner-led" class="w-2 h-2 rounded-full bg-red-500"></div>
+                                <span id="scanner-status-text" class="text-[10px] font-bold tracking-widest text-slate-400 uppercase">OFFLINE</span>
+                            </div>
+                            <div id="scanner-pair" class="text-3xl font-black text-white tracking-tight transition-all duration-300">---</div>
+                            <div class="flex items-center gap-3 mt-2">
+                                <span class="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-xs text-slate-400 font-mono">
+                                    RSI: <span id="scanner-rsi" class="text-slate-300">--</span>
+                                </span>
+                                <span class="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-xs text-slate-400 font-mono">M5</span>
+                            </div>
+                        </div>
+                        <div class="text-right">
+                            <p class="text-[10px] text-slate-500 uppercase font-bold mb-1">PREÇO ATUAL</p>
+                            <p id="scanner-price" class="text-2xl font-mono text-slate-200">0.00000</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Stats Cards -->
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="glass-card p-5 rounded-xl relative overflow-hidden">
+                        <div class="absolute -right-4 -top-4 text-slate-800 opacity-50"><i data-lucide="wallet" class="w-20 h-20"></i></div>
+                        <p class="text-xs text-slate-500 font-bold uppercase tracking-wider mb-1">Saldo Atual</p>
+                        <p id="stat-balance" class="text-2xl font-bold text-white">$0.00</p>
+                    </div>
+                    <div class="glass-card p-5 rounded-xl relative overflow-hidden">
+                        <div class="absolute -right-4 -top-4 text-slate-800 opacity-50"><i data-lucide="activity" class="w-20 h-20"></i></div>
+                        <p class="text-xs text-slate-500 font-bold uppercase tracking-wider mb-1">Resultado (Dia)</p>
+                        <div class="flex items-center gap-1">
+                            <p id="stat-profit" class="text-2xl font-bold text-slate-200">$0.00</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Scoreboard -->
+                <div class="glass-card p-4 rounded-xl border-t-4 border-amber-500">
+                    <div class="flex divide-x divide-slate-700">
+                        <div class="flex-1 px-2 text-center">
+                            <p class="text-[10px] text-green-500 font-bold mb-1">WINS</p>
+                            <span id="score-wins" class="text-2xl font-bold text-white">0</span>
+                        </div>
+                        <div class="flex-1 px-2 text-center">
+                            <p class="text-[10px] text-red-500 font-bold mb-1">LOSS</p>
+                            <span id="score-losses" class="text-2xl font-bold text-white">0</span>
+                        </div>
+                        <div class="flex-1 px-2 text-center">
+                            <p class="text-[10px] text-blue-400 font-bold mb-1">ASSERT.</p>
+                            <span id="score-rate" class="text-2xl font-bold text-white">0%</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Signals List -->
+                <div>
+                    <h3 class="text-sm font-bold text-slate-400 uppercase tracking-wide mb-3 flex items-center gap-2">
+                        <i data-lucide="history" class="w-4 h-4"></i> Histórico Recente
+                    </h3>
+                    <div id="signals-list" class="space-y-3">
+                        <!-- Signals injected via JS -->
+                        <div class="text-center text-slate-600 py-8 text-xs">A carregar sinais...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- VIEW: STRATEGIES -->
+            <div id="view-strategies" class="view-section hidden space-y-6 max-w-3xl mx-auto">
+                <h1 class="text-2xl font-bold text-white">Catalogador</h1>
+                <div class="glass-card p-6 rounded-xl">
+                    <div class="flex justify-between items-center mb-6">
+                        <h2 class="text-sm font-bold text-slate-300">Filtro de Assertividade</h2>
+                        <span id="filter-value-display" class="text-amber-400 font-bold text-2xl">80%</span>
+                    </div>
+                    <input type="range" id="filter-slider" class="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-amber-500" min="50" max="99" value="80">
+                    <p class="text-xs text-slate-500 mt-2">O bot só operará ativos acima desta percentagem.</p>
+                </div>
+                <div id="catalog-list" class="space-y-3">
+                    <div class="text-center text-slate-500 py-10">Sem dados catalogados.</div>
+                </div>
+            </div>
+
+            <!-- VIEW: SETTINGS -->
+            <div id="view-settings" class="view-section hidden space-y-6 max-w-3xl mx-auto">
+                <h1 class="text-2xl font-bold text-white">Configurações</h1>
+                <form id="settings-form" class="space-y-6">
+                    <div class="glass-card p-6 rounded-xl space-y-6">
+                        <div>
+                            <h3 class="text-sm font-bold text-amber-500 uppercase tracking-wide mb-4 flex items-center gap-2">
+                                <i data-lucide="lock" class="w-4 h-4"></i> Risco
+                            </h3>
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="text-xs text-slate-400 block mb-1">Stop Win ($)</label>
+                                    <input type="number" id="conf-stop-win" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-green-400 font-bold outline-none focus:border-green-500">
+                                </div>
+                                <div>
+                                    <label class="text-xs text-slate-400 block mb-1">Stop Loss ($)</label>
+                                    <input type="number" id="conf-stop-loss" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-red-400 font-bold outline-none focus:border-red-500">
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="border-t border-slate-700/50 pt-4">
+                            <h3 class="text-sm font-bold text-amber-500 uppercase tracking-wide mb-4 flex items-center gap-2">
+                                <i data-lucide="wallet" class="w-4 h-4"></i> Operacional
+                            </h3>
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="text-xs text-slate-400 block mb-1">Entrada ($)</label>
+                                    <input type="number" id="conf-entry" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white font-bold outline-none focus:border-amber-500">
+                                </div>
+                                <div>
+                                    <label class="text-xs text-slate-400 block mb-1">Conta</label>
+                                    <select id="conf-account" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white outline-none">
+                                        <option value="PRACTICE">DEMO</option>
+                                        <option value="REAL">REAL</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <button type="submit" class="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-4 rounded-xl shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2 transition-all active:scale-95">
+                        <i data-lucide="save" class="w-5 h-5"></i> Salvar Alterações
+                    </button>
+                </form>
+            </div>
+
+            <!-- VIEW: LOGS -->
+            <div id="view-logs" class="view-section hidden h-full flex flex-col">
+                <h1 class="text-2xl font-bold text-white mb-4">Terminal</h1>
+                <div id="terminal-output" class="flex-1 glass-card rounded-xl p-4 overflow-y-auto font-mono text-xs space-y-2 border border-slate-700 bg-black/60 shadow-inner h-[500px]">
+                    <div class="text-slate-500 mb-2 border-b border-slate-800 pb-2">Marombiew Bot Terminal v1.0 <br> Connected to Database...</div>
+                </div>
+            </div>
+
+        </main>
+
+        <!-- MOBILE NAV -->
+        <nav class="md:hidden fixed bottom-0 left-0 right-0 bg-[#0f172a]/95 backdrop-blur-xl border-t border-slate-800 flex justify-around px-2 pb-safe z-40 h-16 items-center">
+            <button onclick="router.navigate('home')" class="flex flex-col items-center p-2 text-slate-500 active-nav" data-target="home">
+                <i data-lucide="layout-dashboard" class="w-5 h-5"></i><span class="text-[10px] mt-1">Dash</span>
+            </button>
+            <button onclick="router.navigate('strategies')" class="flex flex-col items-center p-2 text-slate-500" data-target="strategies">
+                <i data-lucide="layers" class="w-5 h-5"></i><span class="text-[10px] mt-1">Estrat.</span>
+            </button>
+            <div class="relative -top-6">
+                <button onclick="router.navigate('settings')" class="w-14 h-14 rounded-full flex items-center justify-center shadow-lg border-4 border-[#020617] bg-slate-700 text-slate-300 active-nav-btn" data-target="settings">
+                    <i data-lucide="settings" class="w-6 h-6"></i>
+                </button>
+            </div>
+            <button onclick="router.navigate('logs')" class="flex flex-col items-center p-2 text-slate-500" data-target="logs">
+                <i data-lucide="terminal" class="w-5 h-5"></i><span class="text-[10px] mt-1">Logs</span>
+            </button>
+            <button id="logout-btn-mobile" class="flex flex-col items-center p-2 text-slate-500">
+                <i data-lucide="log-out" class="w-5 h-5"></i><span class="text-[10px] mt-1">Sair</span>
+            </button>
+        </nav>
+    </div>
+
+    <!-- LOGIC -->
+    <script>
+        // CONFIGURAÇÃO SUPABASE
+        const SUPABASE_URL = 'https://ioduahwknfsktujthfyc.supabase.co';
+        const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlvZHVhaHdrbmZza3R1anRoZnljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEzMDc0NDcsImV4cCI6MjA2Njg4MzQ0N30.96f8wZO6SvABKFMWjIiw1pSugAB4Isldj7yxLcLJRSE';
+        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+        // STATE
+        const state = {
+            user: null,
+            config: {},
+            lastLogTime: null,
+            botAlive: false
+        };
+
+        // --- ICONS ---
+        lucide.createIcons();
+
+        // --- ROUTER ---
+        const router = {
+            navigate: (target) => {
+                document.querySelectorAll('.view-section').forEach(el => el.classList.add('hidden'));
+                document.getElementById(`view-${target}`).classList.remove('hidden');
+                
+                // Update nav styles
+                document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('text-white', 'bg-slate-800/50'));
+                document.querySelectorAll(`[data-target="${target}"]`).forEach(el => {
+                    if(el.classList.contains('nav-item')) el.classList.add('text-white', 'bg-slate-800/50');
+                    if(el.classList.contains('flex-col')) { // Mobile
+                        document.querySelectorAll('.md\\:hidden button').forEach(b => b.classList.remove('text-amber-400'));
+                        el.classList.add('text-amber-400');
+                    }
+                });
+                
+                if(target === 'logs') scrollToBottom();
+            }
+        };
+
+        // --- AUTH ---
+        async function checkSession() {
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session) {
+                state.user = session.user;
+                showApp();
+                initRealtime();
+            }
+        }
+
+        function showApp() {
+            document.getElementById('login-screen').classList.add('hidden');
+            const app = document.getElementById('app');
+            app.classList.remove('hidden');
+            setTimeout(() => app.classList.remove('opacity-0'), 50);
+            fetchInitialData();
+        }
+
+        document.getElementById('login-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            const btn = document.getElementById('login-btn');
+            const errorDiv = document.getElementById('login-error');
+
+            btn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> A entrar...';
+            lucide.createIcons();
+            errorDiv.classList.add('hidden');
+
+            const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+
+            if (error) {
+                errorDiv.textContent = 'Erro: ' + error.message;
+                errorDiv.classList.remove('hidden');
+                btn.innerHTML = '<span>Entrar</span><i data-lucide="arrow-right" class="w-4 h-4"></i>';
+                lucide.createIcons();
+            } else {
+                state.user = data.user;
+                showApp();
+            }
+        });
+
+        document.getElementById('logout-btn').addEventListener('click', signOut);
+        document.getElementById('logout-btn-mobile').addEventListener('click', signOut);
+
+        async function signOut() {
+            await supabase.auth.signOut();
+            window.location.reload();
+        }
+
+        // --- DATA HANDLING ---
+        async function fetchInitialData() {
+            // Config
+            let { data: config } = await supabase.from('bot_config').select('*').eq('id', 1).single();
+            if (!config) {
+                // Create default config if missing
+                const def = { id: 1, status: 'PAUSED', stop_win: 500, stop_loss: 200, entry_value: 10, account_type: 'PRACTICE' };
+                await supabase.from('bot_config').insert(def);
+                config = def;
+            }
+            updateConfigUI(config);
+
+            // Signals
+            const { data: signals } = await supabase.from('trade_signals').select('*').order('created_at', { ascending: false }).limit(20);
+            renderSignals(signals || []);
+
+            // Logs
+            const { data: logs } = await supabase.from('logs').select('*').order('created_at', { ascending: false }).limit(50);
+            if(logs) renderLogs(logs.reverse());
+
+            // Catalog
+            const { data: catalog } = await supabase.from('cataloged_assets').select('*').order('win_rate', { ascending: false });
+            renderCatalog(catalog || []);
+        }
+
+        function initRealtime() {
+            supabase.channel('dashboard')
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'bot_config' }, payload => updateConfigUI(payload.new))
+                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'trade_signals' }, payload => {
+                    const list = document.getElementById('signals-list');
+                    const el = createSignalElement(payload.new);
+                    list.insertBefore(el, list.firstChild);
+                    updateStats();
+                })
+                .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'trade_signals' }, payload => {
+                    // Refresh all signals on update to handle status change
+                    supabase.from('trade_signals').select('*').order('created_at', { ascending: false }).limit(20)
+                        .then(({data}) => { renderSignals(data); updateStats(data); });
+                })
+                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'logs' }, payload => {
+                    appendLog(payload.new);
+                    processScannerLog(payload.new);
+                })
+                .subscribe();
+        }
+
+        // --- UI UPDATERS ---
+        function updateConfigUI(config) {
+            state.config = config;
+            
+            // Toggle Button
+            const btn = document.getElementById('toggle-bot-btn');
+            const isRunning = config.status === 'RUNNING';
+            
+            btn.className = `flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold shadow-lg transition-all ${isRunning ? 'bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20' : 'bg-green-500 text-white hover:bg-green-400'}`;
+            btn.innerHTML = isRunning 
+                ? '<i data-lucide="pause" class="w-4 h-4"></i> PAUSAR' 
+                : '<i data-lucide="play" class="w-4 h-4"></i> INICIAR';
+            
+            // Inputs
+            document.getElementById('conf-stop-win').value = config.stop_win;
+            document.getElementById('conf-stop-loss').value = config.stop_loss;
+            document.getElementById('conf-entry').value = config.entry_value;
+            document.getElementById('conf-account').value = config.account_type;
+            
+            // Balance
+            document.getElementById('stat-balance').textContent = `$${(config.current_balance || 0).toFixed(2)}`;
+            const profit = (config.current_balance || 0) - (config.daily_initial_balance || 0);
+            const profitEl = document.getElementById('stat-profit');
+            profitEl.textContent = `${profit >= 0 ? '+' : ''}$${profit.toFixed(2)}`;
+            profitEl.className = `text-2xl font-bold ${profit >= 0 ? 'text-green-400' : 'text-red-400'}`;
+
+            lucide.createIcons();
+        }
+
+        // --- TOGGLE BOT ACTION ---
+        document.getElementById('toggle-bot-btn').addEventListener('click', async () => {
+            const newStatus = state.config.status === 'RUNNING' ? 'PAUSED' : 'RUNNING';
+            
+            // Otimista update UI
+            const btn = document.getElementById('toggle-bot-btn');
+            btn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> Enviando...';
+            lucide.createIcons();
+
+            const { error } = await supabase.from('bot_config').update({ status: newStatus }).eq('id', 1);
+            if (error) alert('Erro ao atualizar status: ' + error.message);
+        });
+
+        // --- SETTINGS SAVE ACTION ---
+        document.getElementById('settings-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const updates = {
+                stop_win: Number(document.getElementById('conf-stop-win').value),
+                stop_loss: Number(document.getElementById('conf-stop-loss').value),
+                entry_value: Number(document.getElementById('conf-entry').value),
+                account_type: document.getElementById('conf-account').value
+            };
+            
+            const btn = e.target.querySelector('button');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = 'Salvando...';
+            
+            await supabase.from('bot_config').update(updates).eq('id', 1);
+            btn.innerHTML = originalText;
+            alert('Configurações salvas!');
+        });
+
+        // --- SIGNALS RENDER ---
+        function renderSignals(signals) {
+            const list = document.getElementById('signals-list');
+            list.innerHTML = '';
+            
+            let wins = 0, losses = 0;
+            
+            signals.forEach(s => {
+                list.appendChild(createSignalElement(s));
+                if (s.result === 'WIN') wins++;
+                if (s.result === 'LOSS') losses++;
+            });
+
+            // Update Scoreboard
+            document.getElementById('score-wins').textContent = wins;
+            document.getElementById('score-losses').textContent = losses;
+            const total = wins + losses;
+            const rate = total > 0 ? Math.round((wins/total)*100) : 0;
+            document.getElementById('score-rate').textContent = `${rate}%`;
+        }
+
+        function createSignalElement(s) {
+            const el = document.createElement('div');
+            el.className = `glass-card p-4 rounded-xl flex items-center justify-between border-l-4 ${s.direction === 'call' ? 'border-green-500' : 'border-red-500'}`;
+            
+            let statusBadge = '';
+            if(s.result === 'WIN') statusBadge = '<span class="text-green-400 font-bold text-sm flex items-center gap-1"><i data-lucide="check" class="w-4 h-4"></i> WIN</span>';
+            else if(s.result === 'LOSS') statusBadge = '<span class="text-red-400 font-bold text-sm flex items-center gap-1"><i data-lucide="x" class="w-4 h-4"></i> LOSS</span>';
+            else statusBadge = '<span class="text-amber-400 text-xs font-bold animate-pulse flex items-center gap-1"><i data-lucide="loader" class="w-3 h-3 animate-spin"></i> Pendente</span>';
+
+            el.innerHTML = `
+                <div class="flex items-center gap-4">
+                    <div class="w-10 h-10 rounded-full flex items-center justify-center ${s.direction === 'call' ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'}">
+                        <i data-lucide="${s.direction === 'call' ? 'arrow-up' : 'arrow-down'}" class="w-5 h-5"></i>
+                    </div>
+                    <div>
+                        <p class="font-bold text-white text-sm">${s.pair}</p>
+                        <div class="flex items-center gap-2">
+                            <span class="text-[10px] text-slate-500 bg-slate-900 px-1.5 py-0.5 rounded">${new Date(s.created_at).toLocaleTimeString()}</span>
+                            <span class="text-[10px] text-slate-400">${s.strategy}</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="text-right">
+                    ${statusBadge}
+                    ${s.martingale_level > 0 ? `<span class="block text-[9px] text-orange-400 font-mono mt-0.5">Gale ${s.martingale_level}</span>` : ''}
+                </div>
+            `;
+            // Re-render icons for new element
+            setTimeout(() => lucide.createIcons(), 0);
+            return el;
+        }
+
+        // --- LOGS & SCANNER ---
+        function renderLogs(logs) {
+            const term = document.getElementById('terminal-output');
+            term.innerHTML = '<div class="text-slate-500 mb-2 border-b border-slate-800 pb-2">Marombiew Bot Terminal v1.0 <br> Connected...</div>';
+            logs.forEach(l => appendLog(l));
+            // Check bot health based on last log
+            if(logs.length > 0) processScannerLog(logs[logs.length-1]);
+        }
+
+        function appendLog(log) {
+            const term = document.getElementById('terminal-output');
+            const line = document.createElement('div');
+            line.className = 'flex gap-2 opacity-80 hover:opacity-100 transition-opacity';
+            
+            let color = 'text-slate-300';
+            if(log.level === 'ERROR') color = 'text-red-400';
+            if(log.level === 'SUCCESS') color = 'text-green-400';
+            if(log.level === 'WARNING') color = 'text-amber-400';
+
+            line.innerHTML = `<span class="text-slate-600 shrink-0">[${new Date(log.created_at).toLocaleTimeString()}]</span> <span class="${color}">${log.message}</span>`;
+            term.appendChild(line);
+            scrollToBottom();
+            
+            state.lastLogTime = new Date(log.created_at);
+            updateBotStatus();
+        }
+
+        function scrollToBottom() {
+            const term = document.getElementById('terminal-output');
+            term.scrollTop = term.scrollHeight;
+        }
+
+        function processScannerLog(log) {
+            // Espera formato: ANALISE_DETALHADA::EUR/USD-OTC::Preço:1.2345::RSI:50.5
+            if (log.message && log.message.startsWith('ANALISE_DETALHADA::')) {
+                const parts = log.message.split('::');
                 if (parts.length >= 4) {
-                    setData({
-                        pair: parts[1],
-                        price: parts[2].split(':')[1] || '0.00000',
-                        rsi: parts[3].split(':')[1] || '0.0'
-                    });
-                    setAnim(true);
-                    setTimeout(() => setAnim(false), 500);
+                    const pair = parts[1];
+                    const price = parts[2].split(':')[1];
+                    const rsi = parts[3].split(':')[1];
+
+                    document.getElementById('scanner-pair').textContent = pair;
+                    document.getElementById('scanner-price').textContent = price;
+                    document.getElementById('scanner-rsi').textContent = rsi;
+                    
+                    // Animations
+                    const led = document.getElementById('scanner-led');
+                    led.className = 'w-2 h-2 rounded-full bg-green-500 animate-pulse';
+                    document.getElementById('scanner-status-text').textContent = 'LIVE SCAN';
+                    document.getElementById('scanner-line').classList.remove('hidden');
+                    
+                    // Reset to idle visually after 3s if no new log comes (handled by heartbeat logic below)
                 }
             }
         }
-    };
 
-    const interval = setInterval(fetchLogs, 2000); // Check a cada 2s
-    fetchLogs();
-    return () => clearInterval(interval);
-  }, []);
-
-  return (
-    <div className="glass-card rounded-xl p-6 relative overflow-hidden group">
-      {botStatus === 'RUNNING' && <div className="scan-line top-0 left-0 z-0"></div>}
-      
-      <div className="relative z-10 flex justify-between items-start">
-        <div>
-          <div className="flex items-center gap-2 mb-2">
-            <div className={`w-2 h-2 rounded-full ${botStatus === 'RUNNING' ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></div>
-            <span className="text-[10px] font-bold tracking-widest text-zinc-400 uppercase">
-              {botStatus === 'RUNNING' ? 'SCANNER LIVE' : 'OFFLINE'}
-            </span>
-          </div>
-          <div className={`text-3xl font-black text-white tracking-tight transition-all duration-300 ${anim ? 'text-amber-400 scale-105' : ''}`}>
-            {data.pair}
-          </div>
-          <div className="flex items-center gap-3 mt-2">
-            <span className="px-2 py-0.5 rounded bg-zinc-800 border border-zinc-700 text-xs text-zinc-400 font-mono">
-              RSI: <span className={parseFloat(data.rsi) > 65 || parseFloat(data.rsi) < 35 ? 'text-amber-400 font-bold' : 'text-zinc-300'}>{data.rsi}</span>
-            </span>
-            <span className="px-2 py-0.5 rounded bg-zinc-800 border border-zinc-700 text-xs text-zinc-400 font-mono">
-              M5
-            </span>
-          </div>
-        </div>
-        <div className="text-right">
-          <p className="text-[10px] text-zinc-500 uppercase font-bold mb-1">PREÇO ATUAL</p>
-          <p className="text-2xl font-mono text-zinc-200">{data.price}</p>
-          {botStatus === 'RUNNING' && (
-             <div className="flex justify-end mt-2 gap-1">
-               <span className="w-1 h-3 bg-amber-500/20 rounded-full animate-pulse"></span>
-               <span className="w-1 h-5 bg-amber-500/40 rounded-full animate-pulse delay-75"></span>
-               <span className="w-1 h-2 bg-amber-500/60 rounded-full animate-pulse delay-100"></span>
-               <span className="w-1 h-4 bg-amber-500 rounded-full animate-pulse delay-150"></span>
-             </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const CountdownTimer = () => {
-  const [seconds, setSeconds] = useState(60 - new Date().getSeconds());
-  useEffect(() => {
-    const t = setInterval(() => setSeconds(60 - new Date().getSeconds()), 1000);
-    return () => clearInterval(t);
-  }, []);
-
-  return (
-    <div className="flex flex-col items-center justify-center bg-zinc-800/50 rounded-lg p-2 border border-zinc-700/50">
-      <span className="text-[9px] text-zinc-500 uppercase font-bold">Vela M1</span>
-      <span className="text-lg font-mono font-bold text-amber-400">{String(seconds).padStart(2, '0')}s</span>
-    </div>
-  );
-};
-
-// --- View Components ---
-
-const LoginView = ({ onLogin }) => {
-  const [loading, setLoading] = useState(false);
-  const [email, setEmail] = useState('');
-  const [pass, setPass] = useState('');
-  const [error, setError] = useState('');
-
-  const handleDemoLogin = () => {
-    onLogin({ id: 'demo-user', email: 'demo@marombiew.com', role: 'authenticated' });
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    setError('');
-    
-    try {
-        // Chamada direta Auth API
-        const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
-            method: 'POST',
-            headers: { 
-              'apikey': SUPABASE_ANON_KEY, 
-              'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-              'Content-Type': 'application/json' 
-            },
-            body: JSON.stringify({ email, password: pass })
-        });
-        const data = await res.json();
-        
-        if (!res.ok) throw new Error(data.error_description || data.msg || 'Credenciais inválidas ou erro no servidor');
-        
-        onLogin(data.user);
-    } catch (err) {
-        setError(err.message);
-    } finally {
-        setLoading(false);
-    }
-  };
-
-  return (
-    <div className="min-h-screen flex items-center justify-center p-4 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-gray-800 via-gray-950 to-black">
-      <CustomStyles />
-      <div className="w-full max-w-md glass-card p-8 rounded-2xl shadow-2xl border-t border-zinc-700">
-        <div className="text-center mb-8">
-          <div className="w-20 h-20 bg-amber-500/10 rounded-2xl flex items-center justify-center mx-auto mb-6 border border-amber-500/20 shadow-[0_0_30px_rgba(245,158,11,0.2)]">
-            <Zap className="text-amber-400" size={40} />
-          </div>
-          <h2 className="text-3xl font-bold text-white tracking-tight">Marombiew Bot</h2>
-          <p className="text-zinc-500 text-sm mt-2 font-medium">Painel de Controlo Inteligente</p>
-        </div>
-        
-        {error && (
-          <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-sm p-3 rounded-xl mb-4 text-center">
-            {error}
-          </div>
-        )}
-        
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-1">
-            <label className="text-xs text-zinc-400 font-medium ml-1">Email</label>
-            <div className="relative">
-               <input 
-                type="email" 
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                required
-                className="w-full bg-zinc-900/50 border border-zinc-700 text-zinc-200 text-sm rounded-xl pl-10 pr-4 py-3 focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500 outline-none transition-all placeholder:text-zinc-600" 
-                placeholder="admin@marombiew.com" 
-               />
-               <div className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500"><Search size={16}/></div>
-            </div>
-          </div>
-          <div className="space-y-1">
-            <label className="text-xs text-zinc-400 font-medium ml-1">Senha</label>
-            <div className="relative">
-              <input 
-                type="password"
-                value={pass}
-                onChange={e => setPass(e.target.value)} 
-                required
-                className="w-full bg-zinc-900/50 border border-zinc-700 text-zinc-200 text-sm rounded-xl pl-10 pr-4 py-3 focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500 outline-none transition-all placeholder:text-zinc-600" 
-                placeholder="••••••••" 
-              />
-              <div className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500"><Lock size={16}/></div>
-            </div>
-          </div>
-          
-          <div className="flex flex-col gap-3 mt-6">
-            <button 
-              type="submit" 
-              disabled={loading}
-              className="w-full bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-amber-900/20 transition-all active:scale-[0.98] flex justify-center items-center gap-2"
-            >
-              {loading ? <RefreshCw className="animate-spin" size={20} /> : 'Aceder ao Sistema'}
-            </button>
+        // --- CATALOG ---
+        function renderCatalog(items) {
+            const list = document.getElementById('catalog-list');
+            if(items.length === 0) return;
+            list.innerHTML = '';
             
-            <button 
-              type="button"
-              onClick={handleDemoLogin}
-              className="w-full bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-medium py-3.5 rounded-xl border border-zinc-700 transition-all flex justify-center items-center gap-2"
-            >
-              <User size={18} /> Entrar como Demo
-            </button>
-          </div>
-        </form>
-        <p className="text-center text-xs text-zinc-600 mt-6">v2.5.2 API-Connected (Rest)</p>
-      </div>
-    </div>
-  );
-};
+            items.forEach(item => {
+                const el = document.createElement('div');
+                el.className = 'glass-card p-4 rounded-xl flex items-center justify-between';
+                
+                let rateColor = 'text-red-400';
+                if(item.win_rate >= 80) rateColor = 'text-green-400';
+                else if(item.win_rate >= 60) rateColor = 'text-amber-400';
 
-export default function BotDashboard() {
-  const [user, setUser] = useState(null);
-  const [view, setView] = useState('home');
-  const [botStatus, setBotStatus] = useState('PAUSED');
-  const [signals, setSignals] = useState([]);
-  const [catalog, setCatalog] = useState([]);
-  const [config, setConfig] = useState(null);
-  const [toast, setToast] = useState(null);
-  const [balance, setBalance] = useState({ current: 0, initial: 0 });
-  const [logs, setLogs] = useState([]);
-
-  // --- Data Fetching & Realtime Polling ---
-  
-  useEffect(() => {
-    if (!user) return;
-
-    const refreshData = async () => {
-        try {
-            // Se for demo user e a API falhar, não crashar
-            // Signals
-            const sData = await supabaseFetch('trade_signals?select=*&order=created_at.desc&limit=50');
-            if (sData) setSignals(sData);
-
-            // Config
-            const cData = await supabaseFetch('bot_config?select=*&id=eq.1');
-            if (cData && cData.length > 0) {
-                const cfg = cData[0];
-                setConfig(cfg);
-                setBotStatus(cfg.status || 'PAUSED');
-                setBalance({ current: cfg.current_balance || 0, initial: cfg.daily_initial_balance || 0 });
-            }
-
-            // Catalog
-            const catData = await supabaseFetch('cataloged_assets?select=*&order=win_rate.desc');
-            if (catData) setCatalog(catData);
-
-            // Logs
-            const lData = await supabaseFetch('logs?select=*&order=created_at.desc&limit=50');
-            if (lData) setLogs(lData.reverse());
-
-        } catch (error) {
-            console.error("Refresh error", error);
+                el.innerHTML = `
+                    <div>
+                        <div class="flex items-center gap-2">
+                            <p class="font-bold text-white">${item.pair}</p>
+                            ${item.win_rate > 90 ? '<i data-lucide="zap" class="w-3 h-3 text-amber-400 fill-amber-400"></i>' : ''}
+                        </div>
+                        <p class="text-xs text-slate-400 mt-1">Estratégia: <span class="text-amber-400">${item.best_strategy}</span></p>
+                    </div>
+                    <div class="text-right">
+                        <div class="text-xl font-bold ${rateColor}">${item.win_rate.toFixed(1)}%</div>
+                        <div class="text-[10px] space-x-2">
+                            <span class="text-green-500">${item.wins}W</span>
+                            <span class="text-slate-600">|</span>
+                            <span class="text-red-500">${item.losses}L</span>
+                        </div>
+                    </div>
+                `;
+                list.appendChild(el);
+            });
+            lucide.createIcons();
         }
-    };
 
-    refreshData();
-    const interval = setInterval(refreshData, 3000); // Poll a cada 3s para simular realtime
-    return () => clearInterval(interval);
-  }, [user]);
+        // --- SLIDER LOGIC ---
+        document.getElementById('filter-slider').addEventListener('input', (e) => {
+            document.getElementById('filter-value-display').textContent = e.target.value + '%';
+        });
+        document.getElementById('filter-slider').addEventListener('change', async (e) => {
+            await supabase.from('bot_config').update({ min_win_rate: Number(e.target.value) }).eq('id', 1);
+        });
 
-  // Stats calculation
-  const stats = useMemo(() => {
-    const wins = signals.filter(s => s.result === 'WIN').length;
-    const losses = signals.filter(s => s.result === 'LOSS').length;
-    return { wins, losses, total: wins + losses };
-  }, [signals]);
+        // --- HEARTBEAT & HEALTH CHECK ---
+        function updateBotStatus() {
+            const indicator = document.getElementById('bot-status-indicator');
+            const warning = document.getElementById('connection-warning');
+            const scannerLed = document.getElementById('scanner-led');
+            const scannerLine = document.getElementById('scanner-line');
+            const scannerText = document.getElementById('scanner-status-text');
 
-  const assertiveness = stats.total > 0 ? ((stats.wins / stats.total) * 100).toFixed(0) : 0;
-  const profit = balance.current - balance.initial;
+            if (!state.lastLogTime) return;
 
-  const handleLogout = () => setUser(null);
+            const diff = Date.now() - state.lastLogTime.getTime();
+            
+            if (diff < 60000) { // < 1 min
+                indicator.innerHTML = '<span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span> ONLINE';
+                indicator.className = 'text-xs font-bold flex items-center gap-1 text-green-400';
+                warning.classList.add('hidden');
+                state.botAlive = true;
+            } else {
+                indicator.innerHTML = '<span class="w-2 h-2 rounded-full bg-red-500"></span> OFFLINE';
+                indicator.className = 'text-xs font-bold flex items-center gap-1 text-red-400';
+                warning.classList.remove('hidden');
+                
+                // Disable scanner visuals
+                scannerLed.className = 'w-2 h-2 rounded-full bg-red-500';
+                scannerLine.classList.add('hidden');
+                scannerText.textContent = 'OFFLINE';
+                state.botAlive = false;
+            }
+        }
 
-  const showToast = (msg, type = 'info') => {
-    setToast({ msg, type });
-    setTimeout(() => setToast(null), 3000);
-  };
+        setInterval(updateBotStatus, 5000); // Check every 5s
 
-  const toggleBotStatus = async () => {
-      // Se for demo user sem config real, simular
-      if (!config && user?.id === 'demo-user') {
-         const newS = botStatus === 'RUNNING' ? 'PAUSED' : 'RUNNING';
-         setBotStatus(newS);
-         showToast(`Modo Demo: Bot ${newS}`, 'success');
-         return;
-      }
+        // --- INIT ---
+        checkSession();
 
-      if (!config) return;
-      const newStatus = botStatus === 'RUNNING' ? 'PAUSED' : 'RUNNING';
-      
-      const res = await supabaseFetch('bot_config?id=eq.1', {
-          method: 'PATCH',
-          body: JSON.stringify({ status: newStatus })
-      });
-
-      if (res === null) {
-          // Fallback para demo se falhar a escrita
-          setBotStatus(newStatus);
-          showToast(`Estado atualizado localmente (Erro API)`, 'warning');
-      } else {
-          setBotStatus(newStatus);
-          showToast(`Bot ${newStatus === 'RUNNING' ? 'Iniciado' : 'Pausado'}`, newStatus === 'RUNNING' ? 'success' : 'info');
-      }
-  };
-
-  const updateConfig = async (key, value) => {
-      setConfig(prev => ({ ...prev, [key]: value })); // Optimistic update
-      
-      // Se for demo user, não tentar salvar na API se não tiver permissão
-      if (user?.id === 'demo-user') return;
-
-      const res = await supabaseFetch('bot_config?id=eq.1', {
-          method: 'PATCH',
-          body: JSON.stringify({ [key]: value })
-      });
-      if (res === null) showToast("Erro ao salvar (Verifique permissões)", "error");
-  };
-
-  const NavItem = ({ id, icon: Icon, label }) => (
-    <button 
-      onClick={() => setView(id)}
-      className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all w-full md:w-auto md:justify-start justify-center
-        ${view === id 
-          ? 'bg-amber-500/10 text-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.1)] border border-amber-500/20' 
-          : 'text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800/50'
-        }`}
-    >
-      <Icon size={20} className={view === id ? 'text-amber-400' : ''} />
-      <span className="hidden md:block font-medium text-sm">{label}</span>
-    </button>
-  );
-
-  if (!user) return <LoginView onLogin={setUser} />;
-
-  return (
-    <div className="min-h-screen bg-[#111827] text-zinc-100 font-sans flex flex-col md:flex-row overflow-hidden selection:bg-amber-500/30">
-      <CustomStyles />
-      {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
-
-      {/* Sidebar Desktop */}
-      <aside className="hidden md:flex flex-col w-64 bg-[#1f2937]/50 backdrop-blur-md border-r border-zinc-800 h-screen z-20">
-        <div className="h-20 flex items-center px-6 border-b border-zinc-800/50">
-          <Zap className="text-amber-400 mr-3" size={24} fill="currentColor" />
-          <span className="font-bold text-lg tracking-wider text-white">MAROMBIEW</span>
-        </div>
-        
-        <nav className="flex-1 p-4 space-y-2">
-          <NavItem id="home" icon={LayoutDashboard} label="Dashboard" />
-          <NavItem id="strategies" icon={Layers} label="Estratégias" />
-          <NavItem id="settings" icon={Settings} label="Configurações" />
-          <NavItem id="logs" icon={Terminal} label="Logs do Sistema" />
-        </nav>
-
-        <div className="p-4 border-t border-zinc-800/50">
-          <div className="px-4 py-2 mb-2 text-xs text-zinc-500">
-             Logado como: <span className="text-zinc-300 block truncate">{user.email}</span>
-          </div>
-          <button onClick={handleLogout} className="flex items-center gap-3 px-4 py-3 text-sm text-red-400 hover:bg-red-500/10 rounded-xl w-full transition-colors">
-            <LogOut size={18} /> Sair
-          </button>
-        </div>
-      </aside>
-
-      {/* Main Content */}
-      <main className="flex-1 flex flex-col h-screen overflow-hidden relative">
-        <div className="flex-1 overflow-y-auto p-4 md:p-8 scroll-smooth pb-24 md:pb-8">
-          
-          {/* VIEW: DASHBOARD */}
-          {view === 'home' && (
-            <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-5xl mx-auto">
-              <div className="flex justify-between items-end">
-                <div>
-                  <h1 className="text-2xl font-bold text-white">Dashboard</h1>
-                  <p className="text-zinc-500 text-xs">Visão geral das operações de hoje.</p>
-                </div>
-                <div className="flex gap-2">
-                   <button 
-                    onClick={toggleBotStatus}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold shadow-lg transition-all ${
-                        botStatus === 'RUNNING' 
-                        ? 'bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20' 
-                        : 'bg-green-500 text-white hover:bg-green-400 shadow-green-500/20'
-                    }`}
-                   >
-                     {botStatus === 'RUNNING' ? <Pause size={16} fill="currentColor"/> : <Play size={16} fill="currentColor"/>}
-                     {botStatus === 'RUNNING' ? 'PAUSAR BOT' : 'INICIAR BOT'}
-                   </button>
-                </div>
-              </div>
-
-              {/* Scanner */}
-              <ScannerWidget botStatus={botStatus} />
-
-              {/* Financial Cards */}
-              <div className="grid grid-cols-2 gap-4">
-                <div className="glass-card p-5 rounded-xl relative overflow-hidden group">
-                   <div className="absolute -right-4 -top-4 text-zinc-800 opacity-50 group-hover:opacity-100 group-hover:scale-110 transition-all duration-500">
-                     <Wallet size={80} />
-                   </div>
-                   <p className="text-xs text-zinc-500 font-bold uppercase tracking-wider mb-1">Saldo Atual</p>
-                   <p className="text-2xl font-bold text-white">${Number(balance.current).toFixed(2)}</p>
-                </div>
-                <div className="glass-card p-5 rounded-xl relative overflow-hidden group">
-                   <div className={`absolute -right-4 -top-4 opacity-50 group-hover:opacity-100 group-hover:scale-110 transition-all duration-500 ${profit >= 0 ? 'text-green-900' : 'text-red-900'}`}>
-                     <Activity size={80} />
-                   </div>
-                   <p className="text-xs text-zinc-500 font-bold uppercase tracking-wider mb-1">Resultado (Dia)</p>
-                   <p className={`text-2xl font-bold flex items-center gap-1 ${profit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                     {profit >= 0 ? <TrendingUp size={20} /> : <TrendingDown size={20} />}
-                     {profit >= 0 ? '+' : ''}{profit.toFixed(2)}
-                   </p>
-                </div>
-              </div>
-
-              {/* Scoreboard */}
-              <div className="glass-card p-4 rounded-xl border-t-4 border-amber-500">
-                <div className="flex divide-x divide-zinc-700">
-                  <div className="flex-1 px-2 text-center">
-                    <p className="text-[10px] text-green-500 font-bold mb-1">WINS</p>
-                    <span className="text-2xl font-bold text-white">{stats.wins}</span>
-                  </div>
-                  <div className="flex-1 px-2 text-center">
-                    <p className="text-[10px] text-red-500 font-bold mb-1">LOSS</p>
-                    <span className="text-2xl font-bold text-white">{stats.losses}</span>
-                  </div>
-                  <div className="flex-1 px-2 text-center">
-                    <p className="text-[10px] text-blue-400 font-bold mb-1">ASSERT.</p>
-                    <span className="text-2xl font-bold text-white">{assertiveness}%</span>
-                  </div>
-                  <div className="flex-1 px-2 flex justify-center items-center">
-                     <CountdownTimer />
-                  </div>
-                </div>
-              </div>
-
-              {/* Signals List */}
-              <div>
-                <h3 className="text-sm font-bold text-zinc-400 uppercase tracking-wide mb-3 flex items-center gap-2">
-                  <Activity size={14} /> Histórico de Sinais
-                </h3>
-                <div className="space-y-3">
-                  {signals.length === 0 ? (
-                    <p className="text-center text-zinc-600 py-10">A aguardar primeiros sinais...</p>
-                  ) : signals.map((signal) => (
-                    <div key={signal.id} className="glass-card p-4 rounded-xl flex items-center justify-between hover:bg-zinc-800/50 transition-colors border-l-4" style={{borderLeftColor: signal.direction === 'call' ? '#22c55e' : '#ef4444'}}>
-                      <div className="flex items-center gap-4">
-                        <div className={`w-10 h-10 rounded-full flex items-center justify-center ${signal.direction === 'call' ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'}`}>
-                          {signal.direction === 'call' ? <ArrowUp size={20} /> : <ArrowDown size={20} />}
-                        </div>
-                        <div>
-                          <p className="font-bold text-white text-sm">{signal.pair}</p>
-                          <div className="flex items-center gap-2">
-                             <span className="text-[10px] text-zinc-500 bg-zinc-900 px-1.5 py-0.5 rounded">{new Date(signal.created_at).toLocaleTimeString()}</span>
-                             <span className="text-[10px] text-zinc-400">{signal.strategy}</span>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        {signal.result === 'WIN' && <span className="text-green-400 font-bold text-sm flex items-center gap-1"><Check size={14} /> WIN</span>}
-                        {signal.result === 'LOSS' && <span className="text-red-400 font-bold text-sm flex items-center gap-1"><X size={14} /> LOSS</span>}
-                        {(!signal.result || signal.result === 'PENDING') && <span className="text-amber-400 text-xs font-bold animate-pulse flex items-center gap-1"><RefreshCw size={12} className="animate-spin"/> Em Curso</span>}
-                        {signal.martingale_level > 0 && <span className="block text-[9px] text-orange-400 font-mono mt-0.5">Gale {signal.martingale_level}</span>}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* VIEW: STRATEGIES */}
-          {view === 'strategies' && (
-            <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-3xl mx-auto">
-               <h1 className="text-2xl font-bold text-white">Catalogador</h1>
-               
-               <div className="glass-card p-6 rounded-xl">
-                 <div className="flex justify-between items-center mb-6">
-                   <h2 className="text-sm font-bold text-zinc-300">Filtro de Assertividade</h2>
-                   <span className="text-amber-400 font-bold text-2xl">{config?.min_win_rate || 80}%</span>
-                 </div>
-                 <input 
-                    type="range" 
-                    className="w-full h-2 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-amber-500" 
-                    min="50" max="99" 
-                    value={config?.min_win_rate || 80}
-                    onChange={(e) => updateConfig('min_win_rate', Number(e.target.value))}
-                 />
-                 <p className="text-xs text-zinc-500 mt-2">Apenas pares com assertividade acima do selecionado serão operados.</p>
-               </div>
-
-               <div className="space-y-3">
-                 <h2 className="text-sm font-bold text-zinc-500 uppercase tracking-wide">Melhores Ativos (M5)</h2>
-                 {catalog.map(asset => (
-                   <div key={asset.pair} className="glass-card p-4 rounded-xl flex items-center justify-between group hover:border-amber-500/30 transition-all">
-                     <div>
-                       <div className="flex items-center gap-2">
-                         <p className="font-bold text-white">{asset.pair}</p>
-                         {asset.win_rate > 90 && <Zap size={12} className="text-amber-400 fill-amber-400" />}
-                       </div>
-                       <p className="text-xs text-zinc-400 mt-1">
-                         Melhor Estratégia: <span className="text-amber-400">{asset.best_strategy}</span>
-                       </p>
-                     </div>
-                     <div className="text-right">
-                       <div className={`text-xl font-bold ${asset.win_rate >= 80 ? 'text-green-400' : asset.win_rate >= 60 ? 'text-amber-400' : 'text-red-400'}`}>
-                         {asset.win_rate.toFixed(1)}%
-                       </div>
-                       <div className="text-[10px] space-x-2">
-                         <span className="text-green-500">{asset.wins}W</span>
-                         <span className="text-zinc-600">|</span>
-                         <span className="text-red-500">{asset.losses}L</span>
-                       </div>
-                     </div>
-                   </div>
-                 ))}
-               </div>
-            </div>
-          )}
-
-          {/* VIEW: SETTINGS */}
-          {view === 'settings' && (config || user?.id === 'demo-user') && (
-            <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-3xl mx-auto">
-              <h1 className="text-2xl font-bold text-white">Configurações</h1>
-
-              <div className="glass-card p-6 rounded-xl space-y-8">
-                <div>
-                   <h3 className="text-sm font-bold text-amber-500 uppercase tracking-wide mb-4 flex items-center gap-2">
-                     <Lock size={14} /> Gerenciamento de Risco
-                   </h3>
-                   <div className="grid grid-cols-2 gap-4">
-                     <div className="space-y-2">
-                       <label className="text-xs text-zinc-400 block">Stop Win</label>
-                       <input 
-                        type="number" 
-                        value={config?.stop_win || 500}
-                        onChange={(e) => updateConfig('stop_win', Number(e.target.value))}
-                        className="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-3 text-green-400 font-bold outline-none focus:border-green-500" 
-                       />
-                     </div>
-                     <div className="space-y-2">
-                       <label className="text-xs text-zinc-400 block">Stop Loss</label>
-                       <input 
-                        type="number" 
-                        value={config?.stop_loss || 200}
-                        onChange={(e) => updateConfig('stop_loss', Number(e.target.value))}
-                        className="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-3 text-red-400 font-bold outline-none focus:border-red-500" 
-                       />
-                     </div>
-                   </div>
-                </div>
-
-                <div className="border-t border-zinc-700/50 pt-6">
-                  <div className="flex justify-between items-center mb-4">
-                     <h3 className="text-sm font-bold text-amber-500 uppercase tracking-wide flex items-center gap-2">
-                       <Layers size={14} /> Martingale
-                     </h3>
-                     <div className="flex items-center gap-2">
-                       <span className="text-xs text-zinc-400">{config?.use_martingale ? 'Ativado' : 'Desativado'}</span>
-                       <button 
-                        onClick={() => updateConfig('use_martingale', !config?.use_martingale)}
-                        className={`w-10 h-5 rounded-full relative cursor-pointer transition-colors ${config?.use_martingale ? 'bg-amber-500' : 'bg-zinc-700'}`}
-                       >
-                         <div className={`w-3 h-3 bg-white rounded-full absolute top-1 transition-all shadow-sm ${config?.use_martingale ? 'right-1' : 'left-1'}`}></div>
-                       </button>
-                     </div>
-                  </div>
-                  
-                  {config?.use_martingale && (
-                    <div className="grid grid-cols-2 gap-4">
-                       <div className="space-y-2">
-                         <label className="text-xs text-zinc-400 block">Níveis de Gale</label>
-                         <input 
-                            type="number" 
-                            value={config.martingale_levels} 
-                            onChange={(e) => updateConfig('martingale_levels', Number(e.target.value))}
-                            className="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-3 text-white outline-none" 
-                         />
-                       </div>
-                       <div className="space-y-2">
-                         <label className="text-xs text-zinc-400 block">Fator Multiplicador</label>
-                         <input 
-                            type="number" 
-                            step="0.1"
-                            value={config.martingale_factor} 
-                            onChange={(e) => updateConfig('martingale_factor', Number(e.target.value))}
-                            className="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-3 text-white font-bold outline-none focus:border-amber-500" 
-                         />
-                       </div>
-                    </div>
-                  )}
-                </div>
-
-                <div className="border-t border-zinc-700/50 pt-6">
-                   <h3 className="text-sm font-bold text-amber-500 uppercase tracking-wide mb-4 flex items-center gap-2">
-                     <Wallet size={14} /> Operacional
-                   </h3>
-                   <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                       <label className="text-xs text-zinc-400 block">Valor Entrada ($)</label>
-                       <input 
-                        type="number" 
-                        value={config?.entry_value || 10} 
-                        onChange={(e) => updateConfig('entry_value', Number(e.target.value))}
-                        className="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-3 text-white font-bold outline-none focus:border-amber-500" 
-                       />
-                     </div>
-                     <div className="space-y-2">
-                       <label className="text-xs text-zinc-400 block">Conta</label>
-                       <select 
-                        value={config?.account_type || 'PRACTICE'} 
-                        onChange={(e) => updateConfig('account_type', e.target.value)}
-                        className="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-3 text-white outline-none"
-                       >
-                         <option value="PRACTICE">DEMO (Treino)</option>
-                         <option value="REAL">REAL</option>
-                       </select>
-                     </div>
-                   </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* VIEW: LOGS */}
-          {view === 'logs' && (
-            <div className="h-full flex flex-col animate-in fade-in slide-in-from-bottom-4 duration-500">
-               <h1 className="text-2xl font-bold text-white mb-4">Terminal do Sistema</h1>
-               <div className="flex-1 glass-card rounded-xl p-4 overflow-y-auto font-mono text-xs space-y-2 border border-zinc-700 bg-black/60 shadow-inner">
-                 <div className="text-zinc-500 mb-4 pb-2 border-b border-zinc-800">
-                   Marombiew Bot v2.5.2 - Connected via REST
-                   <br/>Server: {SUPABASE_URL.split('//')[1]}
-                 </div>
-                 {logs.map((log) => (
-                   <div key={log.id} className="flex gap-2 opacity-80 hover:opacity-100 transition-opacity">
-                     <span className="text-zinc-600 shrink-0">[{new Date(log.created_at).toLocaleTimeString()}]</span>
-                     <span className={`${log.level === 'ERROR' ? 'text-red-400' : log.level === 'WARNING' ? 'text-amber-400' : log.level === 'SUCCESS' ? 'text-green-400' : 'text-zinc-300'}`}>
-                       {log.level}: {log.message}
-                     </span>
-                   </div>
-                 ))}
-                 <div className="animate-pulse text-amber-500">_</div>
-               </div>
-            </div>
-          )}
-
-        </div>
-
-        {/* Mobile Navigation (Bottom Bar) */}
-        <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-[#1f2937]/95 backdrop-blur-xl border-t border-zinc-800 flex justify-around px-2 pb-safe z-40 h-16 items-center">
-           <button onClick={() => setView('home')} className={`flex flex-col items-center p-2 ${view === 'home' ? 'text-amber-400' : 'text-zinc-500'}`}>
-             <LayoutDashboard size={20} />
-             <span className="text-[10px] mt-1">Dash</span>
-           </button>
-           <button onClick={() => setView('strategies')} className={`flex flex-col items-center p-2 ${view === 'strategies' ? 'text-amber-400' : 'text-zinc-500'}`}>
-             <Layers size={20} />
-             <span className="text-[10px] mt-1">Estrat.</span>
-           </button>
-           
-           <div className="relative -top-6">
-             <button 
-               onClick={() => setView('settings')}
-               className={`w-14 h-14 rounded-full flex items-center justify-center shadow-lg border-4 border-[#111827] transition-all ${view === 'settings' ? 'bg-amber-500 text-white' : 'bg-zinc-700 text-zinc-300'}`}
-             >
-               <Settings size={24} />
-             </button>
-           </div>
-
-           <button onClick={() => setView('logs')} className={`flex flex-col items-center p-2 ${view === 'logs' ? 'text-amber-400' : 'text-zinc-500'}`}>
-             <Terminal size={20} />
-             <span className="text-[10px] mt-1">Logs</span>
-           </button>
-           <button onClick={handleLogout} className="flex flex-col items-center p-2 text-zinc-500">
-             <LogOut size={20} />
-             <span className="text-[10px] mt-1">Sair</span>
-           </button>
-        </nav>
-      </main>
-    </div>
-  );
-}
+    </script>
+</body>
+</html>
