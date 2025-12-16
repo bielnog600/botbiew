@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>MAROMBIEW BOT</title>
+    <title>Marombiew Bot</title>
     
     <!-- PWA Settings -->
     <meta name="theme-color" content="#0f172a">
@@ -46,7 +46,7 @@
                 <div class="w-16 h-16 bg-amber-500/10 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-amber-500/20 shadow-[0_0_30px_rgba(245,158,11,0.2)]">
                     <i data-lucide="zap" class="text-amber-500 w-8 h-8"></i>
                 </div>
-                <h1 class="text-2xl font-bold text-white">MAROMBIEW BOT</h1>
+                <h1 class="text-2xl font-bold text-white">Marombiew Bot</h1>
             </div>
             <form id="login-form" class="space-y-4">
                 <input type="email" id="email" class="w-full bg-slate-900/50 border border-slate-700 text-white text-sm rounded-xl pl-4 py-3" placeholder="Email" required>
@@ -90,7 +90,6 @@
                 <div class="glass-card rounded-xl p-6 relative overflow-hidden group">
                     <div id="scanner-line" class="scan-line hidden"></div>
                     
-                    <!-- Cabeçalho do Scanner -->
                     <div class="relative z-10 flex justify-between items-start mb-6">
                         <div>
                             <div class="flex items-center gap-2 mb-2"><div id="scanner-led" class="w-2 h-2 rounded-full bg-red-500"></div><span id="scanner-status-text" class="text-[10px] font-bold tracking-widest text-slate-400 uppercase">OFFLINE</span></div>
@@ -100,9 +99,8 @@
                             </div>
                             <div class="flex items-center gap-2 mt-1">
                                 <span class="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-[10px] text-slate-400 font-mono">
-                                    <span id="scanner-rsi" class="text-amber-400">--</span>
+                                    <span id="scanner-indicator-label" class="text-amber-400">SMA9</span>: <span id="scanner-rsi">--</span>
                                 </span>
-                                <span class="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-[10px] text-slate-400 font-mono">M1/M5</span>
                             </div>
                         </div>
                     </div>
@@ -110,7 +108,6 @@
                     <!-- Live Feed Area -->
                     <div class="relative z-10 bg-black/40 rounded-lg border border-slate-800 p-3 h-24 overflow-hidden flex flex-col justify-end">
                         <div id="scanner-feed" class="flex flex-col gap-1 text-[11px] font-mono text-slate-400">
-                            <!-- JS vai injetar linhas aqui -->
                             <div class="opacity-50">A aguardar dados do bot...</div>
                         </div>
                         <div class="absolute top-0 left-0 w-full h-8 bg-gradient-to-b from-black/40 to-transparent pointer-events-none"></div>
@@ -135,7 +132,7 @@
                         <h3 class="text-sm font-bold text-slate-400 flex items-center gap-2"><i data-lucide="history" class="w-4 h-4"></i> Histórico</h3>
                         <div class="flex gap-2">
                              <button onclick="fetchData()" class="p-1.5 text-slate-500 hover:text-white hover:bg-slate-800 rounded-lg"><i data-lucide="refresh-cw" class="w-4 h-4"></i></button>
-                             <button id="clear-history-btn" class="p-1.5 text-red-400 hover:bg-red-500/10 rounded-lg"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                             <button id="clear-history-btn" class="p-1.5 text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-lg"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
                         </div>
                     </div>
                     <div id="signals-list" class="space-y-3 pb-8"><div class="text-center text-slate-600 text-xs">A carregar...</div></div>
@@ -178,7 +175,8 @@
         const SUPABASE_URL = 'https://ioduahwknfsktujthfyc.supabase.co';
         const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlvZHVhaHdrbmZza3R1anRoZnljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEzMDc0NDcsImV4cCI6MjA2Njg4MzQ0N30.96f8wZO6SvABKFMWjIiw1pSugAB4Isldj7yxLcLJRSE';
         const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-        const state = { user: null, config: {}, lastLogTime: null };
+        // lastLogId ensures we don't repeat logs in feed during polling
+        const state = { user: null, config: {}, lastLogTime: null, lastLogId: null };
         lucide.createIcons();
 
         const router = {
@@ -212,6 +210,7 @@
                     addScannerFeedItem(l);
                 });
                 state.lastLogTime = new Date(logs[0].created_at);
+                state.lastLogId = logs[0].id;
                 processScannerLog(logs[0]);
                 updateBotStatus();
             }
@@ -285,8 +284,13 @@
 
             const { data: logs } = await supabaseClient.from('logs').select('*').order('created_at', { ascending: false }).limit(1);
             if(logs && logs.length > 0) {
-                processScannerLog(logs[0]);
-                state.lastLogTime = new Date(logs[0].created_at);
+                // Only process if it's a NEW log to avoid animation jitter
+                if (state.lastLogId !== logs[0].id) {
+                    state.lastLogId = logs[0].id;
+                    processScannerLog(logs[0]);
+                    addScannerFeedItem(logs[0]);
+                    state.lastLogTime = new Date(logs[0].created_at);
+                }
             }
         }
 
@@ -426,9 +430,22 @@
         function processScannerLog(log) {
             const msg = log.message || "";
             let pair = "", price = "---", rsi = "--";
+            
+            // Format 1: ANALISE_DETALHADA::PAR::Preço:VAL::SMA9:VAL
             if (msg.startsWith('ANALISE_DETALHADA::')) {
                 const parts = msg.split('::');
-                if (parts.length >= 4) { pair = parts[1]; price = parts[2].split(':')[1]; rsi = parts[3].split(':')[1]; }
+                if (parts.length >= 4) { 
+                    pair = parts[1]; 
+                    price = parts[2].split(':')[1]; 
+                    // Support both RSI and SMA labels dynamically
+                    const indPart = parts[3].split(':');
+                    if(indPart.length > 0) {
+                         const label = indPart[0];
+                         const val = indPart[1];
+                         document.getElementById('scanner-indicator-label').textContent = label;
+                         rsi = val;
+                    }
+                }
             }
             if (pair) {
                 document.getElementById('scanner-pair').textContent = pair;
