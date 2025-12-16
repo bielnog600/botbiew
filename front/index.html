@@ -4,12 +4,20 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Marombiew Bot</title>
+    
+    <!-- PWA Settings -->
     <meta name="theme-color" content="#0f172a">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/4712/4712109.png">
+
+    <!-- Tailwind & Supabase -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+
     <style>
         :root { --bg-dark: #0f172a; --glass: rgba(30, 41, 59, 0.95); --gold: #f59e0b; }
         body { font-family: 'Inter', sans-serif; background-color: #020617; color: #e2e8f0; overflow: hidden; user-select: none; }
@@ -21,27 +29,31 @@
         ::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
         .hidden { display: none !important; }
         .active-nav { color: var(--gold); }
-        .animate-pulse-green { animation: pulse-green 2s infinite; }
+        .live-indicator { animation: pulse-green 2s infinite; }
         @keyframes pulse-green { 0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4); } 70% { box-shadow: 0 0 0 6px rgba(34, 197, 94, 0); } 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); } }
     </style>
 </head>
 <body class="flex flex-col h-screen">
 
+    <!-- LOGIN -->
     <div id="login-screen" class="fixed inset-0 z-50 flex items-center justify-center bg-[#020617] p-4">
         <div class="glass-card w-full max-w-md p-8 rounded-2xl border-t border-slate-700">
             <div class="text-center mb-8">
-                <i data-lucide="zap" class="text-amber-500 w-12 h-12 mx-auto mb-4"></i>
+                <div class="w-16 h-16 bg-amber-500/10 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-amber-500/20 shadow-[0_0_30px_rgba(245,158,11,0.2)]">
+                    <i data-lucide="zap" class="text-amber-500 w-8 h-8"></i>
+                </div>
                 <h1 class="text-2xl font-bold text-white">Marombiew Bot</h1>
             </div>
             <form id="login-form" class="space-y-4">
-                <input type="email" id="email" class="w-full bg-slate-900/50 border border-slate-700 text-white rounded-xl pl-4 py-3" placeholder="Email" required>
-                <input type="password" id="password" class="w-full bg-slate-900/50 border border-slate-700 text-white rounded-xl pl-4 py-3" placeholder="Senha" required>
-                <button type="submit" id="login-btn" class="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-3.5 rounded-xl">Entrar</button>
+                <input type="email" id="email" class="w-full bg-slate-900/50 border border-slate-700 text-white text-sm rounded-xl pl-4 py-3" placeholder="Email" required>
+                <input type="password" id="password" class="w-full bg-slate-900/50 border border-slate-700 text-white text-sm rounded-xl pl-4 py-3" placeholder="Senha" required>
+                <button type="submit" id="login-btn" class="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-3.5 rounded-xl transition-all">Entrar</button>
                 <div id="login-error" class="text-red-400 text-xs text-center hidden"></div>
             </form>
         </div>
     </div>
 
+    <!-- APP -->
     <div id="app" class="flex-1 flex flex-col md:flex-row overflow-hidden hidden opacity-0 transition-opacity duration-500">
         <aside class="hidden md:flex flex-col w-64 glass-card border-r border-slate-800 z-20">
             <div class="h-20 flex items-center px-6 border-b border-slate-800/50">
@@ -57,6 +69,7 @@
         <main class="flex-1 overflow-y-auto p-4 md:p-8 scroll-smooth pb-24 md:pb-8">
             <div id="connection-warning" class="hidden mb-4 bg-red-500/10 border border-red-500/20 text-red-400 p-3 rounded-xl flex items-center gap-2 text-sm animate-pulse"><i data-lucide="wifi-off" class="w-4 h-4"></i> Bot Offline</div>
 
+            <!-- HOME -->
             <div id="view-home" class="view-section space-y-6 max-w-5xl mx-auto">
                 <div class="flex justify-between items-end">
                     <div>
@@ -102,6 +115,7 @@
                 </div>
             </div>
 
+            <!-- SETTINGS -->
             <div id="view-settings" class="view-section hidden space-y-6 max-w-3xl mx-auto">
                 <h1 class="text-2xl font-bold text-white">Configurações</h1>
                 <form id="settings-form" class="space-y-6">
@@ -119,6 +133,7 @@
                 </form>
             </div>
 
+            <!-- LOGS -->
             <div id="view-logs" class="view-section hidden h-full flex flex-col">
                 <h1 class="text-2xl font-bold text-white mb-4">Terminal</h1>
                 <div id="terminal-output" class="flex-1 glass-card rounded-xl p-4 overflow-y-auto font-mono text-xs space-y-2 bg-black/60 h-[500px]"></div>
@@ -135,7 +150,9 @@
     <script>
         const SUPABASE_URL = 'https://ioduahwknfsktujthfyc.supabase.co';
         const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlvZHVhaHdrbmZza3R1anRoZnljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEzMDc0NDcsImV4cCI6MjA2Njg4MzQ0N30.96f8wZO6SvABKFMWjIiw1pSugAB4Isldj7yxLcLJRSE';
-        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+        
+        // CORREÇÃO: Usar um nome único para o cliente para evitar conflitos com a lib global
+        const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
         const state = { user: null, config: {}, lastLogTime: null };
         lucide.createIcons();
 
@@ -148,7 +165,7 @@
         };
 
         async function checkSession() {
-            const { data: { session } } = await supabase.auth.getSession();
+            const { data: { session } } = await supabaseClient.auth.getSession();
             if (session) { state.user = session.user; showApp(); startDataLoop(); }
         }
 
@@ -156,17 +173,14 @@
             document.getElementById('login-screen').classList.add('hidden');
             document.getElementById('app').classList.remove('hidden');
             setTimeout(() => document.getElementById('app').classList.remove('opacity-0'), 50);
-            // FETCH INITIAL LOGS NOW
             fetchInitialLogs();
         }
 
         async function fetchInitialLogs() {
-            // Fetch last 50 logs for terminal
-            const { data: logs } = await supabase.from('logs').select('*').order('created_at', { ascending: false }).limit(50);
+            const { data: logs } = await supabaseClient.from('logs').select('*').order('created_at', { ascending: false }).limit(50);
             if(logs && logs.length > 0) {
                 const term = document.getElementById('terminal-output');
                 term.innerHTML = '<div class="text-slate-500 mb-2 border-b border-slate-800 pb-2">Marombiew Bot Terminal v2.0 <br> Carregando histórico...</div>';
-                // Render oldest to newest
                 [...logs].reverse().forEach(l => appendLog(l));
                 state.lastLogTime = new Date(logs[0].created_at);
                 processScannerLog(logs[0]);
@@ -176,7 +190,7 @@
 
         document.getElementById('login-form').addEventListener('submit', async (e) => {
             e.preventDefault();
-            const { data, error } = await supabase.auth.signInWithPassword({ email: document.getElementById('email').value, password: document.getElementById('password').value });
+            const { data, error } = await supabaseClient.auth.signInWithPassword({ email: document.getElementById('email').value, password: document.getElementById('password').value });
             if (error) {
                 document.getElementById('login-error').textContent = error.message;
                 document.getElementById('login-error').classList.remove('hidden');
@@ -187,14 +201,14 @@
             }
         });
 
-        document.getElementById('logout-btn').addEventListener('click', async () => { await supabase.auth.signOut(); window.location.reload(); });
+        document.getElementById('logout-btn').addEventListener('click', async () => { await supabaseClient.auth.signOut(); window.location.reload(); });
 
         document.getElementById('clear-history-btn').addEventListener('click', async () => {
             if(!confirm("Limpar histórico?")) return;
             try {
-                await supabase.from('trade_signals').delete().gt('id', 0);
+                await supabaseClient.from('trade_signals').delete().gt('id', 0);
                 const currentBal = state.config.current_balance || 0;
-                await supabase.from('bot_config').update({ daily_initial_balance: currentBal }).eq('id', 1);
+                await supabaseClient.from('bot_config').update({ daily_initial_balance: currentBal }).eq('id', 1);
                 document.getElementById('signals-list').innerHTML = '<div class="text-center text-slate-600 py-8 text-xs">Limpo.</div>';
                 updateStats([]);
                 state.config.daily_initial_balance = currentBal;
@@ -204,16 +218,16 @@
 
         document.getElementById('toggle-bot-btn').addEventListener('click', async () => {
             const newStatus = state.config.status === 'RUNNING' ? 'PAUSED' : 'RUNNING';
-            await supabase.from('bot_config').update({ status: newStatus }).eq('id', 1);
+            await supabaseClient.from('bot_config').update({ status: newStatus }).eq('id', 1);
         });
 
         document.getElementById('restart-bot-btn').addEventListener('click', async () => {
-            if(confirm("Reiniciar conexão?")) await supabase.from('bot_config').update({ status: 'RESTARTING' }).eq('id', 1);
+            if(confirm("Reiniciar conexão?")) await supabaseClient.from('bot_config').update({ status: 'RESTARTING' }).eq('id', 1);
         });
 
         function startDataLoop() {
             fetchData();
-            supabase.channel('dash').on('postgres_changes', { event: '*', schema: 'public', table: 'bot_config' }, p => updateConfigUI(p.new))
+            supabaseClient.channel('dash').on('postgres_changes', { event: '*', schema: 'public', table: 'bot_config' }, p => updateConfigUI(p.new))
                 .on('postgres_changes', { event: '*', schema: 'public', table: 'trade_signals' }, () => refreshSignals())
                 .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'logs' }, p => { appendLog(p.new); processScannerLog(p.new); })
                 .subscribe();
@@ -222,7 +236,7 @@
         }
 
         async function refreshSignals() {
-            const { data: signals } = await supabase.from('trade_signals').select('*').order('created_at', { ascending: false }).limit(50);
+            const { data: signals } = await supabaseClient.from('trade_signals').select('*').order('created_at', { ascending: false }).limit(50);
             if(signals) {
                 syncSignalsList(signals);
                 updateStats(signals);
@@ -230,15 +244,16 @@
         }
 
         async function fetchData() {
-            let { data: config } = await supabase.from('bot_config').select('*').eq('id', 1).single();
+            let { data: config } = await supabaseClient.from('bot_config').select('*').eq('id', 1).single();
             if (!config) config = { id: 1, status: 'PAUSED', stop_win: 500, stop_loss: 200, entry_value: 10, account_type: 'PRACTICE' };
             updateConfigUI(config);
+
             refreshSignals();
-            // Polling latest log for status check
-            const { data: logs } = await supabase.from('logs').select('*').order('created_at', { ascending: false }).limit(1);
+
+            const { data: logs } = await supabaseClient.from('logs').select('*').order('created_at', { ascending: false }).limit(1);
             if(logs && logs.length > 0) {
-                state.lastLogTime = new Date(logs[0].created_at);
                 processScannerLog(logs[0]);
+                state.lastLogTime = new Date(logs[0].created_at);
             }
         }
 
@@ -249,6 +264,7 @@
                 updateStats([]);
                 return;
             }
+            
             signals.forEach(s => {
                 const existing = document.getElementById(`signal-${s.id}`);
                 if (!existing) {
@@ -408,7 +424,7 @@
             const btn = e.target.querySelector('button');
             const originalText = btn.innerHTML;
             btn.innerHTML = 'Salvando...';
-            await supabase.from('bot_config').update(updates).eq('id', 1);
+            await supabaseClient.from('bot_config').update(updates).eq('id', 1);
             btn.innerHTML = originalText;
             alert('Configurações salvas!');
         });
