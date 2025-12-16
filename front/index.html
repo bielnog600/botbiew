@@ -202,7 +202,7 @@
                             <button onclick="fetchData()" class="p-1.5 text-slate-500 hover:text-white rounded-lg hover:bg-slate-800 transition-colors" title="Atualizar">
                                 <i data-lucide="refresh-cw" class="w-4 h-4"></i>
                             </button>
-                            <button id="clear-history-btn" class="p-1.5 text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-lg transition-colors border border-red-500/20" title="Limpar Histórico">
+                            <button id="clear-history-btn" class="p-1.5 text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-lg transition-colors border border-red-500/20" title="Limpar Histórico e Resetar Dia">
                                 <i data-lucide="trash-2" class="w-4 h-4"></i>
                             </button>
                         </div>
@@ -402,23 +402,38 @@
             window.location.reload();
         }
 
-        // --- CLEAR HISTORY ---
+        // --- CLEAR HISTORY (UPDATED TO RESET DAILY PROFIT) ---
         document.getElementById('clear-history-btn').addEventListener('click', async () => {
-            if(!confirm("Tem a certeza que deseja limpar todo o histórico de sinais?")) return;
+            if(!confirm("Tem a certeza que deseja limpar todo o histórico de sinais e reiniciar o resultado do dia?")) return;
             
             const btn = document.getElementById('clear-history-btn');
             btn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i>';
             lucide.createIcons();
 
             try {
-                // Delete all rows where ID > 0 (all rows)
-                const { error } = await supabase.from('trade_signals').delete().gt('id', 0);
-                if (error) throw error;
+                // 1. Apagar sinais
+                const { error: delError } = await supabase.from('trade_signals').delete().gt('id', 0);
+                if (delError) throw delError;
+
+                // 2. Resetar "Resultado do Dia" (Igualando Saldo Inicial ao Atual)
+                const currentBal = state.config.current_balance || 0;
+                const { error: updateError } = await supabase.from('bot_config').update({ 
+                    daily_initial_balance: currentBal 
+                }).eq('id', 1);
                 
-                // Clear UI
+                if (updateError) throw updateError;
+                
+                // 3. Limpar UI
                 document.getElementById('signals-list').innerHTML = '<div class="text-center text-slate-600 py-8 text-xs">Histórico limpo.</div>';
                 updateStats([]);
-                alert("Histórico apagado com sucesso.");
+                
+                // 4. Reset Visual Imediato do Lucro
+                const profitEl = document.getElementById('stat-profit');
+                profitEl.textContent = '$0.00';
+                profitEl.className = 'text-2xl font-bold text-slate-200';
+                state.config.daily_initial_balance = currentBal; // Update local state
+
+                alert("Histórico e resultado do dia reiniciados.");
             } catch (err) {
                 alert("Erro ao limpar: " + err.message);
             } finally {
@@ -435,20 +450,16 @@
                 .on('postgres_changes', { event: '*', schema: 'public', table: 'bot_config' }, payload => updateConfigUI(payload.new))
                 .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'trade_signals' }, payload => {
                     const list = document.getElementById('signals-list');
-                    // Remove "Loading/Empty" message if present
-                    if(list.textContent.includes('A carregar') || list.textContent.includes('Sem dados')) list.innerHTML = '';
+                    if(list.textContent.includes('A carregar') || list.textContent.includes('Sem dados') || list.textContent.includes('Histórico limpo')) list.innerHTML = '';
                     
                     const el = createSignalElement(payload.new);
                     list.insertBefore(el, list.firstChild);
                     
-                    // Keep max 50 items in DOM
                     if(list.children.length > 50) list.lastChild.remove();
-                    
-                    // Re-calculate stats fully to be safe
-                    refreshStats();
+                    refreshStats(); // Recalculate stats properly
                 })
                 .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'trade_signals' }, payload => {
-                    // Find existing element and replace it to show new status (WIN/LOSS) immediately
+                    // Update specific card in place to prevent flicker
                     const existingEl = document.getElementById(`signal-${payload.new.id}`);
                     if (existingEl) {
                         const newEl = createSignalElement(payload.new);
@@ -475,8 +486,9 @@
             }
             updateConfigUI(config);
 
-            // Signals Refresh (Polling) to ensure status is correct
-            refreshStats();
+            // Signals - Polling to catch status updates missed by realtime
+            const { data: signals } = await supabase.from('trade_signals').select('*').order('created_at', { ascending: false }).limit(50);
+            if(signals) syncSignalsList(signals);
 
             // Logs
             const { data: logs } = await supabase.from('logs').select('*').order('created_at', { ascending: false }).limit(1);
@@ -486,18 +498,37 @@
             }
         }
 
-        async function refreshStats() {
-            const { data: signals } = await supabase.from('trade_signals').select('*').order('created_at', { ascending: false }).limit(50);
-            if(signals) {
-                // Only render signals if list is empty or completely different count (optimization)
-                // Or if we want to ensure latest status is shown
-                const list = document.getElementById('signals-list');
-                // Simple re-render to guarantee status updates visually
-                list.innerHTML = '';
-                if(signals.length === 0) list.innerHTML = '<div class="text-center text-slate-600 py-8 text-xs">Sem dados.</div>';
-                signals.forEach(s => list.appendChild(createSignalElement(s)));
-                updateStats(signals);
+        function syncSignalsList(signals) {
+            const list = document.getElementById('signals-list');
+            if (signals.length === 0 && !list.innerHTML.includes('Histórico limpo')) {
+                list.innerHTML = '<div class="text-center text-slate-600 py-8 text-xs">Sem dados.</div>';
+                updateStats([]);
+                return;
             }
+            
+            // Intelligent update: only replace if status changed or new item
+            signals.forEach(s => {
+                const existing = document.getElementById(`signal-${s.id}`);
+                if (!existing) {
+                    // New? Insert (rare in polling if realtime works, but safe)
+                    // Usually we don't insert in polling to avoid race conditions with realtime, 
+                    // but we can update existing statuses.
+                } else {
+                    // Check if status changed
+                    const currentStatus = existing.getAttribute('data-status');
+                    if (currentStatus !== s.result) {
+                        const newEl = createSignalElement(s);
+                        existing.replaceWith(newEl);
+                    }
+                }
+            });
+            
+            // If list empty but signals exist (first load)
+            if (list.childElementCount === 0 && signals.length > 0) {
+                 renderSignals(signals);
+            }
+            
+            updateStats(signals);
         }
 
         function updateStats(signals) {
@@ -534,7 +565,9 @@
             document.getElementById('stat-balance').textContent = `$${(config.current_balance || 0).toFixed(2)}`;
             const profit = (config.current_balance || 0) - (config.daily_initial_balance || 0);
             const profitEl = document.getElementById('stat-profit');
-            profitEl.textContent = `${profit >= 0 ? '+' : ''}$${profit.toFixed(2)}`;
+            // Format +$0.00
+            const sign = profit >= 0 ? '+' : '';
+            profitEl.textContent = `${sign}$${profit.toFixed(2)}`;
             profitEl.className = `text-2xl font-bold ${profit >= 0 ? 'text-green-400' : 'text-red-400'}`;
         }
 
@@ -561,7 +594,6 @@
 
         function renderSignals(signals) {
             const list = document.getElementById('signals-list');
-            // Initial render
             list.innerHTML = '';
             if (signals.length === 0) {
                 list.innerHTML = '<div class="text-center text-slate-600 py-8 text-xs">Sem dados.</div>';
@@ -576,6 +608,7 @@
         function createSignalElement(s) {
             const el = document.createElement('div');
             el.id = `signal-${s.id}`;
+            el.setAttribute('data-status', s.result); // Store status for checking changes
             el.className = `glass-card p-4 rounded-xl flex items-center justify-between border-l-4 ${s.direction === 'call' ? 'border-green-500' : 'border-red-500'}`;
             let statusBadge = s.result === 'WIN' ? '<span class="text-green-400 font-bold text-sm flex items-center gap-1"><i data-lucide="check" class="w-4 h-4"></i> WIN</span>' 
                 : s.result === 'LOSS' ? '<span class="text-red-400 font-bold text-sm flex items-center gap-1"><i data-lucide="x" class="w-4 h-4"></i> LOSS</span>'
@@ -609,28 +642,65 @@
             term.scrollTop = term.scrollHeight;
         }
 
+        // --- SCANNER UPDATER (More Robust) ---
         function processScannerLog(log) {
-            if (log.message && log.message.startsWith('ANALISE_DETALHADA::')) {
-                const parts = log.message.split('::');
-                if (parts.length >= 4) {
-                    const pair = parts[1];
-                    const price = parts[2].split(':')[1];
-                    const rsi = parts[3].split(':')[1];
-                    
-                    // Simple animation effect on update
-                    const pairEl = document.getElementById('scanner-pair');
-                    if (pairEl.textContent !== pair) {
-                        pairEl.classList.add('scale-110', 'text-amber-400');
-                        setTimeout(() => pairEl.classList.remove('scale-110', 'text-amber-400'), 300);
-                    }
+            const msg = log.message || "";
+            let pair = "", price = "---", rsi = "--";
+            let updated = false;
 
-                    document.getElementById('scanner-pair').textContent = pair;
-                    document.getElementById('scanner-price').textContent = price;
-                    document.getElementById('scanner-rsi').textContent = rsi;
-                    document.getElementById('scanner-led').className = 'w-2 h-2 rounded-full bg-green-500 animate-pulse';
-                    document.getElementById('scanner-status-text').textContent = 'LIVE SCAN';
-                    document.getElementById('scanner-line').classList.remove('hidden');
+            // Type 1: Detailed Analysis (From Scanner)
+            if (msg.startsWith('ANALISE_DETALHADA::')) {
+                const parts = msg.split('::');
+                if (parts.length >= 4) {
+                    pair = parts[1];
+                    price = parts[2].split(':')[1];
+                    rsi = parts[3].split(':')[1];
+                    updated = true;
                 }
+            } 
+            // Type 2: Signal Detected (From Strategy)
+            else if (msg.includes('SINAL DETETADO') || msg.includes('SINAL:')) {
+                // Example: 🔔 SINAL DETETADO: EURUSD-OTC -> CALL
+                const parts = msg.split(': ');
+                if(parts.length > 1) {
+                    const subparts = parts[1].split(' '); // [EURUSD-OTC, ->, CALL]
+                    if(subparts.length > 0) {
+                        pair = subparts[0];
+                        updated = true;
+                    }
+                }
+            }
+            // Type 3: Opening Trade
+            else if (msg.includes('ABRINDO:')) {
+                // Example: ➡️ ABRINDO: EURUSD-OTC | CALL | $10
+                const parts = msg.split(': ');
+                if(parts.length > 1) {
+                    const subparts = parts[1].split(' | ');
+                    if(subparts.length > 0) {
+                        pair = subparts[0];
+                        updated = true;
+                    }
+                }
+            }
+
+            if (updated && pair) {
+                // Update Card
+                document.getElementById('scanner-pair').textContent = pair;
+                if(price !== "---") document.getElementById('scanner-price').textContent = price;
+                if(rsi !== "--") document.getElementById('scanner-rsi').textContent = rsi;
+                
+                document.getElementById('scanner-led').className = 'w-2 h-2 rounded-full bg-green-500 animate-pulse';
+                document.getElementById('scanner-status-text').textContent = 'LIVE';
+                document.getElementById('scanner-line').classList.remove('hidden');
+                
+                // Visual pop
+                const card = document.getElementById('scanner-pair').parentElement.parentElement.parentElement;
+                card.classList.remove('border-slate-700');
+                card.classList.add('border-amber-500');
+                setTimeout(() => {
+                    card.classList.remove('border-amber-500');
+                    card.classList.add('border-slate-700'); // actually border is defined in css as rgba white
+                }, 500);
             }
         }
 
