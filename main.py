@@ -40,16 +40,52 @@ class TechnicalAnalysis:
 
     @staticmethod
     def get_signal(candles):
-        if len(candles) < 25: return None
-        sma_20 = TechnicalAnalysis.calculate_sma(candles, 20)
-        if sma_20 == 0: return None
-        last_candle = candles[-1]
+        # Requer menos velas agora pois a SMA é de 9
+        if len(candles) < 10: return None
         
-        # Estratégia: A favor da tendência
-        if last_candle['close'] > sma_20:
-            if last_candle['close'] > last_candle['open']: return 'call' # Tendencia Alta + Vela Verde
-        elif last_candle['close'] < sma_20:
-            if last_candle['close'] < last_candle['open']: return 'put' # Tendencia Baixa + Vela Vermelha
+        # 1. Nano Tendência (SMA 9)
+        sma_9 = TechnicalAnalysis.calculate_sma(candles, 9)
+        if sma_9 == 0: return None
+
+        last_candle = candles[-1]
+        open_price = last_candle['open']
+        close_price = last_candle['close']
+        # Exnova API usa 'max' e 'min' para High e Low
+        high_price = last_candle.get('max', last_candle.get('high', close_price))
+        low_price = last_candle.get('min', last_candle.get('low', close_price))
+        
+        # Cálculo dos tamanhos
+        body_size = abs(close_price - open_price)
+        upper_wick = high_price - max(open_price, close_price)
+        lower_wick = min(open_price, close_price) - low_price
+        
+        # Definição de "Muito Pavio": Se o pavio for maior que o próprio corpo
+        # Isso indica forte rejeição
+        has_long_upper_wick = upper_wick > body_size
+        has_long_lower_wick = lower_wick > body_size
+        
+        # Cor da vela
+        is_green = close_price > open_price
+        is_red = close_price < open_price
+        
+        # --- LÓGICA DE SINAL (NANO TENDÊNCIA) ---
+        
+        # CENÁRIO 1: Tendência de Alta (Preço > SMA 9)
+        if close_price > sma_9:
+            # Gatilho: Vela Verde (Força)
+            if is_green:
+                # Filtro: Se tiver muito pavio em cima, é rejeição de alta. NÃO faz CALL.
+                if not has_long_upper_wick:
+                    return 'call'
+                
+        # CENÁRIO 2: Tendência de Baixa (Preço < SMA 9)
+        elif close_price < sma_9:
+            # Gatilho: Vela Vermelha (Força)
+            if is_red:
+                # Filtro: Se tiver muito pavio embaixo, é rejeição de baixa. NÃO faz PUT.
+                if not has_long_lower_wick:
+                    return 'put'
+                    
         return None
 
 # --- CORREÇÕES OTC ---
@@ -190,7 +226,7 @@ class SimpleBot:
             sig_data = {
                 "pair": asset,
                 "direction": direction,
-                "strategy": "Micro Tendência",
+                "strategy": "Nano Tendência (SMA9)",
                 "result": "PENDING",
                 "created_at": datetime.now().isoformat()
             }
@@ -231,8 +267,7 @@ class SimpleBot:
             if is_win: self.log_to_db(f"🏆 WIN! +${profit:.2f}", "SUCCESS")
             else: self.log_to_db(f"🔻 LOSS. ${profit:.2f}", "ERROR")
 
-            # 4. Atualiza DB (CORREÇÃO DE PENDENTE)
-            # Tenta pelo ID, se falhar, tenta pelo último registro pendente desse par
+            # 4. Atualiza DB
             updated = False
             if sig_id:
                 try: 
@@ -241,10 +276,8 @@ class SimpleBot:
                 except: pass
             
             if not updated:
-                # Fallback: Atualiza o último sinal pendente deste par criado nos ultimos 2 minutos
-                self.log_to_db("Usando método alternativo de atualização...", "SYSTEM")
                 try:
-                    # Busca sinais pendentes recentes
+                    # Busca sinais pendentes recentes se ID falhou
                     recent = self.supabase.table("trade_signals").select("id")\
                         .eq("pair", asset).eq("result", "PENDING")\
                         .order("created_at", desc=True).limit(1).execute()
@@ -266,7 +299,6 @@ class SimpleBot:
 
     def start(self):
         # 1. Carrega Configuração ANTES de conectar
-        # Isto garante que 'active_account_type' seja definido corretamente
         self.fetch_config()
         self.log_to_db(f"Configuração carregada: Conta {self.config['account_type']}", "SYSTEM")
 
@@ -283,7 +315,6 @@ class SimpleBot:
                 while True:
                     self.fetch_config()
                     
-                    # --- TROCA DE CONTA DINÂMICA ---
                     if self.config["account_type"] != self.active_account_type:
                         self.log_to_db(f"🔄 Trocando conta para {self.config['account_type']}...", "SYSTEM")
                         self.api.change_balance(self.config["account_type"])
@@ -301,9 +332,12 @@ class SimpleBot:
 
                     if time.time() - last_scan > 5:
                         try:
-                            candles = self.api.get_candles("EURUSD-OTC", 60, 1, int(time.time()))
-                            price = candles[-1]['close'] if candles else 0
-                            self.log_to_db(f"ANALISE_DETALHADA::EUR/USD-OTC::Preço:{price}::RSI:--", "SYSTEM")
+                            candles = self.api.get_candles("EURUSD-OTC", 60, 25, int(time.time()))
+                            if candles:
+                                price = candles[-1]['close']
+                                # Calculo de SMA9 para display simples (opcional)
+                                rsi_val = "--" 
+                                self.log_to_db(f"ANALISE_DETALHADA::EUR/USD-OTC::Preço:{price}::RSI:{rsi_val}", "SYSTEM")
                         except: pass
                         last_scan = time.time()
 
@@ -322,7 +356,7 @@ class SimpleBot:
                                 candles = self.api.get_candles(asset, 60, 30, int(time.time()))
                                 signal = TechnicalAnalysis.get_signal(candles)
                                 if signal:
-                                    self.log_to_db(f"🔔 SINAL: {asset} -> {signal}", "INFO")
+                                    self.log_to_db(f"🔔 SINAL (SMA9): {asset} -> {signal.upper()}", "INFO")
                                     self.execute_trade(asset, signal)
                             except: pass
                         time.sleep(50)
