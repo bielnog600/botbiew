@@ -35,7 +35,6 @@ class TechnicalAnalysis:
     def get_signal(candles):
         if len(candles) < 3: return None
         last = candles[-1]
-        # Estratégia Simples (Exemplo)
         if last['close'] > last['open']:
             return 'put' if random.random() > 0.6 else None
         else:
@@ -90,29 +89,8 @@ class SimpleBot:
                 "created_at": datetime.now().isoformat()
             }).execute()
         except: 
-            # Tenta reconectar silenciosamente se falhar o log
             try: self.supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
             except: pass
-
-    def cleanup_stale_signals(self):
-        """Limpa sinais que ficaram presos como PENDING em sessões anteriores"""
-        try:
-            # Remove sinais PENDING com mais de 10 minutos
-            self.log_to_db("🧹 A verificar sinais presos...", "SYSTEM")
-            # Supabase não suporta delete com filtro complexo de data facilmente via cliente simples,
-            # então vamos buscar e deletar por ID.
-            data = self.supabase.table("trade_signals").select("*").eq("result", "PENDING").execute()
-            count = 0
-            for row in data.data:
-                # Se criado há mais de 5 min
-                created = datetime.fromisoformat(row['created_at'].replace('Z', ''))
-                if (datetime.now() - created).total_seconds() > 300:
-                    self.supabase.table("trade_signals").delete().eq("id", row['id']).execute()
-                    count += 1
-            if count > 0:
-                self.log_to_db(f"🧹 Limpeza: {count} sinais presos removidos.", "WARNING")
-        except Exception as e:
-            print(f"Erro cleanup: {e}")
 
     def update_balance_remote(self):
         if not self.api: return
@@ -152,16 +130,13 @@ class SimpleBot:
             self.log_to_db("✅ Conectado com sucesso!", "SUCCESS")
             self.api.change_balance(self.config["account_type"])
             self.update_balance_remote()
-            self.cleanup_stale_signals() # Limpa lixo ao conectar
             return True
         except Exception as e:
             self.log_to_db(f"❌ Erro crítico connect: {e}", "ERROR")
             return False
 
     def safe_buy(self, asset, amount, direction, type="digital"):
-        """Tenta abrir ordem com timeout para não travar o bot"""
         result = [None]
-        
         def target():
             try:
                 if type == "digital":
@@ -173,7 +148,7 @@ class SimpleBot:
         t = threading.Thread(target=target)
         t.daemon = True
         t.start()
-        t.join(timeout=10.0) # Espera max 10 segundos
+        t.join(timeout=10.0)
         
         if t.is_alive():
             self.log_to_db(f"⚠️ Timeout ao enviar ordem para {asset}", "WARNING")
@@ -186,9 +161,10 @@ class SimpleBot:
         amount = self.config["entry_value"]
         self.log_to_db(f"➡️ ABRINDO: {asset} | {direction.upper()} | ${amount}", "INFO")
         
-        # 1. Sinal PENDING
+        # 1. Sinal PENDING (Tentativa Robusta de Insert)
         sig_id = None
         try:
+            # Força retorno dos dados inseridos
             sig = self.supabase.table("trade_signals").insert({
                 "pair": asset,
                 "direction": direction,
@@ -196,52 +172,71 @@ class SimpleBot:
                 "result": "PENDING",
                 "created_at": datetime.now().isoformat()
             }).execute()
-            if sig.data: sig_id = sig.data[0]['id']
-        except: pass
+            if sig.data and len(sig.data) > 0:
+                sig_id = sig.data[0]['id']
+        except Exception as e:
+            self.log_to_db(f"Erro ao criar sinal DB: {e}", "WARNING")
 
-        # 2. Ordem com Timeout (Safe Buy)
+        # 2. Ordem
         status, id = self.safe_buy(asset, amount, direction, "digital")
-        
-        if not status:
-             status, id = self.safe_buy(asset, amount, direction, "binary")
+        if not status: status, id = self.safe_buy(asset, amount, direction, "binary")
 
         if status:
             self.log_to_db(f"✅ Ordem {id} aceite.", "INFO")
             self.active_trades.add(asset)
-            
-            # Espera resultado (bloqueante mas controlado)
             time.sleep(60) 
             
             # 3. Resultado
             is_win = False
-            profit = 0
+            profit = 0.0
             try:
-                # Tenta verificar digital
                 win_dig = self.api.check_win_digital_v2(id)
                 if isinstance(win_dig, tuple) and win_dig[1] > 0: 
-                    is_win, profit = True, win_dig[1]
+                    is_win, profit = True, float(win_dig[1])
                 elif isinstance(win_dig, (int, float)) and win_dig > 0:
-                    is_win, profit = True, win_dig
-                # Tenta verificar binária se não foi digital
+                    is_win, profit = True, float(win_dig)
                 elif self.api.check_win_v4(id)[0] == 'win': 
-                    is_win, profit = True, self.api.check_win_v4(id)[1]
+                    is_win, profit = True, float(self.api.check_win_v4(id)[1])
             except: pass
 
             result_str = 'WIN' if is_win else 'LOSS'
             
-            if is_win: self.log_to_db(f"🏆 WIN! +${profit:.2f}", "SUCCESS")
-            else: self.log_to_db(f"🔻 LOSS.", "ERROR")
+            # Ajuste de Profit para LOSS (negativo)
+            if not is_win:
+                profit = -float(amount)
 
-            # 4. Atualiza DB
-            if sig_id:
-                try: self.supabase.table("trade_signals").update({"result": result_str, "profit": profit}).eq("id", sig_id).execute()
-                except: pass
+            if is_win: self.log_to_db(f"🏆 WIN! +${profit:.2f}", "SUCCESS")
+            else: self.log_to_db(f"🔻 LOSS. ${profit:.2f}", "ERROR")
+
+            # 4. Atualiza DB (TENTATIVA ROBUSTA)
+            try:
+                # Se não temos ID, tentamos encontrar o último sinal PENDING deste par
+                if not sig_id:
+                    pending = self.supabase.table("trade_signals").select("id")\
+                        .eq("pair", asset).eq("result", "PENDING")\
+                        .order("created_at", desc=True).limit(1).execute()
+                    if pending.data:
+                        sig_id = pending.data[0]['id']
+                
+                # Se temos ID, atualiza
+                if sig_id:
+                    upd = self.supabase.table("trade_signals").update({
+                        "result": result_str, 
+                        "profit": profit
+                    }).eq("id", sig_id).execute()
+                    
+                    if not upd.data:
+                        self.log_to_db(f"Aviso: DB não confirmou update do sinal {sig_id}", "WARNING")
+                else:
+                    self.log_to_db("Erro: ID do sinal perdido, não foi possível atualizar DB.", "ERROR")
+
+            except Exception as e:
+                self.log_to_db(f"Erro crítico ao atualizar DB: {e}", "ERROR")
             
             self.update_balance_remote()
             self.active_trades.discard(asset)
         else:
-            self.log_to_db("❌ Falha na ordem (Timeout ou Erro).", "ERROR")
-            # Importante: Apagar sinal pendente para não ficar preso no Front
+            self.log_to_db("❌ Falha na ordem.", "ERROR")
             if sig_id:
                 try: self.supabase.table("trade_signals").delete().eq("id", sig_id).execute()
                 except: pass
@@ -261,15 +256,14 @@ class SimpleBot:
                     self.fetch_config()
                     
                     if self.config["status"] == "RESTARTING":
-                        self.log_to_db("🔄 Reiniciando sistema...", "WARNING")
+                        self.log_to_db("🔄 Reiniciando...", "WARNING")
                         self.supabase.table("bot_config").update({"status": "RUNNING"}).eq("id", 1).execute()
                         break 
 
                     if not self.api.check_connect():
-                        self.log_to_db("⚠️ Conexão perdida. Tentando recuperar...", "WARNING")
+                        self.log_to_db("⚠️ Reconectando...", "WARNING")
                         break 
 
-                    # Heartbeat
                     if time.time() - last_scan > 5:
                         try:
                             candles = self.api.get_candles("EURUSD-OTC", 60, 1, int(time.time()))
@@ -278,7 +272,6 @@ class SimpleBot:
                         except: pass
                         last_scan = time.time()
 
-                    # Sync Saldo
                     if time.time() - last_bal > 60:
                         self.update_balance_remote()
                         last_bal = time.time()
@@ -287,7 +280,6 @@ class SimpleBot:
                         time.sleep(2)
                         continue
 
-                    # Operação
                     if datetime.now().second <= 5:
                         for asset in ASSETS:
                             if asset in self.active_trades: continue
@@ -303,7 +295,7 @@ class SimpleBot:
                     time.sleep(1)
 
             except Exception as e:
-                print(f"Crash Loop Principal: {e}")
+                print(f"Crash: {e}")
                 time.sleep(10)
 
 if __name__ == "__main__":
