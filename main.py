@@ -69,8 +69,6 @@ class TechnicalAnalysis:
                 # Pavio superior pequeno (< 60% do corpo) = Força
                 if last['upper_wick'] < (last['body'] * 0.6):
                     return 'call', f"Alta (P > SMA9)"
-                else:
-                    return None, "Rejeição Alta (Pavio)"
 
         # TENDÊNCIA DE BAIXA
         elif last['close'] < sma_9:
@@ -78,21 +76,23 @@ class TechnicalAnalysis:
                 # Pavio inferior pequeno (< 60% do corpo) = Força
                 if last['lower_wick'] < (last['body'] * 0.6):
                     return 'put', f"Baixa (P < SMA9)"
-                else:
-                    return None, "Rejeição Baixa (Pavio)"
                     
         return None, "Sem tendência clara"
 
-# --- CORREÇÕES OTC ---
+# --- CORREÇÕES OTC (LISTA COMPLETA) ---
 try:
     def update_consts():
         import exnovaapi.constants as OP_code
+        # Mapeamento expandido fornecido pelo usuário
         OTC_MAP = {
-            "EURUSD-OTC": 76, "GBPUSD-OTC": 81, "USDJPY-OTC": 85, "EURJPY-OTC": 79,
-            "USDCHF-OTC": 78, "AUDCAD-OTC": 86, "NZDUSD-OTC": 80, "EURGBP-OTC": 77,
-            "AUDUSD-OTC": 2111, "USDCAD-OTC": 2112, "USDMXN-OTC": 1548, 
-            "FWONA-OTC": 2169, "XNGUSD-OTC": 2170, "AUDJPY-OTC": 2113, 
-            "GBPCAD-OTC": 2114, "GBPCHF-OTC": 2115, "GBPAUD-OTC": 2116, "EURCAD-OTC": 2117
+            "EURUSD-OTC": 76, "EURGBP-OTC": 77, "USDCHF-OTC": 78, "EURJPY-OTC": 79,
+            "NZDUSD-OTC": 80, "GBPUSD-OTC": 81, "GBPJPY-OTC": 84, "USDJPY-OTC": 85,
+            "AUDCAD-OTC": 86, "AUDUSD-OTC": 2111, "USDCAD-OTC": 2112, "AUDJPY-OTC": 2113,
+            "GBPCAD-OTC": 2114, "GBPCHF-OTC": 2115, "GBPAUD-OTC": 2116, "EURCAD-OTC": 2117,
+            "CHFJPY-OTC": 2118, "CADCHF-OTC": 2119, "EURAUD-OTC": 2120, "USDNOK-OTC": 2121,
+            "EURNZD-OTC": 2122, "USDSEK-OTC": 2123, "USDTRY-OTC": 2124, "AUDCHF-OTC": 2129,
+            "AUDNZD-OTC": 2130, "EURCHF-OTC": 2131, "GBPNZD-OTC": 2132, "CADJPY-OTC": 2136,
+            "NZDCAD-OTC": 2137, "NZDJPY-OTC": 2138
         }
         OP_code.ACTIVES.update(OTC_MAP)
     update_consts()
@@ -155,7 +155,6 @@ class SimpleBot:
             self.api = Exnova(EXNOVA_EMAIL, EXNOVA_PASSWORD)
             if self.api.connect()[0]:
                 self.log_to_db("✅ Conectado!", "SUCCESS")
-                # Define conta correta logo na conexão
                 self.active_account_type = self.config["account_type"]
                 self.api.change_balance(self.active_account_type)
                 self.update_balance_remote()
@@ -164,7 +163,7 @@ class SimpleBot:
         return False
 
     def catalog_assets(self, assets_list):
-        self.log_to_db("📊 Catalogando ativos (Nano SMA9)...", "SYSTEM")
+        self.log_to_db(f"📊 Catalogando {len(assets_list)} ativos...", "SYSTEM")
         best_winrate = -1
         best_pair = None
         
@@ -187,12 +186,16 @@ class SimpleBot:
                 
                 if total > 0:
                     wr = (wins / total) * 100
-                    self.log_to_db(f"🔎 {asset}: {wins}/{total} ({wr:.1f}%)", "INFO")
-                    if wr > best_winrate and total >= 5:
+                    # Log apenas de ativos bons para não poluir
+                    if wr >= 50:
+                        self.log_to_db(f"🔎 {asset}: {wr:.1f}% ({wins}/{total})", "INFO")
+                    
+                    # Critério: Winrate alto e min 3 entradas
+                    if wr > best_winrate and total >= 3:
                         best_winrate = wr
                         best_pair = asset
             except: pass
-            time.sleep(0.1)
+            time.sleep(0.05) # Ligeiro delay
             
         if best_pair:
             self.log_to_db(f"💎 Par Escolhido: {best_pair} ({best_winrate:.1f}%)", "SUCCESS")
@@ -203,6 +206,8 @@ class SimpleBot:
                 }).execute()
             except: pass
             return best_pair
+        
+        self.log_to_db("⚠️ Catalogação fraca, usando padrão.", "WARNING")
         return assets_list[0]
 
     def safe_buy(self, asset, amount, direction, type="digital"):
@@ -225,21 +230,19 @@ class SimpleBot:
         amount = self.config["entry_value"]
         self.log_to_db(f"➡️ ABRINDO: {asset} | {direction} | ${amount}", "INFO")
         
-        # 1. Cria Sinal (PENDING) - Escreve STATUS e RESULT
         sig_id = None
         try:
             res = self.supabase.table("trade_signals").insert({
                 "pair": asset,
                 "direction": direction,
                 "strategy": "Nano SMA9",
-                "status": "PENDING", # Fundamental para o frontend
+                "status": "PENDING",
                 "result": "PENDING",
                 "created_at": datetime.now().isoformat()
             }).execute()
             if res.data: sig_id = res.data[0]['id']
         except: pass
 
-        # 2. Ordem
         status, id = self.safe_buy(asset, amount, direction, "digital")
         if not status: status, id = self.safe_buy(asset, amount, direction, "binary")
 
@@ -248,7 +251,6 @@ class SimpleBot:
             self.active_trades.add(asset)
             time.sleep(60) 
             
-            # 3. Resultado Financeiro
             is_win, profit = False, 0.0
             try:
                 win_v = self.api.check_win_digital_v2(id)
@@ -258,25 +260,21 @@ class SimpleBot:
             except: pass
 
             res_str = 'WIN' if is_win else 'LOSS'
-            if not is_win: profit = -float(amount) # Define lucro negativo se perdeu
+            if not is_win: profit = -float(amount)
 
             self.log_to_db(f"{'🏆' if is_win else '🔻'} {res_str}: ${profit:.2f}", "SUCCESS" if is_win else "ERROR")
 
-            # 4. Atualiza DB (Tenta atualizar STATUS e RESULT)
             if sig_id:
                 try: 
                     self.supabase.table("trade_signals").update({
-                        "status": res_str, 
-                        "result": res_str, 
-                        "profit": profit
+                        "status": res_str, "result": res_str, "profit": profit
                     }).eq("id", sig_id).execute()
                 except Exception as e:
                     self.log_to_db(f"Erro update DB: {e}", "WARNING")
             else:
-                # Fallback se perdeu ID
                 try:
                     rec = self.supabase.table("trade_signals").select("id").eq("pair", asset).eq("status", "PENDING").order("created_at", desc=True).limit(1).execute()
-                    if rec.data: self.supabase.table("trade_signals").update({"status": res_str, "result": res_str, "profit": profit}).eq("id", rec.data[0]['id']).execute()
+                    if rec.data: self.supabase.table("trade_signals").update({"status": res_str, "profit": profit}).eq("id", rec.data[0]['id']).execute()
                 except: pass
             
             self.update_balance_remote()
@@ -294,7 +292,18 @@ class SimpleBot:
                     time.sleep(10)
                     continue
                 
-                ASSETS_POOL = ["EURUSD-OTC", "GBPUSD-OTC", "USDJPY-OTC", "USDCHF-OTC", "AUDCAD-OTC"]
+                # LISTA EXPANDIDA DE ATIVOS OTC
+                ASSETS_POOL = [
+                    "EURUSD-OTC", "EURGBP-OTC", "USDCHF-OTC", "EURJPY-OTC",
+                    "NZDUSD-OTC", "GBPUSD-OTC", "GBPJPY-OTC", "USDJPY-OTC",
+                    "AUDCAD-OTC", "AUDUSD-OTC", "USDCAD-OTC", "AUDJPY-OTC",
+                    "GBPCAD-OTC", "GBPCHF-OTC", "GBPAUD-OTC", "EURCAD-OTC",
+                    "CHFJPY-OTC", "CADCHF-OTC", "EURAUD-OTC", "USDNOK-OTC",
+                    "EURNZD-OTC", "USDSEK-OTC", "USDTRY-OTC", "AUDCHF-OTC",
+                    "AUDNZD-OTC", "EURCHF-OTC", "GBPNZD-OTC", "CADJPY-OTC",
+                    "NZDCAD-OTC", "NZDJPY-OTC"
+                ]
+                
                 self.best_asset = self.catalog_assets(ASSETS_POOL)
                 
                 last_scan = 0
@@ -304,7 +313,6 @@ class SimpleBot:
                 while True:
                     self.fetch_config()
                     
-                    # Troca de conta
                     if self.config["account_type"] != self.active_account_type:
                          self.log_to_db(f"🔄 Trocando conta: {self.config['account_type']}", "SYSTEM")
                          self.api.change_balance(self.config["account_type"])
@@ -317,12 +325,10 @@ class SimpleBot:
                     
                     if not self.api.check_connect(): break
                     
-                    # Recataloga
                     if time.time() - last_catalog > 900:
                         self.best_asset = self.catalog_assets(ASSETS_POOL)
                         last_catalog = time.time()
 
-                    # Heartbeat
                     if time.time() - last_scan > 5:
                         try:
                             candles = self.api.get_candles(self.best_asset, 60, 25, int(time.time()))
@@ -341,7 +347,6 @@ class SimpleBot:
                         time.sleep(2)
                         continue
 
-                    # Operação
                     if datetime.now().second <= 5:
                         asset = self.best_asset
                         if asset not in self.active_trades:
