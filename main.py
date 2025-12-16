@@ -60,30 +60,26 @@ class TechnicalAnalysis:
         sma_9 = TechnicalAnalysis.calculate_sma(candles, 9)
         last = TechnicalAnalysis.analyze_candle(candles[-1])
         
-        # Filtro de Volatilidade
         if last['body'] < 0.000001: return None, "Sem volume"
 
         # TENDÊNCIA DE ALTA
         if last['close'] > sma_9:
             if last['color'] == 'green':
-                # Pavio superior pequeno (< 60% do corpo) = Força
                 if last['upper_wick'] < (last['body'] * 0.6):
                     return 'call', f"Alta (P > SMA9)"
 
         # TENDÊNCIA DE BAIXA
         elif last['close'] < sma_9:
             if last['color'] == 'red':
-                # Pavio inferior pequeno (< 60% do corpo) = Força
                 if last['lower_wick'] < (last['body'] * 0.6):
                     return 'put', f"Baixa (P < SMA9)"
                     
-        return None, "Sem tendência clara"
+        return None, "Sem tendência"
 
-# --- CORREÇÕES OTC (LISTA COMPLETA) ---
+# --- CORREÇÕES OTC ---
 try:
     def update_consts():
         import exnovaapi.constants as OP_code
-        # Mapeamento expandido fornecido pelo usuário
         OTC_MAP = {
             "EURUSD-OTC": 76, "EURGBP-OTC": 77, "USDCHF-OTC": 78, "EURJPY-OTC": 79,
             "NZDUSD-OTC": 80, "GBPUSD-OTC": 81, "GBPJPY-OTC": 84, "USDJPY-OTC": 85,
@@ -104,7 +100,7 @@ class SimpleBot:
         self.supabase = None
         self.active_trades = set()
         self.active_account_type = None
-        self.best_asset = None
+        self.best_assets = [] 
         self.config = { "status": "PAUSED", "account_type": "PRACTICE", "entry_value": 1.0 }
         self.init_supabase()
 
@@ -163,9 +159,8 @@ class SimpleBot:
         return False
 
     def catalog_assets(self, assets_list):
-        self.log_to_db(f"📊 Catalogando {len(assets_list)} ativos...", "SYSTEM")
-        best_winrate = -1
-        best_pair = None
+        self.log_to_db(f"📊 Catalogando Top 3...", "SYSTEM")
+        results = []
         
         for asset in assets_list:
             try:
@@ -184,31 +179,28 @@ class SimpleBot:
                                  (signal == 'put' and nxt['close'] < nxt['open'])
                         if is_win: wins += 1
                 
-                if total > 0:
+                if total >= 3: 
                     wr = (wins / total) * 100
-                    # Log apenas de ativos bons para não poluir
-                    if wr >= 50:
-                        self.log_to_db(f"🔎 {asset}: {wr:.1f}% ({wins}/{total})", "INFO")
-                    
-                    # Critério: Winrate alto e min 3 entradas
-                    if wr > best_winrate and total >= 3:
-                        best_winrate = wr
-                        best_pair = asset
+                    results.append({
+                        "pair": asset, "win_rate": wr, "wins": wins, "losses": total-wins, "best_strategy": "Nano SMA9"
+                    })
             except: pass
-            time.sleep(0.05) # Ligeiro delay
-            
-        if best_pair:
-            self.log_to_db(f"💎 Par Escolhido: {best_pair} ({best_winrate:.1f}%)", "SUCCESS")
+            time.sleep(0.05)
+        
+        results.sort(key=lambda x: x['win_rate'], reverse=True)
+        top_3 = results[:3]
+        
+        if top_3:
+            pairs_str = ", ".join([f"{r['pair']} ({r['win_rate']:.0f}%)" for r in top_3])
+            self.log_to_db(f"💎 Top 3 Ativos: {pairs_str}", "SUCCESS")
             try:
                 self.supabase.table("cataloged_assets").delete().neq("pair", "XYZ").execute() 
-                self.supabase.table("cataloged_assets").insert({
-                    "pair": best_pair, "win_rate": best_winrate, "wins": 0, "losses": 0, "best_strategy": "Nano SMA9"
-                }).execute()
+                self.supabase.table("cataloged_assets").insert(top_3).execute()
             except: pass
-            return best_pair
+            return [r['pair'] for r in top_3]
         
         self.log_to_db("⚠️ Catalogação fraca, usando padrão.", "WARNING")
-        return assets_list[0]
+        return [assets_list[0]]
 
     def safe_buy(self, asset, amount, direction, type="digital"):
         result = [None]
@@ -236,8 +228,8 @@ class SimpleBot:
                 "pair": asset,
                 "direction": direction,
                 "strategy": "Nano SMA9",
-                "status": "PENDING",
-                "result": "PENDING",
+                "status": "PENDING", 
+                "result": "PENDING", 
                 "created_at": datetime.now().isoformat()
             }).execute()
             if res.data: sig_id = res.data[0]['id']
@@ -247,8 +239,10 @@ class SimpleBot:
         if not status: status, id = self.safe_buy(asset, amount, direction, "binary")
 
         if status:
-            self.log_to_db(f"✅ Ordem {id} aceita.", "INFO")
+            self.log_to_db(f"✅ Ordem {id} aceita. Aguardando...", "INFO")
             self.active_trades.add(asset)
+            
+            # Bloqueio intencional (simula foco humano na operação)
             time.sleep(60) 
             
             is_win, profit = False, 0.0
@@ -267,14 +261,16 @@ class SimpleBot:
             if sig_id:
                 try: 
                     self.supabase.table("trade_signals").update({
-                        "status": res_str, "result": res_str, "profit": profit
+                        "status": res_str, 
+                        "result": res_str, 
+                        "profit": profit
                     }).eq("id", sig_id).execute()
                 except Exception as e:
                     self.log_to_db(f"Erro update DB: {e}", "WARNING")
             else:
                 try:
                     rec = self.supabase.table("trade_signals").select("id").eq("pair", asset).eq("status", "PENDING").order("created_at", desc=True).limit(1).execute()
-                    if rec.data: self.supabase.table("trade_signals").update({"status": res_str, "profit": profit}).eq("id", rec.data[0]['id']).execute()
+                    if rec.data: self.supabase.table("trade_signals").update({"status": res_str, "result": res_str, "profit": profit}).eq("id", rec.data[0]['id']).execute()
                 except: pass
             
             self.update_balance_remote()
@@ -286,13 +282,11 @@ class SimpleBot:
     def start(self):
         while True:
             try:
-                # Inicializa
                 self.fetch_config()
                 if not self.connect():
                     time.sleep(10)
                     continue
                 
-                # LISTA EXPANDIDA DE ATIVOS OTC
                 ASSETS_POOL = [
                     "EURUSD-OTC", "EURGBP-OTC", "USDCHF-OTC", "EURJPY-OTC",
                     "NZDUSD-OTC", "GBPUSD-OTC", "GBPJPY-OTC", "USDJPY-OTC",
@@ -304,7 +298,7 @@ class SimpleBot:
                     "NZDCAD-OTC", "NZDJPY-OTC"
                 ]
                 
-                self.best_asset = self.catalog_assets(ASSETS_POOL)
+                self.best_assets = self.catalog_assets(ASSETS_POOL)
                 
                 last_scan = 0
                 last_bal = 0
@@ -312,30 +306,27 @@ class SimpleBot:
 
                 while True:
                     self.fetch_config()
-                    
-                    if self.config["account_type"] != self.active_account_type:
-                         self.log_to_db(f"🔄 Trocando conta: {self.config['account_type']}", "SYSTEM")
-                         self.api.change_balance(self.config["account_type"])
-                         self.active_account_type = self.config["account_type"]
-                         self.update_balance_remote()
-
                     if self.config["status"] == "RESTARTING":
                         self.supabase.table("bot_config").update({"status": "RUNNING"}).eq("id", 1).execute()
                         break
                     
                     if not self.api.check_connect(): break
                     
+                    # Recataloga a cada 15 min
                     if time.time() - last_catalog > 900:
-                        self.best_asset = self.catalog_assets(ASSETS_POOL)
+                        self.best_assets = self.catalog_assets(ASSETS_POOL)
                         last_catalog = time.time()
 
+                    # Heartbeat
                     if time.time() - last_scan > 5:
                         try:
-                            candles = self.api.get_candles(self.best_asset, 60, 25, int(time.time()))
+                            # Mostra o primeiro do ranking no scanner
+                            primary = self.best_assets[0] if self.best_assets else "EURUSD-OTC"
+                            candles = self.api.get_candles(primary, 60, 20, int(time.time()))
                             if candles:
                                 price = candles[-1]['close']
                                 sma = TechnicalAnalysis.calculate_sma(candles, 9)
-                                self.log_to_db(f"ANALISE_DETALHADA::{self.best_asset}::Preço:{price}::SMA9:{sma:.5f}", "SYSTEM")
+                                self.log_to_db(f"ANALISE_DETALHADA::{primary}::Preço:{price}::SMA9:{sma:.5f}", "SYSTEM")
                         except: pass
                         last_scan = time.time()
                     
@@ -347,17 +338,37 @@ class SimpleBot:
                         time.sleep(2)
                         continue
 
+                    # OPERAÇÃO NOS TOP 3 (HUMANIZADA)
                     if datetime.now().second <= 5:
-                        asset = self.best_asset
-                        if asset not in self.active_trades:
+                        # Baralha a ordem para não parecer robô
+                        current_assets = self.best_assets.copy()
+                        random.shuffle(current_assets)
+                        
+                        trade_executed = False
+                        
+                        for asset in current_assets:
+                            if asset in self.active_trades: continue
+                            
+                            # Delay humano entre olhar pares
+                            time.sleep(random.uniform(0.5, 1.5))
+                            
                             try:
-                                candles = self.api.get_candles(asset, 60, 30, int(time.time()))
+                                candles = self.api.get_candles(asset, 60, 20, int(time.time()))
                                 sig, reason = TechnicalAnalysis.get_signal(candles)
                                 if sig: 
-                                    self.log_to_db(f"🔔 SINAL: {sig.upper()} ({reason})", "INFO")
+                                    self.log_to_db(f"🔔 SINAL EM {asset}: {sig.upper()} ({reason})", "INFO")
                                     self.execute_trade(asset, sig)
+                                    # SE ENTROU, PARA DE PROCURAR (HUMANO)
+                                    trade_executed = True
+                                    break 
                             except: pass
-                        time.sleep(50)
+                        
+                        # Se operou, espera o resto do minuto
+                        if trade_executed:
+                            time.sleep(50) 
+                        else:
+                            # Se não operou, espera o minuto acabar (para não ficar spamando)
+                            time.sleep(40)
                     
                     time.sleep(1)
             except: time.sleep(5)
