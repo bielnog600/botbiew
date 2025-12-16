@@ -112,7 +112,7 @@
         <main class="flex-1 overflow-y-auto p-4 md:p-8 scroll-smooth pb-24 md:pb-8 relative">
             <div id="connection-warning" class="hidden mb-4 bg-red-500/10 border border-red-500/20 text-red-400 p-3 rounded-xl flex items-center gap-2 text-sm animate-pulse">
                 <i data-lucide="wifi-off" class="w-4 h-4"></i>
-                <span>Bot Offline: Sem sinal há mais de 1 minuto. Verifique o script Python.</span>
+                <span>Bot Offline: Sem sinal há mais de 3 minutos. Verifique o script Python.</span>
             </div>
 
             <!-- VIEW: HOME -->
@@ -127,7 +127,10 @@
                             </span>
                         </div>
                     </div>
-                    <div>
+                    <div class="flex gap-2">
+                        <button id="restart-bot-btn" class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-bold shadow-lg transition-all bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20" title="Reiniciar Conexão">
+                            <i data-lucide="power" class="w-4 h-4"></i>
+                        </button>
                         <button id="toggle-bot-btn" class="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold shadow-lg transition-all bg-slate-700 text-white">
                             <i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> A carregar...
                         </button>
@@ -442,6 +445,29 @@
             }
         });
 
+        // --- RESTART BOT ACTION ---
+        document.getElementById('restart-bot-btn').addEventListener('click', async () => {
+            if(!confirm("Deseja forçar o reinício da conexão do Bot?")) return;
+            
+            const btn = document.getElementById('restart-bot-btn');
+            btn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i>';
+            lucide.createIcons();
+
+            try {
+                // Set status to RESTARTING
+                await supabase.from('bot_config').update({ status: 'RESTARTING' }).eq('id', 1);
+                // Also create a LOG to force a "wake up" event if the bot is listening to logs (optional)
+            } catch(e) {
+                alert("Erro ao enviar comando.");
+            } finally {
+                // Let the polling update the UI, but reset button icon after a delay
+                setTimeout(() => {
+                    btn.innerHTML = '<i data-lucide="power" class="w-4 h-4"></i>';
+                    lucide.createIcons();
+                }, 2000);
+            }
+        });
+
         // --- DATA LOOP (HYBRID REALTIME + POLLING) ---
         function startDataLoop() {
             fetchData();
@@ -459,7 +485,6 @@
                     refreshStats(); 
                 })
                 .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'trade_signals' }, payload => {
-                    // Update specific card in place to prevent flicker
                     const existingEl = document.getElementById(`signal-${payload.new.id}`);
                     if (existingEl) {
                         const newEl = createSignalElement(payload.new);
@@ -545,8 +570,8 @@
             let wins = 0, losses = 0;
             signals.forEach(s => {
                 const res = (s.result || '').toUpperCase();
-                if (res === 'WIN') wins++;
-                if (res === 'LOSS') losses++;
+                if (['WIN', 'VICTORY', 'SUCESSO'].includes(res)) wins++;
+                if (['LOSS', 'LOSE', 'DERROTA'].includes(res)) losses++;
             });
             document.getElementById('score-wins').textContent = wins;
             document.getElementById('score-losses').textContent = losses;
@@ -560,9 +585,17 @@
             state.config = config;
             
             const btn = document.getElementById('toggle-bot-btn');
-            const isRunning = config.status === 'RUNNING';
-            btn.className = `flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold shadow-lg transition-all ${isRunning ? 'bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20' : 'bg-green-500 text-white hover:bg-green-400'}`;
-            btn.innerHTML = isRunning ? '<i data-lucide="pause" class="w-4 h-4"></i> PAUSAR' : '<i data-lucide="play" class="w-4 h-4"></i> INICIAR';
+            const status = config.status || 'PAUSED';
+            const isRunning = status === 'RUNNING';
+            const isRestarting = status === 'RESTARTING';
+
+            if (isRestarting) {
+                btn.className = `flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold shadow-lg transition-all bg-amber-500/10 text-amber-400 border border-amber-500/20 cursor-wait`;
+                btn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> A REINICIAR...';
+            } else {
+                btn.className = `flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold shadow-lg transition-all ${isRunning ? 'bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20' : 'bg-green-500 text-white hover:bg-green-400'}`;
+                btn.innerHTML = isRunning ? '<i data-lucide="pause" class="w-4 h-4"></i> PAUSAR' : '<i data-lucide="play" class="w-4 h-4"></i> INICIAR';
+            }
             lucide.createIcons();
 
             if(document.activeElement.tagName !== 'INPUT') {
@@ -733,22 +766,41 @@
         }
 
         function updateBotStatus() {
-            if (!state.lastLogTime) return;
+            // Se não houver logs ou a config não estiver carregada, aborta
+            if (!state.lastLogTime || !state.config) return;
+
             const diff = Date.now() - state.lastLogTime.getTime();
             const indicator = document.getElementById('bot-status-indicator');
             const warning = document.getElementById('connection-warning');
             
-            if (diff < 60000) { 
+            // Tolerância aumentada para 3 minutos (180000ms)
+            // Se estiver PAUSED, ignoramos o aviso de offline
+            const isPaused = state.config.status === 'PAUSED';
+            const isRestarting = state.config.status === 'RESTARTING';
+            const threshold = isPaused ? 86400000 : 180000; 
+
+            if (diff < threshold) { 
                 indicator.innerHTML = '<span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span> ONLINE';
                 indicator.className = 'text-xs font-bold flex items-center gap-1 text-green-400';
                 warning.classList.add('hidden');
             } else {
-                indicator.innerHTML = '<span class="w-2 h-2 rounded-full bg-red-500"></span> OFFLINE';
-                indicator.className = 'text-xs font-bold flex items-center gap-1 text-red-400';
-                warning.classList.remove('hidden');
-                document.getElementById('scanner-led').className = 'w-2 h-2 rounded-full bg-red-500';
-                document.getElementById('scanner-line').classList.add('hidden');
-                document.getElementById('scanner-status-text').textContent = 'OFFLINE';
+                if (!isPaused && !isRestarting) {
+                    indicator.innerHTML = '<span class="w-2 h-2 rounded-full bg-red-500"></span> OFFLINE';
+                    indicator.className = 'text-xs font-bold flex items-center gap-1 text-red-400';
+                    warning.classList.remove('hidden');
+                    
+                    document.getElementById('scanner-led').className = 'w-2 h-2 rounded-full bg-red-500';
+                    document.getElementById('scanner-line').classList.add('hidden');
+                    document.getElementById('scanner-status-text').textContent = 'OFFLINE';
+                } else if (isRestarting) {
+                    indicator.innerHTML = '<span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span> A REINICIAR';
+                    indicator.className = 'text-xs font-bold flex items-center gap-1 text-amber-400';
+                    warning.classList.add('hidden');
+                } else {
+                    indicator.innerHTML = '<span class="w-2 h-2 rounded-full bg-amber-500"></span> PAUSADO';
+                    indicator.className = 'text-xs font-bold flex items-center gap-1 text-amber-400';
+                    warning.classList.add('hidden');
+                }
             }
         }
 
