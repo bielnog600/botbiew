@@ -41,7 +41,6 @@ class TechnicalAnalysis:
     def get_signal(candles):
         if len(candles) < 3: return None
         last = candles[-1]
-        # Estratégia simples de exemplo (Troque pela sua)
         if last['close'] > last['open']:
             return 'put' if random.random() > 0.6 else None
         else:
@@ -87,6 +86,14 @@ class SimpleBot:
             }).execute()
         except: pass
 
+    def update_balance_remote(self):
+        """Lê o saldo da API e atualiza a base de dados"""
+        try:
+            balance = self.api.get_balance()
+            supabase.table("bot_config").update({"current_balance": balance}).eq("id", 1).execute()
+        except Exception as e:
+            print(f"Erro ao atualizar saldo: {e}")
+
     def fetch_config(self):
         try:
             response = supabase.table("bot_config").select("*").eq("id", 1).execute()
@@ -102,7 +109,6 @@ class SimpleBot:
     def connect(self):
         self.log_to_db(f"🔌 Conectando à Exnova...", "SYSTEM")
         try:
-            # Força desconexão se existir
             if self.api and self.api.check_connect():
                 self.api.api.close()
             
@@ -114,7 +120,11 @@ class SimpleBot:
                 return False
             
             self.log_to_db("✅ Conectado com sucesso!", "SUCCESS")
+            
+            # Atualiza tipo de conta e saldo IMEDIATAMENTE
             self.api.change_balance(self.config["account_type"])
+            self.update_balance_remote()
+            
             return True
         except Exception as e:
             self.log_to_db(f"❌ Erro crítico: {e}", "ERROR")
@@ -136,10 +146,9 @@ class SimpleBot:
             sig_id = sig.data[0]['id'] if sig.data else None
         except: sig_id = None
 
-        # 2. Envia Ordem (Digital -> Binary)
+        # 2. Envia Ordem
         id = None
-        try:
-            status, id = self.api.buy_digital_spot(asset, amount, direction, 1)
+        try: status, id = self.api.buy_digital_spot(asset, amount, direction, 1)
         except: status = False
         
         if not status:
@@ -149,7 +158,7 @@ class SimpleBot:
         if status:
             self.log_to_db(f"✅ Ordem {id} aceita. Aguardando...", "INFO")
             self.active_trades.add(asset)
-            time.sleep(60) # Espera vela
+            time.sleep(60) 
             
             # 3. Verifica Win
             is_win = False
@@ -168,11 +177,8 @@ class SimpleBot:
             if sig_id:
                 supabase.table("trade_signals").update({"result": result_str, "profit": profit}).eq("id", sig_id).execute()
             
-            try:
-                bal = self.api.get_balance()
-                supabase.table("bot_config").update({"current_balance": bal}).eq("id", 1).execute()
-            except: pass
-            
+            # Atualiza saldo após operação
+            self.update_balance_remote()
             self.active_trades.discard(asset)
         else:
             self.log_to_db("❌ Falha na ordem.", "ERROR")
@@ -183,32 +189,34 @@ class SimpleBot:
         
         ASSETS = ["EURUSD-OTC", "GBPUSD-OTC", "USDJPY-OTC", "USDCHF-OTC", "AUDCAD-OTC"]
         last_scan = 0
+        last_balance_check = 0
 
         while True:
             try:
                 self.fetch_config()
                 
-                # --- LÓGICA DE REINÍCIO ---
+                # --- REINÍCIO ---
                 if self.config["status"] == "RESTARTING":
-                    self.log_to_db("🔄 Comando de reinício recebido...", "WARNING")
+                    self.log_to_db("🔄 Reiniciando...", "WARNING")
                     time.sleep(1)
                     if self.connect():
-                        self.log_to_db("✅ Reinício completo. Voltando a operar.", "SUCCESS")
-                        # Reseta status para RUNNING
                         supabase.table("bot_config").update({"status": "RUNNING"}).eq("id", 1).execute()
-                        self.config["status"] = "RUNNING"
-                    else:
-                        time.sleep(5)
+                    else: time.sleep(5)
                     continue
                 
                 # --- CHECK CONEXÃO ---
                 if not self.api.check_connect():
-                    self.log_to_db("⚠️ Conexão perdida. Tentando reconectar...", "WARNING")
+                    self.log_to_db("⚠️ Reconectando...", "WARNING")
                     self.connect()
                     time.sleep(5)
                     continue
 
-                # --- HEARTBEAT PARA O FRONTEND ---
+                # --- SINCRONIZAÇÃO PERIÓDICA DE SALDO (1 min) ---
+                if time.time() - last_balance_check > 60:
+                    self.update_balance_remote()
+                    last_balance_check = time.time()
+
+                # --- HEARTBEAT ---
                 if time.time() - last_scan > 5:
                     try:
                         candles = self.api.get_candles("EURUSD-OTC", 60, 1, int(time.time()))
@@ -225,7 +233,6 @@ class SimpleBot:
                 if datetime.now().second <= 5:
                     for asset in ASSETS:
                         if asset in self.active_trades: continue
-                        
                         try:
                             candles = self.api.get_candles(asset, 60, 60, int(time.time()))
                             signal = TechnicalAnalysis.get_signal(candles)
