@@ -207,6 +207,8 @@ class SimpleBot:
         def target():
             try:
                 if type == "digital":
+                    # O '1' aqui define o tempo de expiração da ordem em minutos.
+                    # Se quiser M5, mude para 5.
                     result[0] = self.api.buy_digital_spot(asset, amount, direction, 1)
                 else:
                     result[0] = self.api.buy(amount, asset, direction, 1)
@@ -242,7 +244,7 @@ class SimpleBot:
             self.log_to_db(f"✅ Ordem {id} aceita. Aguardando...", "INFO")
             self.active_trades.add(asset)
             
-            # Bloqueio intencional (simula foco humano na operação)
+            # Bloqueio intencional (simula foco humano na operação durante 60s)
             time.sleep(60) 
             
             is_win, profit = False, 0.0
@@ -312,16 +314,14 @@ class SimpleBot:
                     
                     if not self.api.check_connect(): break
                     
-                    # Recataloga a cada 15 min
                     if time.time() - last_catalog > 900:
                         self.best_assets = self.catalog_assets(ASSETS_POOL)
                         last_catalog = time.time()
 
-                    # Heartbeat
                     if time.time() - last_scan > 5:
                         try:
-                            # Mostra o primeiro do ranking no scanner
-                            primary = self.best_assets[0] if self.best_assets else "EURUSD-OTC"
+                            # CORREÇÃO: Garante que primary existe
+                            primary = self.best_assets[0] if self.best_assets and len(self.best_assets) > 0 else "EURUSD-OTC"
                             candles = self.api.get_candles(primary, 60, 20, int(time.time()))
                             if candles:
                                 price = candles[-1]['close']
@@ -338,8 +338,14 @@ class SimpleBot:
                         time.sleep(2)
                         continue
 
-                    # OPERAÇÃO NOS TOP 3 (HUMANIZADA)
-                    if datetime.now().second <= 5:
+                    # --- VERIFICAÇÃO DO SEGUNDO DE ENTRADA ---
+                    # Aqui você define os segundos para entrar na operação.
+                    # Exemplo: <= 5 significa que ele tenta entrar nos primeiros 5 segundos da vela (00:00:00 a 00:00:05).
+                    # Se quiser antecipar (ex: entrar aos 58s da vela anterior), mude para:
+                    # if datetime.now().second >= 58:
+                    
+                    if datetime.now().second <= 55: 
+                        
                         # Baralha a ordem para não parecer robô
                         current_assets = self.best_assets.copy()
                         random.shuffle(current_assets)
@@ -349,7 +355,6 @@ class SimpleBot:
                         for asset in current_assets:
                             if asset in self.active_trades: continue
                             
-                            # Delay humano entre olhar pares
                             time.sleep(random.uniform(0.5, 1.5))
                             
                             try:
@@ -358,16 +363,13 @@ class SimpleBot:
                                 if sig: 
                                     self.log_to_db(f"🔔 SINAL EM {asset}: {sig.upper()} ({reason})", "INFO")
                                     self.execute_trade(asset, sig)
-                                    # SE ENTROU, PARA DE PROCURAR (HUMANO)
                                     trade_executed = True
                                     break 
                             except: pass
                         
-                        # Se operou, espera o resto do minuto
                         if trade_executed:
                             time.sleep(50) 
                         else:
-                            # Se não operou, espera o minuto acabar (para não ficar spamando)
                             time.sleep(40)
                     
                     time.sleep(1)
