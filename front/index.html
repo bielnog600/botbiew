@@ -214,14 +214,13 @@
         function startDataLoop() {
             fetchData();
             supabase.channel('dash').on('postgres_changes', { event: '*', schema: 'public', table: 'bot_config' }, p => updateConfigUI(p.new))
-                .on('postgres_changes', { event: '*', schema: 'public', table: 'trade_signals' }, () => refreshSignals()) // Usa função segura
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'trade_signals' }, () => refreshSignals()) 
                 .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'logs' }, p => { appendLog(p.new); processScannerLog(p.new); })
                 .subscribe();
             setInterval(fetchData, 3000);
             setInterval(updateBotStatus, 5000);
         }
 
-        // Nova função segura para atualizar sinais e estatísticas
         async function refreshSignals() {
             const { data: signals } = await supabase.from('trade_signals').select('*').order('created_at', { ascending: false }).limit(50);
             if(signals) {
@@ -235,7 +234,7 @@
             if (!config) config = { id: 1, status: 'PAUSED', stop_win: 500, stop_loss: 200, entry_value: 10, account_type: 'PRACTICE' };
             updateConfigUI(config);
 
-            refreshSignals(); // Chama a mesma função segura
+            refreshSignals();
 
             const { data: logs } = await supabase.from('logs').select('*').order('created_at', { ascending: false }).limit(1);
             if(logs && logs.length > 0) {
@@ -259,25 +258,24 @@
                     if(list.firstChild && !list.innerHTML.includes('Sem dados') && !list.innerHTML.includes('Limpo')) list.insertBefore(el, list.firstChild);
                     else list.innerHTML = '', list.appendChild(el);
                 } else {
-                    // Update if status or profit changed
                     const currentStatus = existing.getAttribute('data-status');
                     const currentProfit = existing.getAttribute('data-profit');
-                    if (currentStatus !== s.result || currentProfit != s.profit) existing.replaceWith(createSignalElement(s));
+                    if (currentStatus !== s.status || currentProfit != s.profit) existing.replaceWith(createSignalElement(s));
                 }
             });
-            // Cleanup deleted items logic omitted for simplicity, fetching handles replacement mostly
         }
 
         function updateStats(signals) {
-            if(!signals) return;
             let wins = 0, losses = 0;
             signals.forEach(s => {
                 const profit = parseFloat(s.profit);
-                // LÓGICA DE DETEÇÃO FINANCEIRA: Prioriza dinheiro > 0
+                const status = (s.status || '').toUpperCase();
+                
+                // --- LÓGICA DE DETEÇÃO FINANCEIRA ---
                 if (!isNaN(profit) && profit > 0) wins++;
                 else if (!isNaN(profit) && profit < 0) losses++;
-                else if ((s.result || '').toUpperCase() === 'WIN') wins++;
-                else if ((s.result || '').toUpperCase() === 'LOSS') losses++;
+                else if (status === 'WIN') wins++;
+                else if (status === 'LOSS') losses++;
             });
             document.getElementById('score-wins').textContent = wins;
             document.getElementById('score-losses').textContent = losses;
@@ -317,17 +315,16 @@
         function createSignalElement(s) {
             const el = document.createElement('div');
             el.id = `signal-${s.id}`;
-            el.setAttribute('data-status', s.result); 
-            el.setAttribute('data-profit', s.profit); // Armazena profit para check
+            el.setAttribute('data-status', s.status); 
+            el.setAttribute('data-profit', s.profit);
             el.className = `glass-card p-4 rounded-xl flex items-center justify-between border-l-4 ${s.direction === 'call' ? 'border-green-500' : 'border-red-500'}`;
             
-            const status = (s.result || 'PENDING').trim().toUpperCase();
+            const status = (s.status || 'PENDING').trim().toUpperCase();
             let profit = parseFloat(s.profit);
             
             let statusBadge;
             let profitDisplay = '';
 
-            // Lógica de Status Baseada em Dinheiro OU Texto
             let isWin = false;
             let isLoss = false;
 
@@ -336,7 +333,6 @@
                 if (profit < 0) isLoss = true;
             } 
             
-            // Fallback para texto se profit for 0 ou nulo mas status estiver definido
             if (!isWin && !isLoss) {
                 if (['WIN', 'VICTORY'].includes(status)) isWin = true;
                 if (['LOSS', 'LOSE'].includes(status)) isLoss = true;
