@@ -4,20 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Marombiew Bot</title>
-    
-    <!-- PWA Settings -->
     <meta name="theme-color" content="#0f172a">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="manifest" href="manifest.json">
-    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/4712/4712109.png">
-
-    <!-- Tailwind & Supabase -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
-
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
     <style>
         :root { --bg-dark: #0f172a; --glass: rgba(30, 41, 59, 0.95); --gold: #f59e0b; }
         body { font-family: 'Inter', sans-serif; background-color: #020617; color: #e2e8f0; overflow: hidden; user-select: none; }
@@ -25,36 +17,31 @@
         .glass-card { background: var(--glass); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.08); }
         .scan-line { position: absolute; width: 100%; height: 2px; background: linear-gradient(90deg, transparent, var(--gold), transparent); animation: scanMove 2s linear infinite; opacity: 0.8; box-shadow: 0 0 15px var(--gold); z-index: 0; }
         @keyframes scanMove { 0% { top: 0%; opacity: 0; } 10% { opacity: 1; } 90% { opacity: 1; } 100% { top: 100%; opacity: 0; } }
-        ::-webkit-scrollbar { width: 4px; }
-        ::-webkit-scrollbar-track { background: #0f172a; }
+        ::-webkit-scrollbar { width: 4px; background: #0f172a; }
         ::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
         .hidden { display: none !important; }
         .active-nav { color: var(--gold); }
-        .live-indicator { animation: pulse-green 2s infinite; }
+        .animate-pulse-green { animation: pulse-green 2s infinite; }
         @keyframes pulse-green { 0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4); } 70% { box-shadow: 0 0 0 6px rgba(34, 197, 94, 0); } 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); } }
     </style>
 </head>
 <body class="flex flex-col h-screen">
 
-    <!-- LOGIN -->
     <div id="login-screen" class="fixed inset-0 z-50 flex items-center justify-center bg-[#020617] p-4">
         <div class="glass-card w-full max-w-md p-8 rounded-2xl border-t border-slate-700">
             <div class="text-center mb-8">
-                <div class="w-16 h-16 bg-amber-500/10 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-amber-500/20 shadow-[0_0_30px_rgba(245,158,11,0.2)]">
-                    <i data-lucide="zap" class="text-amber-500 w-8 h-8"></i>
-                </div>
+                <i data-lucide="zap" class="text-amber-500 w-12 h-12 mx-auto mb-4"></i>
                 <h1 class="text-2xl font-bold text-white">Marombiew Bot</h1>
             </div>
             <form id="login-form" class="space-y-4">
-                <input type="email" id="email" class="w-full bg-slate-900/50 border border-slate-700 text-white text-sm rounded-xl pl-4 py-3" placeholder="Email" required>
-                <input type="password" id="password" class="w-full bg-slate-900/50 border border-slate-700 text-white text-sm rounded-xl pl-4 py-3" placeholder="Senha" required>
-                <button type="submit" id="login-btn" class="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-3.5 rounded-xl transition-all">Entrar</button>
+                <input type="email" id="email" class="w-full bg-slate-900/50 border border-slate-700 text-white rounded-xl pl-4 py-3" placeholder="Email" required>
+                <input type="password" id="password" class="w-full bg-slate-900/50 border border-slate-700 text-white rounded-xl pl-4 py-3" placeholder="Senha" required>
+                <button type="submit" id="login-btn" class="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-3.5 rounded-xl">Entrar</button>
                 <div id="login-error" class="text-red-400 text-xs text-center hidden"></div>
             </form>
         </div>
     </div>
 
-    <!-- APP -->
     <div id="app" class="flex-1 flex flex-col md:flex-row overflow-hidden hidden opacity-0 transition-opacity duration-500">
         <aside class="hidden md:flex flex-col w-64 glass-card border-r border-slate-800 z-20">
             <div class="h-20 flex items-center px-6 border-b border-slate-800/50">
@@ -68,9 +55,8 @@
         </aside>
 
         <main class="flex-1 overflow-y-auto p-4 md:p-8 scroll-smooth pb-24 md:pb-8">
-            <div id="connection-warning" class="hidden mb-4 bg-red-500/10 border border-red-500/20 text-red-400 p-3 rounded-xl flex items-center gap-2 text-sm animate-pulse"><i data-lucide="wifi-off" class="w-4 h-4"></i> Bot Offline: Sem sinal há mais de 3 minutos.</div>
+            <div id="connection-warning" class="hidden mb-4 bg-red-500/10 border border-red-500/20 text-red-400 p-3 rounded-xl flex items-center gap-2 text-sm animate-pulse"><i data-lucide="wifi-off" class="w-4 h-4"></i> Bot Offline</div>
 
-            <!-- HOME -->
             <div id="view-home" class="view-section space-y-6 max-w-5xl mx-auto">
                 <div class="flex justify-between items-end">
                     <div>
@@ -80,6 +66,17 @@
                     <div class="flex gap-2">
                         <button id="restart-bot-btn" class="p-2 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20"><i data-lucide="power" class="w-4 h-4"></i></button>
                         <button id="toggle-bot-btn" class="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold bg-slate-700 text-white"><i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> ...</button>
+                    </div>
+                </div>
+
+                <div class="glass-card rounded-xl p-6 relative overflow-hidden group">
+                    <div id="scanner-line" class="scan-line hidden"></div>
+                    <div class="relative z-10 flex justify-between items-start">
+                        <div>
+                            <div class="flex items-center gap-2 mb-2"><div id="scanner-led" class="w-2 h-2 rounded-full bg-red-500"></div><span id="scanner-status-text" class="text-[10px] font-bold text-slate-400">OFFLINE</span></div>
+                            <div id="scanner-pair" class="text-3xl font-black text-white">---</div>
+                        </div>
+                        <div class="text-right"><p class="text-[10px] text-slate-500 font-bold mb-1">PREÇO</p><p id="scanner-price" class="text-2xl font-mono text-slate-200">0.00000</p></div>
                     </div>
                 </div>
 
@@ -105,7 +102,6 @@
                 </div>
             </div>
 
-            <!-- SETTINGS -->
             <div id="view-settings" class="view-section hidden space-y-6 max-w-3xl mx-auto">
                 <h1 class="text-2xl font-bold text-white">Configurações</h1>
                 <form id="settings-form" class="space-y-6">
@@ -123,7 +119,6 @@
                 </form>
             </div>
 
-            <!-- LOGS -->
             <div id="view-logs" class="view-section hidden h-full flex flex-col">
                 <h1 class="text-2xl font-bold text-white mb-4">Terminal</h1>
                 <div id="terminal-output" class="flex-1 glass-card rounded-xl p-4 overflow-y-auto font-mono text-xs space-y-2 bg-black/60 h-[500px]"></div>
@@ -161,6 +156,22 @@
             document.getElementById('login-screen').classList.add('hidden');
             document.getElementById('app').classList.remove('hidden');
             setTimeout(() => document.getElementById('app').classList.remove('opacity-0'), 50);
+            // FETCH INITIAL LOGS NOW
+            fetchInitialLogs();
+        }
+
+        async function fetchInitialLogs() {
+            // Fetch last 50 logs for terminal
+            const { data: logs } = await supabase.from('logs').select('*').order('created_at', { ascending: false }).limit(50);
+            if(logs && logs.length > 0) {
+                const term = document.getElementById('terminal-output');
+                term.innerHTML = '<div class="text-slate-500 mb-2 border-b border-slate-800 pb-2">Marombiew Bot Terminal v2.0 <br> Carregando histórico...</div>';
+                // Render oldest to newest
+                [...logs].reverse().forEach(l => appendLog(l));
+                state.lastLogTime = new Date(logs[0].created_at);
+                processScannerLog(logs[0]);
+                updateBotStatus();
+            }
         }
 
         document.getElementById('login-form').addEventListener('submit', async (e) => {
@@ -222,13 +233,12 @@
             let { data: config } = await supabase.from('bot_config').select('*').eq('id', 1).single();
             if (!config) config = { id: 1, status: 'PAUSED', stop_win: 500, stop_loss: 200, entry_value: 10, account_type: 'PRACTICE' };
             updateConfigUI(config);
-
             refreshSignals();
-
+            // Polling latest log for status check
             const { data: logs } = await supabase.from('logs').select('*').order('created_at', { ascending: false }).limit(1);
             if(logs && logs.length > 0) {
-                processScannerLog(logs[0]);
                 state.lastLogTime = new Date(logs[0].created_at);
+                processScannerLog(logs[0]);
             }
         }
 
@@ -239,7 +249,6 @@
                 updateStats([]);
                 return;
             }
-            
             signals.forEach(s => {
                 const existing = document.getElementById(`signal-${s.id}`);
                 if (!existing) {
@@ -247,20 +256,10 @@
                     if(list.firstChild && !list.innerHTML.includes('Sem dados') && !list.innerHTML.includes('Limpo')) list.insertBefore(el, list.firstChild);
                     else list.innerHTML = '', list.appendChild(el);
                 } else {
-                    const status1 = s.status || '';
-                    const status2 = s.result || '';
-                    const profit = s.profit || '';
-                    
-                    const oldStatus = existing.getAttribute('data-status');
-                    const oldProfit = existing.getAttribute('data-profit');
-                    
-                    // Compara string combinada para ver se mudou algo
-                    const newSig = `${status1}|${status2}|${profit}`;
-                    const oldSig = `${oldStatus}|${oldProfit}`;
-                    
-                    // Se mudou, atualiza
-                    // (Simplificação: apenas substitui se o status PENDING mudou ou profit mudou)
-                    if (newSig !== oldSig) existing.replaceWith(createSignalElement(s));
+                    const stCombined = s.status || s.result || 'PENDING';
+                    const currentStatus = existing.getAttribute('data-status');
+                    const currentProfit = existing.getAttribute('data-profit');
+                    if (currentStatus !== stCombined || currentProfit != s.profit) existing.replaceWith(createSignalElement(s));
                 }
             });
         }
@@ -270,11 +269,8 @@
             signals.forEach(s => {
                 const profit = parseFloat(s.profit);
                 const st = (s.status || s.result || '').toUpperCase();
-                
-                // LÓGICA FINANCEIRA ABSOLUTA
                 if (!isNaN(profit) && profit > 0) wins++;
                 else if (!isNaN(profit) && profit < 0) losses++;
-                // Fallback para texto se profit for 0 ou nulo
                 else if (['WIN','VICTORY'].includes(st)) wins++;
                 else if (['LOSS','LOSE'].includes(st)) losses++;
             });
@@ -289,7 +285,6 @@
             const btn = document.getElementById('toggle-bot-btn');
             const isRunning = config.status === 'RUNNING';
             const isRestarting = config.status === 'RESTARTING';
-            
             if (isRestarting) {
                 btn.className = "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20";
                 btn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> ...';
@@ -298,51 +293,33 @@
                 btn.innerHTML = isRunning ? '<i data-lucide="pause" class="w-4 h-4"></i> PAUSAR' : '<i data-lucide="play" class="w-4 h-4"></i> INICIAR';
             }
             lucide.createIcons();
-            
             if(document.activeElement.tagName !== 'INPUT') {
                 document.getElementById('conf-stop-win').value = config.stop_win;
                 document.getElementById('conf-stop-loss').value = config.stop_loss;
                 document.getElementById('conf-entry').value = config.entry_value;
                 document.getElementById('conf-account').value = config.account_type;
             }
-
             document.getElementById('stat-balance').textContent = `$${(config.current_balance || 0).toFixed(2)}`;
             const profit = (config.current_balance || 0) - (config.daily_initial_balance || 0);
             const profitEl = document.getElementById('stat-profit');
-            const sign = profit >= 0 ? '+' : '';
-            profitEl.textContent = `${sign}$${profit.toFixed(2)}`;
+            profitEl.textContent = `${profit >= 0 ? '+' : ''}$${profit.toFixed(2)}`;
             profitEl.className = `text-2xl font-bold ${profit >= 0 ? 'text-green-400' : 'text-red-400'}`;
         }
 
         function createSignalElement(s) {
             const el = document.createElement('div');
             el.id = `signal-${s.id}`;
-            // Guarda estado para comparação futura
             const stCombined = s.status || s.result || 'PENDING';
             el.setAttribute('data-status', stCombined);
-            el.setAttribute('data-profit', s.profit || ''); 
-            
+            el.setAttribute('data-profit', s.profit);
             el.className = `glass-card p-4 rounded-xl flex items-center justify-between border-l-4 ${s.direction === 'call' ? 'border-green-500' : 'border-red-500'}`;
-            
-            const statusText = stCombined.trim().toUpperCase();
+            const status = stCombined.trim().toUpperCase();
             let profit = parseFloat(s.profit);
-            
             let statusBadge;
             let profitDisplay = '';
             let isWin = false, isLoss = false;
-
-            // Determina WIN/LOSS
-            if (!isNaN(profit)) {
-                if (profit > 0) isWin = true;
-                if (profit < 0) isLoss = true;
-            }
-            
-            // Fallback texto se profit neutro
-            if (!isWin && !isLoss) {
-                if (['WIN', 'VICTORY'].includes(statusText)) isWin = true;
-                if (['LOSS', 'LOSE'].includes(statusText)) isLoss = true;
-            }
-
+            if (!isNaN(profit)) { if (profit > 0) isWin = true; if (profit < 0) isLoss = true; }
+            if (!isWin && !isLoss) { if (['WIN', 'VICTORY'].includes(status)) isWin = true; if (['LOSS', 'LOSE'].includes(status)) isLoss = true; }
             if (isWin) {
                 statusBadge = '<span class="text-green-400 font-bold text-sm flex items-center gap-1"><i data-lucide="check" class="w-4 h-4"></i> WIN</span>';
                 if (!isNaN(profit)) profitDisplay = `<span class="block text-xs font-bold text-green-400 mt-1">+$${Math.abs(profit).toFixed(2)}</span>`;
@@ -352,7 +329,6 @@
             } else {
                 statusBadge = '<span class="text-amber-400 text-xs font-bold animate-pulse flex items-center gap-1"><i data-lucide="loader" class="w-3 h-3 animate-spin"></i> Pendente</span>';
             }
-
             el.innerHTML = `
                 <div class="flex items-center gap-4">
                     <div class="w-10 h-10 rounded-full flex items-center justify-center ${s.direction === 'call' ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'}"><i data-lucide="${s.direction === 'call' ? 'arrow-up' : 'arrow-down'}" class="w-5 h-5"></i></div>
@@ -401,7 +377,6 @@
             const ind = document.getElementById('bot-status-indicator');
             const warn = document.getElementById('connection-warning');
             const isPaused = state.config.status === 'PAUSED';
-            
             if (diff < (isPaused ? 86400000 : 180000)) { 
                 ind.innerHTML = '<span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span> ONLINE';
                 ind.className = 'text-xs font-bold flex items-center gap-1 text-green-400';
