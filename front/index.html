@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Marombiew Bot</title>
+    <title>MAROMBIEW BOT</title>
     
     <!-- PWA Settings -->
     <meta name="theme-color" content="#0f172a">
@@ -61,8 +61,8 @@
                 <div class="w-16 h-16 bg-amber-500/10 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-amber-500/20 shadow-[0_0_30px_rgba(245,158,11,0.2)]">
                     <i data-lucide="zap" class="text-amber-500 w-8 h-8"></i>
                 </div>
-                <h1 class="text-2xl font-bold text-white tracking-tight">Marombiew Bot</h1>
-                <p class="text-slate-500 text-sm mt-1">Painel de Controlo PWA</p>
+                <h1 class="text-2xl font-bold text-white tracking-tight">MAROMBIEW BOT</h1>
+                <p class="text-slate-500 text-sm mt-1">Painel de Controle</p>
             </div>
             
             <form id="login-form" class="space-y-4">
@@ -137,7 +137,7 @@
                     </div>
                 </div>
 
-                <!-- Scanner Widget (Atualizado) -->
+                <!-- Scanner Widget -->
                 <div class="glass-card rounded-xl p-6 relative overflow-hidden group">
                     <div id="scanner-line" class="scan-line hidden"></div>
                     <div class="relative z-10 flex justify-between items-start">
@@ -456,11 +456,9 @@
             try {
                 // Set status to RESTARTING
                 await supabase.from('bot_config').update({ status: 'RESTARTING' }).eq('id', 1);
-                // Also create a LOG to force a "wake up" event if the bot is listening to logs (optional)
             } catch(e) {
                 alert("Erro ao enviar comando.");
             } finally {
-                // Let the polling update the UI, but reset button icon after a delay
                 setTimeout(() => {
                     btn.innerHTML = '<i data-lucide="power" class="w-4 h-4"></i>';
                     lucide.createIcons();
@@ -569,7 +567,7 @@
             if(!signals) return;
             let wins = 0, losses = 0;
             signals.forEach(s => {
-                const res = (s.result || '').toUpperCase();
+                const res = (s.result || '').trim().toUpperCase();
                 if (['WIN', 'VICTORY', 'SUCESSO'].includes(res)) wins++;
                 if (['LOSS', 'LOSE', 'DERROTA'].includes(res)) losses++;
             });
@@ -586,8 +584,8 @@
             
             const btn = document.getElementById('toggle-bot-btn');
             const status = config.status || 'PAUSED';
-            const isRunning = status === 'RUNNING';
             const isRestarting = status === 'RESTARTING';
+            const isRunning = status === 'RUNNING';
 
             if (isRestarting) {
                 btn.className = `flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold shadow-lg transition-all bg-amber-500/10 text-amber-400 border border-amber-500/20 cursor-wait`;
@@ -654,7 +652,7 @@
             el.className = `glass-card p-4 rounded-xl flex items-center justify-between border-l-4 ${s.direction === 'call' ? 'border-green-500' : 'border-red-500'}`;
             
             // Robust Status Check
-            const status = (s.result || 'PENDING').toUpperCase();
+            const status = (s.result || 'PENDING').trim().toUpperCase();
             
             let statusBadge;
             if (['WIN', 'VICTORY', 'SUCESSO'].includes(status)) {
@@ -766,9 +764,7 @@
         }
 
         function updateBotStatus() {
-            // Se não houver logs ou a config não estiver carregada, aborta
-            if (!state.lastLogTime || !state.config) return;
-
+            if (!state.lastLogTime) return;
             const diff = Date.now() - state.lastLogTime.getTime();
             const indicator = document.getElementById('bot-status-indicator');
             const warning = document.getElementById('connection-warning');
