@@ -207,8 +207,6 @@ class SimpleBot:
         def target():
             try:
                 if type == "digital":
-                    # O '1' aqui define o tempo de expiração da ordem em minutos.
-                    # Se quiser M5, mude para 5.
                     result[0] = self.api.buy_digital_spot(asset, amount, direction, 1)
                 else:
                     result[0] = self.api.buy(amount, asset, direction, 1)
@@ -241,10 +239,8 @@ class SimpleBot:
         if not status: status, id = self.safe_buy(asset, amount, direction, "binary")
 
         if status:
-            self.log_to_db(f"✅ Ordem {id} aceita. Aguardando...", "INFO")
+            self.log_to_db(f"✅ Ordem {id} aceita.", "INFO")
             self.active_trades.add(asset)
-            
-            # Bloqueio intencional (simula foco humano na operação durante 60s)
             time.sleep(60) 
             
             is_win, profit = False, 0.0
@@ -320,7 +316,6 @@ class SimpleBot:
 
                     if time.time() - last_scan > 5:
                         try:
-                            # CORREÇÃO: Garante que primary existe
                             primary = self.best_assets[0] if self.best_assets and len(self.best_assets) > 0 else "EURUSD-OTC"
                             candles = self.api.get_candles(primary, 60, 20, int(time.time()))
                             if candles:
@@ -338,15 +333,11 @@ class SimpleBot:
                         time.sleep(2)
                         continue
 
-                    # --- VERIFICAÇÃO DO SEGUNDO DE ENTRADA ---
-                    # Aqui você define os segundos para entrar na operação.
-                    # Exemplo: <= 5 significa que ele tenta entrar nos primeiros 5 segundos da vela (00:00:00 a 00:00:05).
-                    # Se quiser antecipar (ex: entrar aos 58s da vela anterior), mude para:
-                    # if datetime.now().second >= 58:
-                    
-                    if datetime.now().second <= 55: 
+                    # --- ENTRADA DE PRECISÃO (55s) ---
+                    # Para antecipar o sinal, usamos >= 55.
+                    # Removemos delays artificiais para ser rápido.
+                    if datetime.now().second >= 55:
                         
-                        # Baralha a ordem para não parecer robô
                         current_assets = self.best_assets.copy()
                         random.shuffle(current_assets)
                         
@@ -355,7 +346,7 @@ class SimpleBot:
                         for asset in current_assets:
                             if asset in self.active_trades: continue
                             
-                            time.sleep(random.uniform(0.5, 1.5))
+                            # SEM DELAY AQUI PARA NÃO PERDER O SEGUNDO 58/59
                             
                             try:
                                 candles = self.api.get_candles(asset, 60, 20, int(time.time()))
@@ -367,12 +358,11 @@ class SimpleBot:
                                     break 
                             except: pass
                         
-                        if trade_executed:
-                            time.sleep(50) 
-                        else:
-                            time.sleep(40)
+                        # Se operou, dorme para não repetir no mesmo minuto
+                        if trade_executed: time.sleep(50) 
+                        else: time.sleep(4) # Tenta nos próximos segundos (55, 56, 57...) até virar o minuto
                     
-                    time.sleep(1)
+                    time.sleep(0.5) # Loop mais rápido para precisão
             except: time.sleep(5)
 
 if __name__ == "__main__":
