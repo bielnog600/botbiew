@@ -3,369 +3,166 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>MAROMBIEW BOT</title>
+    <title>Marombiew Bot</title>
     
     <!-- PWA Settings -->
     <meta name="theme-color" content="#0f172a">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="Marombiew">
     <link rel="manifest" href="manifest.json">
     <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/4712/4712109.png">
 
-    <!-- Tailwind CSS -->
+    <!-- Tailwind & Supabase -->
     <script src="https://cdn.tailwindcss.com"></script>
-    
-    <!-- Supabase JS -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    
-    <!-- Icons (Lucide) -->
     <script src="https://unpkg.com/lucide@latest"></script>
-
-    <!-- Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 
     <style>
-        :root { --bg-dark: #0f172a; --glass: rgba(30, 41, 59, 0.9); --gold: #f59e0b; }
-        body { font-family: 'Inter', sans-serif; background-color: #020617; color: #e2e8f0; overflow: hidden; user-select: none; -webkit-tap-highlight-color: transparent; }
+        :root { --bg-dark: #0f172a; --glass: rgba(30, 41, 59, 0.95); --gold: #f59e0b; }
+        body { font-family: 'Inter', sans-serif; background-color: #020617; color: #e2e8f0; overflow: hidden; user-select: none; }
         .font-mono { font-family: 'JetBrains Mono', monospace; }
-        .glass-card { background: var(--glass); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.08); }
-        
-        /* Scanner Animation */
+        .glass-card { background: var(--glass); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.08); }
         .scan-line { position: absolute; width: 100%; height: 2px; background: linear-gradient(90deg, transparent, var(--gold), transparent); animation: scanMove 2s linear infinite; opacity: 0.8; box-shadow: 0 0 15px var(--gold); z-index: 0; }
         @keyframes scanMove { 0% { top: 0%; opacity: 0; } 10% { opacity: 1; } 90% { opacity: 1; } 100% { top: 100%; opacity: 0; } }
-        
-        /* Scrollbar */
         ::-webkit-scrollbar { width: 4px; }
         ::-webkit-scrollbar-track { background: #0f172a; }
         ::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
-        
-        /* PWA Install Prompt */
-        #pwa-install-btn { display: none; }
-        
-        /* Utility */
         .hidden { display: none !important; }
         .active-nav { color: var(--gold); }
-        
-        /* Pulse Animation for Live Status */
-        @keyframes pulse-green { 0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4); } 70% { box-shadow: 0 0 0 6px rgba(34, 197, 94, 0); } 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); } }
         .live-indicator { animation: pulse-green 2s infinite; }
+        @keyframes pulse-green { 0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4); } 70% { box-shadow: 0 0 0 6px rgba(34, 197, 94, 0); } 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); } }
     </style>
 </head>
 <body class="flex flex-col h-screen">
 
-    <!-- LOGIN SCREEN -->
+    <!-- LOGIN -->
     <div id="login-screen" class="fixed inset-0 z-50 flex items-center justify-center bg-[#020617] p-4">
         <div class="glass-card w-full max-w-md p-8 rounded-2xl border-t border-slate-700">
             <div class="text-center mb-8">
                 <div class="w-16 h-16 bg-amber-500/10 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-amber-500/20 shadow-[0_0_30px_rgba(245,158,11,0.2)]">
                     <i data-lucide="zap" class="text-amber-500 w-8 h-8"></i>
                 </div>
-                <h1 class="text-2xl font-bold text-white tracking-tight">MAROMBIEW BOT</h1>
-                <p class="text-slate-500 text-sm mt-1">Painel de Controle</p>
+                <h1 class="text-2xl font-bold text-white">Marombiew Bot</h1>
             </div>
-            
             <form id="login-form" class="space-y-4">
-                <div>
-                    <label class="block text-xs font-medium text-slate-400 mb-1">Email</label>
-                    <div class="relative">
-                        <input type="email" id="email" class="w-full bg-slate-900/50 border border-slate-700 text-white text-sm rounded-xl pl-10 pr-4 py-3 focus:outline-none focus:border-amber-500 transition-colors" placeholder="admin@exemplo.com" required>
-                        <div class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500"><i data-lucide="mail" class="w-4 h-4"></i></div>
-                    </div>
-                </div>
-                <div>
-                    <label class="block text-xs font-medium text-slate-400 mb-1">Senha</label>
-                    <div class="relative">
-                        <input type="password" id="password" class="w-full bg-slate-900/50 border border-slate-700 text-white text-sm rounded-xl pl-10 pr-4 py-3 focus:outline-none focus:border-amber-500 transition-colors" placeholder="••••••••" required>
-                        <div class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500"><i data-lucide="lock" class="w-4 h-4"></i></div>
-                    </div>
-                </div>
-                <button type="submit" id="login-btn" class="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-amber-900/20 transition-all active:scale-95 flex justify-center items-center gap-2">
-                    <span>Entrar</span><i data-lucide="arrow-right" class="w-4 h-4"></i>
-                </button>
+                <input type="email" id="email" class="w-full bg-slate-900/50 border border-slate-700 text-white text-sm rounded-xl pl-4 py-3" placeholder="Email" required>
+                <input type="password" id="password" class="w-full bg-slate-900/50 border border-slate-700 text-white text-sm rounded-xl pl-4 py-3" placeholder="Senha" required>
+                <button type="submit" id="login-btn" class="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-3.5 rounded-xl transition-all">Entrar</button>
                 <div id="login-error" class="text-red-400 text-xs text-center hidden"></div>
             </form>
         </div>
     </div>
 
-    <!-- MAIN APP -->
+    <!-- APP -->
     <div id="app" class="flex-1 flex flex-col md:flex-row overflow-hidden hidden opacity-0 transition-opacity duration-500">
-        <!-- SIDEBAR (Desktop) -->
         <aside class="hidden md:flex flex-col w-64 glass-card border-r border-slate-800 z-20">
             <div class="h-20 flex items-center px-6 border-b border-slate-800/50">
-                <i data-lucide="zap" class="text-amber-500 w-6 h-6 mr-3"></i>
-                <span class="font-bold text-lg tracking-wider text-white">MAROMBIEW</span>
+                <i data-lucide="zap" class="text-amber-500 w-6 h-6 mr-3"></i><span class="font-bold text-lg text-white">MAROMBIEW</span>
             </div>
             <nav class="flex-1 p-4 space-y-2">
-                <button onclick="router.navigate('home')" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800/50 hover:text-white transition-all" data-target="home"><i data-lucide="layout-dashboard" class="w-5 h-5"></i> <span class="text-sm font-medium">Dashboard</span></button>
-                <button onclick="router.navigate('strategies')" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800/50 hover:text-white transition-all" data-target="strategies"><i data-lucide="layers" class="w-5 h-5"></i> <span class="text-sm font-medium">Estratégias</span></button>
-                <button onclick="router.navigate('settings')" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800/50 hover:text-white transition-all" data-target="settings"><i data-lucide="settings" class="w-5 h-5"></i> <span class="text-sm font-medium">Configurações</span></button>
-                <button onclick="router.navigate('logs')" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800/50 hover:text-white transition-all" data-target="logs"><i data-lucide="terminal" class="w-5 h-5"></i> <span class="text-sm font-medium">Terminal</span></button>
+                <button onclick="router.navigate('home')" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800/50 hover:text-white" data-target="home"><i data-lucide="layout-dashboard" class="w-5 h-5"></i> Dashboard</button>
+                <button onclick="router.navigate('logs')" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800/50 hover:text-white" data-target="logs"><i data-lucide="terminal" class="w-5 h-5"></i> Terminal</button>
             </nav>
-            <div class="p-4 border-t border-slate-800/50">
-                <button id="pwa-install-btn-desktop" class="hidden w-full mb-2 flex items-center gap-3 px-4 py-3 text-sm text-green-400 hover:bg-green-500/10 rounded-xl transition-colors"><i data-lucide="download" class="w-5 h-5"></i> Instalar App</button>
-                <button id="logout-btn" class="flex items-center gap-3 px-4 py-3 text-sm text-red-400 hover:bg-red-500/10 rounded-xl w-full transition-colors"><i data-lucide="log-out" class="w-5 h-5"></i> Sair</button>
-            </div>
+            <div class="p-4 border-t border-slate-800/50"><button id="logout-btn" class="flex items-center gap-3 px-4 py-3 text-sm text-red-400 hover:bg-red-500/10 rounded-xl w-full"><i data-lucide="log-out" class="w-5 h-5"></i> Sair</button></div>
         </aside>
 
-        <!-- CONTENT AREA -->
-        <main class="flex-1 overflow-y-auto p-4 md:p-8 scroll-smooth pb-24 md:pb-8 relative">
-            <div id="connection-warning" class="hidden mb-4 bg-red-500/10 border border-red-500/20 text-red-400 p-3 rounded-xl flex items-center gap-2 text-sm animate-pulse">
-                <i data-lucide="wifi-off" class="w-4 h-4"></i>
-                <span>Bot Offline: Sem sinal há mais de 3 minutos. Verifique o script Python.</span>
-            </div>
+        <main class="flex-1 overflow-y-auto p-4 md:p-8 scroll-smooth pb-24 md:pb-8">
+            <div id="connection-warning" class="hidden mb-4 bg-red-500/10 border border-red-500/20 text-red-400 p-3 rounded-xl flex items-center gap-2 text-sm animate-pulse"><i data-lucide="wifi-off" class="w-4 h-4"></i> Bot Offline: Sem sinal há mais de 3 minutos.</div>
 
-            <!-- VIEW: HOME -->
+            <!-- HOME -->
             <div id="view-home" class="view-section space-y-6 max-w-5xl mx-auto">
                 <div class="flex justify-between items-end">
                     <div>
                         <h1 class="text-2xl font-bold text-white">Dashboard</h1>
-                        <div class="flex items-center gap-2 mt-1">
-                            <span class="text-slate-500 text-xs">Status do Bot:</span>
-                            <span id="bot-status-indicator" class="text-xs font-bold flex items-center gap-1">
-                                <span class="w-2 h-2 rounded-full bg-slate-500"></span> A CARREGAR...
-                            </span>
-                        </div>
+                        <div class="flex items-center gap-2 mt-1"><span class="text-slate-500 text-xs">Status:</span><span id="bot-status-indicator" class="text-xs font-bold text-slate-500">CARREGANDO...</span></div>
                     </div>
                     <div class="flex gap-2">
-                        <button id="restart-bot-btn" class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-bold shadow-lg transition-all bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20" title="Reiniciar Conexão">
-                            <i data-lucide="power" class="w-4 h-4"></i>
-                        </button>
-                        <button id="toggle-bot-btn" class="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold shadow-lg transition-all bg-slate-700 text-white">
-                            <i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> A carregar...
-                        </button>
+                        <button id="restart-bot-btn" class="p-2 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20"><i data-lucide="power" class="w-4 h-4"></i></button>
+                        <button id="toggle-bot-btn" class="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold bg-slate-700 text-white"><i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> ...</button>
                     </div>
                 </div>
 
-                <!-- Scanner Widget -->
                 <div class="glass-card rounded-xl p-6 relative overflow-hidden group">
                     <div id="scanner-line" class="scan-line hidden"></div>
                     <div class="relative z-10 flex justify-between items-start">
                         <div>
-                            <div class="flex items-center gap-2 mb-2">
-                                <div id="scanner-led" class="w-2 h-2 rounded-full bg-red-500"></div>
-                                <span id="scanner-status-text" class="text-[10px] font-bold tracking-widest text-slate-400 uppercase">OFFLINE</span>
-                            </div>
-                            <div id="scanner-pair" class="text-3xl font-black text-white tracking-tight transition-all duration-300">---</div>
-                            <div class="flex items-center gap-3 mt-2">
-                                <span class="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-xs text-slate-400 font-mono">
-                                    RSI: <span id="scanner-rsi" class="text-slate-300">--</span>
-                                </span>
-                                <span class="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-xs text-slate-400 font-mono">M5</span>
-                            </div>
+                            <div class="flex items-center gap-2 mb-2"><div id="scanner-led" class="w-2 h-2 rounded-full bg-red-500"></div><span id="scanner-status-text" class="text-[10px] font-bold text-slate-400">OFFLINE</span></div>
+                            <div id="scanner-pair" class="text-3xl font-black text-white">---</div>
                         </div>
-                        <div class="text-right">
-                            <p class="text-[10px] text-slate-500 uppercase font-bold mb-1">PREÇO ATUAL</p>
-                            <p id="scanner-price" class="text-2xl font-mono text-slate-200">0.00000</p>
-                        </div>
+                        <div class="text-right"><p class="text-[10px] text-slate-500 font-bold mb-1">PREÇO</p><p id="scanner-price" class="text-2xl font-mono text-slate-200">0.00000</p></div>
                     </div>
                 </div>
 
-                <!-- Stats Cards -->
                 <div class="grid grid-cols-2 gap-4">
-                    <div class="glass-card p-5 rounded-xl relative overflow-hidden">
-                        <div class="absolute -right-4 -top-4 text-slate-800 opacity-50"><i data-lucide="wallet" class="w-20 h-20"></i></div>
-                        <p class="text-xs text-slate-500 font-bold uppercase tracking-wider mb-1">Saldo Atual</p>
-                        <p id="stat-balance" class="text-2xl font-bold text-white">$0.00</p>
-                    </div>
-                    <div class="glass-card p-5 rounded-xl relative overflow-hidden">
-                        <div class="absolute -right-4 -top-4 text-slate-800 opacity-50"><i data-lucide="activity" class="w-20 h-20"></i></div>
-                        <p class="text-xs text-slate-500 font-bold uppercase tracking-wider mb-1">Resultado (Dia)</p>
-                        <div class="flex items-center gap-1">
-                            <p id="stat-profit" class="text-2xl font-bold text-slate-200">$0.00</p>
-                        </div>
-                    </div>
+                    <div class="glass-card p-5 rounded-xl"><p class="text-xs text-slate-500 font-bold mb-1">SALDO</p><p id="stat-balance" class="text-2xl font-bold text-white">$0.00</p></div>
+                    <div class="glass-card p-5 rounded-xl"><p class="text-xs text-slate-500 font-bold mb-1">LUCRO (DIA)</p><p id="stat-profit" class="text-2xl font-bold text-slate-200">$0.00</p></div>
                 </div>
 
-                <!-- Scoreboard -->
                 <div class="glass-card p-4 rounded-xl border-t-4 border-amber-500">
                     <div class="flex divide-x divide-slate-700">
-                        <div class="flex-1 px-2 text-center">
-                            <p class="text-[10px] text-green-500 font-bold mb-1">WINS</p>
-                            <span id="score-wins" class="text-2xl font-bold text-white">0</span>
-                        </div>
-                        <div class="flex-1 px-2 text-center">
-                            <p class="text-[10px] text-red-500 font-bold mb-1">LOSS</p>
-                            <span id="score-losses" class="text-2xl font-bold text-white">0</span>
-                        </div>
-                        <div class="flex-1 px-2 text-center">
-                            <p class="text-[10px] text-blue-400 font-bold mb-1">ASSERT.</p>
-                            <span id="score-rate" class="text-2xl font-bold text-white">0%</span>
-                        </div>
+                        <div class="flex-1 px-2 text-center"><p class="text-[10px] text-green-500 font-bold mb-1">WINS</p><span id="score-wins" class="text-2xl font-bold text-white">0</span></div>
+                        <div class="flex-1 px-2 text-center"><p class="text-[10px] text-red-500 font-bold mb-1">LOSS</p><span id="score-losses" class="text-2xl font-bold text-white">0</span></div>
+                        <div class="flex-1 px-2 text-center"><p class="text-[10px] text-blue-400 font-bold mb-1">ASSERT.</p><span id="score-rate" class="text-2xl font-bold text-white">0%</span></div>
                     </div>
                 </div>
 
-                <!-- Signals List -->
                 <div>
                     <div class="flex justify-between items-center mb-3">
-                        <h3 class="text-sm font-bold text-slate-400 uppercase tracking-wide flex items-center gap-2">
-                            <i data-lucide="history" class="w-4 h-4"></i> Histórico Recente
-                        </h3>
-                        <div class="flex gap-2">
-                            <button onclick="fetchData()" class="p-1.5 text-slate-500 hover:text-white rounded-lg hover:bg-slate-800 transition-colors" title="Atualizar">
-                                <i data-lucide="refresh-cw" class="w-4 h-4"></i>
-                            </button>
-                            <button id="clear-history-btn" class="p-1.5 text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-lg transition-colors border border-red-500/20" title="Limpar Histórico e Resetar Dia">
-                                <i data-lucide="trash-2" class="w-4 h-4"></i>
-                            </button>
-                        </div>
+                        <h3 class="text-sm font-bold text-slate-400 flex items-center gap-2"><i data-lucide="history" class="w-4 h-4"></i> Histórico</h3>
+                        <button id="clear-history-btn" class="p-1.5 text-red-400 hover:bg-red-500/10 rounded-lg"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
                     </div>
-                    <div id="signals-list" class="space-y-3 pb-8">
-                        <div class="text-center text-slate-600 py-8 text-xs">A carregar sinais...</div>
-                    </div>
+                    <div id="signals-list" class="space-y-3 pb-8"><div class="text-center text-slate-600 text-xs">A carregar...</div></div>
                 </div>
             </div>
 
-            <!-- VIEW: STRATEGIES -->
-            <div id="view-strategies" class="view-section hidden space-y-6 max-w-3xl mx-auto">
-                <h1 class="text-2xl font-bold text-white">Catalogador</h1>
-                <div class="glass-card p-6 rounded-xl">
-                    <div class="flex justify-between items-center mb-6">
-                        <h2 class="text-sm font-bold text-slate-300">Filtro de Assertividade</h2>
-                        <span id="filter-value-display" class="text-amber-400 font-bold text-2xl">80%</span>
-                    </div>
-                    <input type="range" id="filter-slider" class="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-amber-500" min="50" max="99" value="80">
-                    <p class="text-xs text-slate-500 mt-2">O bot só operará ativos acima desta percentagem.</p>
-                </div>
-                <div id="catalog-list" class="space-y-3">
-                    <div class="text-center text-slate-500 py-10">Sem dados catalogados.</div>
-                </div>
-            </div>
-
-            <!-- VIEW: SETTINGS -->
+            <!-- SETTINGS -->
             <div id="view-settings" class="view-section hidden space-y-6 max-w-3xl mx-auto">
                 <h1 class="text-2xl font-bold text-white">Configurações</h1>
                 <form id="settings-form" class="space-y-6">
                     <div class="glass-card p-6 rounded-xl space-y-6">
-                        <div>
-                            <h3 class="text-sm font-bold text-amber-500 uppercase tracking-wide mb-4 flex items-center gap-2">
-                                <i data-lucide="lock" class="w-4 h-4"></i> Risco
-                            </h3>
-                            <div class="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label class="text-xs text-slate-400 block mb-1">Stop Win ($)</label>
-                                    <input type="number" id="conf-stop-win" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-green-400 font-bold outline-none focus:border-green-500">
-                                </div>
-                                <div>
-                                    <label class="text-xs text-slate-400 block mb-1">Stop Loss ($)</label>
-                                    <input type="number" id="conf-stop-loss" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-red-400 font-bold outline-none focus:border-red-500">
-                                </div>
-                            </div>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div><label class="text-xs text-slate-400 block mb-1">Stop Win</label><input type="number" id="conf-stop-win" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white outline-none"></div>
+                            <div><label class="text-xs text-slate-400 block mb-1">Stop Loss</label><input type="number" id="conf-stop-loss" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white outline-none"></div>
                         </div>
-                        <div class="border-t border-slate-700/50 pt-4">
-                            <h3 class="text-sm font-bold text-amber-500 uppercase tracking-wide mb-4 flex items-center gap-2">
-                                <i data-lucide="wallet" class="w-4 h-4"></i> Operacional
-                            </h3>
-                            <div class="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label class="text-xs text-slate-400 block mb-1">Entrada ($)</label>
-                                    <input type="number" id="conf-entry" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white font-bold outline-none focus:border-amber-500">
-                                </div>
-                                <div>
-                                    <label class="text-xs text-slate-400 block mb-1">Conta</label>
-                                    <select id="conf-account" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white outline-none">
-                                        <option value="PRACTICE">DEMO</option>
-                                        <option value="REAL">REAL</option>
-                                    </select>
-                                </div>
-                            </div>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div><label class="text-xs text-slate-400 block mb-1">Entrada</label><input type="number" id="conf-entry" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white outline-none"></div>
+                            <div><label class="text-xs text-slate-400 block mb-1">Conta</label><select id="conf-account" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white outline-none"><option value="PRACTICE">DEMO</option><option value="REAL">REAL</option></select></div>
                         </div>
                     </div>
-                    <button type="submit" class="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-4 rounded-xl shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2 transition-all active:scale-95">
-                        <i data-lucide="save" class="w-5 h-5"></i> Salvar Alterações
-                    </button>
+                    <button type="submit" class="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-4 rounded-xl">Salvar</button>
                 </form>
             </div>
 
-            <!-- VIEW: LOGS -->
+            <!-- LOGS -->
             <div id="view-logs" class="view-section hidden h-full flex flex-col">
                 <h1 class="text-2xl font-bold text-white mb-4">Terminal</h1>
-                <div id="terminal-output" class="flex-1 glass-card rounded-xl p-4 overflow-y-auto font-mono text-xs space-y-2 border border-slate-700 bg-black/60 shadow-inner h-[500px]">
-                    <div class="text-slate-500 mb-2 border-b border-slate-800 pb-2">Marombiew Bot Terminal v1.0 <br> Connected...</div>
-                </div>
+                <div id="terminal-output" class="flex-1 glass-card rounded-xl p-4 overflow-y-auto font-mono text-xs space-y-2 bg-black/60 h-[500px]"></div>
             </div>
         </main>
 
-        <!-- MOBILE NAV -->
         <nav class="md:hidden fixed bottom-0 left-0 right-0 bg-[#0f172a]/95 backdrop-blur-xl border-t border-slate-800 flex justify-around px-2 pb-safe z-40 h-16 items-center">
-            <button onclick="router.navigate('home')" class="flex flex-col items-center p-2 text-slate-500 active-nav" data-target="home">
-                <i data-lucide="layout-dashboard" class="w-5 h-5"></i><span class="text-[10px] mt-1">Dash</span>
-            </button>
-            <button onclick="router.navigate('strategies')" class="flex flex-col items-center p-2 text-slate-500" data-target="strategies">
-                <i data-lucide="layers" class="w-5 h-5"></i><span class="text-[10px] mt-1">Estrat.</span>
-            </button>
-            <div class="relative -top-6">
-                <button onclick="router.navigate('settings')" class="w-14 h-14 rounded-full flex items-center justify-center shadow-lg border-4 border-[#020617] bg-slate-700 text-slate-300 active-nav-btn" data-target="settings">
-                    <i data-lucide="settings" class="w-6 h-6"></i>
-                </button>
-            </div>
-            <button onclick="router.navigate('logs')" class="flex flex-col items-center p-2 text-slate-500" data-target="logs">
-                <i data-lucide="terminal" class="w-5 h-5"></i><span class="text-[10px] mt-1">Logs</span>
-            </button>
-            <button id="pwa-install-btn-mobile" class="flex flex-col items-center p-2 text-green-500 hidden">
-                <i data-lucide="download" class="w-5 h-5"></i><span class="text-[10px] mt-1">App</span>
-            </button>
+            <button onclick="router.navigate('home')" class="flex flex-col items-center p-2 text-slate-500 active-nav"><i data-lucide="layout-dashboard" class="w-5 h-5"></i></button>
+            <button onclick="router.navigate('settings')" class="flex flex-col items-center p-2 text-slate-500"><i data-lucide="settings" class="w-5 h-5"></i></button>
+            <button onclick="router.navigate('logs')" class="flex flex-col items-center p-2 text-slate-500"><i data-lucide="terminal" class="w-5 h-5"></i></button>
         </nav>
     </div>
 
-    <!-- LOGIC -->
     <script>
-        // CONFIGURAÇÃO SUPABASE
         const SUPABASE_URL = 'https://ioduahwknfsktujthfyc.supabase.co';
         const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlvZHVhaHdrbmZza3R1anRoZnljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEzMDc0NDcsImV4cCI6MjA2Njg4MzQ0N30.96f8wZO6SvABKFMWjIiw1pSugAB4Isldj7yxLcLJRSE';
         const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-
         const state = { user: null, config: {}, lastLogTime: null };
-
-        // --- ICONS ---
         lucide.createIcons();
 
-        // --- PWA INSTALL LOGIC ---
-        let deferredPrompt;
-        window.addEventListener('beforeinstallprompt', (e) => {
-            e.preventDefault();
-            deferredPrompt = e;
-            document.getElementById('pwa-install-btn-desktop').classList.remove('hidden');
-            document.getElementById('pwa-install-btn-mobile').classList.remove('hidden');
-        });
-
-        async function installPWA() {
-            if (!deferredPrompt) return;
-            deferredPrompt.prompt();
-            const { outcome } = await deferredPrompt.userChoice;
-            deferredPrompt = null;
-            if(outcome === 'accepted') {
-                document.getElementById('pwa-install-btn-desktop').classList.add('hidden');
-                document.getElementById('pwa-install-btn-mobile').classList.add('hidden');
-            }
-        }
-        document.getElementById('pwa-install-btn-desktop').addEventListener('click', installPWA);
-        document.getElementById('pwa-install-btn-mobile').addEventListener('click', installPWA);
-
-        // --- SERVICE WORKER REGISTER ---
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('./sw.js').then(() => console.log("SW Registered")).catch(err => console.log("SW Fail", err));
-        }
-
-        // --- ROUTER ---
         const router = {
             navigate: (target) => {
                 document.querySelectorAll('.view-section').forEach(el => el.classList.add('hidden'));
                 document.getElementById(`view-${target}`).classList.remove('hidden');
-                
-                document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('text-white', 'bg-slate-800/50'));
-                document.querySelectorAll(`[data-target="${target}"]`).forEach(el => {
-                    if(el.classList.contains('nav-item')) el.classList.add('text-white', 'bg-slate-800/50');
-                    if(el.classList.contains('flex-col')) { // Mobile
-                        document.querySelectorAll('.md\\:hidden button').forEach(b => b.classList.remove('text-amber-400'));
-                        el.classList.add('text-amber-400');
-                    }
-                });
                 if(target === 'logs') scrollToBottom();
             }
         };
 
-        // --- AUTH ---
         async function checkSession() {
             const { data: { session } } = await supabase.auth.getSession();
             if (session) { state.user = session.user; showApp(); startDataLoop(); }
@@ -379,18 +176,10 @@
 
         document.getElementById('login-form').addEventListener('submit', async (e) => {
             e.preventDefault();
-            const email = document.getElementById('email').value;
-            const password = document.getElementById('password').value;
-            const btn = document.getElementById('login-btn');
-            btn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> A entrar...';
-            lucide.createIcons();
-            
-            const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+            const { data, error } = await supabase.auth.signInWithPassword({ email: document.getElementById('email').value, password: document.getElementById('password').value });
             if (error) {
                 document.getElementById('login-error').textContent = error.message;
                 document.getElementById('login-error').classList.remove('hidden');
-                btn.innerHTML = '<span>Entrar</span><i data-lucide="arrow-right" class="w-4 h-4"></i>';
-                lucide.createIcons();
             } else {
                 state.user = data.user;
                 showApp();
@@ -398,122 +187,54 @@
             }
         });
 
-        document.getElementById('logout-btn').addEventListener('click', signOut);
+        document.getElementById('logout-btn').addEventListener('click', async () => { await supabase.auth.signOut(); window.location.reload(); });
 
-        async function signOut() {
-            await supabase.auth.signOut();
-            window.location.reload();
-        }
-
-        // --- CLEAR HISTORY (UPDATED TO RESET DAILY PROFIT) ---
         document.getElementById('clear-history-btn').addEventListener('click', async () => {
-            if(!confirm("Tem a certeza que deseja limpar todo o histórico de sinais e reiniciar o resultado do dia?")) return;
-            
-            const btn = document.getElementById('clear-history-btn');
-            btn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i>';
-            lucide.createIcons();
-
+            if(!confirm("Limpar histórico?")) return;
             try {
-                // 1. Apagar sinais
-                const { error: delError } = await supabase.from('trade_signals').delete().gt('id', 0);
-                if (delError) throw delError;
-
-                // 2. Resetar "Resultado do Dia" (Igualando Saldo Inicial ao Atual)
+                await supabase.from('trade_signals').delete().gt('id', 0);
                 const currentBal = state.config.current_balance || 0;
-                const { error: updateError } = await supabase.from('bot_config').update({ 
-                    daily_initial_balance: currentBal 
-                }).eq('id', 1);
-                
-                if (updateError) throw updateError;
-                
-                // 3. Limpar UI
-                document.getElementById('signals-list').innerHTML = '<div class="text-center text-slate-600 py-8 text-xs">Histórico limpo.</div>';
+                await supabase.from('bot_config').update({ daily_initial_balance: currentBal }).eq('id', 1);
+                document.getElementById('signals-list').innerHTML = '<div class="text-center text-slate-600 py-8 text-xs">Limpo.</div>';
                 updateStats([]);
-                
-                // 4. Reset Visual Imediato do Lucro
-                const profitEl = document.getElementById('stat-profit');
-                profitEl.textContent = '$0.00';
-                profitEl.className = 'text-2xl font-bold text-slate-200';
-                state.config.daily_initial_balance = currentBal; // Update local state
-
-                alert("Histórico e resultado do dia reiniciados.");
-            } catch (err) {
-                alert("Erro ao limpar: " + err.message);
-            } finally {
-                btn.innerHTML = '<i data-lucide="trash-2" class="w-4 h-4"></i>';
-                lucide.createIcons();
-            }
+                state.config.daily_initial_balance = currentBal;
+                updateConfigUI(state.config);
+            } catch (err) { alert(err.message); }
         });
 
-        // --- RESTART BOT ACTION ---
+        document.getElementById('toggle-bot-btn').addEventListener('click', async () => {
+            const newStatus = state.config.status === 'RUNNING' ? 'PAUSED' : 'RUNNING';
+            await supabase.from('bot_config').update({ status: newStatus }).eq('id', 1);
+        });
+
         document.getElementById('restart-bot-btn').addEventListener('click', async () => {
-            if(!confirm("Deseja forçar o reinício da conexão do Bot?")) return;
-            
-            const btn = document.getElementById('restart-bot-btn');
-            btn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i>';
-            lucide.createIcons();
-
-            try {
-                // Set status to RESTARTING
-                await supabase.from('bot_config').update({ status: 'RESTARTING' }).eq('id', 1);
-            } catch(e) {
-                alert("Erro ao enviar comando.");
-            } finally {
-                setTimeout(() => {
-                    btn.innerHTML = '<i data-lucide="power" class="w-4 h-4"></i>';
-                    lucide.createIcons();
-                }, 2000);
-            }
+            if(confirm("Reiniciar conexão?")) await supabase.from('bot_config').update({ status: 'RESTARTING' }).eq('id', 1);
         });
 
-        // --- DATA LOOP (HYBRID REALTIME + POLLING) ---
         function startDataLoop() {
             fetchData();
-            
-            supabase.channel('dashboard_updates')
-                .on('postgres_changes', { event: '*', schema: 'public', table: 'bot_config' }, payload => updateConfigUI(payload.new))
-                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'trade_signals' }, payload => {
-                    const list = document.getElementById('signals-list');
-                    if(list.textContent.includes('A carregar') || list.textContent.includes('Sem dados') || list.textContent.includes('Histórico limpo')) list.innerHTML = '';
-                    
-                    const el = createSignalElement(payload.new);
-                    list.insertBefore(el, list.firstChild);
-                    
-                    if(list.children.length > 50) list.lastChild.remove();
-                    refreshStats(); 
-                })
-                .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'trade_signals' }, payload => {
-                    const existingEl = document.getElementById(`signal-${payload.new.id}`);
-                    if (existingEl) {
-                        const newEl = createSignalElement(payload.new);
-                        existingEl.replaceWith(newEl);
-                    }
-                    refreshStats();
-                })
-                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'logs' }, payload => {
-                    appendLog(payload.new);
-                    processScannerLog(payload.new);
-                })
+            supabase.channel('dash').on('postgres_changes', { event: '*', schema: 'public', table: 'bot_config' }, p => updateConfigUI(p.new))
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'trade_signals' }, () => fetchData())
+                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'logs' }, p => { appendLog(p.new); processScannerLog(p.new); })
                 .subscribe();
-
             setInterval(fetchData, 3000);
             setInterval(updateBotStatus, 5000);
         }
 
         async function fetchData() {
-            // Config
             let { data: config } = await supabase.from('bot_config').select('*').eq('id', 1).single();
-            if (!config) {
-                await supabase.from('bot_config').insert({ id: 1, status: 'PAUSED', stop_win: 500, stop_loss: 200, entry_value: 10, account_type: 'PRACTICE' });
-                config = { id: 1, status: 'PAUSED', stop_win: 500, stop_loss: 200, entry_value: 10, account_type: 'PRACTICE' };
-            }
+            if (!config) config = { id: 1, status: 'PAUSED', stop_win: 500, stop_loss: 200, entry_value: 10, account_type: 'PRACTICE' };
             updateConfigUI(config);
 
-            // Signals - Polling to catch status updates missed by realtime
             const { data: signals } = await supabase.from('trade_signals').select('*').order('created_at', { ascending: false }).limit(50);
-            if(signals) syncSignalsList(signals);
+            if(signals) {
+                const list = document.getElementById('signals-list');
+                list.innerHTML = '';
+                if (signals.length === 0) list.innerHTML = '<div class="text-center text-slate-600 py-8 text-xs">Sem dados.</div>';
+                else signals.forEach(s => list.appendChild(createSignalElement(s)));
+                updateStats(signals);
+            }
 
-            // Logs
             const { data: logs } = await supabase.from('logs').select('*').order('created_at', { ascending: false }).limit(1);
             if(logs && logs.length > 0) {
                 processScannerLog(logs[0]);
@@ -521,100 +242,143 @@
             }
         }
 
-        function syncSignalsList(signals) {
-            const list = document.getElementById('signals-list');
-            if (signals.length === 0 && !list.innerHTML.includes('Histórico limpo')) {
-                list.innerHTML = '<div class="text-center text-slate-600 py-8 text-xs">Sem dados.</div>';
-                updateStats([]);
-                return;
-            }
-            
-            // Intelligent update: only replace if status changed or new item
-            signals.forEach(s => {
-                const existing = document.getElementById(`signal-${s.id}`);
-                if (!existing) {
-                    // New item found via polling
-                    const el = createSignalElement(s);
-                    // Insert keeping sort (assuming API returns sorted DESC)
-                    // Simple approach: prepend if list isn't empty, otherwise set
-                    if(list.firstChild && !list.innerHTML.includes('Sem dados')) {
-                        // Check if it's actually newer than first child (simple check)
-                        // If we assume signals array is DESC, first element is newest.
-                        // We will just prepend to be safe if list has items.
-                        list.insertBefore(el, list.firstChild); 
-                    } else {
-                        list.appendChild(el);
-                    }
-                } else {
-                    // Check if status changed
-                    const currentStatus = existing.getAttribute('data-status');
-                    if (currentStatus !== s.result) {
-                        const newEl = createSignalElement(s);
-                        existing.replaceWith(newEl);
-                    }
-                }
-            });
-            
-            // If list empty but signals exist (first load)
-            if (list.childElementCount === 0 && signals.length > 0) {
-                 renderSignals(signals);
-            }
-            
-            updateStats(signals);
-        }
-
         function updateStats(signals) {
-            if(!signals) return;
             let wins = 0, losses = 0;
             signals.forEach(s => {
-                const res = (s.result || '').trim().toUpperCase();
-                if (['WIN', 'VICTORY', 'SUCESSO'].includes(res)) wins++;
-                if (['LOSS', 'LOSE', 'DERROTA'].includes(res)) losses++;
+                const profit = Number(s.profit);
+                const status = (s.result || '').toUpperCase();
+                
+                // --- LÓGICA DE DETEÇÃO FINANCEIRA ---
+                if (profit > 0) wins++;
+                else if (profit < 0) losses++;
+                else if (status === 'WIN') wins++; // Fallback se profit for 0
+                else if (status === 'LOSS') losses++;
             });
             document.getElementById('score-wins').textContent = wins;
             document.getElementById('score-losses').textContent = losses;
             const total = wins + losses;
-            const rate = total > 0 ? Math.round((wins/total)*100) + '%' : '0%';
-            document.getElementById('score-rate').textContent = rate;
+            document.getElementById('score-rate').textContent = total > 0 ? Math.round((wins/total)*100) + '%' : '0%';
         }
 
-        // --- UI UPDATERS ---
         function updateConfigUI(config) {
             state.config = config;
-            
             const btn = document.getElementById('toggle-bot-btn');
-            const status = config.status || 'PAUSED';
-            const isRestarting = status === 'RESTARTING';
-            const isRunning = status === 'RUNNING';
-
+            const isRunning = config.status === 'RUNNING';
+            const isRestarting = config.status === 'RESTARTING';
+            
             if (isRestarting) {
-                btn.className = `flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold shadow-lg transition-all bg-amber-500/10 text-amber-400 border border-amber-500/20 cursor-wait`;
-                btn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> A REINICIAR...';
+                btn.className = "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20";
+                btn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> ...';
             } else {
-                btn.className = `flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold shadow-lg transition-all ${isRunning ? 'bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20' : 'bg-green-500 text-white hover:bg-green-400'}`;
+                btn.className = `flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold shadow-lg transition-all ${isRunning ? 'bg-red-500/10 text-red-400 border border-red-500/20' : 'bg-green-500 text-white'}`;
                 btn.innerHTML = isRunning ? '<i data-lucide="pause" class="w-4 h-4"></i> PAUSAR' : '<i data-lucide="play" class="w-4 h-4"></i> INICIAR';
             }
             lucide.createIcons();
-
+            
             if(document.activeElement.tagName !== 'INPUT') {
                 document.getElementById('conf-stop-win').value = config.stop_win;
                 document.getElementById('conf-stop-loss').value = config.stop_loss;
                 document.getElementById('conf-entry').value = config.entry_value;
                 document.getElementById('conf-account').value = config.account_type;
             }
-            
+
             document.getElementById('stat-balance').textContent = `$${(config.current_balance || 0).toFixed(2)}`;
             const profit = (config.current_balance || 0) - (config.daily_initial_balance || 0);
             const profitEl = document.getElementById('stat-profit');
-            const sign = profit >= 0 ? '+' : '';
-            profitEl.textContent = `${sign}$${profit.toFixed(2)}`;
+            profitEl.textContent = `${profit >= 0 ? '+' : ''}$${profit.toFixed(2)}`;
             profitEl.className = `text-2xl font-bold ${profit >= 0 ? 'text-green-400' : 'text-red-400'}`;
         }
 
-        document.getElementById('toggle-bot-btn').addEventListener('click', async () => {
-            const newStatus = state.config.status === 'RUNNING' ? 'PAUSED' : 'RUNNING';
-            await supabase.from('bot_config').update({ status: newStatus }).eq('id', 1);
-        });
+        function createSignalElement(s) {
+            const el = document.createElement('div');
+            el.className = `glass-card p-4 rounded-xl flex items-center justify-between border-l-4 ${s.direction === 'call' ? 'border-green-500' : 'border-red-500'}`;
+            
+            // Lógica Financeira para Status
+            let profit = Number(s.profit);
+            let statusBadge = '<span class="text-amber-400 text-xs font-bold animate-pulse flex items-center gap-1"><i data-lucide="loader" class="w-3 h-3 animate-spin"></i> Pendente</span>';
+            let profitDisplay = '';
+
+            // Se profit existe e não é nulo (mesmo que seja 0, se o status for final)
+            const isFinished = s.result && s.result !== 'PENDING';
+            
+            if (isFinished || profit !== 0) {
+                if (profit > 0 || s.result === 'WIN') {
+                    statusBadge = '<span class="text-green-400 font-bold text-sm flex items-center gap-1"><i data-lucide="check" class="w-4 h-4"></i> WIN</span>';
+                    profitDisplay = `<span class="block text-xs font-bold text-green-400 mt-1">+$${Math.abs(profit).toFixed(2)}</span>`;
+                } else {
+                    statusBadge = '<span class="text-red-400 font-bold text-sm flex items-center gap-1"><i data-lucide="x" class="w-4 h-4"></i> LOSS</span>';
+                    profitDisplay = `<span class="block text-xs font-bold text-red-400 mt-1">-$${Math.abs(profit).toFixed(2)}</span>`;
+                }
+            }
+
+            el.innerHTML = `
+                <div class="flex items-center gap-4">
+                    <div class="w-10 h-10 rounded-full flex items-center justify-center ${s.direction === 'call' ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'}"><i data-lucide="${s.direction === 'call' ? 'arrow-up' : 'arrow-down'}" class="w-5 h-5"></i></div>
+                    <div><p class="font-bold text-white text-sm">${s.pair}</p><span class="text-[10px] text-slate-500">${new Date(s.created_at).toLocaleTimeString()}</span></div>
+                </div>
+                <div class="text-right">${statusBadge}${profitDisplay}</div>
+            `;
+            setTimeout(() => lucide.createIcons(), 0);
+            return el;
+        }
+
+        function appendLog(log) {
+            const term = document.getElementById('terminal-output');
+            const line = document.createElement('div');
+            line.className = 'flex gap-2 opacity-80 text-slate-300';
+            line.innerHTML = `<span class="text-slate-600 shrink-0">[${new Date(log.created_at).toLocaleTimeString()}]</span> <span>${log.message}</span>`;
+            term.appendChild(line);
+            scrollToBottom();
+        }
+
+        function scrollToBottom() {
+            const term = document.getElementById('terminal-output');
+            term.scrollTop = term.scrollHeight;
+        }
+
+        function processScannerLog(log) {
+            const msg = log.message || "";
+            let pair = "", price = "---", rsi = "--";
+            if (msg.startsWith('ANALISE_DETALHADA::')) {
+                const parts = msg.split('::');
+                if (parts.length >= 4) { pair = parts[1]; price = parts[2].split(':')[1]; rsi = parts[3].split(':')[1]; }
+            }
+            if (pair) {
+                document.getElementById('scanner-pair').textContent = pair;
+                document.getElementById('scanner-price').textContent = price;
+                document.getElementById('scanner-rsi').textContent = rsi;
+                document.getElementById('scanner-led').className = 'w-2 h-2 rounded-full bg-green-500 animate-pulse';
+                document.getElementById('scanner-status-text').textContent = 'LIVE';
+                document.getElementById('scanner-line').classList.remove('hidden');
+            }
+        }
+
+        function updateBotStatus() {
+            if (!state.lastLogTime) return;
+            const diff = Date.now() - state.lastLogTime.getTime();
+            const ind = document.getElementById('bot-status-indicator');
+            const warn = document.getElementById('connection-warning');
+            const isPaused = state.config.status === 'PAUSED';
+            
+            if (diff < (isPaused ? 86400000 : 180000)) { 
+                ind.innerHTML = '<span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span> ONLINE';
+                ind.className = 'text-xs font-bold flex items-center gap-1 text-green-400';
+                warn.classList.add('hidden');
+            } else {
+                if(!isPaused) {
+                    ind.innerHTML = '<span class="w-2 h-2 rounded-full bg-red-500"></span> OFFLINE';
+                    ind.className = 'text-xs font-bold flex items-center gap-1 text-red-400';
+                    warn.classList.remove('hidden');
+                    document.getElementById('scanner-led').className = 'w-2 h-2 rounded-full bg-red-500';
+                    document.getElementById('scanner-line').classList.add('hidden');
+                    document.getElementById('scanner-status-text').textContent = 'OFFLINE';
+                } else {
+                    ind.innerHTML = '<span class="w-2 h-2 rounded-full bg-amber-500"></span> PAUSADO';
+                    ind.className = 'text-xs font-bold flex items-center gap-1 text-amber-400';
+                    warn.classList.add('hidden');
+                }
+            }
+        }
 
         document.getElementById('settings-form').addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -629,176 +393,8 @@
             btn.innerHTML = 'Salvando...';
             await supabase.from('bot_config').update(updates).eq('id', 1);
             btn.innerHTML = originalText;
-            alert('Salvo!');
+            alert('Configurações salvas!');
         });
-
-        function renderSignals(signals) {
-            const list = document.getElementById('signals-list');
-            list.innerHTML = '';
-            if (signals.length === 0) {
-                list.innerHTML = '<div class="text-center text-slate-600 py-8 text-xs">Sem dados.</div>';
-                return;
-            }
-            signals.forEach(s => {
-                list.appendChild(createSignalElement(s));
-            });
-            updateStats(signals);
-        }
-
-        function createSignalElement(s) {
-            const el = document.createElement('div');
-            el.id = `signal-${s.id}`;
-            el.setAttribute('data-status', s.result); 
-            el.className = `glass-card p-4 rounded-xl flex items-center justify-between border-l-4 ${s.direction === 'call' ? 'border-green-500' : 'border-red-500'}`;
-            
-            // Robust Status Check
-            const status = (s.result || 'PENDING').trim().toUpperCase();
-            
-            let statusBadge;
-            if (['WIN', 'VICTORY', 'SUCESSO'].includes(status)) {
-                statusBadge = '<span class="text-green-400 font-bold text-sm flex items-center gap-1"><i data-lucide="check" class="w-4 h-4"></i> WIN</span>';
-            } else if (['LOSS', 'LOSE', 'DERROTA'].includes(status)) {
-                statusBadge = '<span class="text-red-400 font-bold text-sm flex items-center gap-1"><i data-lucide="x" class="w-4 h-4"></i> LOSS</span>';
-            } else {
-                statusBadge = '<span class="text-amber-400 text-xs font-bold animate-pulse flex items-center gap-1"><i data-lucide="loader" class="w-3 h-3 animate-spin"></i> Pendente</span>';
-            }
-
-            // PROFIT DISPLAY LOGIC (Requires 'profit' column in Supabase)
-            let profitDisplay = '';
-            if (s.profit !== undefined && s.profit !== null && status !== 'PENDING') {
-                const pVal = Number(s.profit);
-                const pClass = pVal >= 0 ? 'text-green-400' : 'text-red-400';
-                const pSign = pVal >= 0 ? '+' : '';
-                profitDisplay = `<span class="block text-xs font-bold ${pClass} mt-1">${pSign}$${pVal.toFixed(2)}</span>`;
-            }
-
-            el.innerHTML = `
-                <div class="flex items-center gap-4">
-                    <div class="w-10 h-10 rounded-full flex items-center justify-center ${s.direction === 'call' ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'}">
-                        <i data-lucide="${s.direction === 'call' ? 'arrow-up' : 'arrow-down'}" class="w-5 h-5"></i>
-                    </div>
-                    <div>
-                        <p class="font-bold text-white text-sm">${s.pair}</p>
-                        <div class="flex items-center gap-2">
-                            <span class="text-[10px] text-slate-500 bg-slate-900 px-1.5 py-0.5 rounded">${new Date(s.created_at).toLocaleTimeString()}</span>
-                            <span class="text-[10px] text-slate-400">${s.strategy}</span>
-                        </div>
-                    </div>
-                </div>
-                <div class="text-right">
-                    ${statusBadge}
-                    ${profitDisplay}
-                    ${s.martingale_level > 0 ? `<span class="block text-[9px] text-orange-400 font-mono mt-0.5">Gale ${s.martingale_level}</span>` : ''}
-                </div>
-            `;
-            setTimeout(() => lucide.createIcons(), 0);
-            return el;
-        }
-
-        function appendLog(log) {
-            const term = document.getElementById('terminal-output');
-            const line = document.createElement('div');
-            line.className = 'flex gap-2 opacity-80 hover:opacity-100 transition-opacity';
-            let color = log.level === 'ERROR' ? 'text-red-400' : log.level === 'SUCCESS' ? 'text-green-400' : log.level === 'WARNING' ? 'text-amber-400' : 'text-slate-300';
-            line.innerHTML = `<span class="text-slate-600 shrink-0">[${new Date(log.created_at).toLocaleTimeString()}]</span> <span class="${color}">${log.message}</span>`;
-            term.appendChild(line);
-            scrollToBottom();
-        }
-
-        function scrollToBottom() {
-            const term = document.getElementById('terminal-output');
-            term.scrollTop = term.scrollHeight;
-        }
-
-        // --- SCANNER UPDATER (Updated Logic) ---
-        function processScannerLog(log) {
-            const msg = log.message || "";
-            let pair = "", price = "---", rsi = "--";
-            let updated = false;
-
-            // Type 1: Detailed Analysis (From Scanner)
-            if (msg.startsWith('ANALISE_DETALHADA::')) {
-                const parts = msg.split('::');
-                if (parts.length >= 4) {
-                    pair = parts[1];
-                    price = parts[2].split(':')[1];
-                    rsi = parts[3].split(':')[1];
-                    updated = true;
-                }
-            } 
-            // Type 2: Signal Detected
-            else if (msg.includes('SINAL DETETADO') || msg.includes('SINAL:')) {
-                const parts = msg.split(': ');
-                if(parts.length > 1) {
-                    const subparts = parts[1].split(' ');
-                    if(subparts.length > 0) { pair = subparts[0]; updated = true; }
-                }
-            }
-            // Type 3: Opening Trade
-            else if (msg.includes('ABRINDO:')) {
-                const parts = msg.split(': ');
-                if(parts.length > 1) {
-                    const subparts = parts[1].split(' | ');
-                    if(subparts.length > 0) { pair = subparts[0]; updated = true; }
-                }
-            }
-
-            if (updated && pair) {
-                document.getElementById('scanner-pair').textContent = pair;
-                if(price !== "---") document.getElementById('scanner-price').textContent = price;
-                if(rsi !== "--") document.getElementById('scanner-rsi').textContent = rsi;
-                
-                document.getElementById('scanner-led').className = 'w-2 h-2 rounded-full bg-green-500 animate-pulse';
-                document.getElementById('scanner-status-text').textContent = 'LIVE';
-                document.getElementById('scanner-line').classList.remove('hidden');
-                
-                // Visual pop
-                const card = document.getElementById('scanner-pair').parentElement.parentElement.parentElement;
-                card.classList.remove('border-slate-700');
-                card.classList.add('border-amber-500');
-                setTimeout(() => {
-                    card.classList.remove('border-amber-500');
-                    card.classList.add('border-slate-700');
-                }, 500);
-            }
-        }
-
-        function updateBotStatus() {
-            if (!state.lastLogTime) return;
-            const diff = Date.now() - state.lastLogTime.getTime();
-            const indicator = document.getElementById('bot-status-indicator');
-            const warning = document.getElementById('connection-warning');
-            
-            // Tolerância aumentada para 3 minutos (180000ms)
-            // Se estiver PAUSED, ignoramos o aviso de offline
-            const isPaused = state.config.status === 'PAUSED';
-            const isRestarting = state.config.status === 'RESTARTING';
-            const threshold = isPaused ? 86400000 : 180000; 
-
-            if (diff < threshold) { 
-                indicator.innerHTML = '<span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span> ONLINE';
-                indicator.className = 'text-xs font-bold flex items-center gap-1 text-green-400';
-                warning.classList.add('hidden');
-            } else {
-                if (!isPaused && !isRestarting) {
-                    indicator.innerHTML = '<span class="w-2 h-2 rounded-full bg-red-500"></span> OFFLINE';
-                    indicator.className = 'text-xs font-bold flex items-center gap-1 text-red-400';
-                    warning.classList.remove('hidden');
-                    
-                    document.getElementById('scanner-led').className = 'w-2 h-2 rounded-full bg-red-500';
-                    document.getElementById('scanner-line').classList.add('hidden');
-                    document.getElementById('scanner-status-text').textContent = 'OFFLINE';
-                } else if (isRestarting) {
-                    indicator.innerHTML = '<span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span> A REINICIAR';
-                    indicator.className = 'text-xs font-bold flex items-center gap-1 text-amber-400';
-                    warning.classList.add('hidden');
-                } else {
-                    indicator.innerHTML = '<span class="w-2 h-2 rounded-full bg-amber-500"></span> PAUSADO';
-                    indicator.className = 'text-xs font-bold flex items-center gap-1 text-amber-400';
-                    warning.classList.add('hidden');
-                }
-            }
-        }
 
         checkSession();
     </script>
