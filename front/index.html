@@ -46,6 +46,10 @@
         /* Utility */
         .hidden { display: none !important; }
         .active-nav { color: var(--gold); }
+        
+        /* Pulse Animation for Live Status */
+        @keyframes pulse-green { 0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4); } 70% { box-shadow: 0 0 0 6px rgba(34, 197, 94, 0); } 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); } }
+        .live-indicator { animation: pulse-green 2s infinite; }
     </style>
 </head>
 <body class="flex flex-col h-screen">
@@ -130,7 +134,7 @@
                     </div>
                 </div>
 
-                <!-- Scanner Widget -->
+                <!-- Scanner Widget (Atualizado) -->
                 <div class="glass-card rounded-xl p-6 relative overflow-hidden group">
                     <div id="scanner-line" class="scan-line hidden"></div>
                     <div class="relative z-10 flex justify-between items-start">
@@ -190,10 +194,20 @@
 
                 <!-- Signals List -->
                 <div>
-                    <h3 class="text-sm font-bold text-slate-400 uppercase tracking-wide mb-3 flex items-center gap-2">
-                        <i data-lucide="history" class="w-4 h-4"></i> Histórico Recente
-                    </h3>
-                    <div id="signals-list" class="space-y-3">
+                    <div class="flex justify-between items-center mb-3">
+                        <h3 class="text-sm font-bold text-slate-400 uppercase tracking-wide flex items-center gap-2">
+                            <i data-lucide="history" class="w-4 h-4"></i> Histórico Recente
+                        </h3>
+                        <div class="flex gap-2">
+                            <button onclick="fetchData()" class="p-1.5 text-slate-500 hover:text-white rounded-lg hover:bg-slate-800 transition-colors" title="Atualizar">
+                                <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+                            </button>
+                            <button id="clear-history-btn" class="p-1.5 text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-lg transition-colors border border-red-500/20" title="Limpar Histórico">
+                                <i data-lucide="trash-2" class="w-4 h-4"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div id="signals-list" class="space-y-3 pb-8">
                         <div class="text-center text-slate-600 py-8 text-xs">A carregar sinais...</div>
                     </div>
                 </div>
@@ -388,19 +402,59 @@
             window.location.reload();
         }
 
+        // --- CLEAR HISTORY ---
+        document.getElementById('clear-history-btn').addEventListener('click', async () => {
+            if(!confirm("Tem a certeza que deseja limpar todo o histórico de sinais?")) return;
+            
+            const btn = document.getElementById('clear-history-btn');
+            btn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i>';
+            lucide.createIcons();
+
+            try {
+                // Delete all rows where ID > 0 (all rows)
+                const { error } = await supabase.from('trade_signals').delete().gt('id', 0);
+                if (error) throw error;
+                
+                // Clear UI
+                document.getElementById('signals-list').innerHTML = '<div class="text-center text-slate-600 py-8 text-xs">Histórico limpo.</div>';
+                updateStats([]);
+                alert("Histórico apagado com sucesso.");
+            } catch (err) {
+                alert("Erro ao limpar: " + err.message);
+            } finally {
+                btn.innerHTML = '<i data-lucide="trash-2" class="w-4 h-4"></i>';
+                lucide.createIcons();
+            }
+        });
+
         // --- DATA LOOP (HYBRID REALTIME + POLLING) ---
         function startDataLoop() {
-            // Initial Fetch
             fetchData();
             
-            // Subscribe Realtime (Updates instantly)
             supabase.channel('dashboard_updates')
                 .on('postgres_changes', { event: '*', schema: 'public', table: 'bot_config' }, payload => updateConfigUI(payload.new))
                 .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'trade_signals' }, payload => {
                     const list = document.getElementById('signals-list');
+                    // Remove "Loading/Empty" message if present
+                    if(list.textContent.includes('A carregar') || list.textContent.includes('Sem dados')) list.innerHTML = '';
+                    
                     const el = createSignalElement(payload.new);
                     list.insertBefore(el, list.firstChild);
-                    updateStats();
+                    
+                    // Keep max 50 items in DOM
+                    if(list.children.length > 50) list.lastChild.remove();
+                    
+                    // Re-calculate stats fully to be safe
+                    refreshStats();
+                })
+                .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'trade_signals' }, payload => {
+                    // Find existing element and replace it to show new status (WIN/LOSS) immediately
+                    const existingEl = document.getElementById(`signal-${payload.new.id}`);
+                    if (existingEl) {
+                        const newEl = createSignalElement(payload.new);
+                        existingEl.replaceWith(newEl);
+                    }
+                    refreshStats();
                 })
                 .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'logs' }, payload => {
                     appendLog(payload.new);
@@ -408,10 +462,7 @@
                 })
                 .subscribe();
 
-            // Polling Backup (Updates every 3s to guarantee freshness)
             setInterval(fetchData, 3000);
-            
-            // Heartbeat check
             setInterval(updateBotStatus, 5000);
         }
 
@@ -419,22 +470,48 @@
             // Config
             let { data: config } = await supabase.from('bot_config').select('*').eq('id', 1).single();
             if (!config) {
-                // Create if missing
                 await supabase.from('bot_config').insert({ id: 1, status: 'PAUSED', stop_win: 500, stop_loss: 200, entry_value: 10, account_type: 'PRACTICE' });
                 config = { id: 1, status: 'PAUSED', stop_win: 500, stop_loss: 200, entry_value: 10, account_type: 'PRACTICE' };
             }
             updateConfigUI(config);
 
-            // Signals
-            const { data: signals } = await supabase.from('trade_signals').select('*').order('created_at', { ascending: false }).limit(20);
-            if(signals) renderSignals(signals);
+            // Signals Refresh (Polling) to ensure status is correct
+            refreshStats();
 
-            // Logs (Only if list is empty or stale)
+            // Logs
             const { data: logs } = await supabase.from('logs').select('*').order('created_at', { ascending: false }).limit(1);
             if(logs && logs.length > 0) {
                 processScannerLog(logs[0]);
                 state.lastLogTime = new Date(logs[0].created_at);
             }
+        }
+
+        async function refreshStats() {
+            const { data: signals } = await supabase.from('trade_signals').select('*').order('created_at', { ascending: false }).limit(50);
+            if(signals) {
+                // Only render signals if list is empty or completely different count (optimization)
+                // Or if we want to ensure latest status is shown
+                const list = document.getElementById('signals-list');
+                // Simple re-render to guarantee status updates visually
+                list.innerHTML = '';
+                if(signals.length === 0) list.innerHTML = '<div class="text-center text-slate-600 py-8 text-xs">Sem dados.</div>';
+                signals.forEach(s => list.appendChild(createSignalElement(s)));
+                updateStats(signals);
+            }
+        }
+
+        function updateStats(signals) {
+            if(!signals) return;
+            let wins = 0, losses = 0;
+            signals.forEach(s => {
+                if (s.result === 'WIN') wins++;
+                if (s.result === 'LOSS') losses++;
+            });
+            document.getElementById('score-wins').textContent = wins;
+            document.getElementById('score-losses').textContent = losses;
+            const total = wins + losses;
+            const rate = total > 0 ? Math.round((wins/total)*100) + '%' : '0%';
+            document.getElementById('score-rate').textContent = rate;
         }
 
         // --- UI UPDATERS ---
@@ -447,7 +524,6 @@
             btn.innerHTML = isRunning ? '<i data-lucide="pause" class="w-4 h-4"></i> PAUSAR' : '<i data-lucide="play" class="w-4 h-4"></i> INICIAR';
             lucide.createIcons();
 
-            // Inputs (Only update if not focused to avoid typing interruption)
             if(document.activeElement.tagName !== 'INPUT') {
                 document.getElementById('conf-stop-win').value = config.stop_win;
                 document.getElementById('conf-stop-loss').value = config.stop_loss;
@@ -485,25 +561,21 @@
 
         function renderSignals(signals) {
             const list = document.getElementById('signals-list');
-            // Simple approach: re-render if count changed significantly or empty
-            // For production, a diffing algo is better, but this works for basic usage
-            if (list.childElementCount !== signals.length) {
-                list.innerHTML = '';
-                let wins = 0, losses = 0;
-                signals.forEach(s => {
-                    list.appendChild(createSignalElement(s));
-                    if (s.result === 'WIN') wins++;
-                    if (s.result === 'LOSS') losses++;
-                });
-                document.getElementById('score-wins').textContent = wins;
-                document.getElementById('score-losses').textContent = losses;
-                const total = wins + losses;
-                document.getElementById('score-rate').textContent = total > 0 ? Math.round((wins/total)*100) + '%' : '0%';
+            // Initial render
+            list.innerHTML = '';
+            if (signals.length === 0) {
+                list.innerHTML = '<div class="text-center text-slate-600 py-8 text-xs">Sem dados.</div>';
+                return;
             }
+            signals.forEach(s => {
+                list.appendChild(createSignalElement(s));
+            });
+            updateStats(signals);
         }
 
         function createSignalElement(s) {
             const el = document.createElement('div');
+            el.id = `signal-${s.id}`;
             el.className = `glass-card p-4 rounded-xl flex items-center justify-between border-l-4 ${s.direction === 'call' ? 'border-green-500' : 'border-red-500'}`;
             let statusBadge = s.result === 'WIN' ? '<span class="text-green-400 font-bold text-sm flex items-center gap-1"><i data-lucide="check" class="w-4 h-4"></i> WIN</span>' 
                 : s.result === 'LOSS' ? '<span class="text-red-400 font-bold text-sm flex items-center gap-1"><i data-lucide="x" class="w-4 h-4"></i> LOSS</span>'
@@ -541,9 +613,20 @@
             if (log.message && log.message.startsWith('ANALISE_DETALHADA::')) {
                 const parts = log.message.split('::');
                 if (parts.length >= 4) {
-                    document.getElementById('scanner-pair').textContent = parts[1];
-                    document.getElementById('scanner-price').textContent = parts[2].split(':')[1];
-                    document.getElementById('scanner-rsi').textContent = parts[3].split(':')[1];
+                    const pair = parts[1];
+                    const price = parts[2].split(':')[1];
+                    const rsi = parts[3].split(':')[1];
+                    
+                    // Simple animation effect on update
+                    const pairEl = document.getElementById('scanner-pair');
+                    if (pairEl.textContent !== pair) {
+                        pairEl.classList.add('scale-110', 'text-amber-400');
+                        setTimeout(() => pairEl.classList.remove('scale-110', 'text-amber-400'), 300);
+                    }
+
+                    document.getElementById('scanner-pair').textContent = pair;
+                    document.getElementById('scanner-price').textContent = price;
+                    document.getElementById('scanner-rsi').textContent = rsi;
                     document.getElementById('scanner-led').className = 'w-2 h-2 rounded-full bg-green-500 animate-pulse';
                     document.getElementById('scanner-status-text').textContent = 'LIVE SCAN';
                     document.getElementById('scanner-line').classList.remove('hidden');
