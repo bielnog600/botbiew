@@ -369,7 +369,9 @@ class SimpleBot:
                                 sma = TechnicalAnalysis.calculate_sma(candles, 14)
                                 # Adicionando info de Cooldown no log se estiver ativo
                                 cd_msg = " [COOLDOWN ATIVO]" if (time.time() - self.last_loss_time < 120) else ""
-                                self.log_to_db(f"Monitorando {primary} | P:{price} | SMA14:{sma:.5f}{cd_msg}", "SYSTEM")
+                                
+                                # FORMATO ESPECÍFICO PARA ATIVAR UX (Scanner, LED, Gráfico)
+                                self.log_to_db(f"ANALISE_DETALHADA::{primary}::Preço:{price:.5f}::SMA14:{sma:.5f}{cd_msg}", "SYSTEM")
                         except Exception as e: self.log_to_db(f"Erro monitoramento: {e}", "WARNING")
                         last_scan = time.time()
                     
