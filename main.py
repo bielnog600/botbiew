@@ -23,7 +23,7 @@ EXNOVA_PASSWORD = os.environ.get("EXNOVA_PASSWORD", "sua_senha")
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
 logging.getLogger("urllib3").setLevel(logging.WARNING)
 
-# --- ANÁLISE TÉCNICA (SMA 3 + Filtro Lateralização) ---
+# --- ANÁLISE TÉCNICA (SMA 7 + Filtro Lateralização) ---
 class TechnicalAnalysis:
     @staticmethod
     def calculate_sma(candles, period):
@@ -56,10 +56,10 @@ class TechnicalAnalysis:
 
     @staticmethod
     def get_signal(candles):
-        if len(candles) < 10: return None, "Dados insuficientes"
+        if len(candles) < 15: return None, "Dados insuficientes"
         
-        # 1. Calcular SMA 3
-        sma = TechnicalAnalysis.calculate_sma(candles, 3)
+        # 1. Calcular SMA 7 (Alterado de 3 para 7)
+        sma = TechnicalAnalysis.calculate_sma(candles, 7)
         if sma == 0: return None, "Erro SMA"
 
         last = TechnicalAnalysis.analyze_candle(candles[-1])
@@ -67,7 +67,7 @@ class TechnicalAnalysis:
         prev2 = candles[-3]
 
         # 2. Filtro de Lateralização (Consistência)
-        # Tendência só é válida se as últimas 3 velas respeitarem a média
+        # Tendência só é válida se as últimas 3 velas respeitarem a média SMA7
         trend_up_consistent = (
             last['close'] > sma and 
             prev1['close'] > sma and 
@@ -81,7 +81,7 @@ class TechnicalAnalysis:
         )
 
         if not trend_up_consistent and not trend_down_consistent:
-            return None, "Lateralizado (Preço cruzando SMA3)"
+            return None, "Lateralizado (Preço cruzando SMA7)"
         
         # Filtro de Volatilidade
         if last['body'] < 0.000001: return None, "Sem volume"
@@ -91,7 +91,7 @@ class TechnicalAnalysis:
             if last['color'] == 'green':
                 # Rejeição superior baixa (< 60% do corpo) = Força compradora
                 if last['upper_wick'] < (last['body'] * 0.6):
-                    return 'call', f"Alta Forte (3 velas > SMA3)"
+                    return 'call', f"Alta Forte (3 velas > SMA7)"
                 else:
                     return None, "Rejeição Alta (Pavio)"
 
@@ -100,7 +100,7 @@ class TechnicalAnalysis:
             if last['color'] == 'red':
                 # Rejeição inferior baixa (< 60% do corpo) = Força vendedora
                 if last['lower_wick'] < (last['body'] * 0.6):
-                    return 'put', f"Baixa Forte (3 velas < SMA3)"
+                    return 'put', f"Baixa Forte (3 velas < SMA7)"
                 else:
                     return None, "Rejeição Baixa (Pavio)"
                     
@@ -189,7 +189,7 @@ class SimpleBot:
         return False
 
     def catalog_assets(self, assets_list):
-        self.log_to_db(f"📊 Catalogando Top 3 (SMA 3)...", "SYSTEM")
+        self.log_to_db(f"📊 Catalogando Top 3 (SMA 7)...", "SYSTEM")
         results = []
         
         for asset in assets_list:
@@ -212,7 +212,7 @@ class SimpleBot:
                 if total >= 3: 
                     wr = (wins / total) * 100
                     results.append({
-                        "pair": asset, "win_rate": wr, "wins": wins, "losses": total-wins, "best_strategy": "Nano SMA3"
+                        "pair": asset, "win_rate": wr, "wins": wins, "losses": total-wins, "best_strategy": "Nano SMA7"
                     })
             except: pass
             time.sleep(0.05)
@@ -257,7 +257,7 @@ class SimpleBot:
             res = self.supabase.table("trade_signals").insert({
                 "pair": asset,
                 "direction": direction,
-                "strategy": "Nano SMA3",
+                "strategy": "Nano SMA7",
                 "status": "PENDING", 
                 "result": "PENDING", 
                 "created_at": datetime.now().isoformat()
@@ -346,13 +346,13 @@ class SimpleBot:
 
                     if time.time() - last_scan > 5:
                         try:
-                            primary = self.best_assets[0] if self.best_assets else "EURUSD-OTC"
+                            primary = self.best_assets[0] if self.best_assets and len(self.best_assets) > 0 else "EURUSD-OTC"
                             candles = self.api.get_candles(primary, 60, 20, int(time.time()))
                             if candles:
                                 price = candles[-1]['close']
-                                # LOG VISUAL COM SMA 3
-                                sma = TechnicalAnalysis.calculate_sma(candles, 3)
-                                self.log_to_db(f"ANALISE_DETALHADA::{primary}::Preço:{price}::SMA3:{sma:.5f}", "SYSTEM")
+                                # ALTERADO PARA 7 AQUI TAMBÉM (LOG VISUAL)
+                                sma = TechnicalAnalysis.calculate_sma(candles, 7)
+                                self.log_to_db(f"ANALISE_DETALHADA::{primary}::Preço:{price}::SMA7:{sma:.5f}", "SYSTEM")
                         except: pass
                         last_scan = time.time()
                     
