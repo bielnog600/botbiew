@@ -144,6 +144,16 @@
                 <h1 class="text-2xl font-bold text-white">Configurações</h1>
                 <form id="settings-form" class="space-y-6">
                     <div class="glass-card p-6 rounded-xl space-y-6">
+                        
+                        <!-- NOVO SELETOR DE MODO -->
+                        <div>
+                            <label class="text-xs text-slate-400 block mb-1">Modo de Gerenciamento</label>
+                            <select id="conf-stop-mode" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white outline-none">
+                                <option value="percentage">Porcentagem (%)</option>
+                                <option value="value">Valor Fixo ($)</option>
+                            </select>
+                        </div>
+
                         <div class="grid grid-cols-2 gap-4">
                             <div><label class="text-xs text-slate-400 block mb-1">Stop Win</label><input type="number" id="conf-stop-win" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white outline-none"></div>
                             <div><label class="text-xs text-slate-400 block mb-1">Stop Loss</label><input type="number" id="conf-stop-loss" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white outline-none"></div>
@@ -175,7 +185,6 @@
         const SUPABASE_URL = 'https://ioduahwknfsktujthfyc.supabase.co';
         const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlvZHVhaHdrbmZza3R1anRoZnljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEzMDc0NDcsImV4cCI6MjA2Njg4MzQ0N30.96f8wZO6SvABKFMWjIiw1pSugAB4Isldj7yxLcLJRSE';
         const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-        // lastLogId ensures we don't repeat logs in feed during polling
         const state = { user: null, config: {}, lastLogTime: null, lastLogId: null };
         lucide.createIcons();
 
@@ -206,7 +215,6 @@
                 term.innerHTML = '<div class="text-slate-500 mb-2 border-b border-slate-800 pb-2">Marombiew Bot Terminal v2.0 <br> Carregando histórico...</div>';
                 [...logs].reverse().forEach(l => {
                     appendLog(l);
-                    // Also populate scanner feed with initial data
                     addScannerFeedItem(l);
                 });
                 state.lastLogTime = new Date(logs[0].created_at);
@@ -260,7 +268,7 @@
                 .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'logs' }, p => { 
                     appendLog(p.new); 
                     processScannerLog(p.new);
-                    addScannerFeedItem(p.new); // Feed ao vivo no card
+                    addScannerFeedItem(p.new);
                 })
                 .subscribe();
             setInterval(fetchData, 3000);
@@ -284,7 +292,6 @@
 
             const { data: logs } = await supabaseClient.from('logs').select('*').order('created_at', { ascending: false }).limit(1);
             if(logs && logs.length > 0) {
-                // Only process if it's a NEW log to avoid animation jitter
                 if (state.lastLogId !== logs[0].id) {
                     state.lastLogId = logs[0].id;
                     processScannerLog(logs[0]);
@@ -346,11 +353,13 @@
                 btn.innerHTML = isRunning ? '<i data-lucide="pause" class="w-4 h-4"></i> PAUSAR' : '<i data-lucide="play" class="w-4 h-4"></i> INICIAR';
             }
             lucide.createIcons();
-            if(document.activeElement.tagName !== 'INPUT') {
+            if(document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'SELECT') {
                 document.getElementById('conf-stop-win').value = config.stop_win;
                 document.getElementById('conf-stop-loss').value = config.stop_loss;
                 document.getElementById('conf-entry').value = config.entry_value;
                 document.getElementById('conf-account').value = config.account_type;
+                // Atualiza o select do modo de stop
+                document.getElementById('conf-stop-mode').value = config.stop_mode || 'percentage';
             }
             document.getElementById('stat-balance').textContent = `$${(config.current_balance || 0).toFixed(2)}`;
             const profit = (config.current_balance || 0) - (config.daily_initial_balance || 0);
@@ -402,23 +411,18 @@
             scrollToBottom();
         }
 
-        // --- NEW: Add items to the Scanner Card Feed ---
         function addScannerFeedItem(log) {
             const feed = document.getElementById('scanner-feed');
             const msg = log.message || "";
-            // Filtra mensagens irrelevantes para o feed principal
             if (!msg.includes('ANALISE_DETALHADA') && !msg.includes('SINAL') && !msg.includes('Catalogando') && !msg.includes('Trocando')) return;
             
             const item = document.createElement('div');
             item.className = 'feed-item truncate';
-            // Clean up message for display
             let cleanMsg = msg.replace('ANALISE_DETALHADA::', '').replace('::', ' | ').replace('SYSTEM', '').replace('INFO', '');
             if(cleanMsg.length > 50) cleanMsg = cleanMsg.substring(0, 50) + '...';
             
             item.textContent = `> ${cleanMsg}`;
             feed.appendChild(item);
-            
-            // Keep only last 3 items
             if(feed.children.length > 3) feed.firstChild.remove();
         }
 
@@ -430,14 +434,11 @@
         function processScannerLog(log) {
             const msg = log.message || "";
             let pair = "", price = "---", rsi = "--";
-            
-            // Format 1: ANALISE_DETALHADA::PAR::Preço:VAL::SMA9:VAL
             if (msg.startsWith('ANALISE_DETALHADA::')) {
                 const parts = msg.split('::');
                 if (parts.length >= 4) { 
                     pair = parts[1]; 
                     price = parts[2].split(':')[1]; 
-                    // Support both RSI and SMA labels dynamically
                     const indPart = parts[3].split(':');
                     if(indPart.length > 0) {
                          const label = indPart[0];
@@ -454,8 +455,6 @@
                 document.getElementById('scanner-led').className = 'w-2 h-2 rounded-full bg-green-500 animate-pulse';
                 document.getElementById('scanner-status-text').textContent = 'LIVE';
                 document.getElementById('scanner-line').classList.remove('hidden');
-                
-                // Animation for update
                 const priceEl = document.getElementById('scanner-price');
                 priceEl.classList.add('text-green-400');
                 setTimeout(() => priceEl.classList.remove('text-green-400'), 500);
@@ -495,7 +494,8 @@
                 stop_win: Number(document.getElementById('conf-stop-win').value),
                 stop_loss: Number(document.getElementById('conf-stop-loss').value),
                 entry_value: Number(document.getElementById('conf-entry').value),
-                account_type: document.getElementById('conf-account').value
+                account_type: document.getElementById('conf-account').value,
+                stop_mode: document.getElementById('conf-stop-mode').value
             };
             const btn = e.target.querySelector('button');
             const originalText = btn.innerHTML;
