@@ -142,7 +142,7 @@ try:
     def update_consts():
         import exnovaapi.constants as OP_code
         OTC_MAP = {
-            "EURUSD-OTC": 76, "USDBRL-OTC": 1546, "EURGBP-OTC": 77, "USDCHF-OTC": 78, "EURJPY-OTC": 79,
+            "EURUSD-OTC": 76, "EURGBP-OTC": 77, "USDCHF-OTC": 78, "EURJPY-OTC": 79,
             "NZDUSD-OTC": 80, "GBPUSD-OTC": 81, "GBPJPY-OTC": 84, "USDJPY-OTC": 85,
             "AUDCAD-OTC": 86, "AUDUSD-OTC": 2111, "USDCAD-OTC": 2112, "AUDJPY-OTC": 2113,
             "GBPCAD-OTC": 2114, "GBPCHF-OTC": 2115, "GBPAUD-OTC": 2116, "EURCAD-OTC": 2117,
@@ -289,7 +289,10 @@ class SimpleBot:
         self.log_to_db(f"🔌 Conectando...", "SYSTEM")
         try:
             if self.api: 
-                try: self.api.api.close(); except: pass
+                try:
+                    self.api.api.close()
+                except:
+                    pass
             
             self.api = Exnova(EXNOVA_EMAIL, EXNOVA_PASSWORD)
             check, reason = self.api.connect()
