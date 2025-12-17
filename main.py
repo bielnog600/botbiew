@@ -6,6 +6,7 @@ import threading
 import os
 import random
 from datetime import datetime, timedelta
+# Certifique-se de instalar: pip install supabase exnovaapi
 from supabase import create_client, Client
 
 # --- IMPORTAÇÃO DA EXNOVA ---
@@ -15,6 +16,7 @@ except ImportError:
     print("[ERRO] Biblioteca 'exnovaapi' não instalada.")
 
 # --- CONFIGURAÇÃO ---
+# DICA: Em produção, use variáveis de ambiente para esconder as chaves.
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://ioduahwknfsktujthfyc.supabase.co")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlvZHVhaHdrbmZza3R1anRoZnljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEzMDc0NDcsImV4cCI6MjA2Njg4MzQ0N30.96f8wZO6SvABKFMWjIiw1pSugAB4Isldj7yxLcLJRSE")
 EXNOVA_EMAIL = os.environ.get("EXNOVA_EMAIL", "seu_email@exemplo.com")
@@ -350,7 +352,6 @@ class SimpleBot:
                             candles = self.api.get_candles(primary, 60, 20, int(time.time()))
                             if candles:
                                 price = candles[-1]['close']
-                                # ALTERADO PARA 7 AQUI TAMBÉM (LOG VISUAL)
                                 sma = TechnicalAnalysis.calculate_sma(candles, 7)
                                 self.log_to_db(f"ANALISE_DETALHADA::{primary}::Preço:{price}::SMA7:{sma:.5f}", "SYSTEM")
                         except: pass
