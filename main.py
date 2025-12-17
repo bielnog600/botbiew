@@ -16,16 +16,16 @@ except ImportError:
     print("[ERRO] Biblioteca 'exnovaapi' não instalada.")
 
 # --- CONFIGURAÇÃO ---
-# SEGURANÇA: Chaves removidas do código. Use variáveis de ambiente.
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
-EXNOVA_EMAIL = os.environ.get("EXNOVA_EMAIL", "")
-EXNOVA_PASSWORD = os.environ.get("EXNOVA_PASSWORD", "")
+# RESTAURANDO CHAVES PARA FUNCIONAR O LOG REMOTO
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://ioduahwknfsktujthfyc.supabase.co")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlvZHVhaHdrbmZza3R1anRoZnljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEzMDc0NDcsImV4cCI6MjA2Njg4MzQ0N30.96f8wZO6SvABKFMWjIiw1pSugAB4Isldj7yxLcLJRSE")
+EXNOVA_EMAIL = os.environ.get("EXNOVA_EMAIL", "seu_email@exemplo.com")
+EXNOVA_PASSWORD = os.environ.get("EXNOVA_PASSWORD", "sua_senha")
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
 logging.getLogger("urllib3").setLevel(logging.WARNING)
 
-# --- ANÁLISE TÉCNICA (SMA 14 + Consistência Temporal + ATR + S&R) ---
+# --- ANÁLISE TÉCNICA ---
 class TechnicalAnalysis:
     @staticmethod
     def calculate_sma(candles, period):
@@ -38,7 +38,6 @@ class TechnicalAnalysis:
     def calculate_atr(candles, period=14):
         if len(candles) < period + 1: return 0
         tr_list = []
-        # Começa calculando TRs
         for i in range(1, len(candles)):
             current = candles[i]
             prev = candles[i-1]
@@ -46,8 +45,6 @@ class TechnicalAnalysis:
             hc = abs(current['max'] - prev['close'])
             lc = abs(current['min'] - prev['close'])
             tr_list.append(max(hl, hc, lc))
-        
-        # Simples média dos TRs (pode usar suavização em versões futuras)
         if len(tr_list) < period: return 0
         return sum(tr_list[-period:]) / period
 
@@ -57,22 +54,14 @@ class TechnicalAnalysis:
         close_p = candle['close']
         high_p = candle['max']
         low_p = candle['min']
-        
         body = abs(close_p - open_p)
         upper_wick = high_p - max(open_p, close_p)
         lower_wick = min(open_p, close_p) - low_p
-        
         color = 'green' if close_p > open_p else 'red' if close_p < open_p else 'doji'
-        
         return {
-            'color': color,
-            'body': body,
-            'upper_wick': upper_wick,
-            'lower_wick': lower_wick,
-            'close': close_p,
-            'open': open_p,
-            'max': high_p,
-            'min': low_p
+            'color': color, 'body': body, 'upper_wick': upper_wick,
+            'lower_wick': lower_wick, 'close': close_p, 'open': open_p,
+            'max': high_p, 'min': low_p
         }
 
     @staticmethod
@@ -85,85 +74,71 @@ class TechnicalAnalysis:
 
     @staticmethod
     def get_signal(candles):
-        # Aumentamos buffer para garantir calculo histórico correto
         if len(candles) < 40: return None, "Dados insuficientes"
         
-        # 1. Indicadores Globais
         atr = TechnicalAnalysis.calculate_atr(candles, 14)
         support, resistance = TechnicalAnalysis.get_support_resistance(candles, window=20)
         last = TechnicalAnalysis.analyze_candle(candles[-1])
         
-        # Filtro de Volatilidade (ATR Mínimo)
-        # Se o ATR for muito baixo, mercado está "morto"
-        if atr < 0.00003: return None, f"Baixa Volatilidade (ATR: {atr:.5f})"
+        # 2.1. ATR ADAPTATIVO
+        min_atr_required = last['close'] * 0.00005
+        if atr < min_atr_required: 
+            return None, f"Baixa Volatilidade (ATR {atr:.5f} < {min_atr_required:.5f})"
 
-        # Zona de Segurança Dinâmica (com piso mínimo)
+        # Cálculo da média dos corpos das últimas 5 velas (para contexto)
         avg_body = sum([abs(c['close']-c['open']) for c in candles[-6:-1]]) / 5
-        safe_zone = max(avg_body * 0.5, 0.00005) 
+        
+        # 4.1. FILTRO MICRO-DOJI (NOVO)
+        # Se o corpo da vela atual for menor que 40% da média, é indecisão.
+        if last['body'] < avg_body * 0.4:
+            return None, f"Filtro: Corpo pequeno/Indecisão ({last['body']:.5f})"
 
-        # 2. Lógica de Consistência Temporal (CORRIGIDA)
-        # Verifica se as últimas 7 velas estavam acima/abaixo da SMA DO MOMENTO DELAS
+        # 2.2. SAFE ZONE CAPPED
+        safe_zone = min(max(avg_body * 0.5, 0.00005), atr * 0.6)
+
         consistency_count = 7
         trend_up_consistent = True
         trend_down_consistent = True
 
+        # Loop de consistência temporal
         for i in range(1, consistency_count + 1):
-            idx = -i # -1, -2 ... -7
-            
-            # Recorta os candles como se estivéssemos no passado, no momento 'idx'
-            # Se len=100, idx=-1. Queremos candles[:100]. SMA usa os últimos 14 desse slice.
+            idx = -i
             historical_slice = candles[:len(candles) + idx + 1] 
-            
             sma_historical = TechnicalAnalysis.calculate_sma(historical_slice, 14)
             candle_at_moment = candles[idx]
             
-            if candle_at_moment['close'] <= sma_historical:
-                trend_up_consistent = False
-            
-            if candle_at_moment['close'] >= sma_historical:
-                trend_down_consistent = False
-            
-            # Otimização: Se ambos já falharam, para o loop
-            if not trend_up_consistent and not trend_down_consistent:
-                break
+            if candle_at_moment['close'] <= sma_historical: trend_up_consistent = False
+            if candle_at_moment['close'] >= sma_historical: trend_down_consistent = False
+            if not trend_up_consistent and not trend_down_consistent: break
 
         if not trend_up_consistent and not trend_down_consistent:
-            return None, f"Lateralizado (Falha na consistência de {consistency_count} velas)"
+            return None, f"Lateralizado (Sem tendência de {consistency_count} velas)"
 
-        # 3. Filtro de Vela Anterior (Continuidade)
         prev = TechnicalAnalysis.analyze_candle(candles[-2])
         
         # --- LÓGICA CALL ---
         if trend_up_consistent:
-            # Confirmação vela anterior também verde ou doji alta
-            if prev['close'] < prev['open']: return None, "Vela anterior vermelha (contra tendência)"
-
-            # FILTRO S&R
-            if resistance and (resistance - last['close']) < safe_zone:
-                return None, "Abortar: Muito perto da Resistência"
+            if prev['close'] < prev['open']: return None, "Filtro: Vela anterior vermelha"
+            if resistance and (resistance - last['close']) < safe_zone: return None, "Filtro: Perto da Resistência"
 
             if last['color'] == 'green':
                 if last['upper_wick'] < (last['body'] * 0.6):
-                    return 'call', f"Alta Forte (7 velas > SMA14 Histórica)"
+                    return 'call', f"Sinal COMPRA (7 velas > SMA14)"
                 else:
-                    return None, "Rejeição Alta (Pavio)"
+                    return None, "Filtro: Pavio Superior Grande"
 
         # --- LÓGICA PUT ---
         elif trend_down_consistent:
-            # Confirmação vela anterior também vermelha ou doji baixa
-            if prev['close'] > prev['open']: return None, "Vela anterior verde (contra tendência)"
-
-            # FILTRO S&R
-            if support and (last['close'] - support) < safe_zone:
-                return None, "Abortar: Muito perto do Suporte"
+            if prev['close'] > prev['open']: return None, "Filtro: Vela anterior verde"
+            if support and (last['close'] - support) < safe_zone: return None, "Filtro: Perto do Suporte"
 
             if last['color'] == 'red':
                 if last['lower_wick'] < (last['body'] * 0.6):
-                    return 'put', f"Baixa Forte (7 velas < SMA14 Histórica)"
+                    return 'put', f"Sinal VENDA (7 velas < SMA14)"
                 else:
-                    return None, "Rejeição Baixa (Pavio)"
+                    return None, "Filtro: Pavio Inferior Grande"
                     
-        return None, "Sem sinal claro"
+        return None, "Neutro"
 
 # --- CORREÇÕES OTC ---
 try:
@@ -187,20 +162,18 @@ class SimpleBot:
     def __init__(self):
         self.api = None
         self.supabase = None
-        # LOCK para evitar Race Condition
         self.trade_lock = threading.Lock()
         self.active_trades = set()
         self.active_account_type = None
         self.best_assets = []
         self.config = { "status": "PAUSED", "account_type": "PRACTICE", "entry_value": 1.0 }
+        
+        # 4.2. VARIÁVEL DE COOLDOWN
+        self.last_loss_time = 0
+        
         self.init_supabase()
 
     def init_supabase(self):
-        # Validação simples para evitar erro se não tiver credenciais
-        if not SUPABASE_URL or not SUPABASE_KEY:
-            print("⚠️ Supabase Credentials não encontradas. Logs remotos desativados.")
-            return
-
         try:
             self.supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
             print("✅ Supabase conectado.")
@@ -214,9 +187,7 @@ class SimpleBot:
             self.supabase.table("logs").insert({
                 "message": message, "level": level, "created_at": datetime.now().isoformat()
             }).execute()
-        except Exception as e: 
-            print(f"Erro local de log: {e}")
-            # Tenta reconectar em caso de falha silenciosa
+        except: 
             try: self.supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
             except: pass
 
@@ -225,14 +196,10 @@ class SimpleBot:
         try:
             balance = self.api.get_balance()
             self.supabase.table("bot_config").update({"current_balance": balance}).eq("id", 1).execute()
-        except Exception as e:
-            self.log_to_db(f"Erro update balance: {e}", "ERROR")
+        except: pass
 
     def fetch_config(self):
-        if not self.supabase: 
-            self.init_supabase()
-            return
-
+        if not self.supabase: self.init_supabase(); return
         try:
             res = self.supabase.table("bot_config").select("*").eq("id", 1).execute()
             if res.data:
@@ -242,23 +209,16 @@ class SimpleBot:
                 self.config["entry_value"] = float(data.get("entry_value", 1.0))
             else:
                 self.supabase.table("bot_config").insert({"id": 1, "status": "PAUSED"}).execute()
-        except Exception as e:
-            self.log_to_db(f"Erro fetch config: {e}", "ERROR")
+        except: pass
 
     def connect(self):
         self.log_to_db(f"🔌 Conectando...", "SYSTEM")
         try:
             if self.api: 
-                try: self.api.api.close() 
-                except: pass
+                try: self.api.api.close(); except: pass
             
-            if not EXNOVA_EMAIL or not EXNOVA_PASSWORD:
-                self.log_to_db("Credenciais Exnova não configuradas.", "ERROR")
-                return False
-
             self.api = Exnova(EXNOVA_EMAIL, EXNOVA_PASSWORD)
             check, reason = self.api.connect()
-            
             if check:
                 self.log_to_db("✅ Conectado!", "SUCCESS")
                 self.active_account_type = self.config["account_type"]
@@ -272,75 +232,54 @@ class SimpleBot:
         return False
 
     def catalog_assets(self, assets_list):
-        self.log_to_db(f"📊 Catalogando Top 3 (SMA 14 + S&R)...", "SYSTEM")
+        self.log_to_db(f"📊 Catalogando Top 3...", "SYSTEM")
         results = []
-        
         for asset in assets_list:
             try:
-                # Aumentado para 150 candles para ter histórico suficiente nos testes
                 candles = self.api.get_candles(asset, 60, 150, int(time.time()))
                 if not candles or len(candles) < 100: continue
-                
                 wins, total = 0, 0
-                # Começa do 40 para garantir que get_signal tenha buffer para SMA histórica
                 for i in range(40, len(candles)-1):
-                    # Passa o subset terminando em 'i'
                     subset = candles[i-40:i+1]
                     signal, _ = TechnicalAnalysis.get_signal(subset)
-                    
                     if signal:
                         total += 1
                         nxt = candles[i+1]
                         is_win = (signal == 'call' and nxt['close'] > nxt['open']) or \
                                  (signal == 'put' and nxt['close'] < nxt['open'])
                         if is_win: wins += 1
-                
                 if total >= 3: 
                     wr = (wins / total) * 100
-                    results.append({
-                        "pair": asset, "win_rate": wr, "wins": wins, "losses": total-wins, "best_strategy": "Nano SMA14+SR"
-                    })
-            except Exception as e:
-                 self.log_to_db(f"Erro catalog {asset}: {e}", "WARNING")
-            
+                    results.append({"pair": asset, "win_rate": wr, "wins": wins, "losses": total-wins, "best_strategy": "Nano SMA14+SR"})
+            except: pass
             time.sleep(0.05)
         
         results.sort(key=lambda x: x['win_rate'], reverse=True)
         top_3 = results[:3]
-        
         if top_3:
             pairs_str = ", ".join([f"{r['pair']} ({r['win_rate']:.0f}%)" for r in top_3])
-            self.log_to_db(f"💎 Top 3 Ativos: {pairs_str}", "SUCCESS")
+            self.log_to_db(f"💎 Melhores: {pairs_str}", "SUCCESS")
             try:
                 if self.supabase:
                     self.supabase.table("cataloged_assets").delete().neq("pair", "XYZ").execute() 
                     self.supabase.table("cataloged_assets").insert(top_3).execute()
             except: pass
             return [r['pair'] for r in top_3]
-        
-        self.log_to_db("⚠️ Catalogação fraca, usando padrão.", "WARNING")
         return [assets_list[0]]
 
     def safe_buy(self, asset, amount, direction, type="digital"):
         result = [None]
         def target():
             try:
-                if type == "digital":
-                    result[0] = self.api.buy_digital_spot(asset, amount, direction, 1)
-                else:
-                    result[0] = self.api.buy(amount, asset, direction, 1)
-            except Exception as e:
-                self.log_to_db(f"Erro safe_buy: {e}", "ERROR")
-        t = threading.Thread(target=target)
-        t.daemon = True
-        t.start()
+                if type == "digital": result[0] = self.api.buy_digital_spot(asset, amount, direction, 1)
+                else: result[0] = self.api.buy(amount, asset, direction, 1)
+            except: pass
+        t = threading.Thread(target=target); t.daemon = True; t.start()
         t.join(timeout=10.0)
         return result[0] if result[0] else (False, None)
 
     def execute_trade(self, asset, direction):
         if not self.api: return
-        
-        # LOCK: Evita duplicidade no mesmo ativo
         with self.trade_lock:
             if asset in self.active_trades: return
             self.active_trades.add(asset)
@@ -352,12 +291,8 @@ class SimpleBot:
         try:
             if self.supabase:
                 res = self.supabase.table("trade_signals").insert({
-                    "pair": asset,
-                    "direction": direction,
-                    "strategy": "Nano SMA14+SR",
-                    "status": "PENDING", 
-                    "result": "PENDING", 
-                    "created_at": datetime.now().isoformat()
+                    "pair": asset, "direction": direction, "strategy": "Nano SMA14+SR",
+                    "status": "PENDING", "result": "PENDING", "created_at": datetime.now().isoformat()
                 }).execute()
                 if res.data: sig_id = res.data[0]['id']
         except: pass
@@ -367,48 +302,32 @@ class SimpleBot:
 
         if status:
             self.log_to_db(f"✅ Ordem {id} aceita.", "INFO")
-            # Sleep fora do lock principal, mas ativo já está marcado
             time.sleep(60) 
-            
             is_win, profit = False, 0.0
             try:
-                # CORREÇÃO: Removido check_win_v4
                 win_v = self.api.check_win_digital_v2(id)
-                if isinstance(win_v, tuple) and win_v[1] > 0: 
-                    is_win, profit = True, float(win_v[1])
-                elif isinstance(win_v, (int, float)) and win_v > 0: 
-                    is_win, profit = True, float(win_v)
-                else:
-                    # Fallback apenas para binária v3 se necessário
-                    # check_win_v3(id) se fosse implementado
-                    pass
-            except Exception as e:
-                self.log_to_db(f"Erro check_win: {e}", "ERROR")
+                if isinstance(win_v, tuple) and win_v[1] > 0: is_win, profit = True, float(win_v[1])
+                elif isinstance(win_v, (int, float)) and win_v > 0: is_win, profit = True, float(win_v)
+            except: pass
 
             res_str = 'WIN' if is_win else 'LOSS'
-            if not is_win: profit = -float(amount)
-
+            if not is_win: 
+                profit = -float(amount)
+                # 4.2. REGISTRA COOLDOWN APÓS LOSS
+                self.last_loss_time = time.time()
+                self.log_to_db("🛑 Cooldown ativo: Pausa de 2 min para análise.", "WARNING")
+            
             self.log_to_db(f"{'🏆' if is_win else '🔻'} {res_str}: ${profit:.2f}", "SUCCESS" if is_win else "ERROR")
 
             if sig_id and self.supabase:
-                try: 
-                    self.supabase.table("trade_signals").update({
-                        "status": res_str, 
-                        "result": res_str, 
-                        "profit": profit
-                    }).eq("id", sig_id).execute()
-                except Exception as e:
-                    self.log_to_db(f"Erro update DB: {e}", "WARNING")
+                try: self.supabase.table("trade_signals").update({"status": res_str, "result": res_str, "profit": profit}).eq("id", sig_id).execute()
+                except: pass
             
             self.update_balance_remote()
-            
-            # Libera o ativo para operar novamente
-            with self.trade_lock:
-                self.active_trades.discard(asset)
+            with self.trade_lock: self.active_trades.discard(asset)
         else:
             self.log_to_db("❌ Falha ordem.", "ERROR")
-            with self.trade_lock:
-                self.active_trades.discard(asset)
+            with self.trade_lock: self.active_trades.discard(asset)
             if sig_id and self.supabase: 
                 try: self.supabase.table("trade_signals").delete().eq("id", sig_id).execute()
                 except: pass
@@ -417,23 +336,14 @@ class SimpleBot:
         while True:
             try:
                 self.fetch_config()
-                if not self.connect():
-                    time.sleep(10)
-                    continue
+                if not self.connect(): time.sleep(10); continue
                 
                 ASSETS_POOL = [
-                    "EURUSD-OTC", "EURGBP-OTC", "USDCHF-OTC", "EURJPY-OTC",
-                    "NZDUSD-OTC", "GBPUSD-OTC", "GBPJPY-OTC", "USDJPY-OTC",
-                    "AUDCAD-OTC", "AUDUSD-OTC", "USDCAD-OTC", "AUDJPY-OTC",
-                    "GBPCAD-OTC", "GBPCHF-OTC", "GBPAUD-OTC", "EURCAD-OTC",
-                    "CHFJPY-OTC", "CADCHF-OTC", "EURAUD-OTC", "USDNOK-OTC",
-                    "EURNZD-OTC", "USDSEK-OTC", "USDTRY-OTC", "AUDCHF-OTC",
-                    "AUDNZD-OTC", "EURCHF-OTC", "GBPNZD-OTC", "CADJPY-OTC",
-                    "NZDCAD-OTC", "NZDJPY-OTC"
+                    "EURUSD-OTC", "EURGBP-OTC", "USDCHF-OTC", "EURJPY-OTC", "NZDUSD-OTC", "GBPUSD-OTC", 
+                    "GBPJPY-OTC", "USDJPY-OTC", "AUDCAD-OTC", "AUDUSD-OTC", "USDCAD-OTC", "AUDJPY-OTC"
                 ]
                 
                 self.best_assets = self.catalog_assets(ASSETS_POOL)
-                
                 last_scan = 0
                 last_bal = 0
                 last_catalog = time.time()
@@ -441,46 +351,48 @@ class SimpleBot:
                 while True:
                     self.fetch_config()
                     if self.config["status"] == "RESTARTING":
-                        if self.supabase:
-                            self.supabase.table("bot_config").update({"status": "RUNNING"}).eq("id", 1).execute()
+                        if self.supabase: self.supabase.table("bot_config").update({"status": "RUNNING"}).eq("id", 1).execute()
                         break
                     
                     if not self.api.check_connect(): break
-                    
                     if time.time() - last_catalog > 900:
                         self.best_assets = self.catalog_assets(ASSETS_POOL)
                         last_catalog = time.time()
 
-                    if time.time() - last_scan > 5:
+                    # --- LOG DE ANÁLISE PERIÓDICA ---
+                    if time.time() - last_scan > 10:
                         try:
-                            primary = self.best_assets[0] if self.best_assets and len(self.best_assets) > 0 else "EURUSD-OTC"
+                            primary = self.best_assets[0] if self.best_assets else "EURUSD-OTC"
                             candles = self.api.get_candles(primary, 60, 40, int(time.time()))
                             if candles:
                                 price = candles[-1]['close']
                                 sma = TechnicalAnalysis.calculate_sma(candles, 14)
-                                self.log_to_db(f"ANALISE::{primary}::P:{price}::SMA14:{sma:.5f}", "SYSTEM")
-                        except Exception as e:
-                            pass # Log muito frequente pode poluir, manter pass aqui ou debug
+                                # Adicionando info de Cooldown no log se estiver ativo
+                                cd_msg = " [COOLDOWN ATIVO]" if (time.time() - self.last_loss_time < 120) else ""
+                                self.log_to_db(f"Monitorando {primary} | P:{price} | SMA14:{sma:.5f}{cd_msg}", "SYSTEM")
+                        except Exception as e: self.log_to_db(f"Erro monitoramento: {e}", "WARNING")
                         last_scan = time.time()
                     
-                    if time.time() - last_bal > 60:
-                        self.update_balance_remote()
-                        last_bal = time.time()
+                    if time.time() - last_bal > 60: self.update_balance_remote(); last_bal = time.time()
 
-                    if self.config["status"] == "PAUSED":
-                        time.sleep(2)
-                        continue
+                    if self.config["status"] == "PAUSED": time.sleep(2); continue
 
-                    if datetime.now().second >= 55:
+                    # 2.3. Janela de Execução Estrita (57s a 58s)
+                    now_sec = datetime.now().second
+                    if 57 <= now_sec <= 58:
+                        # 4.2. VERIFICAÇÃO DE COOLDOWN
+                        if time.time() - self.last_loss_time < 120:
+                             # Se estiver em cooldown, pula execução e aguarda
+                             time.sleep(2)
+                             continue
+
                         current_assets = self.best_assets.copy()
                         random.shuffle(current_assets)
                         trade_executed = False
                         
                         for asset in current_assets:
-                            # Verifica lock antes de pedir candle para economizar recurso
                             with self.trade_lock:
                                 if asset in self.active_trades: continue
-
                             try:
                                 candles = self.api.get_candles(asset, 60, 40, int(time.time()))
                                 sig, reason = TechnicalAnalysis.get_signal(candles)
@@ -489,12 +401,12 @@ class SimpleBot:
                                     self.execute_trade(asset, sig)
                                     trade_executed = True
                                     break 
-                            except Exception as e:
-                                self.log_to_db(f"Erro loop asset {asset}: {e}", "WARNING")
+                                else:
+                                    pass
+                            except: pass
                         
                         if trade_executed: time.sleep(50) 
                         else: time.sleep(4) 
-                    
                     time.sleep(0.5)
             except Exception as e:
                 self.log_to_db(f"Erro loop principal: {e}", "ERROR")
