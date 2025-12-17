@@ -85,11 +85,9 @@ class TechnicalAnalysis:
         if atr < min_atr_required: 
             return None, f"Baixa Volatilidade (ATR {atr:.5f} < {min_atr_required:.5f})"
 
-        # Cálculo da média dos corpos das últimas 5 velas (para contexto)
         avg_body = sum([abs(c['close']-c['open']) for c in candles[-6:-1]]) / 5
         
-        # 4.1. FILTRO MICRO-DOJI (NOVO)
-        # Se o corpo da vela atual for menor que 40% da média, é indecisão.
+        # 4.1. FILTRO MICRO-DOJI
         if last['body'] < avg_body * 0.4:
             return None, f"Filtro: Corpo pequeno/Indecisão ({last['body']:.5f})"
 
@@ -100,7 +98,6 @@ class TechnicalAnalysis:
         trend_up_consistent = True
         trend_down_consistent = True
 
-        # Loop de consistência temporal
         for i in range(1, consistency_count + 1):
             idx = -i
             historical_slice = candles[:len(candles) + idx + 1] 
@@ -145,7 +142,7 @@ try:
     def update_consts():
         import exnovaapi.constants as OP_code
         OTC_MAP = {
-            "EURUSD-OTC": 76, "EURGBP-OTC": 77, "USDCHF-OTC": 78, "EURJPY-OTC": 79,
+            "EURUSD-OTC": 76, "USDBRL-OTC": 1546, "EURGBP-OTC": 77, "USDCHF-OTC": 78, "EURJPY-OTC": 79,
             "NZDUSD-OTC": 80, "GBPUSD-OTC": 81, "GBPJPY-OTC": 84, "USDJPY-OTC": 85,
             "AUDCAD-OTC": 86, "AUDUSD-OTC": 2111, "USDCAD-OTC": 2112, "AUDJPY-OTC": 2113,
             "GBPCAD-OTC": 2114, "GBPCHF-OTC": 2115, "GBPAUD-OTC": 2116, "EURCAD-OTC": 2117,
@@ -166,11 +163,19 @@ class SimpleBot:
         self.active_trades = set()
         self.active_account_type = None
         self.best_assets = []
-        self.config = { "status": "PAUSED", "account_type": "PRACTICE", "entry_value": 1.0 }
         
-        # 4.2. VARIÁVEL DE COOLDOWN
+        # Configuração inicial (será sobrescrita pelo fetch_config)
+        self.config = { 
+            "status": "PAUSED", 
+            "account_type": "PRACTICE", 
+            "entry_value": 1.0,
+            "stop_win": 10.0,
+            "stop_loss": 5.0,
+            "stop_mode": "percentage", # 'percentage' ou 'value'
+            "daily_initial_balance": 0.0
+        }
+        
         self.last_loss_time = 0
-        
         self.init_supabase()
 
     def init_supabase(self):
@@ -188,10 +193,8 @@ class SimpleBot:
                 "message": message, "level": level, "created_at": datetime.now().isoformat()
             }).execute()
         except: 
-            try:
-                self.supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-            except:
-                pass
+            try: self.supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+            except: pass
 
     def update_balance_remote(self):
         if not self.api or not self.supabase: return
@@ -201,9 +204,7 @@ class SimpleBot:
         except: pass
 
     def fetch_config(self):
-        if not self.supabase: 
-            self.init_supabase()
-            return
+        if not self.supabase: self.init_supabase(); return
         try:
             res = self.supabase.table("bot_config").select("*").eq("id", 1).execute()
             if res.data:
@@ -211,18 +212,84 @@ class SimpleBot:
                 self.config["status"] = data.get("status", "PAUSED")
                 self.config["account_type"] = data.get("account_type", "PRACTICE").strip().upper()
                 self.config["entry_value"] = float(data.get("entry_value", 1.0))
+                
+                # NOVOS CAMPOS DE GERENCIAMENTO
+                self.config["stop_win"] = float(data.get("stop_win", 0))
+                self.config["stop_loss"] = float(data.get("stop_loss", 0))
+                self.config["stop_mode"] = data.get("stop_mode", "percentage") # percentage ou value
+                self.config["daily_initial_balance"] = float(data.get("daily_initial_balance", 0))
+
             else:
                 self.supabase.table("bot_config").insert({"id": 1, "status": "PAUSED"}).execute()
         except: pass
+
+    def check_management(self):
+        """
+        Verifica se a meta ou stop loss foi atingido.
+        Retorna True se pode operar, False se deve parar.
+        """
+        if not self.api: return False
+        
+        try:
+            current_bal = self.api.get_balance()
+            initial_bal = self.config.get("daily_initial_balance", 0)
+
+            # Se for a primeira vez no dia (ou após reset), define o saldo inicial
+            if initial_bal <= 0:
+                initial_bal = current_bal
+                self.config["daily_initial_balance"] = initial_bal
+                if self.supabase:
+                    self.supabase.table("bot_config").update({"daily_initial_balance": initial_bal}).eq("id", 1).execute()
+                self.log_to_db(f"Saldo Inicial definido: ${initial_bal:.2f}", "SYSTEM")
+
+            profit = current_bal - initial_bal
+            
+            stop_win = self.config.get("stop_win", 0)
+            stop_loss = self.config.get("stop_loss", 0)
+            mode = self.config.get("stop_mode", "percentage")
+
+            target_win_val = 0
+            target_loss_val = 0
+
+            # Cálculo dos limites (Valor ou Porcentagem)
+            if mode == "percentage":
+                target_win_val = initial_bal * (stop_win / 100)
+                target_loss_val = initial_bal * (stop_loss / 100)
+                desc = "%"
+            else:
+                target_win_val = stop_win
+                target_loss_val = stop_loss
+                desc = "$"
+
+            # Verifica Meta (Stop Win)
+            if profit >= target_win_val and target_win_val > 0:
+                self.log_to_db(f"🏆 META BATIDA! Lucro: ${profit:.2f} (Meta: {stop_win}{desc})", "SUCCESS")
+                self.pause_bot_by_management()
+                return False
+            
+            # Verifica Stop Loss
+            if profit <= -target_loss_val and target_loss_val > 0:
+                self.log_to_db(f"🛑 STOP LOSS ATINGIDO! Perda: ${profit:.2f} (Limit: {stop_loss}{desc})", "ERROR")
+                self.pause_bot_by_management()
+                return False
+
+            return True
+
+        except Exception as e:
+            self.log_to_db(f"Erro no gerenciamento: {e}", "ERROR")
+            return True # Em caso de erro, por segurança, permite continuar (ou poderia travar)
+
+    def pause_bot_by_management(self):
+        self.config["status"] = "PAUSED"
+        if self.supabase:
+            self.supabase.table("bot_config").update({"status": "PAUSED"}).eq("id", 1).execute()
+        time.sleep(2) # Pausa dramática para logs processarem
 
     def connect(self):
         self.log_to_db(f"🔌 Conectando...", "SYSTEM")
         try:
             if self.api: 
-                try:
-                    self.api.api.close()
-                except:
-                    pass
+                try: self.api.api.close(); except: pass
             
             self.api = Exnova(EXNOVA_EMAIL, EXNOVA_PASSWORD)
             check, reason = self.api.connect()
@@ -287,6 +354,10 @@ class SimpleBot:
 
     def execute_trade(self, asset, direction):
         if not self.api: return
+        
+        # VERIFICAÇÃO FINAL DE GERENCIAMENTO ANTES DE ENTRAR
+        if not self.check_management(): return
+
         with self.trade_lock:
             if asset in self.active_trades: return
             self.active_trades.add(asset)
@@ -320,9 +391,8 @@ class SimpleBot:
             res_str = 'WIN' if is_win else 'LOSS'
             if not is_win: 
                 profit = -float(amount)
-                # 4.2. REGISTRA COOLDOWN APÓS LOSS
                 self.last_loss_time = time.time()
-                self.log_to_db("🛑 Cooldown ativo: Pausa de 2 min para análise.", "WARNING")
+                self.log_to_db("🛑 Cooldown ativo: Pausa de 2 min.", "WARNING")
             
             self.log_to_db(f"{'🏆' if is_win else '🔻'} {res_str}: ${profit:.2f}", "SUCCESS" if is_win else "ERROR")
 
@@ -331,6 +401,10 @@ class SimpleBot:
                 except: pass
             
             self.update_balance_remote()
+            
+            # VERIFICA GERENCIAMENTO PÓS-RESULTADO
+            self.check_management()
+
             with self.trade_lock: self.active_trades.discard(asset)
         else:
             self.log_to_db("❌ Falha ordem.", "ERROR")
@@ -343,9 +417,7 @@ class SimpleBot:
         while True:
             try:
                 self.fetch_config()
-                if not self.connect(): 
-                    time.sleep(10)
-                    continue
+                if not self.connect(): time.sleep(10); continue
                 
                 ASSETS_POOL = [
                     "EURUSD-OTC", "EURGBP-OTC", "USDCHF-OTC", "EURJPY-OTC", "NZDUSD-OTC", "GBPUSD-OTC", 
@@ -371,31 +443,35 @@ class SimpleBot:
                     # --- LOG DE ANÁLISE PERIÓDICA ---
                     if time.time() - last_scan > 10:
                         try:
+                            # ATUALIZA SALDO NO BANCO PERIODICAMENTE
+                            self.update_balance_remote()
+                            
                             primary = self.best_assets[0] if self.best_assets else "EURUSD-OTC"
                             candles = self.api.get_candles(primary, 60, 40, int(time.time()))
                             if candles:
                                 price = candles[-1]['close']
                                 sma = TechnicalAnalysis.calculate_sma(candles, 14)
-                                # Adicionando info de Cooldown no log se estiver ativo
                                 cd_msg = " [COOLDOWN ATIVO]" if (time.time() - self.last_loss_time < 120) else ""
-                                
-                                # FORMATO ESPECÍFICO PARA ATIVAR UX (Scanner, LED, Gráfico)
                                 self.log_to_db(f"ANALISE_DETALHADA::{primary}::Preço:{price:.5f}::SMA14:{sma:.5f}{cd_msg}", "SYSTEM")
                         except Exception as e: self.log_to_db(f"Erro monitoramento: {e}", "WARNING")
                         last_scan = time.time()
                     
                     if time.time() - last_bal > 60: self.update_balance_remote(); last_bal = time.time()
 
-                    if self.config["status"] == "PAUSED": time.sleep(2); continue
+                    if self.config["status"] == "PAUSED": 
+                        time.sleep(2)
+                        continue
+                    
+                    # VERIFICAÇÃO DE GERENCIAMENTO NO LOOP PRINCIPAL
+                    if not self.check_management():
+                        time.sleep(5) # Se bateu meta/stop, espera
+                        continue
 
-                    # 2.3. Janela de Execução Estrita (57s a 58s)
+                    # 2.3. Janela de Execução Estrita
                     now_sec = datetime.now().second
                     if 57 <= now_sec <= 58:
-                        # 4.2. VERIFICAÇÃO DE COOLDOWN
                         if time.time() - self.last_loss_time < 120:
-                             # Se estiver em cooldown, pula execução e aguarda
-                             time.sleep(2)
-                             continue
+                             time.sleep(2); continue
 
                         current_assets = self.best_assets.copy()
                         random.shuffle(current_assets)
@@ -412,8 +488,6 @@ class SimpleBot:
                                     self.execute_trade(asset, sig)
                                     trade_executed = True
                                     break 
-                                else:
-                                    pass
                             except: pass
                         
                         if trade_executed: time.sleep(50) 
