@@ -188,8 +188,10 @@ class SimpleBot:
                 "message": message, "level": level, "created_at": datetime.now().isoformat()
             }).execute()
         except: 
-            try: self.supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-            except: pass
+            try:
+                self.supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+            except:
+                pass
 
     def update_balance_remote(self):
         if not self.api or not self.supabase: return
@@ -199,7 +201,9 @@ class SimpleBot:
         except: pass
 
     def fetch_config(self):
-        if not self.supabase: self.init_supabase(); return
+        if not self.supabase: 
+            self.init_supabase()
+            return
         try:
             res = self.supabase.table("bot_config").select("*").eq("id", 1).execute()
             if res.data:
@@ -215,7 +219,10 @@ class SimpleBot:
         self.log_to_db(f"🔌 Conectando...", "SYSTEM")
         try:
             if self.api: 
-                try: self.api.api.close(); except: pass
+                try:
+                    self.api.api.close()
+                except:
+                    pass
             
             self.api = Exnova(EXNOVA_EMAIL, EXNOVA_PASSWORD)
             check, reason = self.api.connect()
@@ -336,7 +343,9 @@ class SimpleBot:
         while True:
             try:
                 self.fetch_config()
-                if not self.connect(): time.sleep(10); continue
+                if not self.connect(): 
+                    time.sleep(10)
+                    continue
                 
                 ASSETS_POOL = [
                     "EURUSD-OTC", "EURGBP-OTC", "USDCHF-OTC", "EURJPY-OTC", "NZDUSD-OTC", "GBPUSD-OTC", 
