@@ -23,18 +23,19 @@
         body { font-family: 'Inter', sans-serif; background-color: #020617; color: #e2e8f0; overflow: hidden; user-select: none; }
         .font-mono { font-family: 'JetBrains Mono', monospace; }
         .glass-card { background: var(--glass); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.08); }
-        .scan-line { position: absolute; width: 100%; height: 2px; background: linear-gradient(90deg, transparent, var(--gold), transparent); animation: scanMove 2s linear infinite; opacity: 0.8; box-shadow: 0 0 15px var(--gold); z-index: 0; }
-        @keyframes scanMove { 0% { top: 0%; opacity: 0; } 10% { opacity: 1; } 90% { opacity: 1; } 100% { top: 100%; opacity: 0; } }
+        
+        /* Scanner Pulse Animation for individual cards */
+        .card-active { border-color: rgba(34, 197, 94, 0.5); box-shadow: 0 0 15px rgba(34, 197, 94, 0.1); }
+        .price-up { color: #4ade80; animation: flashGreen 0.5s; }
+        .price-down { color: #f87171; animation: flashRed 0.5s; }
+        
+        @keyframes flashGreen { 0% { color: #fff; } 100% { color: #4ade80; } }
+        @keyframes flashRed { 0% { color: #fff; } 100% { color: #f87171; } }
+
         ::-webkit-scrollbar { width: 4px; background: #0f172a; }
         ::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
         .hidden { display: none !important; }
         .active-nav { color: var(--gold); }
-        .live-indicator { animation: pulse-green 2s infinite; }
-        @keyframes pulse-green { 0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4); } 70% { box-shadow: 0 0 0 6px rgba(34, 197, 94, 0); } 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); } }
-        
-        /* Scanner Feed Animation */
-        .feed-item { animation: slideUp 0.3s ease-out forwards; }
-        @keyframes slideUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
     </style>
 </head>
 <body class="flex flex-col h-screen">
@@ -75,8 +76,8 @@
             <div id="connection-warning" class="hidden mb-4 bg-red-500/10 border border-red-500/20 text-red-400 p-3 rounded-xl flex items-center gap-2 text-sm animate-pulse"><i data-lucide="wifi-off" class="w-4 h-4"></i> Bot Offline: Sem sinal há mais de 3 minutos.</div>
 
             <!-- HOME -->
-            <div id="view-home" class="view-section space-y-6 max-w-5xl mx-auto">
-                <div class="flex justify-between items-end">
+            <div id="view-home" class="view-section space-y-6 max-w-6xl mx-auto">
+                <div class="flex justify-between items-end mb-4">
                     <div>
                         <h1 class="text-2xl font-bold text-white">Dashboard</h1>
                         <div class="flex items-center gap-2 mt-1"><span class="text-slate-500 text-xs">Status:</span><span id="bot-status-indicator" class="text-xs font-bold text-slate-500">CARREGANDO...</span></div>
@@ -87,31 +88,22 @@
                     </div>
                 </div>
 
-                <!-- LIVE SCANNER MONITOR -->
-                <div class="glass-card rounded-xl p-6 relative overflow-hidden group">
-                    <div id="scanner-line" class="scan-line hidden"></div>
-                    
-                    <div class="relative z-10 flex justify-between items-start mb-6">
-                        <div>
-                            <div class="flex items-center gap-2 mb-2"><div id="scanner-led" class="w-2 h-2 rounded-full bg-red-500"></div><span id="scanner-status-text" class="text-[10px] font-bold tracking-widest text-slate-400 uppercase">OFFLINE</span></div>
-                            <div class="flex items-baseline gap-3">
-                                <div id="scanner-pair" class="text-3xl font-black text-white tracking-tight transition-all duration-300">---</div>
-                                <div class="text-sm text-slate-400 font-mono" id="scanner-price">0.00000</div>
-                            </div>
-                            <div class="flex items-center gap-2 mt-1">
-                                <span class="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-[10px] text-slate-400 font-mono">
-                                    <span id="scanner-indicator-label" class="text-amber-400">SMA9</span>: <span id="scanner-rsi">--</span>
-                                </span>
-                            </div>
-                        </div>
+                <!-- TOP 3 ASSETS GRID -->
+                <div class="mb-2 flex items-center gap-2">
+                    <i data-lucide="trending-up" class="w-4 h-4 text-amber-500"></i>
+                    <h3 class="text-sm font-bold text-slate-400 uppercase tracking-widest">Melhores Oportunidades</h3>
+                </div>
+                
+                <div id="top-assets-container" class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                    <!-- Cards serão injetados aqui via JS -->
+                    <div class="glass-card p-6 rounded-xl border-t-4 border-slate-700 animate-pulse h-32 flex items-center justify-center text-slate-600 text-xs">
+                        Aguardando catalogação...
                     </div>
-
-                    <!-- Live Feed Area -->
-                    <div class="relative z-10 bg-black/40 rounded-lg border border-slate-800 p-3 h-24 overflow-hidden flex flex-col justify-end">
-                        <div id="scanner-feed" class="flex flex-col gap-1 text-[11px] font-mono text-slate-400">
-                            <div class="opacity-50">A aguardar dados do bot...</div>
-                        </div>
-                        <div class="absolute top-0 left-0 w-full h-8 bg-gradient-to-b from-black/40 to-transparent pointer-events-none"></div>
+                    <div class="glass-card p-6 rounded-xl border-t-4 border-slate-700 animate-pulse h-32 flex items-center justify-center text-slate-600 text-xs">
+                        Aguardando catalogação...
+                    </div>
+                    <div class="glass-card p-6 rounded-xl border-t-4 border-slate-700 animate-pulse h-32 flex items-center justify-center text-slate-600 text-xs">
+                        Aguardando catalogação...
                     </div>
                 </div>
 
@@ -146,7 +138,6 @@
                 <form id="settings-form" class="space-y-6">
                     <div class="glass-card p-6 rounded-xl space-y-6">
                         
-                        <!-- MODO DE GERENCIAMENTO -->
                         <div>
                             <label class="text-xs text-slate-400 block mb-1">Modo de Gerenciamento</label>
                             <select id="conf-stop-mode" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white outline-none">
@@ -155,7 +146,6 @@
                             </select>
                         </div>
 
-                        <!-- AGENDAMENTO AUTOMÁTICO -->
                         <div class="border-t border-slate-700 pt-4">
                             <div class="flex items-center justify-between mb-4">
                                 <label class="text-sm font-bold text-white flex items-center gap-2">
@@ -167,14 +157,8 @@
                                 </label>
                             </div>
                             <div class="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label class="text-xs text-slate-400 block mb-1">Início (HH:MM)</label>
-                                    <input type="time" id="conf-timer-start" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white outline-none">
-                                </div>
-                                <div>
-                                    <label class="text-xs text-slate-400 block mb-1">Fim (HH:MM)</label>
-                                    <input type="time" id="conf-timer-end" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white outline-none">
-                                </div>
+                                <div><label class="text-xs text-slate-400 block mb-1">Início (HH:MM)</label><input type="time" id="conf-timer-start" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white outline-none"></div>
+                                <div><label class="text-xs text-slate-400 block mb-1">Fim (HH:MM)</label><input type="time" id="conf-timer-end" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white outline-none"></div>
                             </div>
                         </div>
 
@@ -209,17 +193,15 @@
         const SUPABASE_URL = 'https://ioduahwknfsktujthfyc.supabase.co';
         const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlvZHVhaHdrbmZza3R1anRoZnljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEzMDc0NDcsImV4cCI6MjA2Njg4MzQ0N30.96f8wZO6SvABKFMWjIiw1pSugAB4Isldj7yxLcLJRSE';
         const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-        const state = { user: null, config: {}, lastLogTime: null, lastLogId: null };
+        const state = { user: null, config: {}, lastLogTime: null, lastLogId: null, activePairs: [] };
         lucide.createIcons();
 
         const router = {
             navigate: (target) => {
                 document.querySelectorAll('.view-section').forEach(el => el.classList.add('hidden'));
                 document.getElementById(`view-${target}`).classList.remove('hidden');
-                
                 document.querySelectorAll('nav button').forEach(btn => btn.classList.remove('active-nav'));
                 document.querySelectorAll(`button[data-target="${target}"]`).forEach(btn => btn.classList.add('active-nav'));
-
                 if(target === 'logs') scrollToBottom();
             }
         };
@@ -234,6 +216,7 @@
             document.getElementById('app').classList.remove('hidden');
             setTimeout(() => document.getElementById('app').classList.remove('opacity-0'), 50);
             fetchInitialLogs();
+            fetchTopAssets(); // Carrega os cards iniciais
         }
 
         async function fetchInitialLogs() {
@@ -243,13 +226,74 @@
                 term.innerHTML = '<div class="text-slate-500 mb-2 border-b border-slate-800 pb-2">Marombiew Bot Terminal v2.0 <br> Carregando histórico...</div>';
                 [...logs].reverse().forEach(l => {
                     appendLog(l);
-                    addScannerFeedItem(l);
                 });
                 state.lastLogTime = new Date(logs[0].created_at);
                 state.lastLogId = logs[0].id;
                 processScannerLog(logs[0]);
                 updateBotStatus();
             }
+        }
+
+        // --- TOP 3 CARDS LOGIC ---
+        async function fetchTopAssets() {
+            const { data: assets } = await supabaseClient.from('cataloged_assets').select('*').order('win_rate', { ascending: false }).limit(3);
+            renderAssetCards(assets || []);
+        }
+
+        function renderAssetCards(assets) {
+            const container = document.getElementById('top-assets-container');
+            if (assets.length === 0) {
+                container.innerHTML = `<div class="col-span-1 md:col-span-3 text-center text-slate-500 py-8 text-sm bg-slate-900/50 rounded-xl border border-dashed border-slate-800">
+                    <i data-lucide="search" class="w-6 h-6 mx-auto mb-2 opacity-50"></i>
+                    Nenhum par qualificado (>60%) encontrado no momento.
+                </div>`;
+                lucide.createIcons();
+                return;
+            }
+
+            container.innerHTML = '';
+            state.activePairs = [];
+
+            assets.forEach((asset, index) => {
+                state.activePairs.push(asset.pair);
+                const safePairId = asset.pair.replace(/[^a-zA-Z0-9]/g, ''); // Remove chars especiais para usar no ID HTML
+                
+                const card = document.createElement('div');
+                card.id = `card-${safePairId}`;
+                card.className = "glass-card p-5 rounded-xl border-t-4 border-slate-700 relative overflow-hidden transition-all duration-300";
+                
+                card.innerHTML = `
+                    <div class="flex justify-between items-start mb-4">
+                        <div>
+                            <h3 class="font-bold text-lg text-white tracking-tight">${asset.pair}</h3>
+                            <p class="text-[10px] text-slate-400 font-mono flex items-center gap-1">
+                                <span class="w-1.5 h-1.5 rounded-full bg-slate-500" id="led-${safePairId}"></span> 
+                                ${asset.best_strategy || 'SMA14'}
+                            </p>
+                        </div>
+                        <div class="text-right">
+                            <span class="text-green-400 font-bold text-sm bg-green-500/10 px-2 py-1 rounded">${Math.round(asset.win_rate)}%</span>
+                            <p class="text-[9px] text-slate-500 mt-1 uppercase tracking-wide">Assertividade</p>
+                        </div>
+                    </div>
+                    
+                    <div class="flex justify-between items-end">
+                        <div>
+                            <p class="text-[9px] text-slate-500 mb-0.5">PREÇO ATUAL</p>
+                            <p class="text-xl font-mono text-slate-300" id="price-${safePairId}">---</p>
+                        </div>
+                        <div class="text-right">
+                             <p class="text-[9px] text-slate-500 mb-0.5">STATUS</p>
+                             <p class="text-xs font-bold text-slate-400" id="status-${safePairId}">AGUARDANDO</p>
+                        </div>
+                    </div>
+                    
+                    <div class="mt-3 pt-3 border-t border-white/5">
+                        <p class="text-[9px] text-slate-500 font-mono truncate" id="log-${safePairId}">Sincronizando...</p>
+                    </div>
+                `;
+                container.appendChild(card);
+            });
         }
 
         document.getElementById('login-form').addEventListener('submit', async (e) => {
@@ -296,8 +340,8 @@
                 .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'logs' }, p => { 
                     appendLog(p.new); 
                     processScannerLog(p.new);
-                    addScannerFeedItem(p.new);
                 })
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'cataloged_assets' }, () => fetchTopAssets()) // Atualiza cards se a catalogação mudar
                 .subscribe();
             setInterval(fetchData, 3000);
             setInterval(updateBotStatus, 5000);
@@ -323,7 +367,6 @@
                 if (state.lastLogId !== logs[0].id) {
                     state.lastLogId = logs[0].id;
                     processScannerLog(logs[0]);
-                    addScannerFeedItem(logs[0]);
                     state.lastLogTime = new Date(logs[0].created_at);
                 }
             }
@@ -413,7 +456,6 @@
         function createSignalElement(s) {
             const el = document.createElement('div');
             el.id = `signal-${s.id}`;
-            
             const rawStatus = s.result || s.status || 'PENDING';
             el.setAttribute('data-status', rawStatus);
             
@@ -424,7 +466,6 @@
             let isLoss = status.includes('LOSS') || (!isNaN(profit) && profit < 0);
             
             const borderClass = s.direction === 'call' ? 'border-green-500' : 'border-red-500';
-            
             let statusBadge;
             let profitDisplay = '';
 
@@ -462,22 +503,9 @@
             line.className = 'flex gap-2 opacity-80 text-slate-300';
             line.innerHTML = `<span class="text-slate-600 shrink-0">[${new Date(log.created_at).toLocaleTimeString()}]</span> <span>${log.message}</span>`;
             term.appendChild(line);
-            scrollToBottom();
-        }
-
-        function addScannerFeedItem(log) {
-            const feed = document.getElementById('scanner-feed');
-            const msg = log.message || "";
-            if (!msg.includes('ANALISE_DETALHADA') && !msg.includes('SINAL') && !msg.includes('Catalogando') && !msg.includes('SCAN_ENTRADA')) return;
-            
-            const item = document.createElement('div');
-            item.className = 'feed-item truncate';
-            let cleanMsg = msg.replace('ANALISE_DETALHADA::', '').replace('SCAN_ENTRADA::', 'SCAN: ').replace('::', ' | ').replace('SYSTEM', '').replace('INFO', '');
-            if(cleanMsg.length > 50) cleanMsg = cleanMsg.substring(0, 50) + '...';
-            
-            item.textContent = `> ${cleanMsg}`;
-            feed.appendChild(item);
-            if(feed.children.length > 3) feed.firstChild.remove();
+            const container = term.parentElement; 
+            // Only auto-scroll if close to bottom
+            if(container) container.scrollTop = container.scrollHeight;
         }
 
         function scrollToBottom() {
@@ -485,44 +513,70 @@
             term.scrollTop = term.scrollHeight;
         }
 
+        // --- UPDATED LOG PROCESSOR FOR 3 CARDS ---
         function processScannerLog(log) {
             const msg = log.message || "";
-            let pair = "", price = "---", rsi = "--";
             
-            if (msg.startsWith('SCAN_ENTRADA::')) {
-                pair = msg.split('::')[1];
-                document.getElementById('scanner-pair').textContent = pair;
-                document.getElementById('scanner-status-text').textContent = 'SCANNING';
-                document.getElementById('scanner-status-text').className = "text-[10px] font-bold tracking-widest text-amber-400 uppercase animate-pulse";
-                document.getElementById('scanner-led').className = 'w-2 h-2 rounded-full bg-amber-500 animate-pulse';
-                return; 
-            }
+            // Try to extract PAIR name from log
+            // Formats: ANALISE_DETALHADA::EURUSD::... OR SCAN_ENTRADA::EURUSD
+            let pair = "";
+            let info = "";
+            let price = "";
 
-            if (msg.startsWith('ANALISE_DETALHADA::')) {
+            if (msg.includes('::')) {
                 const parts = msg.split('::');
-                if (parts.length >= 4) { 
-                    pair = parts[1]; 
-                    price = parts[2].split(':')[1]; 
-                    const indPart = parts[3].split(':');
-                    if(indPart.length > 0) {
-                         const label = indPart[0];
-                         const val = indPart[1];
-                         document.getElementById('scanner-indicator-label').textContent = label;
-                         rsi = val;
-                    }
+                if(parts.length > 1) pair = parts[1];
+                
+                // Extrai preço se disponível
+                if (msg.includes('Preço:')) {
+                    const pPart = parts.find(p => p.startsWith('Preço:'));
+                    if(pPart) price = pPart.split(':')[1];
                 }
             }
-            if (pair) {
-                document.getElementById('scanner-pair').textContent = pair;
-                document.getElementById('scanner-price').textContent = price;
-                document.getElementById('scanner-rsi').textContent = rsi;
-                document.getElementById('scanner-led').className = 'w-2 h-2 rounded-full bg-green-500 animate-pulse';
-                document.getElementById('scanner-status-text').textContent = 'LIVE';
-                document.getElementById('scanner-status-text').className = "text-[10px] font-bold tracking-widest text-slate-400 uppercase";
-                document.getElementById('scanner-line').classList.remove('hidden');
-                const priceEl = document.getElementById('scanner-price');
-                priceEl.classList.add('text-green-400');
-                setTimeout(() => priceEl.classList.remove('text-green-400'), 500);
+
+            if (!pair) return;
+
+            // Clean pair name for ID selector
+            const safePairId = pair.replace(/[^a-zA-Z0-9]/g, '');
+            const card = document.getElementById(`card-${safePairId}`);
+            
+            if (card) {
+                // Update Log Text
+                const logEl = document.getElementById(`log-${safePairId}`);
+                if(logEl) {
+                    let cleanMsg = msg.replace('ANALISE_DETALHADA::', '').replace('SCAN_ENTRADA::', 'SCAN: ').replace(/::/g, ' ').replace('SYSTEM', '').replace('INFO', '');
+                    logEl.textContent = cleanMsg;
+                }
+
+                // Update Status & LED
+                const statusEl = document.getElementById(`status-${safePairId}`);
+                const ledEl = document.getElementById(`led-${safePairId}`);
+                const priceEl = document.getElementById(`price-${safePairId}`);
+
+                if (msg.includes('SCAN_ENTRADA')) {
+                    if(statusEl) { statusEl.textContent = 'ANALISANDO'; statusEl.className = 'text-xs font-bold text-amber-400 animate-pulse'; }
+                    if(ledEl) ledEl.className = 'w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse';
+                    card.classList.add('border-amber-500');
+                    setTimeout(() => card.classList.remove('border-amber-500'), 1000);
+                } else if (msg.includes('SINAL')) {
+                    if(statusEl) { statusEl.textContent = 'SINAL ENCONTRADO'; statusEl.className = 'text-xs font-bold text-green-400 animate-bounce'; }
+                    if(ledEl) ledEl.className = 'w-1.5 h-1.5 rounded-full bg-green-500 animate-ping';
+                } else {
+                    // Normal update (Analise Detalhada)
+                    if(statusEl) { statusEl.textContent = 'MONITORANDO'; statusEl.className = 'text-xs font-bold text-slate-400'; }
+                    if(ledEl) ledEl.className = 'w-1.5 h-1.5 rounded-full bg-green-500';
+                }
+
+                // Update Price
+                if (price && priceEl) {
+                    const oldPrice = parseFloat(priceEl.textContent) || 0;
+                    const newPrice = parseFloat(price);
+                    priceEl.textContent = price;
+                    
+                    if (newPrice > oldPrice) priceEl.className = "text-xl font-mono text-green-400 transition-colors duration-300";
+                    else if (newPrice < oldPrice) priceEl.className = "text-xl font-mono text-red-400 transition-colors duration-300";
+                    else priceEl.className = "text-xl font-mono text-slate-300";
+                }
             }
         }
 
@@ -542,9 +596,6 @@
                     ind.innerHTML = '<span class="w-2 h-2 rounded-full bg-red-500"></span> OFFLINE';
                     ind.className = 'text-xs font-bold flex items-center gap-1 text-red-400';
                     warn.classList.remove('hidden');
-                    document.getElementById('scanner-led').className = 'w-2 h-2 rounded-full bg-red-500';
-                    document.getElementById('scanner-line').classList.add('hidden');
-                    document.getElementById('scanner-status-text').textContent = 'OFFLINE';
                 } else {
                     ind.innerHTML = '<span class="w-2 h-2 rounded-full bg-amber-500"></span> PAUSADO';
                     ind.className = 'text-xs font-bold flex items-center gap-1 text-amber-400';
