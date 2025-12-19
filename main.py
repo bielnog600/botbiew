@@ -79,18 +79,15 @@ class TechnicalAnalysis:
         support, resistance = TechnicalAnalysis.get_support_resistance(candles, window=20)
         last = TechnicalAnalysis.analyze_candle(candles[-1])
         
-        # 2.1. ATR ADAPTATIVO
         min_atr_required = last['close'] * 0.00005
         if atr < min_atr_required: 
             return None, f"Baixa Volatilidade (ATR {atr:.5f} < {min_atr_required:.5f})"
 
         avg_body = sum([abs(c['close']-c['open']) for c in candles[-6:-1]]) / 5
         
-        # 4.1. FILTRO MICRO-DOJI
         if last['body'] < avg_body * 0.4:
             return None, f"Filtro: Corpo pequeno/Indecisão ({last['body']:.5f})"
 
-        # 2.2. SAFE ZONE CAPPED
         safe_zone = min(max(avg_body * 0.5, 0.00005), atr * 0.6)
 
         consistency_count = 7
@@ -112,7 +109,6 @@ class TechnicalAnalysis:
 
         prev = TechnicalAnalysis.analyze_candle(candles[-2])
         
-        # --- LÓGICA CALL ---
         if trend_up_consistent:
             if prev['close'] < prev['open']: return None, "Filtro: Vela anterior vermelha"
             if resistance and (resistance - last['close']) < safe_zone: return None, "Filtro: Perto da Resistência"
@@ -123,7 +119,6 @@ class TechnicalAnalysis:
                 else:
                     return None, "Filtro: Pavio Superior Grande"
 
-        # --- LÓGICA PUT ---
         elif trend_down_consistent:
             if prev['close'] > prev['open']: return None, "Filtro: Vela anterior verde"
             if support and (last['close'] - support) < safe_zone: return None, "Filtro: Perto do Suporte"
@@ -210,7 +205,6 @@ class SimpleBot:
                 self.config["stop_loss"] = float(data.get("stop_loss", 0))
                 self.config["stop_mode"] = data.get("stop_mode", "percentage")
                 self.config["daily_initial_balance"] = float(data.get("daily_initial_balance", 0))
-                # TIMER
                 self.config["timer_enabled"] = data.get("timer_enabled", False)
                 self.config["timer_start"] = data.get("timer_start", "00:00")
                 self.config["timer_end"] = data.get("timer_end", "00:00")
@@ -219,17 +213,13 @@ class SimpleBot:
         except: pass
 
     def check_schedule(self):
-        """
-        Verifica se o bot deve estar rodando baseado no horario.
-        """
         if not self.config.get("timer_enabled", False):
-            return # Timer desligado, respeita status manual
+            return 
 
         now_str = datetime.now().strftime("%H:%M")
         start_str = self.config.get("timer_start", "00:00")
         end_str = self.config.get("timer_end", "00:00")
         
-        # Logica para determinar se esta dentro do horario (suporta virada de noite ex: 22:00 as 02:00)
         is_inside = False
         if start_str < end_str:
             is_inside = start_str <= now_str < end_str
@@ -239,14 +229,12 @@ class SimpleBot:
         current_status = self.config["status"]
         
         if is_inside and current_status == "PAUSED":
-            # Está na hora e bot está pausado -> LIGAR
             self.log_to_db(f"⏰ Agendador: Iniciando operações ({start_str}-{end_str})", "SYSTEM")
             self.config["status"] = "RUNNING"
             if self.supabase:
                 self.supabase.table("bot_config").update({"status": "RUNNING"}).eq("id", 1).execute()
         
         elif not is_inside and current_status == "RUNNING":
-            # Passou da hora e bot está rodando -> PAUSAR
             self.log_to_db(f"⏰ Agendador: Pausando operações (Fim do horário)", "SYSTEM")
             self.config["status"] = "PAUSED"
             if self.supabase:
@@ -319,7 +307,7 @@ class SimpleBot:
         return False
 
     def catalog_assets(self, assets_list):
-        self.log_to_db(f"📊 Catalogando Top 3 (Filtro > 60%)...", "SYSTEM")
+        self.log_to_db(f"📊 Catalogando Top 3...", "SYSTEM")
         results = []
         for asset in assets_list:
             try:
@@ -341,15 +329,14 @@ class SimpleBot:
             except: pass
             time.sleep(0.05)
         
-        # --- NOVO FILTRO: APENAS PARES COM ASSERTIVIDADE >= 60% ---
+        # Filtro de assertividade > 60%
         valid_results = [r for r in results if r['win_rate'] >= 60]
-        
         valid_results.sort(key=lambda x: x['win_rate'], reverse=True)
         top_3 = valid_results[:3]
         
         if top_3:
             pairs_str = ", ".join([f"{r['pair']} ({r['win_rate']:.0f}%)" for r in top_3])
-            self.log_to_db(f"💎 Melhores (>60%): {pairs_str}", "SUCCESS")
+            self.log_to_db(f"💎 Melhores: {pairs_str}", "SUCCESS")
             try:
                 if self.supabase:
                     self.supabase.table("cataloged_assets").delete().neq("pair", "XYZ").execute() 
@@ -357,9 +344,8 @@ class SimpleBot:
             except: pass
             return [r['pair'] for r in top_3]
         
-        # Se nenhum par for bom, não opera nada.
         self.log_to_db("⚠️ Mercado difícil: Nenhum par acima de 60%. Pausando entradas.", "WARNING")
-        return [] 
+        return []
 
     def safe_buy(self, asset, amount, direction, type="digital"):
         result = [None]
@@ -476,19 +462,28 @@ class SimpleBot:
                         self.best_assets = self.catalog_assets(ASSETS_POOL)
                         last_catalog = time.time()
 
-                    # VERIFICA AGENDAMENTO A CADA CICLO
                     self.check_schedule()
 
+                    # --- CORREÇÃO AQUI: LOOP PARA ATUALIZAR TODOS OS 3 CARDS ---
                     if time.time() - last_scan > 10:
                         try:
                             self.update_balance_remote()
-                            primary = self.best_assets[0] if self.best_assets else "EURUSD-OTC"
-                            candles = self.api.get_candles(primary, 60, 40, int(time.time()))
-                            if candles:
-                                price = candles[-1]['close']
-                                sma = TechnicalAnalysis.calculate_sma(candles, 14)
-                                cd_msg = " [COOLDOWN ATIVO]" if (time.time() - self.last_loss_time < 120) else ""
-                                self.log_to_db(f"ANALISE_DETALHADA::{primary}::Preço:{price:.5f}::SMA14:{sma:.5f}{cd_msg}", "SYSTEM")
+                            
+                            # Define quais pares monitorar (se não houver best_assets, monitora EURUSD por padrão)
+                            targets = self.best_assets[:3] if self.best_assets else ["EURUSD-OTC"]
+                            
+                            for asset in targets:
+                                try:
+                                    candles = self.api.get_candles(asset, 60, 40, int(time.time()))
+                                    if candles:
+                                        price = candles[-1]['close']
+                                        sma = TechnicalAnalysis.calculate_sma(candles, 14)
+                                        cd_msg = " [COOLDOWN ATIVO]" if (time.time() - self.last_loss_time < 120) else ""
+                                        # Loga para atualizar cada card individualmente
+                                        self.log_to_db(f"ANALISE_DETALHADA::{asset}::Preço:{price:.5f}::SMA14:{sma:.5f}{cd_msg}", "SYSTEM")
+                                        time.sleep(0.2) # Pequeno delay para evitar flood no banco
+                                except: pass
+                                
                         except Exception as e: self.log_to_db(f"Erro monitoramento: {e}", "WARNING")
                         last_scan = time.time()
                     
@@ -516,7 +511,6 @@ class SimpleBot:
                                 if asset in self.active_trades: continue
                             try:
                                 self.log_to_db(f"SCAN_ENTRADA::{asset}", "SYSTEM")
-                                
                                 candles = self.api.get_candles(asset, 60, 40, int(time.time()))
                                 sig, reason = TechnicalAnalysis.get_signal(candles)
                                 if sig: 
