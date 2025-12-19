@@ -319,7 +319,7 @@ class SimpleBot:
         return False
 
     def catalog_assets(self, assets_list):
-        self.log_to_db(f"📊 Catalogando Top 3...", "SYSTEM")
+        self.log_to_db(f"📊 Catalogando Top 3 (Filtro > 60%)...", "SYSTEM")
         results = []
         for asset in assets_list:
             try:
@@ -340,18 +340,26 @@ class SimpleBot:
                     results.append({"pair": asset, "win_rate": wr, "wins": wins, "losses": total-wins, "best_strategy": "Nano SMA14+SR"})
             except: pass
             time.sleep(0.05)
-        results.sort(key=lambda x: x['win_rate'], reverse=True)
-        top_3 = results[:3]
+        
+        # --- NOVO FILTRO: APENAS PARES COM ASSERTIVIDADE >= 60% ---
+        valid_results = [r for r in results if r['win_rate'] >= 60]
+        
+        valid_results.sort(key=lambda x: x['win_rate'], reverse=True)
+        top_3 = valid_results[:3]
+        
         if top_3:
             pairs_str = ", ".join([f"{r['pair']} ({r['win_rate']:.0f}%)" for r in top_3])
-            self.log_to_db(f"💎 Melhores: {pairs_str}", "SUCCESS")
+            self.log_to_db(f"💎 Melhores (>60%): {pairs_str}", "SUCCESS")
             try:
                 if self.supabase:
                     self.supabase.table("cataloged_assets").delete().neq("pair", "XYZ").execute() 
                     self.supabase.table("cataloged_assets").insert(top_3).execute()
             except: pass
             return [r['pair'] for r in top_3]
-        return [assets_list[0]]
+        
+        # Se nenhum par for bom, não opera nada.
+        self.log_to_db("⚠️ Mercado difícil: Nenhum par acima de 60%. Pausando entradas.", "WARNING")
+        return [] 
 
     def safe_buy(self, asset, amount, direction, type="digital"):
         result = [None]
