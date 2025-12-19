@@ -133,21 +133,14 @@ class TechnicalAnalysis:
     # --- MODO 2: PULLBACK (Nova Estratégia Complementar) ---
     @staticmethod
     def get_pullback_signal(candles):
-        """
-        Estratégia de Pullback para OTC:
-        - SMA14 define a tendência macro.
-        - Espera 3 velas a favor da tendência.
-        - Espera 1 vela de correção (contra a tendência, corpo controlado).
-        - Entra a favor da tendência macro na próxima.
-        """
         if len(candles) < 20: return None, "Dados insuficientes"
 
         # Indicadores Básicos
         sma = TechnicalAnalysis.calculate_sma(candles, 14)
         atr = TechnicalAnalysis.calculate_atr(candles, 14)
-        last = TechnicalAnalysis.analyze_candle(candles[-1]) # Vela de correção (gatilho)
+        last = TechnicalAnalysis.analyze_candle(candles[-1]) 
         
-        # Filtros Globais (Iguais ao Trend para segurança)
+        # Filtros Globais
         min_atr_required = last['close'] * 0.00005
         if atr < min_atr_required: return None, "Baixa Volatilidade (ATR)"
         
@@ -155,31 +148,29 @@ class TechnicalAnalysis:
         if last['body'] < avg_body * 0.4: return None, "Correção muito fraca (Doji)"
         if last['body'] > avg_body * 1.5: return None, "Correção muito forte (Engolfo?)"
 
-        # Definição de Tendência Recente (3 velas ANTES da atual)
-        # Candles: ... [-4], [-3], [-2], [-1](Atual/Gatilho)
+        # --- AJUSTE 2: FILTRO DE INCLINAÇÃO DA SMA (MUITO IMPORTANTE) ---
+        # Calcula a SMA anterior para ver se há inclinação real
+        # candles[:-1] pega até a penúltima vela
+        sma_prev = TechnicalAnalysis.calculate_sma(candles[:-1], 14)
+        if abs(sma - sma_prev) < atr * 0.1:
+            return None, "Pullback sem inclinação de SMA (Flat)"
+
+        # Definição de Tendência Recente
         recent_trend_candles = candles[-4:-1]
         
-        # Lógica CALL (Tendência Alta + Correção Baixa)
-        # 1. Preço acima da SMA (Macro Alta)
+        # Lógica CALL
         if last['close'] > sma:
-            # 2. 3 Velas anteriores foram VERDES (Micro Alta)
             if all(c['close'] > c['open'] for c in recent_trend_candles):
-                # 3. Vela atual é VERMELHA (Correção)
                 if last['color'] == 'red':
-                    # 4. Sem pavio inferior exagerado (rejeição da baixa)
                     if last['lower_wick'] < (last['body'] * 0.8):
                         return 'call', "PULLBACK CALL (Alta > Correção)"
                     else:
                         return None, "Pullback rejeitado (Pavio)"
         
-        # Lógica PUT (Tendência Baixa + Correção Alta)
-        # 1. Preço abaixo da SMA (Macro Baixa)
+        # Lógica PUT
         elif last['close'] < sma:
-            # 2. 3 Velas anteriores foram VERMELHAS (Micro Baixa)
             if all(c['close'] < c['open'] for c in recent_trend_candles):
-                # 3. Vela atual é VERDE (Correção)
                 if last['color'] == 'green':
-                    # 4. Sem pavio superior exagerado (rejeição da alta)
                     if last['upper_wick'] < (last['body'] * 0.8):
                         return 'put', "PULLBACK PUT (Baixa > Correção)"
                     else:
@@ -215,9 +206,10 @@ class SimpleBot:
         self.best_assets = []
         
         # Estado dos Modos
-        self.operating_mode = "TREND" # TREND ou PULLBACK
-        self.trend_blocked_count = 0  # Contador para sair do TREND
-        self.pullback_win_count = 0   # Contador para sair do PULLBACK
+        self.operating_mode = "TREND"
+        self.trend_blocked_count = 0
+        self.pullback_win_count = 0
+        self.last_trend_block_time = 0 # AJUSTE 1: Temporizador para bloqueio
         
         self.config = { 
             "status": "PAUSED", "account_type": "PRACTICE", "entry_value": 1.0,
@@ -465,10 +457,8 @@ class SimpleBot:
             if res_str == 'LOSS': 
                 self.last_loss_time = time.time()
                 self.log_to_db(f"🛑 Cooldown ativo: Pausa de 2 min.", "WARNING")
-                # Reset contador de vitórias do Pullback se perder
                 if self.operating_mode == "PULLBACK": self.pullback_win_count = 0
             
-            # Lógica de Troca de Modo: PULLBACK -> TREND (Se ganhar 2 seguidas)
             if res_str == 'WIN' and self.operating_mode == "PULLBACK":
                 self.pullback_win_count += 1
                 if self.pullback_win_count >= 2:
@@ -476,7 +466,6 @@ class SimpleBot:
                     self.pullback_win_count = 0
                     self.log_to_db("MODE_CHANGE::PULLBACK->TREND::Meta de wins atingida", "SUCCESS")
 
-            # Reset contador de bloqueios do TREND se houve uma entrada válida (mesmo loss)
             if self.operating_mode == "TREND":
                 self.trend_blocked_count = 0
 
@@ -531,7 +520,6 @@ class SimpleBot:
                             self.update_balance_remote()
                             targets = self.best_assets[:3] if self.best_assets else ["EURUSD-OTC"]
                             
-                            # Log periódico com o Modo Atual
                             self.log_to_db(f"MODE_ATIVO::{self.operating_mode}", "SYSTEM")
 
                             for asset in targets:
@@ -574,15 +562,25 @@ class SimpleBot:
                                 sig, reason = TechnicalAnalysis.get_signal_by_mode(candles, self.operating_mode)
                                 
                                 if sig: 
+                                    # AJUSTE 3: Reset de contadores em par válido
+                                    if self.operating_mode == "TREND": 
+                                        self.trend_blocked_count = 0
+                                    
                                     self.log_to_db(f"🔔 SINAL EM {asset}: {sig.upper()} ({reason})", "INFO")
                                     self.execute_trade(asset, sig)
                                     trade_executed = True
                                     break 
                                 else:
                                     # Lógica de Troca de Modo: TREND -> PULLBACK
-                                    if self.operating_mode == "TREND" and "Lateralizado" in reason:
+                                    # AJUSTE 1: Temporizador para bloqueio
+                                    if (
+                                        self.operating_mode == "TREND" 
+                                        and "Lateralizado" in reason 
+                                        and time.time() - self.last_trend_block_time > 60
+                                    ):
                                         self.trend_blocked_count += 1
-                                        # Se bloquear 3 vezes consecutivas (em ciclos diferentes ou mesmo ciclo se analisar varios)
+                                        self.last_trend_block_time = time.time()
+                                        
                                         if self.trend_blocked_count >= 3:
                                             self.operating_mode = "PULLBACK"
                                             self.trend_blocked_count = 0
