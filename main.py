@@ -329,7 +329,6 @@ class SimpleBot:
             except: pass
             time.sleep(0.05)
         
-        # Filtro de assertividade > 60%
         valid_results = [r for r in results if r['win_rate'] >= 60]
         valid_results.sort(key=lambda x: x['win_rate'], reverse=True)
         top_3 = valid_results[:3]
@@ -464,12 +463,9 @@ class SimpleBot:
 
                     self.check_schedule()
 
-                    # --- CORREÇÃO AQUI: LOOP PARA ATUALIZAR TODOS OS 3 CARDS ---
                     if time.time() - last_scan > 10:
                         try:
                             self.update_balance_remote()
-                            
-                            # Define quais pares monitorar (se não houver best_assets, monitora EURUSD por padrão)
                             targets = self.best_assets[:3] if self.best_assets else ["EURUSD-OTC"]
                             
                             for asset in targets:
@@ -479,9 +475,8 @@ class SimpleBot:
                                         price = candles[-1]['close']
                                         sma = TechnicalAnalysis.calculate_sma(candles, 14)
                                         cd_msg = " [COOLDOWN ATIVO]" if (time.time() - self.last_loss_time < 120) else ""
-                                        # Loga para atualizar cada card individualmente
                                         self.log_to_db(f"ANALISE_DETALHADA::{asset}::Preço:{price:.5f}::SMA14:{sma:.5f}{cd_msg}", "SYSTEM")
-                                        time.sleep(0.2) # Pequeno delay para evitar flood no banco
+                                        time.sleep(0.2)
                                 except: pass
                                 
                         except Exception as e: self.log_to_db(f"Erro monitoramento: {e}", "WARNING")
@@ -501,6 +496,12 @@ class SimpleBot:
                     if 57 <= now_sec <= 58:
                         if time.time() - self.last_loss_time < 120:
                              time.sleep(2); continue
+                        
+                        # --- FIX: Check if assets exist ---
+                        if not self.best_assets:
+                            self.log_to_db("⛔ Sem ativos válidos (>60%). Aguardando nova catalogação.", "WARNING")
+                            time.sleep(2)
+                            continue
 
                         current_assets = self.best_assets.copy()
                         random.shuffle(current_assets)
