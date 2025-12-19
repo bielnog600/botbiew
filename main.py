@@ -24,7 +24,7 @@ EXNOVA_PASSWORD = os.environ.get("EXNOVA_PASSWORD", "sua_senha")
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
 logging.getLogger("urllib3").setLevel(logging.WARNING)
 
-# --- ANÁLISE TÉCNICA ---
+# --- ANÁLISE TÉCNICA (ARQUITETURA DE MODOS) ---
 class TechnicalAnalysis:
     @staticmethod
     def calculate_sma(candles, period):
@@ -71,8 +71,17 @@ class TechnicalAnalysis:
         support = min(c['min'] for c in subset)
         return support, resistance
 
+    # --- ROTEADOR DE ESTRATÉGIA ---
     @staticmethod
-    def get_signal(candles):
+    def get_signal_by_mode(candles, mode="TREND"):
+        if mode == "PULLBACK":
+            return TechnicalAnalysis.get_pullback_signal(candles)
+        else:
+            return TechnicalAnalysis.get_trend_signal(candles)
+
+    # --- MODO 1: TREND (Estratégia Original) ---
+    @staticmethod
+    def get_trend_signal(candles):
         if len(candles) < 40: return None, "Dados insuficientes"
         
         atr = TechnicalAnalysis.calculate_atr(candles, 14)
@@ -80,13 +89,10 @@ class TechnicalAnalysis:
         last = TechnicalAnalysis.analyze_candle(candles[-1])
         
         min_atr_required = last['close'] * 0.00005
-        if atr < min_atr_required: 
-            return None, f"Baixa Volatilidade (ATR {atr:.5f} < {min_atr_required:.5f})"
+        if atr < min_atr_required: return None, f"Baixa Volatilidade (ATR {atr:.5f})"
 
         avg_body = sum([abs(c['close']-c['open']) for c in candles[-6:-1]]) / 5
-        
-        if last['body'] < avg_body * 0.4:
-            return None, f"Filtro: Corpo pequeno/Indecisão ({last['body']:.5f})"
+        if last['body'] < avg_body * 0.4: return None, f"Filtro: Corpo pequeno/Indecisão"
 
         safe_zone = min(max(avg_body * 0.5, 0.00005), atr * 0.6)
 
@@ -99,37 +105,87 @@ class TechnicalAnalysis:
             historical_slice = candles[:len(candles) + idx + 1] 
             sma_historical = TechnicalAnalysis.calculate_sma(historical_slice, 14)
             candle_at_moment = candles[idx]
-            
             if candle_at_moment['close'] <= sma_historical: trend_up_consistent = False
             if candle_at_moment['close'] >= sma_historical: trend_down_consistent = False
             if not trend_up_consistent and not trend_down_consistent: break
 
         if not trend_up_consistent and not trend_down_consistent:
-            return None, f"Lateralizado (Sem tendência de {consistency_count} velas)"
+            return None, f"Lateralizado (Filtro Trend)"
 
         prev = TechnicalAnalysis.analyze_candle(candles[-2])
         
         if trend_up_consistent:
             if prev['close'] < prev['open']: return None, "Filtro: Vela anterior vermelha"
             if resistance and (resistance - last['close']) < safe_zone: return None, "Filtro: Perto da Resistência"
-
             if last['color'] == 'green':
-                if last['upper_wick'] < (last['body'] * 0.6):
-                    return 'call', f"Sinal COMPRA (7 velas > SMA14)"
-                else:
-                    return None, "Filtro: Pavio Superior Grande"
+                if last['upper_wick'] < (last['body'] * 0.6): return 'call', f"TREND CALL (7 velas > SMA14)"
+                else: return None, "Filtro: Pavio Superior Grande"
 
         elif trend_down_consistent:
             if prev['close'] > prev['open']: return None, "Filtro: Vela anterior verde"
             if support and (last['close'] - support) < safe_zone: return None, "Filtro: Perto do Suporte"
-
             if last['color'] == 'red':
-                if last['lower_wick'] < (last['body'] * 0.6):
-                    return 'put', f"Sinal VENDA (7 velas < SMA14)"
-                else:
-                    return None, "Filtro: Pavio Inferior Grande"
+                if last['lower_wick'] < (last['body'] * 0.6): return 'put', f"TREND PUT (7 velas < SMA14)"
+                else: return None, "Filtro: Pavio Inferior Grande"
                     
         return None, "Neutro"
+
+    # --- MODO 2: PULLBACK (Nova Estratégia Complementar) ---
+    @staticmethod
+    def get_pullback_signal(candles):
+        """
+        Estratégia de Pullback para OTC:
+        - SMA14 define a tendência macro.
+        - Espera 3 velas a favor da tendência.
+        - Espera 1 vela de correção (contra a tendência, corpo controlado).
+        - Entra a favor da tendência macro na próxima.
+        """
+        if len(candles) < 20: return None, "Dados insuficientes"
+
+        # Indicadores Básicos
+        sma = TechnicalAnalysis.calculate_sma(candles, 14)
+        atr = TechnicalAnalysis.calculate_atr(candles, 14)
+        last = TechnicalAnalysis.analyze_candle(candles[-1]) # Vela de correção (gatilho)
+        
+        # Filtros Globais (Iguais ao Trend para segurança)
+        min_atr_required = last['close'] * 0.00005
+        if atr < min_atr_required: return None, "Baixa Volatilidade (ATR)"
+        
+        avg_body = sum([abs(c['close']-c['open']) for c in candles[-6:-1]]) / 5
+        if last['body'] < avg_body * 0.4: return None, "Correção muito fraca (Doji)"
+        if last['body'] > avg_body * 1.5: return None, "Correção muito forte (Engolfo?)"
+
+        # Definição de Tendência Recente (3 velas ANTES da atual)
+        # Candles: ... [-4], [-3], [-2], [-1](Atual/Gatilho)
+        recent_trend_candles = candles[-4:-1]
+        
+        # Lógica CALL (Tendência Alta + Correção Baixa)
+        # 1. Preço acima da SMA (Macro Alta)
+        if last['close'] > sma:
+            # 2. 3 Velas anteriores foram VERDES (Micro Alta)
+            if all(c['close'] > c['open'] for c in recent_trend_candles):
+                # 3. Vela atual é VERMELHA (Correção)
+                if last['color'] == 'red':
+                    # 4. Sem pavio inferior exagerado (rejeição da baixa)
+                    if last['lower_wick'] < (last['body'] * 0.8):
+                        return 'call', "PULLBACK CALL (Alta > Correção)"
+                    else:
+                        return None, "Pullback rejeitado (Pavio)"
+        
+        # Lógica PUT (Tendência Baixa + Correção Alta)
+        # 1. Preço abaixo da SMA (Macro Baixa)
+        elif last['close'] < sma:
+            # 2. 3 Velas anteriores foram VERMELHAS (Micro Baixa)
+            if all(c['close'] < c['open'] for c in recent_trend_candles):
+                # 3. Vela atual é VERDE (Correção)
+                if last['color'] == 'green':
+                    # 4. Sem pavio superior exagerado (rejeição da alta)
+                    if last['upper_wick'] < (last['body'] * 0.8):
+                        return 'put', "PULLBACK PUT (Baixa > Correção)"
+                    else:
+                        return None, "Pullback rejeitado (Pavio)"
+
+        return None, "Sem configuração de Pullback"
 
 # --- CORREÇÕES OTC ---
 try:
@@ -157,6 +213,11 @@ class SimpleBot:
         self.active_trades = set()
         self.active_account_type = None
         self.best_assets = []
+        
+        # Estado dos Modos
+        self.operating_mode = "TREND" # TREND ou PULLBACK
+        self.trend_blocked_count = 0  # Contador para sair do TREND
+        self.pullback_win_count = 0   # Contador para sair do PULLBACK
         
         self.config = { 
             "status": "PAUSED", "account_type": "PRACTICE", "entry_value": 1.0,
@@ -288,10 +349,7 @@ class SimpleBot:
         self.log_to_db(f"🔌 Conectando...", "SYSTEM")
         try:
             if self.api: 
-                try:
-                    self.api.api.close()
-                except:
-                    pass
+                try: self.api.api.close(); except: pass
             self.api = Exnova(EXNOVA_EMAIL, EXNOVA_PASSWORD)
             check, reason = self.api.connect()
             if check:
@@ -316,7 +374,8 @@ class SimpleBot:
                 wins, total = 0, 0
                 for i in range(40, len(candles)-1):
                     subset = candles[i-40:i+1]
-                    signal, _ = TechnicalAnalysis.get_signal(subset)
+                    # Catalogação usa sempre o modo TREND para definir a qualidade do par
+                    signal, _ = TechnicalAnalysis.get_trend_signal(subset)
                     if signal:
                         total += 1
                         nxt = candles[i+1]
@@ -360,11 +419,8 @@ class SimpleBot:
     def execute_trade(self, asset, direction):
         if not self.api: return
         
-        try:
-            balance_before = self.api.get_balance()
-        except:
-            self.log_to_db("Erro ao ler saldo inicial. Abortando entrada.", "ERROR")
-            return
+        try: balance_before = self.api.get_balance()
+        except: return
 
         if not self.check_management(): return
 
@@ -373,13 +429,13 @@ class SimpleBot:
             self.active_trades.add(asset)
 
         amount = self.config["entry_value"]
-        self.log_to_db(f"➡️ ABRINDO: {asset} | {direction.upper()} | ${amount}", "INFO")
+        self.log_to_db(f"➡️ ABRINDO ({self.operating_mode}): {asset} | {direction.upper()} | ${amount}", "INFO")
         
         sig_id = None
         try:
             if self.supabase:
                 res = self.supabase.table("trade_signals").insert({
-                    "pair": asset, "direction": direction, "strategy": "Nano SMA14+SR",
+                    "pair": asset, "direction": direction, "strategy": f"Nano {self.operating_mode}",
                     "status": "PENDING", "result": "PENDING", "created_at": datetime.now().isoformat(), "profit": 0
                 }).execute()
                 if res.data: sig_id = res.data[0]['id']
@@ -389,8 +445,7 @@ class SimpleBot:
         if not status: status, id = self.safe_buy(asset, amount, direction, "binary")
 
         if status:
-            self.log_to_db(f"✅ Ordem {id} aceita. Aguardando resultado (64s)...", "INFO")
-            
+            self.log_to_db(f"✅ Ordem {id} aceita.", "INFO")
             time.sleep(64)
             
             profit = 0.0
@@ -399,24 +454,29 @@ class SimpleBot:
             try:
                 balance_after = self.api.get_balance()
                 delta = balance_after - balance_before
-                
-                if delta > 0:
-                    res_str = 'WIN'
-                    profit = delta
-                elif delta < 0:
-                    res_str = 'LOSS'
-                    profit = delta
-                else:
-                    res_str = 'DOJI'
-                    profit = 0.0
-            except Exception as e:
-                self.log_to_db(f"Erro verificação saldo: {e}", "ERROR")
-                res_str = 'UNKNOWN'
+                if delta > 0: res_str, profit = 'WIN', delta
+                elif delta < 0: res_str, profit = 'LOSS', delta
+                else: res_str, profit = 'DOJI', 0.0
+            except: res_str = 'UNKNOWN'
 
             if res_str == 'LOSS': 
                 self.last_loss_time = time.time()
                 self.log_to_db(f"🛑 Cooldown ativo: Pausa de 2 min.", "WARNING")
+                # Reset contador de vitórias do Pullback se perder
+                if self.operating_mode == "PULLBACK": self.pullback_win_count = 0
             
+            # Lógica de Troca de Modo: PULLBACK -> TREND (Se ganhar 2 seguidas)
+            if res_str == 'WIN' and self.operating_mode == "PULLBACK":
+                self.pullback_win_count += 1
+                if self.pullback_win_count >= 2:
+                    self.operating_mode = "TREND"
+                    self.pullback_win_count = 0
+                    self.log_to_db("MODE_CHANGE::PULLBACK->TREND::Meta de wins atingida", "SUCCESS")
+
+            # Reset contador de bloqueios do TREND se houve uma entrada válida (mesmo loss)
+            if self.operating_mode == "TREND":
+                self.trend_blocked_count = 0
+
             log_type = "SUCCESS" if res_str == 'WIN' else "ERROR" if res_str == 'LOSS' else "WARNING"
             self.log_to_db(f"{'🏆' if res_str == 'WIN' else '🔻'} {res_str}: ${profit:.2f}", log_type)
 
@@ -468,40 +528,33 @@ class SimpleBot:
                             self.update_balance_remote()
                             targets = self.best_assets[:3] if self.best_assets else ["EURUSD-OTC"]
                             
+                            # Log periódico com o Modo Atual
+                            self.log_to_db(f"MODE_ATIVO::{self.operating_mode}", "SYSTEM")
+
                             for asset in targets:
                                 try:
                                     candles = self.api.get_candles(asset, 60, 40, int(time.time()))
                                     if candles:
                                         price = candles[-1]['close']
                                         sma = TechnicalAnalysis.calculate_sma(candles, 14)
-                                        cd_msg = " [COOLDOWN ATIVO]" if (time.time() - self.last_loss_time < 120) else ""
+                                        cd_msg = " [COOLDOWN]" if (time.time() - self.last_loss_time < 120) else ""
                                         self.log_to_db(f"ANALISE_DETALHADA::{asset}::Preço:{price:.5f}::SMA14:{sma:.5f}{cd_msg}", "SYSTEM")
                                         time.sleep(0.2)
                                 except: pass
-                                
                         except Exception as e: self.log_to_db(f"Erro monitoramento: {e}", "WARNING")
                         last_scan = time.time()
                     
                     if time.time() - last_bal > 60: self.update_balance_remote(); last_bal = time.time()
 
-                    if self.config["status"] == "PAUSED": 
-                        time.sleep(2)
-                        continue
-                    
-                    if not self.check_management():
-                        time.sleep(5)
-                        continue
+                    if self.config["status"] == "PAUSED": time.sleep(2); continue
+                    if not self.check_management(): time.sleep(5); continue
 
                     now_sec = datetime.now().second
                     if 57 <= now_sec <= 58:
-                        if time.time() - self.last_loss_time < 120:
-                             time.sleep(2); continue
-                        
-                        # --- FIX: Check if assets exist ---
+                        if time.time() - self.last_loss_time < 120: time.sleep(2); continue
                         if not self.best_assets:
-                            self.log_to_db("⛔ Sem ativos válidos (>60%). Aguardando nova catalogação.", "WARNING")
-                            time.sleep(2)
-                            continue
+                            self.log_to_db("⛔ Sem ativos válidos (>60%).", "WARNING")
+                            time.sleep(2); continue
 
                         current_assets = self.best_assets.copy()
                         random.shuffle(current_assets)
@@ -511,14 +564,26 @@ class SimpleBot:
                             with self.trade_lock:
                                 if asset in self.active_trades: continue
                             try:
-                                self.log_to_db(f"SCAN_ENTRADA::{asset}", "SYSTEM")
+                                self.log_to_db(f"SCAN_ENTRADA::{asset} ({self.operating_mode})", "SYSTEM")
                                 candles = self.api.get_candles(asset, 60, 40, int(time.time()))
-                                sig, reason = TechnicalAnalysis.get_signal(candles)
+                                
+                                # --- USO DO ROTEADOR DE ESTRATÉGIA ---
+                                sig, reason = TechnicalAnalysis.get_signal_by_mode(candles, self.operating_mode)
+                                
                                 if sig: 
                                     self.log_to_db(f"🔔 SINAL EM {asset}: {sig.upper()} ({reason})", "INFO")
                                     self.execute_trade(asset, sig)
                                     trade_executed = True
                                     break 
+                                else:
+                                    # Lógica de Troca de Modo: TREND -> PULLBACK
+                                    if self.operating_mode == "TREND" and "Lateralizado" in reason:
+                                        self.trend_blocked_count += 1
+                                        # Se bloquear 3 vezes consecutivas (em ciclos diferentes ou mesmo ciclo se analisar varios)
+                                        if self.trend_blocked_count >= 3:
+                                            self.operating_mode = "PULLBACK"
+                                            self.trend_blocked_count = 0
+                                            self.log_to_db("MODE_CHANGE::TREND->PULLBACK::Lateralização excessiva detectada", "WARNING")
                             except: pass
                         
                         if trade_executed: time.sleep(50) 
