@@ -91,19 +91,13 @@
                 <!-- TOP 3 ASSETS GRID -->
                 <div class="mb-2 flex items-center gap-2">
                     <i data-lucide="trending-up" class="w-4 h-4 text-amber-500"></i>
-                    <h3 class="text-sm font-bold text-slate-400 uppercase tracking-widest">Melhores Oportunidades</h3>
+                    <h3 class="text-sm font-bold text-slate-400 uppercase tracking-widest">Melhores Oportunidades (>60%)</h3>
                 </div>
                 
                 <div id="top-assets-container" class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                     <!-- Cards serão injetados aqui via JS -->
                     <div class="glass-card p-6 rounded-xl border-t-4 border-slate-700 animate-pulse h-32 flex items-center justify-center text-slate-600 text-xs">
-                        Aguardando catalogação...
-                    </div>
-                    <div class="glass-card p-6 rounded-xl border-t-4 border-slate-700 animate-pulse h-32 flex items-center justify-center text-slate-600 text-xs">
-                        Aguardando catalogação...
-                    </div>
-                    <div class="glass-card p-6 rounded-xl border-t-4 border-slate-700 animate-pulse h-32 flex items-center justify-center text-slate-600 text-xs">
-                        Aguardando catalogação...
+                        Aguardando atualização do bot...
                     </div>
                 </div>
 
@@ -216,7 +210,7 @@
             document.getElementById('app').classList.remove('hidden');
             setTimeout(() => document.getElementById('app').classList.remove('opacity-0'), 50);
             fetchInitialLogs();
-            fetchTopAssets(); // Carrega os cards iniciais
+            fetchTopAssets(); 
         }
 
         async function fetchInitialLogs() {
@@ -256,7 +250,7 @@
 
             assets.forEach((asset, index) => {
                 state.activePairs.push(asset.pair);
-                const safePairId = asset.pair.replace(/[^a-zA-Z0-9]/g, ''); // Remove chars especiais para usar no ID HTML
+                const safePairId = asset.pair.replace(/[^a-zA-Z0-9]/g, ''); 
                 
                 const card = document.createElement('div');
                 card.id = `card-${safePairId}`;
@@ -341,7 +335,7 @@
                     appendLog(p.new); 
                     processScannerLog(p.new);
                 })
-                .on('postgres_changes', { event: '*', schema: 'public', table: 'cataloged_assets' }, () => fetchTopAssets()) // Atualiza cards se a catalogação mudar
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'cataloged_assets' }, () => fetchTopAssets()) 
                 .subscribe();
             setInterval(fetchData, 3000);
             setInterval(updateBotStatus, 5000);
@@ -504,7 +498,6 @@
             line.innerHTML = `<span class="text-slate-600 shrink-0">[${new Date(log.created_at).toLocaleTimeString()}]</span> <span>${log.message}</span>`;
             term.appendChild(line);
             const container = term.parentElement; 
-            // Only auto-scroll if close to bottom
             if(container) container.scrollTop = container.scrollHeight;
         }
 
@@ -516,39 +509,33 @@
         // --- UPDATED LOG PROCESSOR FOR 3 CARDS ---
         function processScannerLog(log) {
             const msg = log.message || "";
-            
-            // Try to extract PAIR name from log
-            // Formats: ANALISE_DETALHADA::EURUSD::... OR SCAN_ENTRADA::EURUSD
-            let pair = "";
-            let info = "";
-            let price = "";
+            let pair = "", price = "";
 
             if (msg.includes('::')) {
                 const parts = msg.split('::');
                 if(parts.length > 1) pair = parts[1];
-                
-                // Extrai preço se disponível
                 if (msg.includes('Preço:')) {
                     const pPart = parts.find(p => p.startsWith('Preço:'));
                     if(pPart) price = pPart.split(':')[1];
                 }
+            } else if (msg.includes('SINAL EM')) {
+                const p1 = msg.split('SINAL EM ')[1];
+                if (p1) pair = p1.split(':')[0].trim();
             }
 
             if (!pair) return;
 
-            // Clean pair name for ID selector
             const safePairId = pair.replace(/[^a-zA-Z0-9]/g, '');
             const card = document.getElementById(`card-${safePairId}`);
             
             if (card) {
-                // Update Log Text
                 const logEl = document.getElementById(`log-${safePairId}`);
                 if(logEl) {
-                    let cleanMsg = msg.replace('ANALISE_DETALHADA::', '').replace('SCAN_ENTRADA::', 'SCAN: ').replace(/::/g, ' ').replace('SYSTEM', '').replace('INFO', '');
+                    let cleanMsg = msg.replace('ANALISE_DETALHADA::', '').replace('SCAN_ENTRADA::', 'SCAN: ').replace(/::/g, ' ').replace('SYSTEM', '').replace('INFO', '').trim();
+                    if(cleanMsg.length > 40) cleanMsg = cleanMsg.substring(0, 40) + '...';
                     logEl.textContent = cleanMsg;
                 }
 
-                // Update Status & LED
                 const statusEl = document.getElementById(`status-${safePairId}`);
                 const ledEl = document.getElementById(`led-${safePairId}`);
                 const priceEl = document.getElementById(`price-${safePairId}`);
@@ -557,25 +544,27 @@
                     if(statusEl) { statusEl.textContent = 'ANALISANDO'; statusEl.className = 'text-xs font-bold text-amber-400 animate-pulse'; }
                     if(ledEl) ledEl.className = 'w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse';
                     card.classList.add('border-amber-500');
-                    setTimeout(() => card.classList.remove('border-amber-500'), 1000);
                 } else if (msg.includes('SINAL')) {
-                    if(statusEl) { statusEl.textContent = 'SINAL ENCONTRADO'; statusEl.className = 'text-xs font-bold text-green-400 animate-bounce'; }
+                    if(statusEl) { statusEl.textContent = 'SINAL!'; statusEl.className = 'text-xs font-bold text-green-400 animate-bounce'; }
                     if(ledEl) ledEl.className = 'w-1.5 h-1.5 rounded-full bg-green-500 animate-ping';
-                } else {
-                    // Normal update (Analise Detalhada)
-                    if(statusEl) { statusEl.textContent = 'MONITORANDO'; statusEl.className = 'text-xs font-bold text-slate-400'; }
-                    if(ledEl) ledEl.className = 'w-1.5 h-1.5 rounded-full bg-green-500';
+                } else if (msg.includes('ANALISE_DETALHADA')) {
+                    if(statusEl) { statusEl.textContent = 'MONITORANDO'; statusEl.className = 'text-xs font-bold text-blue-400'; }
+                    if(ledEl) ledEl.className = 'w-1.5 h-1.5 rounded-full bg-blue-500';
+                    card.classList.remove('border-amber-500');
                 }
 
-                // Update Price
                 if (price && priceEl) {
                     const oldPrice = parseFloat(priceEl.textContent) || 0;
                     const newPrice = parseFloat(price);
                     priceEl.textContent = price;
                     
-                    if (newPrice > oldPrice) priceEl.className = "text-xl font-mono text-green-400 transition-colors duration-300";
-                    else if (newPrice < oldPrice) priceEl.className = "text-xl font-mono text-red-400 transition-colors duration-300";
-                    else priceEl.className = "text-xl font-mono text-slate-300";
+                    if (newPrice > oldPrice) {
+                        priceEl.classList.remove('text-slate-300', 'text-red-400');
+                        priceEl.classList.add('text-green-400');
+                    } else if (newPrice < oldPrice) {
+                        priceEl.classList.remove('text-slate-300', 'text-green-400');
+                        priceEl.classList.add('text-red-400');
+                    }
                 }
             }
         }
