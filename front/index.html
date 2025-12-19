@@ -6,9 +6,9 @@
     <title>Marombiew Bot</title>
     
     <!-- PWA Settings -->
-    <meta name="theme-color" content="#020617">
+    <meta name="theme-color" content="#000000">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black">
     <link rel="manifest" href="manifest.json">
     <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/4712/4712109.png">
 
@@ -20,10 +20,10 @@
 
     <style>
         :root {
-            --bg-dark: #020617;          /* fundo principal */
-            --bg-elevated: #050816;      /* cartões */
+            --bg-dark: #000000;
+            --bg-elevated: #050816;
             --glass: rgba(15, 23, 42, 0.92);
-            --accent: #facc15;           /* amarelo mais neon */
+            --accent: #facc15;
             --accent-soft: rgba(250, 204, 21, 0.18);
             --accent-strong: #f59e0b;
             --border-subtle: rgba(148, 163, 184, 0.25);
@@ -31,12 +31,12 @@
 
         * {
             scrollbar-width: thin;
-            scrollbar-color: #4b5563 #020617;
+            scrollbar-color: #4b5563 #000000;
         }
 
         ::-webkit-scrollbar {
             width: 4px;
-            background: #020617;
+            background: #000000;
         }
 
         ::-webkit-scrollbar-thumb {
@@ -46,7 +46,7 @@
 
         body {
             font-family: 'Inter', sans-serif;
-            background: radial-gradient(circle at top, #111827 0, #020617 50%, #020617 100%);
+            background: #000000;
             color: #e5e7eb;
             overflow: hidden;
             user-select: none;
@@ -96,8 +96,7 @@
 
         /* LOGIN ANIMADO */
         #login-screen {
-            background: radial-gradient(circle at top, rgba(250, 204, 21, 0.06) 0, transparent 45%),
-                        #020617;
+            background: #000000;
         }
 
         #login-screen .glass-card {
@@ -385,7 +384,7 @@
                     <span>Terminal</span>
                 </button>
             </nav>
-            <div class="p-4 border-t border-slate-800/80">
+            <div class="p-4 border-t border-slate-800/50">
                 <button id="logout-btn" class="flex items-center gap-3 px-4 py-3 text-xs text-red-400 hover:bg-red-500/10 rounded-xl w-full transition-colors">
                     <i data-lucide="log-out" class="w-4 h-4"></i>
                     <span class="tracking-[0.18em] uppercase">Sair</span>
@@ -394,14 +393,14 @@
         </aside>
 
         <!-- MAIN -->
-        <main class="flex-1 overflow-y-auto p-4 md:p-8 scroll-smooth pb-24 md:pb-8">
+        <main class="flex-1 p-4 md:p-8 pb-24 md:pb-8 overflow-hidden">
             <div id="connection-warning" class="hidden mb-4 bg-red-500/10 border border-red-500/40 text-red-300 p-3 rounded-xl flex items-center gap-2 text-xs animate-pulse font-mono">
                 <i data-lucide="wifi-off" class="w-4 h-4"></i>
                 <span>Bot Offline: Sem sinal há mais de 3 minutos.</span>
             </div>
 
             <!-- HOME -->
-            <div id="view-home" class="view-section active-view space-y-6 max-w-5xl mx-auto">
+            <div id="view-home" class="view-section active-view space-y-6 max-w-5xl mx-auto h-full flex flex-col">
                 <div class="flex justify-between items-end">
                     <div>
                         <h1 class="text-2xl font-bold text-white tracking-tight">Dashboard</h1>
@@ -504,7 +503,8 @@
                     </div>
                 </div>
 
-                <div>
+                <!-- HISTÓRICO COM SCROLL -->
+                <div class="glass-card rounded-xl p-4 flex-1 flex flex-col min-h-0">
                     <div class="flex justify-between items-center mb-3">
                         <h3 class="text-sm font-bold text-slate-300 flex items-center gap-2">
                             <i data-lucide="history" class="w-4 h-4"></i>
@@ -525,16 +525,18 @@
                             </button>
                         </div>
                     </div>
-                    <div id="signals-list" class="space-y-3 pb-8">
+                    
+                    <!-- ÁREA COM SCROLL -->
+                    <div id="signals-list" class="space-y-3 pr-1 overflow-y-auto flex-1">
                         <div class="text-center text-slate-600 text-xs">A carregar...</div>
                     </div>
                 </div>
             </div>
 
             <!-- SETTINGS -->
-            <div id="view-settings" class="view-section hidden space-y-6 max-w-3xl mx-auto">
+            <div id="view-settings" class="view-section hidden space-y-6 max-w-3xl mx-auto overflow-y-auto h-full">
                 <h1 class="text-2xl font-bold text-white">Configurações</h1>
-                <form id="settings-form" class="space-y-6">
+                <form id="settings-form" class="space-y-6 pb-8">
                     <div class="glass-card p-6 rounded-xl space-y-6">
                         <div>
                             <label class="text-xs text-slate-400 block mb-1 tracking-[0.18em] uppercase">
@@ -602,7 +604,7 @@
                 </h1>
                 <div
                     id="terminal-output"
-                    class="flex-1 glass-card rounded-xl p-4 overflow-y-auto font-mono text-xs space-y-2 bg-black/80 h-[500px]"
+                    class="flex-1 glass-card rounded-xl p-4 overflow-y-auto font-mono text-xs space-y-2 bg-black/80"
                 ></div>
             </div>
         </main>
@@ -650,7 +652,6 @@
                 const view = document.getElementById(`view-${target}`);
                 if (view) {
                     view.classList.remove('hidden');
-                    // forçar reflow para animação funcionar quando trocar rápido
                     void view.offsetWidth;
                     view.classList.add('active-view');
                 }
@@ -661,18 +662,15 @@
         function navigateAndHighlight(target, el) {
             router.navigate(target);
 
-            // desktop
             document.querySelectorAll('aside .nav-item').forEach(btn => btn.classList.remove('active-nav'));
             if (el.closest('aside')) {
                 el.classList.add('active-nav');
             }
 
-            // mobile
             document.querySelectorAll('.bottom-nav-btn').forEach(btn => btn.classList.remove('active-nav'));
             if (el.closest('nav.bottom-nav')) {
                 el.classList.add('active-nav');
             } else {
-                // se clicou na sidebar, achar o botão mobile correspondente
                 const mobileBtn = document.querySelector(`.bottom-nav-btn[data-target="${target}"]`);
                 if (mobileBtn) mobileBtn.classList.add('active-nav');
             }
