@@ -349,7 +349,10 @@ class SimpleBot:
         self.log_to_db(f"🔌 Conectando...", "SYSTEM")
         try:
             if self.api: 
-                try: self.api.api.close(); except: pass
+                try: 
+                    self.api.api.close() 
+                except: 
+                    pass
             self.api = Exnova(EXNOVA_EMAIL, EXNOVA_PASSWORD)
             check, reason = self.api.connect()
             if check:
