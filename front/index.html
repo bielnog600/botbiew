@@ -6,7 +6,7 @@
     <title>Marombiew Bot</title>
     
     <!-- PWA Settings -->
-    <meta name="theme-color" content="#0f172a">
+    <meta name="theme-color" content="#020617">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="manifest" href="manifest.json">
@@ -19,39 +19,340 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 
     <style>
-        :root { --bg-dark: #0f172a; --glass: rgba(30, 41, 59, 0.95); --gold: #f59e0b; }
-        body { font-family: 'Inter', sans-serif; background-color: #020617; color: #e2e8f0; overflow: hidden; user-select: none; }
-        .font-mono { font-family: 'JetBrains Mono', monospace; }
-        .glass-card { background: var(--glass); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.08); }
-        .scan-line { position: absolute; width: 100%; height: 2px; background: linear-gradient(90deg, transparent, var(--gold), transparent); animation: scanMove 2s linear infinite; opacity: 0.8; box-shadow: 0 0 15px var(--gold); z-index: 0; }
-        @keyframes scanMove { 0% { top: 0%; opacity: 0; } 10% { opacity: 1; } 90% { opacity: 1; } 100% { top: 100%; opacity: 0; } }
-        ::-webkit-scrollbar { width: 4px; background: #0f172a; }
-        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
+        :root {
+            --bg-dark: #020617;          /* fundo principal */
+            --bg-elevated: #050816;      /* cartões */
+            --glass: rgba(15, 23, 42, 0.92);
+            --accent: #facc15;           /* amarelo mais neon */
+            --accent-soft: rgba(250, 204, 21, 0.18);
+            --accent-strong: #f59e0b;
+            --border-subtle: rgba(148, 163, 184, 0.25);
+        }
+
+        * {
+            scrollbar-width: thin;
+            scrollbar-color: #4b5563 #020617;
+        }
+
+        ::-webkit-scrollbar {
+            width: 4px;
+            background: #020617;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #4b5563;
+            border-radius: 999px;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: radial-gradient(circle at top, #111827 0, #020617 50%, #020617 100%);
+            color: #e5e7eb;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        .font-mono {
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        /* BACKGROUND FUTURISTA */
+        body::before {
+            content: "";
+            position: fixed;
+            inset: -20%;
+            background:
+                radial-gradient(circle at 10% 0%, rgba(250, 204, 21, 0.03) 0, transparent 45%),
+                radial-gradient(circle at 90% 0%, rgba(250, 204, 21, 0.04) 0, transparent 50%),
+                radial-gradient(circle at 50% 100%, rgba(37, 99, 235, 0.05) 0, transparent 55%);
+            opacity: 1;
+            pointer-events: none;
+            z-index: -2;
+        }
+
+        body::after {
+            content: "";
+            position: fixed;
+            inset: 0;
+            background-image: linear-gradient(rgba(15, 23, 42, 0.7) 1px, transparent 1px),
+                              linear-gradient(90deg, rgba(15, 23, 42, 0.7) 1px, transparent 1px);
+            background-size: 32px 32px;
+            mix-blend-mode: soft-light;
+            opacity: 0.4;
+            pointer-events: none;
+            z-index: -1;
+        }
+
+        .glass-card {
+            background: radial-gradient(circle at top left, rgba(250, 204, 21, 0.08), transparent 55%),
+                        var(--glass);
+            backdrop-filter: blur(18px);
+            -webkit-backdrop-filter: blur(18px);
+            border: 1px solid var(--border-subtle);
+            box-shadow:
+                0 0 0 1px rgba(15, 23, 42, 0.8),
+                0 18px 45px rgba(0, 0, 0, 0.8);
+        }
+
+        /* LOGIN ANIMADO */
+        #login-screen {
+            background: radial-gradient(circle at top, rgba(250, 204, 21, 0.06) 0, transparent 45%),
+                        #020617;
+        }
+
+        #login-screen .glass-card {
+            position: relative;
+            overflow: hidden;
+        }
+
+        #login-screen .glass-card::before {
+            content: "";
+            position: absolute;
+            inset: -40%;
+            background: conic-gradient(
+                from 180deg at 50% 50%,
+                transparent 0deg,
+                rgba(250, 204, 21, 0.08) 60deg,
+                transparent 120deg,
+                transparent 240deg,
+                rgba(250, 204, 21, 0.12) 300deg,
+                transparent 360deg
+            );
+            opacity: 0.0;
+            transform: rotate(0deg);
+            animation: cardGlow 8s linear infinite;
+            pointer-events: none;
+        }
+
+        @keyframes cardGlow {
+            0%   { opacity: 0.0; transform: rotate(0deg);}
+            20%  { opacity: 0.5; }
+            50%  { opacity: 0.25;}
+            100% { opacity: 0.0; transform: rotate(360deg);}
+        }
+
+        .login-input {
+            transition: all 0.18s ease-out;
+        }
+
+        .login-input:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 1px rgba(250, 204, 21, 0.4);
+            background-color: rgba(15, 23, 42, 0.95);
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #facc15, #f59e0b);
+            color: #020617;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            box-shadow:
+                0 10px 30px rgba(250, 204, 21, 0.35),
+                0 0 0 1px rgba(250, 204, 21, 0.5);
+            transition: all 0.16s ease-out;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-1px) scale(1.01);
+            box-shadow:
+                0 16px 40px rgba(250, 204, 21, 0.45),
+                0 0 0 1px rgba(250, 204, 21, 0.9);
+            filter: brightness(1.05);
+        }
+
+        .btn-primary:active {
+            transform: translateY(0) scale(0.99);
+            box-shadow:
+                0 8px 22px rgba(250, 204, 21, 0.3),
+                0 0 0 1px rgba(250, 204, 21, 0.7);
+        }
+
+        /* NAV LATERAL FUTURISTA */
+        .sidebar {
+            border-right: 1px solid rgba(31, 41, 55, 0.9);
+            background: linear-gradient(180deg, rgba(15, 23, 42, 0.96), rgba(15, 23, 42, 0.98));
+        }
+
+        .nav-item {
+            position: relative;
+            transition: all 0.16s ease-out;
+        }
+
+        .nav-item::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            border-radius: 0.75rem;
+            border: 1px solid transparent;
+            background: linear-gradient(135deg, rgba(250, 204, 21, 0.9), transparent) border-box;
+            mask: linear-gradient(#000 0 0) padding-box, linear-gradient(#000 0 0);
+            mask-composite: exclude;
+            opacity: 0;
+            transition: opacity 0.18s ease-out;
+            pointer-events: none;
+        }
+
+        .nav-item:hover {
+            background: radial-gradient(circle at top left, rgba(250, 204, 21, 0.13), transparent 65%);
+            color: #f9fafb;
+            transform: translateX(2px);
+        }
+
+        .nav-item:hover::before {
+            opacity: 0.75;
+        }
+
+        .nav-item.active-nav {
+            color: var(--accent);
+            background: radial-gradient(circle at left, rgba(250, 204, 21, 0.13), transparent 55%);
+        }
+
+        .nav-item.active-nav::before {
+            opacity: 1;
+        }
+
+        /* BARRA INFERIOR MOBILE */
+        .bottom-nav {
+            background: linear-gradient(180deg, rgba(15, 23, 42, 0.94), rgba(15, 23, 42, 0.98));
+            box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.75);
+        }
+
+        .bottom-nav-btn {
+            transition: all 0.16s ease-out;
+            position: relative;
+        }
+
+        .bottom-nav-btn.active-nav {
+            color: var(--accent);
+        }
+
+        .bottom-nav-btn.active-nav::after {
+            content: "";
+            position: absolute;
+            bottom: -4px;
+            width: 18px;
+            height: 2px;
+            border-radius: 999px;
+            background: linear-gradient(90deg, transparent, var(--accent), transparent);
+            box-shadow: 0 0 12px rgba(250, 204, 21, 0.8);
+        }
+
+        /* SCAN-LINE */
+        .scan-line {
+            position: absolute;
+            width: 120%;
+            left: -10%;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, var(--accent), transparent);
+            animation: scanMove 2s linear infinite;
+            opacity: 0.9;
+            box-shadow: 0 0 18px var(--accent);
+            z-index: 0;
+        }
+
+        @keyframes scanMove {
+            0% {
+                top: 0%;
+                opacity: 0;
+            }
+            10% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 1;
+            }
+            100% {
+                top: 100%;
+                opacity: 0;
+            }
+        }
+
+        /* FEED */
+        .feed-item {
+            animation: slideUp 0.25s ease-out forwards;
+        }
+
+        @keyframes slideUp {
+            from { opacity: 0; transform: translateY(6px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        .live-indicator {
+            animation: pulse-green 2s infinite;
+        }
+
+        @keyframes pulse-green {
+            0% {
+                box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4);
+            }
+            70% {
+                box-shadow: 0 0 0 10px rgba(34, 197, 94, 0);
+            }
+            100% {
+                box-shadow: 0 0 0 0 rgba(34, 197, 94, 0);
+            }
+        }
+
+        /* TRANSIÇÃO ENTRE VIEWS */
+        .view-section {
+            opacity: 0;
+            transform: translateY(4px);
+            transition: opacity 0.18s ease-out, transform 0.18s ease-out;
+        }
+
+        .view-section.active-view {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        /* BOTÕES DE AÇÃO DO BOT */
+        .bot-action-btn {
+            transition: all 0.16s ease-out;
+        }
+
+        .bot-action-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 10px 25px rgba(15, 23, 42, 0.9);
+        }
+
+        .bot-action-btn:active {
+            transform: translateY(0);
+        }
+
         .hidden { display: none !important; }
-        .active-nav { color: var(--gold); }
-        .live-indicator { animation: pulse-green 2s infinite; }
-        @keyframes pulse-green { 0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4); } 70% { box-shadow: 0 0 0 6px rgba(34, 197, 94, 0); } 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); } }
-        
-        /* Scanner Feed Animation */
-        .feed-item { animation: slideUp 0.3s ease-out forwards; }
-        @keyframes slideUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
     </style>
 </head>
 <body class="flex flex-col h-screen">
 
     <!-- LOGIN -->
-    <div id="login-screen" class="fixed inset-0 z-50 flex items-center justify-center bg-[#020617] p-4">
-        <div class="glass-card w-full max-w-md p-8 rounded-2xl border-t border-slate-700">
+    <div id="login-screen" class="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div class="glass-card w-full max-w-md p-8 rounded-2xl border border-slate-700/60 shadow-2xl animate-[fadeIn_0.35s_ease-out]">
             <div class="text-center mb-8">
-                <div class="w-16 h-16 bg-amber-500/10 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-amber-500/20 shadow-[0_0_30px_rgba(245,158,11,0.2)]">
-                    <i data-lucide="zap" class="text-amber-500 w-8 h-8"></i>
+                <div class="w-16 h-16 bg-amber-500/10 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-amber-500/30 shadow-[0_0_40px_rgba(250,204,21,0.35)]">
+                    <i data-lucide="zap" class="text-amber-400 w-8 h-8"></i>
                 </div>
-                <h1 class="text-2xl font-bold text-white">Marombiew Bot</h1>
+                <h1 class="text-2xl font-bold text-white tracking-[0.15em] uppercase">Marombiew Bot</h1>
+                <p class="text-xs text-slate-500 mt-1 font-mono">Binary Options | v2.0</p>
             </div>
             <form id="login-form" class="space-y-4">
-                <input type="email" id="email" class="w-full bg-slate-900/50 border border-slate-700 text-white text-sm rounded-xl pl-4 py-3" placeholder="Email" required>
-                <input type="password" id="password" class="w-full bg-slate-900/50 border border-slate-700 text-white text-sm rounded-xl pl-4 py-3" placeholder="Senha" required>
-                <button type="submit" id="login-btn" class="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-3.5 rounded-xl transition-all">Entrar</button>
+                <input
+                    type="email"
+                    id="email"
+                    class="login-input w-full bg-slate-900/60 border border-slate-700 text-white text-sm rounded-xl pl-4 py-3 focus:outline-none"
+                    placeholder="Email"
+                    required
+                >
+                <input
+                    type="password"
+                    id="password"
+                    class="login-input w-full bg-slate-900/60 border border-slate-700 text-white text-sm rounded-xl pl-4 py-3 focus:outline-none"
+                    placeholder="Senha"
+                    required
+                >
+                <button type="submit" id="login-btn" class="btn-primary w-full py-3.5 rounded-xl text-xs tracking-[0.18em]">
+                    ENTRAR
+                </button>
                 <div id="login-error" class="text-red-400 text-xs text-center hidden"></div>
             </form>
         </div>
@@ -59,30 +360,71 @@
 
     <!-- APP -->
     <div id="app" class="flex-1 flex flex-col md:flex-row overflow-hidden hidden opacity-0 transition-opacity duration-500">
-        <aside class="hidden md:flex flex-col w-64 glass-card border-r border-slate-800 z-20">
-            <div class="h-20 flex items-center px-6 border-b border-slate-800/50">
-                <i data-lucide="zap" class="text-amber-500 w-6 h-6 mr-3"></i><span class="font-bold text-lg text-white">MAROMBIEW</span>
+        <!-- SIDEBAR DESKTOP -->
+        <aside class="hidden md:flex flex-col w-64 sidebar z-20">
+            <div class="h-20 flex items-center px-6 border-b border-slate-800/80">
+                <div class="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/40 flex items-center justify-center mr-3 shadow-[0_0_24px_rgba(250,204,21,0.4)]">
+                    <i data-lucide="zap" class="text-amber-400 w-5 h-5"></i>
+                </div>
+                <div>
+                    <span class="font-bold text-lg text-white tracking-[0.23em] uppercase leading-none">MAROMBIEW</span>
+                    <p class="text-[10px] text-slate-500 font-mono mt-1">Binary Options Bot</p>
+                </div>
             </div>
-            <nav class="flex-1 p-4 space-y-2">
-                <button onclick="router.navigate('home')" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800/50 hover:text-white" data-target="home"><i data-lucide="layout-dashboard" class="w-5 h-5"></i> Dashboard</button>
-                <button onclick="router.navigate('logs')" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800/50 hover:text-white" data-target="logs"><i data-lucide="terminal" class="w-5 h-5"></i> Terminal</button>
+            <nav class="flex-1 p-4 space-y-2 text-sm">
+                <button onclick="navigateAndHighlight('home', this)" class="nav-item active-nav w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400" data-target="home">
+                    <i data-lucide="layout-dashboard" class="w-5 h-5"></i>
+                    <span>Dashboard</span>
+                </button>
+                <button onclick="navigateAndHighlight('settings', this)" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400" data-target="settings">
+                    <i data-lucide="settings-2" class="w-5 h-5"></i>
+                    <span>Configurações</span>
+                </button>
+                <button onclick="navigateAndHighlight('logs', this)" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400" data-target="logs">
+                    <i data-lucide="terminal" class="w-5 h-5"></i>
+                    <span>Terminal</span>
+                </button>
             </nav>
-            <div class="p-4 border-t border-slate-800/50"><button id="logout-btn" class="flex items-center gap-3 px-4 py-3 text-sm text-red-400 hover:bg-red-500/10 rounded-xl w-full"><i data-lucide="log-out" class="w-5 h-5"></i> Sair</button></div>
+            <div class="p-4 border-t border-slate-800/80">
+                <button id="logout-btn" class="flex items-center gap-3 px-4 py-3 text-xs text-red-400 hover:bg-red-500/10 rounded-xl w-full transition-colors">
+                    <i data-lucide="log-out" class="w-4 h-4"></i>
+                    <span class="tracking-[0.18em] uppercase">Sair</span>
+                </button>
+            </div>
         </aside>
 
+        <!-- MAIN -->
         <main class="flex-1 overflow-y-auto p-4 md:p-8 scroll-smooth pb-24 md:pb-8">
-            <div id="connection-warning" class="hidden mb-4 bg-red-500/10 border border-red-500/20 text-red-400 p-3 rounded-xl flex items-center gap-2 text-sm animate-pulse"><i data-lucide="wifi-off" class="w-4 h-4"></i> Bot Offline: Sem sinal há mais de 3 minutos.</div>
+            <div id="connection-warning" class="hidden mb-4 bg-red-500/10 border border-red-500/40 text-red-300 p-3 rounded-xl flex items-center gap-2 text-xs animate-pulse font-mono">
+                <i data-lucide="wifi-off" class="w-4 h-4"></i>
+                <span>Bot Offline: Sem sinal há mais de 3 minutos.</span>
+            </div>
 
             <!-- HOME -->
-            <div id="view-home" class="view-section space-y-6 max-w-5xl mx-auto">
+            <div id="view-home" class="view-section active-view space-y-6 max-w-5xl mx-auto">
                 <div class="flex justify-between items-end">
                     <div>
-                        <h1 class="text-2xl font-bold text-white">Dashboard</h1>
-                        <div class="flex items-center gap-2 mt-1"><span class="text-slate-500 text-xs">Status:</span><span id="bot-status-indicator" class="text-xs font-bold text-slate-500">CARREGANDO...</span></div>
+                        <h1 class="text-2xl font-bold text-white tracking-tight">Dashboard</h1>
+                        <div class="flex items-center gap-2 mt-1 text-xs">
+                            <span class="text-slate-500">Status:</span>
+                            <span id="bot-status-indicator" class="text-xs font-bold text-slate-400 flex items-center gap-1">
+                                CARREGANDO...
+                            </span>
+                        </div>
                     </div>
                     <div class="flex gap-2">
-                        <button id="restart-bot-btn" class="p-2 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20"><i data-lucide="power" class="w-4 h-4"></i></button>
-                        <button id="toggle-bot-btn" class="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold bg-slate-700 text-white"><i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> ...</button>
+                        <button
+                            id="restart-bot-btn"
+                            class="bot-action-btn p-2 rounded-lg bg-slate-900/70 text-amber-400 border border-amber-500/30 hover:bg-amber-500/10"
+                        >
+                            <i data-lucide="power" class="w-4 h-4"></i>
+                        </button>
+                        <button
+                            id="toggle-bot-btn"
+                            class="bot-action-btn flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold bg-slate-700 text-white"
+                        >
+                            <i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> ...
+                        </button>
                     </div>
                 </div>
 
@@ -92,50 +434,100 @@
                     
                     <div class="relative z-10 flex justify-between items-start mb-6">
                         <div>
-                            <div class="flex items-center gap-2 mb-2"><div id="scanner-led" class="w-2 h-2 rounded-full bg-red-500"></div><span id="scanner-status-text" class="text-[10px] font-bold tracking-widest text-slate-400 uppercase">OFFLINE</span></div>
-                            <div class="flex items-baseline gap-3">
-                                <div id="scanner-pair" class="text-3xl font-black text-white tracking-tight transition-all duration-300">---</div>
-                                <div class="text-sm text-slate-400 font-mono" id="scanner-price">0.00000</div>
-                            </div>
-                            <div class="flex items-center gap-2 mt-1">
-                                <span class="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-[10px] text-slate-400 font-mono">
-                                    <span id="scanner-indicator-label" class="text-amber-400">SMA9</span>: <span id="scanner-rsi">--</span>
+                            <div class="flex items-center gap-2 mb-2">
+                                <div id="scanner-led" class="w-2 h-2 rounded-full bg-red-500"></div>
+                                <span id="scanner-status-text" class="text-[10px] font-bold tracking-[0.26em] text-slate-400 uppercase">
+                                    OFFLINE
                                 </span>
                             </div>
+                            <div class="flex items-baseline gap-3">
+                                <div
+                                    id="scanner-pair"
+                                    class="text-3xl font-black text-white tracking-tight transition-all duration-300"
+                                >
+                                    ---
+                                </div>
+                                <div
+                                    class="text-sm text-slate-400 font-mono px-2 py-0.5 rounded bg-black/40 border border-slate-800"
+                                    id="scanner-price"
+                                >
+                                    0.00000
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-2 mt-1">
+                                <span class="px-2 py-0.5 rounded border border-slate-700 text-[10px] text-slate-300 font-mono bg-black/50">
+                                    <span id="scanner-indicator-label" class="text-amber-300">SMA9</span>:
+                                    <span id="scanner-rsi">--</span>
+                                </span>
+                            </div>
+                        </div>
+                        <div class="hidden md:flex items-center gap-2 text-[10px] text-slate-500 font-mono">
+                            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 live-indicator"></span>
+                            <span>REAL-TIME FEED</span>
                         </div>
                     </div>
 
                     <!-- Live Feed Area -->
-                    <div class="relative z-10 bg-black/40 rounded-lg border border-slate-800 p-3 h-24 overflow-hidden flex flex-col justify-end">
+                    <div class="relative z-10 bg-black/60 rounded-lg border border-slate-800 p-3 h-24 overflow-hidden flex flex-col justify-end">
                         <div id="scanner-feed" class="flex flex-col gap-1 text-[11px] font-mono text-slate-400">
                             <div class="opacity-50">A aguardar dados do bot...</div>
                         </div>
-                        <div class="absolute top-0 left-0 w-full h-8 bg-gradient-to-b from-black/40 to-transparent pointer-events-none"></div>
+                        <div class="absolute top-0 left-0 w-full h-8 bg-gradient-to-b from-black/60 to-transparent pointer-events-none"></div>
                     </div>
                 </div>
 
                 <div class="grid grid-cols-2 gap-4">
-                    <div class="glass-card p-5 rounded-xl"><p class="text-xs text-slate-500 font-bold mb-1">SALDO</p><p id="stat-balance" class="text-2xl font-bold text-white">$0.00</p></div>
-                    <div class="glass-card p-5 rounded-xl"><p class="text-xs text-slate-500 font-bold mb-1">LUCRO (DIA)</p><p id="stat-profit" class="text-2xl font-bold text-slate-200">$0.00</p></div>
+                    <div class="glass-card p-5 rounded-xl">
+                        <p class="text-[10px] text-slate-500 font-bold mb-1 tracking-[0.2em] uppercase">Saldo</p>
+                        <p id="stat-balance" class="text-2xl font-semibold text-white">$0.00</p>
+                    </div>
+                    <div class="glass-card p-5 rounded-xl">
+                        <p class="text-[10px] text-slate-500 font-bold mb-1 tracking-[0.2em] uppercase">Lucro (Dia)</p>
+                        <p id="stat-profit" class="text-2xl font-semibold text-slate-200">$0.00</p>
+                    </div>
                 </div>
 
-                <div class="glass-card p-4 rounded-xl border-t-4 border-amber-500">
-                    <div class="flex divide-x divide-slate-700">
-                        <div class="flex-1 px-2 text-center"><p class="text-[10px] text-green-500 font-bold mb-1">WINS</p><span id="score-wins" class="text-2xl font-bold text-white">0</span></div>
-                        <div class="flex-1 px-2 text-center"><p class="text-[10px] text-red-500 font-bold mb-1">LOSS</p><span id="score-losses" class="text-2xl font-bold text-white">0</span></div>
-                        <div class="flex-1 px-2 text-center"><p class="text-[10px] text-blue-400 font-bold mb-1">ASSERT.</p><span id="score-rate" class="text-2xl font-bold text-white">0%</span></div>
+                <div class="glass-card p-4 rounded-xl border-t-4 border-amber-400/80">
+                    <div class="flex divide-x divide-slate-800">
+                        <div class="flex-1 px-2 text-center">
+                            <p class="text-[10px] text-emerald-400 font-bold mb-1 tracking-[0.24em] uppercase">Wins</p>
+                            <span id="score-wins" class="text-2xl font-bold text-white">0</span>
+                        </div>
+                        <div class="flex-1 px-2 text-center">
+                            <p class="text-[10px] text-red-400 font-bold mb-1 tracking-[0.24em] uppercase">Loss</p>
+                            <span id="score-losses" class="text-2xl font-bold text-white">0</span>
+                        </div>
+                        <div class="flex-1 px-2 text-center">
+                            <p class="text-[10px] text-sky-400 font-bold mb-1 tracking-[0.24em] uppercase">Assert.</p>
+                            <span id="score-rate" class="text-2xl font-bold text-white">0%</span>
+                        </div>
                     </div>
                 </div>
 
                 <div>
                     <div class="flex justify-between items-center mb-3">
-                        <h3 class="text-sm font-bold text-slate-400 flex items-center gap-2"><i data-lucide="history" class="w-4 h-4"></i> Histórico</h3>
+                        <h3 class="text-sm font-bold text-slate-300 flex items-center gap-2">
+                            <i data-lucide="history" class="w-4 h-4"></i>
+                            Histórico de Entradas
+                        </h3>
                         <div class="flex gap-2">
-                             <button onclick="fetchData()" class="p-1.5 text-slate-500 hover:text-white hover:bg-slate-800 rounded-lg"><i data-lucide="refresh-cw" class="w-4 h-4"></i></button>
-                             <button id="clear-history-btn" class="p-1.5 text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-lg"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                            <button
+                                onclick="fetchData()"
+                                class="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
+                            >
+                                <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+                            </button>
+                            <button
+                                id="clear-history-btn"
+                                class="p-1.5 text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-lg transition-colors"
+                            >
+                                <i data-lucide="trash-2" class="w-4 h-4"></i>
+                            </button>
                         </div>
                     </div>
-                    <div id="signals-list" class="space-y-3 pb-8"><div class="text-center text-slate-600 text-xs">A carregar...</div></div>
+                    <div id="signals-list" class="space-y-3 pb-8">
+                        <div class="text-center text-slate-600 text-xs">A carregar...</div>
+                    </div>
                 </div>
             </div>
 
@@ -144,40 +536,100 @@
                 <h1 class="text-2xl font-bold text-white">Configurações</h1>
                 <form id="settings-form" class="space-y-6">
                     <div class="glass-card p-6 rounded-xl space-y-6">
-                        
-                        <!-- NOVO SELETOR DE MODO -->
                         <div>
-                            <label class="text-xs text-slate-400 block mb-1">Modo de Gerenciamento</label>
-                            <select id="conf-stop-mode" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white outline-none">
+                            <label class="text-xs text-slate-400 block mb-1 tracking-[0.18em] uppercase">
+                                Modo de Gerenciamento
+                            </label>
+                            <select
+                                id="conf-stop-mode"
+                                class="w-full bg-slate-950 border border-slate-700 rounded-lg p-3 text-white outline-none text-sm"
+                            >
                                 <option value="percentage">Porcentagem (%)</option>
                                 <option value="value">Valor Fixo ($)</option>
                             </select>
                         </div>
 
                         <div class="grid grid-cols-2 gap-4">
-                            <div><label class="text-xs text-slate-400 block mb-1">Stop Win</label><input type="number" id="conf-stop-win" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white outline-none"></div>
-                            <div><label class="text-xs text-slate-400 block mb-1">Stop Loss</label><input type="number" id="conf-stop-loss" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white outline-none"></div>
+                            <div>
+                                <label class="text-xs text-slate-400 block mb-1">Stop Win</label>
+                                <input
+                                    type="number"
+                                    id="conf-stop-win"
+                                    class="w-full bg-slate-950 border border-slate-700 rounded-lg p-3 text-white outline-none text-sm"
+                                >
+                            </div>
+                            <div>
+                                <label class="text-xs text-slate-400 block mb-1">Stop Loss</label>
+                                <input
+                                    type="number"
+                                    id="conf-stop-loss"
+                                    class="w-full bg-slate-950 border border-slate-700 rounded-lg p-3 text-white outline-none text-sm"
+                                >
+                            </div>
                         </div>
                         <div class="grid grid-cols-2 gap-4">
-                            <div><label class="text-xs text-slate-400 block mb-1">Entrada</label><input type="number" id="conf-entry" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white outline-none"></div>
-                            <div><label class="text-xs text-slate-400 block mb-1">Conta</label><select id="conf-account" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white outline-none"><option value="PRACTICE">DEMO</option><option value="REAL">REAL</option></select></div>
+                            <div>
+                                <label class="text-xs text-slate-400 block mb-1">Entrada</label>
+                                <input
+                                    type="number"
+                                    id="conf-entry"
+                                    class="w-full bg-slate-950 border border-slate-700 rounded-lg p-3 text-white outline-none text-sm"
+                                >
+                            </div>
+                            <div>
+                                <label class="text-xs text-slate-400 block mb-1">Conta</label>
+                                <select
+                                    id="conf-account"
+                                    class="w-full bg-slate-950 border border-slate-700 rounded-lg p-3 text-white outline-none text-sm"
+                                >
+                                    <option value="PRACTICE">DEMO</option>
+                                    <option value="REAL">REAL</option>
+                                </select>
+                            </div>
                         </div>
                     </div>
-                    <button type="submit" class="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-4 rounded-xl">Salvar</button>
+                    <button type="submit" class="btn-primary w-full py-4 rounded-xl text-xs tracking-[0.2em]">
+                        SALVAR CONFIGURAÇÕES
+                    </button>
                 </form>
             </div>
 
             <!-- LOGS -->
-            <div id="view-logs" class="view-section hidden h-full flex flex-col">
-                <h1 class="text-2xl font-bold text-white mb-4">Terminal</h1>
-                <div id="terminal-output" class="flex-1 glass-card rounded-xl p-4 overflow-y-auto font-mono text-xs space-y-2 bg-black/60 h-[500px]"></div>
+            <div id="view-logs" class="view-section hidden h-full flex flex-col max-w-5xl mx-auto">
+                <h1 class="text-2xl font-bold text-white mb-4 flex items-center gap-2">
+                    <i data-lucide="terminal-square" class="w-6 h-6 text-amber-400"></i>
+                    Terminal
+                </h1>
+                <div
+                    id="terminal-output"
+                    class="flex-1 glass-card rounded-xl p-4 overflow-y-auto font-mono text-xs space-y-2 bg-black/80 h-[500px]"
+                ></div>
             </div>
         </main>
 
-        <nav class="md:hidden fixed bottom-0 left-0 right-0 bg-[#0f172a]/95 backdrop-blur-xl border-t border-slate-800 flex justify-around px-2 pb-safe z-40 h-16 items-center">
-            <button onclick="router.navigate('home')" class="flex flex-col items-center p-2 text-slate-500 active-nav"><i data-lucide="layout-dashboard" class="w-5 h-5"></i></button>
-            <button onclick="router.navigate('settings')" class="flex flex-col items-center p-2 text-slate-500"><i data-lucide="settings" class="w-5 h-5"></i></button>
-            <button onclick="router.navigate('logs')" class="flex flex-col items-center p-2 text-slate-500"><i data-lucide="terminal" class="w-5 h-5"></i></button>
+        <!-- NAV MOBILE -->
+        <nav class="md:hidden fixed bottom-0 left-0 right-0 bottom-nav border-t border-slate-800 flex justify-around px-2 pb-safe z-40 h-16 items-center">
+            <button
+                onclick="navigateAndHighlight('home', this)"
+                class="bottom-nav-btn active-nav flex flex-col items-center p-2 text-slate-400"
+                data-target="home"
+            >
+                <i data-lucide="layout-dashboard" class="w-5 h-5"></i>
+            </button>
+            <button
+                onclick="navigateAndHighlight('settings', this)"
+                class="bottom-nav-btn flex flex-col items-center p-2 text-slate-400"
+                data-target="settings"
+            >
+                <i data-lucide="settings" class="w-5 h-5"></i>
+            </button>
+            <button
+                onclick="navigateAndHighlight('logs', this)"
+                class="bottom-nav-btn flex flex-col items-center p-2 text-slate-400"
+                data-target="logs"
+            >
+                <i data-lucide="terminal" class="w-5 h-5"></i>
+            </button>
         </nav>
     </div>
 
@@ -186,33 +638,74 @@
         const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlvZHVhaHdrbmZza3R1anRoZnljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEzMDc0NDcsImV4cCI6MjA2Njg4MzQ0N30.96f8wZO6SvABKFMWjIiw1pSugAB4Isldj7yxLcLJRSE';
         const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
         const state = { user: null, config: {}, lastLogTime: null, lastLogId: null };
+
         lucide.createIcons();
 
         const router = {
             navigate: (target) => {
-                document.querySelectorAll('.view-section').forEach(el => el.classList.add('hidden'));
-                document.getElementById(`view-${target}`).classList.remove('hidden');
+                document.querySelectorAll('.view-section').forEach(el => {
+                    el.classList.add('hidden');
+                    el.classList.remove('active-view');
+                });
+                const view = document.getElementById(`view-${target}`);
+                if (view) {
+                    view.classList.remove('hidden');
+                    // forçar reflow para animação funcionar quando trocar rápido
+                    void view.offsetWidth;
+                    view.classList.add('active-view');
+                }
                 if(target === 'logs') scrollToBottom();
             }
         };
 
+        function navigateAndHighlight(target, el) {
+            router.navigate(target);
+
+            // desktop
+            document.querySelectorAll('aside .nav-item').forEach(btn => btn.classList.remove('active-nav'));
+            if (el.closest('aside')) {
+                el.classList.add('active-nav');
+            }
+
+            // mobile
+            document.querySelectorAll('.bottom-nav-btn').forEach(btn => btn.classList.remove('active-nav'));
+            if (el.closest('nav.bottom-nav')) {
+                el.classList.add('active-nav');
+            } else {
+                // se clicou na sidebar, achar o botão mobile correspondente
+                const mobileBtn = document.querySelector(`.bottom-nav-btn[data-target="${target}"]`);
+                if (mobileBtn) mobileBtn.classList.add('active-nav');
+            }
+        }
+
         async function checkSession() {
             const { data: { session } } = await supabaseClient.auth.getSession();
-            if (session) { state.user = session.user; showApp(); startDataLoop(); }
+            if (session) {
+                state.user = session.user;
+                showApp();
+                startDataLoop();
+            }
         }
 
         function showApp() {
             document.getElementById('login-screen').classList.add('hidden');
-            document.getElementById('app').classList.remove('hidden');
-            setTimeout(() => document.getElementById('app').classList.remove('opacity-0'), 50);
+            const appEl = document.getElementById('app');
+            appEl.classList.remove('hidden');
+            setTimeout(() => appEl.classList.remove('opacity-0'), 50);
             fetchInitialLogs();
         }
 
         async function fetchInitialLogs() {
-            const { data: logs } = await supabaseClient.from('logs').select('*').order('created_at', { ascending: false }).limit(50);
-            if(logs && logs.length > 0) {
+            const { data: logs } = await supabaseClient
+                .from('logs')
+                .select('*')
+                .order('created_at', { ascending: false })
+                .limit(50);
+
+            if (logs && logs.length > 0) {
                 const term = document.getElementById('terminal-output');
-                term.innerHTML = '<div class="text-slate-500 mb-2 border-b border-slate-800 pb-2">Marombiew Bot Terminal v2.0 <br> Carregando histórico...</div>';
+                term.innerHTML =
+                    '<div class="text-slate-500 mb-2 border-b border-slate-800 pb-2">Marombiew Bot Terminal v2.0 <br> Carregando histórico...</div>';
                 [...logs].reverse().forEach(l => {
                     appendLog(l);
                     addScannerFeedItem(l);
@@ -226,7 +719,10 @@
 
         document.getElementById('login-form').addEventListener('submit', async (e) => {
             e.preventDefault();
-            const { data, error } = await supabaseClient.auth.signInWithPassword({ email: document.getElementById('email').value, password: document.getElementById('password').value });
+            const { data, error } = await supabaseClient.auth.signInWithPassword({
+                email: document.getElementById('email').value,
+                password: document.getElementById('password').value
+            });
             if (error) {
                 document.getElementById('login-error').textContent = error.message;
                 document.getElementById('login-error').classList.remove('hidden');
@@ -237,19 +733,25 @@
             }
         });
 
-        document.getElementById('logout-btn').addEventListener('click', async () => { await supabaseClient.auth.signOut(); window.location.reload(); });
+        document.getElementById('logout-btn').addEventListener('click', async () => {
+            await supabaseClient.auth.signOut();
+            window.location.reload();
+        });
 
         document.getElementById('clear-history-btn').addEventListener('click', async () => {
-            if(!confirm("Limpar histórico?")) return;
+            if (!confirm("Limpar histórico?")) return;
             try {
                 await supabaseClient.from('trade_signals').delete().gt('id', 0);
                 const currentBal = state.config.current_balance || 0;
                 await supabaseClient.from('bot_config').update({ daily_initial_balance: currentBal }).eq('id', 1);
-                document.getElementById('signals-list').innerHTML = '<div class="text-center text-slate-600 py-8 text-xs">Limpo.</div>';
+                document.getElementById('signals-list').innerHTML =
+                    '<div class="text-center text-slate-600 py-8 text-xs">Limpo.</div>';
                 updateStats([]);
                 state.config.daily_initial_balance = currentBal;
                 updateConfigUI(state.config);
-            } catch (err) { alert(err.message); }
+            } catch (err) {
+                alert(err.message);
+            }
         });
 
         document.getElementById('toggle-bot-btn').addEventListener('click', async () => {
@@ -258,15 +760,20 @@
         });
 
         document.getElementById('restart-bot-btn').addEventListener('click', async () => {
-            if(confirm("Reiniciar conexão?")) await supabaseClient.from('bot_config').update({ status: 'RESTARTING' }).eq('id', 1);
+            if (confirm("Reiniciar conexão?"))
+                await supabaseClient.from('bot_config').update({ status: 'RESTARTING' }).eq('id', 1);
         });
 
         function startDataLoop() {
             fetchData();
-            supabaseClient.channel('dash').on('postgres_changes', { event: '*', schema: 'public', table: 'bot_config' }, p => updateConfigUI(p.new))
+            supabaseClient
+                .channel('dash')
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'bot_config' }, p =>
+                    updateConfigUI(p.new)
+                )
                 .on('postgres_changes', { event: '*', schema: 'public', table: 'trade_signals' }, () => refreshSignals())
-                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'logs' }, p => { 
-                    appendLog(p.new); 
+                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'logs' }, p => {
+                    appendLog(p.new);
                     processScannerLog(p.new);
                     addScannerFeedItem(p.new);
                 })
@@ -276,22 +783,42 @@
         }
 
         async function refreshSignals() {
-            const { data: signals } = await supabaseClient.from('trade_signals').select('*').order('created_at', { ascending: false }).limit(50);
-            if(signals) {
+            const { data: signals } = await supabaseClient
+                .from('trade_signals')
+                .select('*')
+                .order('created_at', { ascending: false })
+                .limit(50);
+            if (signals) {
                 syncSignalsList(signals);
                 updateStats(signals);
             }
         }
 
         async function fetchData() {
-            let { data: config } = await supabaseClient.from('bot_config').select('*').eq('id', 1).single();
-            if (!config) config = { id: 1, status: 'PAUSED', stop_win: 500, stop_loss: 200, entry_value: 10, account_type: 'PRACTICE' };
+            let { data: config } = await supabaseClient
+                .from('bot_config')
+                .select('*')
+                .eq('id', 1)
+                .single();
+            if (!config)
+                config = {
+                    id: 1,
+                    status: 'PAUSED',
+                    stop_win: 500,
+                    stop_loss: 200,
+                    entry_value: 10,
+                    account_type: 'PRACTICE'
+                };
             updateConfigUI(config);
 
             refreshSignals();
 
-            const { data: logs } = await supabaseClient.from('logs').select('*').order('created_at', { ascending: false }).limit(1);
-            if(logs && logs.length > 0) {
+            const { data: logs } = await supabaseClient
+                .from('logs')
+                .select('*')
+                .order('created_at', { ascending: false })
+                .limit(1);
+            if (logs && logs.length > 0) {
                 if (state.lastLogId !== logs[0].id) {
                     state.lastLogId = logs[0].id;
                     processScannerLog(logs[0]);
@@ -308,15 +835,19 @@
                 updateStats([]);
                 return;
             }
-            
+
             signals.forEach(s => {
                 const existing = document.getElementById(`signal-${s.id}`);
                 if (!existing) {
                     const el = createSignalElement(s);
-                    if(list.firstChild && !list.innerHTML.includes('Sem dados') && !list.innerHTML.includes('Limpo')) list.insertBefore(el, list.firstChild);
+                    if (
+                        list.firstChild &&
+                        !list.innerHTML.includes('Sem dados') &&
+                        !list.innerHTML.includes('Limpo')
+                    )
+                        list.insertBefore(el, list.firstChild);
                     else list.innerHTML = '', list.appendChild(el);
                 } else {
-                    // Update existing if status/result changed
                     const rawStatus = s.result || s.status || 'PENDING';
                     const currentStatus = existing.getAttribute('data-status');
                     if (currentStatus !== rawStatus) {
@@ -326,32 +857,30 @@
             });
         }
 
-        // CORRIGIDO: Prioridade para a coluna RESULT e tratamento robusto de texto
         function updateStats(signals) {
-            let wins = 0, losses = 0;
+            let wins = 0,
+                losses = 0;
             signals.forEach(s => {
                 const result = (s.result || '').toUpperCase();
                 const status = (s.status || '').toUpperCase();
                 const profit = parseFloat(s.profit);
 
-                // Verifica se é WIN ou LOSS (Texto tem prioridade sobre números)
                 const isWin = result.includes('WIN') || status.includes('WIN') || (!isNaN(profit) && profit > 0);
                 const isLoss = result.includes('LOSS') || status.includes('LOSS') || (!isNaN(profit) && profit < 0);
 
                 if (isWin) wins++;
                 else if (isLoss) losses++;
             });
-            
+
             document.getElementById('score-wins').textContent = wins;
             document.getElementById('score-losses').textContent = losses;
-            
+
             const total = wins + losses;
             const rate = total > 0 ? Math.round((wins / total) * 100) : 0;
             const rateEl = document.getElementById('score-rate');
             rateEl.textContent = `${rate}%`;
-            
-            // Cor da assertividade
-            if(rate >= 50) rateEl.className = "text-2xl font-bold text-green-400";
+
+            if (rate >= 50) rateEl.className = "text-2xl font-bold text-emerald-400";
             else rateEl.className = "text-2xl font-bold text-red-400";
         }
 
@@ -360,73 +889,99 @@
             const btn = document.getElementById('toggle-bot-btn');
             const isRunning = config.status === 'RUNNING';
             const isRestarting = config.status === 'RESTARTING';
+
             if (isRestarting) {
-                btn.className = "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20";
+                btn.className =
+                    "bot-action-btn flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold bg-amber-500/10 text-amber-300 border border-amber-500/40";
                 btn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> ...';
             } else {
-                btn.className = `flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold shadow-lg transition-all ${isRunning ? 'bg-red-500/10 text-red-400 border border-red-500/20' : 'bg-green-500 text-white'}`;
-                btn.innerHTML = isRunning ? '<i data-lucide="pause" class="w-4 h-4"></i> PAUSAR' : '<i data-lucide="play" class="w-4 h-4"></i> INICIAR';
+                btn.className =
+                    "bot-action-btn flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold shadow-lg transition-all " +
+                    (isRunning
+                        ? 'bg-red-500/10 text-red-400 border border-red-500/40'
+                        : 'bg-emerald-500 text-slate-900 border border-emerald-400/60');
+                btn.innerHTML = isRunning
+                    ? '<i data-lucide="pause" class="w-4 h-4"></i> PAUSAR'
+                    : '<i data-lucide="play" class="w-4 h-4"></i> INICIAR';
             }
+
             lucide.createIcons();
-            if(document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'SELECT') {
+
+            if (
+                document.activeElement.tagName !== 'INPUT' &&
+                document.activeElement.tagName !== 'SELECT'
+            ) {
                 document.getElementById('conf-stop-win').value = config.stop_win;
                 document.getElementById('conf-stop-loss').value = config.stop_loss;
                 document.getElementById('conf-entry').value = config.entry_value;
                 document.getElementById('conf-account').value = config.account_type;
                 document.getElementById('conf-stop-mode').value = config.stop_mode || 'percentage';
             }
+
             document.getElementById('stat-balance').textContent = `$${(config.current_balance || 0).toFixed(2)}`;
             const profit = (config.current_balance || 0) - (config.daily_initial_balance || 0);
             const profitEl = document.getElementById('stat-profit');
             profitEl.textContent = `${profit >= 0 ? '+' : ''}$${profit.toFixed(2)}`;
-            profitEl.className = `text-2xl font-bold ${profit >= 0 ? 'text-green-400' : 'text-red-400'}`;
+            profitEl.className = `text-2xl font-semibold ${profit >= 0 ? 'text-emerald-400' : 'text-red-400'}`;
         }
 
-        // CORRIGIDO: Renderização correta baseada em RESULT
         function createSignalElement(s) {
             const el = document.createElement('div');
             el.id = `signal-${s.id}`;
-            
-            // Prioriza 'result', fallback para 'status'
+
             const rawStatus = s.result || s.status || 'PENDING';
-            el.setAttribute('data-status', rawStatus); // Salva para controle
-            
+            el.setAttribute('data-status', rawStatus);
+
             const status = rawStatus.toUpperCase();
             const profit = parseFloat(s.profit);
-            
-            // Determina estado
+
             let isWin = status.includes('WIN') || (!isNaN(profit) && profit > 0);
             let isLoss = status.includes('LOSS') || (!isNaN(profit) && profit < 0);
-            
-            // Borda do card baseada na direção da entrada (CALL/PUT)
-            const borderClass = s.direction === 'call' ? 'border-green-500' : 'border-red-500';
-            
+
+            const borderClass = s.direction === 'call' ? 'border-emerald-400/80' : 'border-red-400/80';
+
             let statusBadge;
             let profitDisplay = '';
 
             if (isWin) {
-                statusBadge = '<span class="text-green-400 font-bold text-sm flex items-center gap-1"><i data-lucide="check" class="w-4 h-4"></i> WIN</span>';
-                if (!isNaN(profit)) profitDisplay = `<span class="block text-xs font-bold text-green-400 mt-1">+$${Math.abs(profit).toFixed(2)}</span>`;
+                statusBadge =
+                    '<span class="text-emerald-400 font-bold text-sm flex items-center gap-1"><i data-lucide="check" class="w-4 h-4"></i> WIN</span>';
+                if (!isNaN(profit))
+                    profitDisplay = `<span class="block text-xs font-bold text-emerald-400 mt-1">+$${Math.abs(
+                        profit
+                    ).toFixed(2)}</span>`;
             } else if (isLoss) {
-                statusBadge = '<span class="text-red-400 font-bold text-sm flex items-center gap-1"><i data-lucide="x" class="w-4 h-4"></i> LOSS</span>';
-                if (!isNaN(profit)) profitDisplay = `<span class="block text-xs font-bold text-red-400 mt-1">-$${Math.abs(profit).toFixed(2)}</span>`;
+                statusBadge =
+                    '<span class="text-red-400 font-bold text-sm flex items-center gap-1"><i data-lucide="x" class="w-4 h-4"></i> LOSS</span>';
+                if (!isNaN(profit))
+                    profitDisplay = `<span class="block text-xs font-bold text-red-400 mt-1">-$${Math.abs(
+                        profit
+                    ).toFixed(2)}</span>`;
             } else {
-                statusBadge = '<span class="text-amber-400 text-xs font-bold animate-pulse flex items-center gap-1"><i data-lucide="loader" class="w-3 h-3 animate-spin"></i> Pendente</span>';
+                statusBadge =
+                    '<span class="text-amber-300 text-xs font-bold animate-pulse flex items-center gap-1"><i data-lucide="loader" class="w-3 h-3 animate-spin"></i> Pendente</span>';
             }
 
             el.className = `glass-card p-4 rounded-xl flex items-center justify-between border-l-4 ${borderClass}`;
-            
+
             el.innerHTML = `
                 <div class="flex items-center gap-4">
-                    <div class="w-10 h-10 rounded-full flex items-center justify-center ${s.direction === 'call' ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'}">
+                    <div class="w-10 h-10 rounded-full flex items-center justify-center ${
+                        s.direction === 'call' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'
+                    }">
                         <i data-lucide="${s.direction === 'call' ? 'arrow-up' : 'arrow-down'}" class="w-5 h-5"></i>
                     </div>
                     <div>
                         <p class="font-bold text-white text-sm">${s.pair || '---'}</p>
-                        <span class="text-[10px] text-slate-500">${new Date(s.created_at).toLocaleTimeString()}</span>
+                        <span class="text-[10px] text-slate-500 font-mono">${new Date(
+                            s.created_at
+                        ).toLocaleTimeString()}</span>
                     </div>
                 </div>
-                <div class="text-right">${statusBadge}${profitDisplay}</div>
+                <div class="text-right">
+                    ${statusBadge}
+                    ${profitDisplay}
+                </div>
             `;
             setTimeout(() => lucide.createIcons(), 0);
             return el;
@@ -436,7 +991,9 @@
             const term = document.getElementById('terminal-output');
             const line = document.createElement('div');
             line.className = 'flex gap-2 opacity-80 text-slate-300';
-            line.innerHTML = `<span class="text-slate-600 shrink-0">[${new Date(log.created_at).toLocaleTimeString()}]</span> <span>${log.message}</span>`;
+            line.innerHTML = `<span class="text-slate-600 shrink-0">[${new Date(
+                log.created_at
+            ).toLocaleTimeString()}]</span> <span>${log.message}</span>`;
             term.appendChild(line);
             scrollToBottom();
         }
@@ -444,16 +1001,26 @@
         function addScannerFeedItem(log) {
             const feed = document.getElementById('scanner-feed');
             const msg = log.message || "";
-            if (!msg.includes('ANALISE_DETALHADA') && !msg.includes('SINAL') && !msg.includes('Catalogando') && !msg.includes('Trocando')) return;
-            
+            if (
+                !msg.includes('ANALISE_DETALHADA') &&
+                !msg.includes('SINAL') &&
+                !msg.includes('Catalogando') &&
+                !msg.includes('Trocando')
+            )
+                return;
+
             const item = document.createElement('div');
             item.className = 'feed-item truncate';
-            let cleanMsg = msg.replace('ANALISE_DETALHADA::', '').replace('::', ' | ').replace('SYSTEM', '').replace('INFO', '');
-            if(cleanMsg.length > 50) cleanMsg = cleanMsg.substring(0, 50) + '...';
-            
+            let cleanMsg = msg
+                .replace('ANALISE_DETALHADA::', '')
+                .replace('::', ' | ')
+                .replace('SYSTEM', '')
+                .replace('INFO', '');
+            if (cleanMsg.length > 50) cleanMsg = cleanMsg.substring(0, 50) + '...';
+
             item.textContent = `> ${cleanMsg}`;
             feed.appendChild(item);
-            if(feed.children.length > 3) feed.firstChild.remove();
+            if (feed.children.length > 3) feed.firstChild.remove();
         }
 
         function scrollToBottom() {
@@ -463,31 +1030,34 @@
 
         function processScannerLog(log) {
             const msg = log.message || "";
-            let pair = "", price = "---", rsi = "--";
+            let pair = "",
+                price = "---",
+                rsi = "--";
             if (msg.startsWith('ANALISE_DETALHADA::')) {
                 const parts = msg.split('::');
-                if (parts.length >= 4) { 
-                    pair = parts[1]; 
-                    price = parts[2].split(':')[1]; 
+                if (parts.length >= 4) {
+                    pair = parts[1];
+                    price = parts[2].split(':')[1];
                     const indPart = parts[3].split(':');
-                    if(indPart.length > 0) {
-                         const label = indPart[0];
-                         const val = indPart[1];
-                         document.getElementById('scanner-indicator-label').textContent = label;
-                         rsi = val;
+                    if (indPart.length > 0) {
+                        const label = indPart[0];
+                        const val = indPart[1];
+                        document.getElementById('scanner-indicator-label').textContent = label;
+                        rsi = val;
                     }
                 }
             }
             if (pair) {
                 document.getElementById('scanner-pair').textContent = pair;
-                document.getElementById('scanner-price').textContent = price;
+                const priceEl = document.getElementById('scanner-price');
+                priceEl.textContent = price;
                 document.getElementById('scanner-rsi').textContent = rsi;
-                document.getElementById('scanner-led').className = 'w-2 h-2 rounded-full bg-green-500 animate-pulse';
+                document.getElementById('scanner-led').className =
+                    'w-2 h-2 rounded-full bg-emerald-400 live-indicator';
                 document.getElementById('scanner-status-text').textContent = 'LIVE';
                 document.getElementById('scanner-line').classList.remove('hidden');
-                const priceEl = document.getElementById('scanner-price');
-                priceEl.classList.add('text-green-400');
-                setTimeout(() => priceEl.classList.remove('text-green-400'), 500);
+                priceEl.classList.add('text-emerald-400');
+                setTimeout(() => priceEl.classList.remove('text-emerald-400'), 500);
             }
         }
 
@@ -497,13 +1067,14 @@
             const ind = document.getElementById('bot-status-indicator');
             const warn = document.getElementById('connection-warning');
             const isPaused = state.config.status === 'PAUSED';
-            
-            if (diff < (isPaused ? 86400000 : 180000)) { 
-                ind.innerHTML = '<span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span> ONLINE';
-                ind.className = 'text-xs font-bold flex items-center gap-1 text-green-400';
+
+            if (diff < (isPaused ? 86400000 : 180000)) {
+                ind.innerHTML =
+                    '<span class="w-2 h-2 rounded-full bg-emerald-400 live-indicator"></span> ONLINE';
+                ind.className = 'text-xs font-bold flex items-center gap-1 text-emerald-400';
                 warn.classList.add('hidden');
             } else {
-                if(!isPaused) {
+                if (!isPaused) {
                     ind.innerHTML = '<span class="w-2 h-2 rounded-full bg-red-500"></span> OFFLINE';
                     ind.className = 'text-xs font-bold flex items-center gap-1 text-red-400';
                     warn.classList.remove('hidden');
@@ -511,8 +1082,8 @@
                     document.getElementById('scanner-line').classList.add('hidden');
                     document.getElementById('scanner-status-text').textContent = 'OFFLINE';
                 } else {
-                    ind.innerHTML = '<span class="w-2 h-2 rounded-full bg-amber-500"></span> PAUSADO';
-                    ind.className = 'text-xs font-bold flex items-center gap-1 text-amber-400';
+                    ind.innerHTML = '<span class="w-2 h-2 rounded-full bg-amber-400"></span> PAUSADO';
+                    ind.className = 'text-xs font-bold flex items-center gap-1 text-amber-300';
                     warn.classList.add('hidden');
                 }
             }
