@@ -223,7 +223,8 @@
                 });
                 state.lastLogTime = new Date(logs[0].created_at);
                 state.lastLogId = logs[0].id;
-                processScannerLog(logs[0]);
+                // Process the most recent logs to update UI immediately
+                logs.slice(0, 5).forEach(l => processScannerLog(l));
                 updateBotStatus();
             }
         }
@@ -356,12 +357,15 @@
 
             refreshSignals();
 
-            const { data: logs } = await supabaseClient.from('logs').select('*').order('created_at', { ascending: false }).limit(1);
+            // AUMENTADO O LIMITE PARA GARANTIR LEITURA DE MÚLTIPLOS CARDS
+            const { data: logs } = await supabaseClient.from('logs').select('*').order('created_at', { ascending: false }).limit(10);
             if(logs && logs.length > 0) {
                 if (state.lastLogId !== logs[0].id) {
                     state.lastLogId = logs[0].id;
-                    processScannerLog(logs[0]);
                     state.lastLogTime = new Date(logs[0].created_at);
+                    
+                    // Processa TODOS os logs novos para atualizar todos os cards
+                    logs.forEach(log => processScannerLog(log));
                 }
             }
         }
