@@ -16,7 +16,6 @@ except ImportError:
     print("[ERRO] Biblioteca 'exnovaapi' não instalada.")
 
 # --- CONFIGURAÇÃO ---
-# RESTAURANDO CHAVES PARA FUNCIONAR O LOG REMOTO
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://ioduahwknfsktujthfyc.supabase.co")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlvZHVhaHdrbmZza3R1anRoZnljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEzMDc0NDcsImV4cCI6MjA2Njg4MzQ0N30.96f8wZO6SvABKFMWjIiw1pSugAB4Isldj7yxLcLJRSE")
 EXNOVA_EMAIL = os.environ.get("EXNOVA_EMAIL", "seu_email@exemplo.com")
@@ -164,15 +163,10 @@ class SimpleBot:
         self.active_account_type = None
         self.best_assets = []
         
-        # Configuração inicial (será sobrescrita pelo fetch_config)
         self.config = { 
-            "status": "PAUSED", 
-            "account_type": "PRACTICE", 
-            "entry_value": 1.0,
-            "stop_win": 10.0,
-            "stop_loss": 5.0,
-            "stop_mode": "percentage", # 'percentage' ou 'value'
-            "daily_initial_balance": 0.0
+            "status": "PAUSED", "account_type": "PRACTICE", "entry_value": 1.0,
+            "stop_win": 10.0, "stop_loss": 5.0, "stop_mode": "percentage", "daily_initial_balance": 0.0,
+            "timer_enabled": False, "timer_start": "00:00", "timer_end": "00:00"
         }
         
         self.last_loss_time = 0
@@ -212,29 +206,58 @@ class SimpleBot:
                 self.config["status"] = data.get("status", "PAUSED")
                 self.config["account_type"] = data.get("account_type", "PRACTICE").strip().upper()
                 self.config["entry_value"] = float(data.get("entry_value", 1.0))
-                
-                # NOVOS CAMPOS DE GERENCIAMENTO
                 self.config["stop_win"] = float(data.get("stop_win", 0))
                 self.config["stop_loss"] = float(data.get("stop_loss", 0))
-                self.config["stop_mode"] = data.get("stop_mode", "percentage") # percentage ou value
+                self.config["stop_mode"] = data.get("stop_mode", "percentage")
                 self.config["daily_initial_balance"] = float(data.get("daily_initial_balance", 0))
-
+                # TIMER
+                self.config["timer_enabled"] = data.get("timer_enabled", False)
+                self.config["timer_start"] = data.get("timer_start", "00:00")
+                self.config["timer_end"] = data.get("timer_end", "00:00")
             else:
                 self.supabase.table("bot_config").insert({"id": 1, "status": "PAUSED"}).execute()
         except: pass
 
-    def check_management(self):
+    def check_schedule(self):
         """
-        Verifica se a meta ou stop loss foi atingido.
-        Retorna True se pode operar, False se deve parar.
+        Verifica se o bot deve estar rodando baseado no horario.
         """
-        if not self.api: return False
+        if not self.config.get("timer_enabled", False):
+            return # Timer desligado, respeita status manual
+
+        now_str = datetime.now().strftime("%H:%M")
+        start_str = self.config.get("timer_start", "00:00")
+        end_str = self.config.get("timer_end", "00:00")
         
+        # Logica para determinar se esta dentro do horario (suporta virada de noite ex: 22:00 as 02:00)
+        is_inside = False
+        if start_str < end_str:
+            is_inside = start_str <= now_str < end_str
+        else:
+            is_inside = now_str >= start_str or now_str < end_str
+            
+        current_status = self.config["status"]
+        
+        if is_inside and current_status == "PAUSED":
+            # Está na hora e bot está pausado -> LIGAR
+            self.log_to_db(f"⏰ Agendador: Iniciando operações ({start_str}-{end_str})", "SYSTEM")
+            self.config["status"] = "RUNNING"
+            if self.supabase:
+                self.supabase.table("bot_config").update({"status": "RUNNING"}).eq("id", 1).execute()
+        
+        elif not is_inside and current_status == "RUNNING":
+            # Passou da hora e bot está rodando -> PAUSAR
+            self.log_to_db(f"⏰ Agendador: Pausando operações (Fim do horário)", "SYSTEM")
+            self.config["status"] = "PAUSED"
+            if self.supabase:
+                self.supabase.table("bot_config").update({"status": "PAUSED"}).eq("id", 1).execute()
+
+    def check_management(self):
+        if not self.api: return False
         try:
             current_bal = self.api.get_balance()
             initial_bal = self.config.get("daily_initial_balance", 0)
 
-            # Se for a primeira vez no dia (ou após reset), define o saldo inicial
             if initial_bal <= 0:
                 initial_bal = current_bal
                 self.config["daily_initial_balance"] = initial_bal
@@ -243,47 +266,35 @@ class SimpleBot:
                 self.log_to_db(f"Saldo Inicial definido: ${initial_bal:.2f}", "SYSTEM")
 
             profit = current_bal - initial_bal
-            
             stop_win = self.config.get("stop_win", 0)
             stop_loss = self.config.get("stop_loss", 0)
             mode = self.config.get("stop_mode", "percentage")
 
-            target_win_val = 0
-            target_loss_val = 0
+            target_win_val = initial_bal * (stop_win / 100) if mode == "percentage" else stop_win
+            target_loss_val = initial_bal * (stop_loss / 100) if mode == "percentage" else stop_loss
+            
+            desc = "%" if mode == "percentage" else "$"
 
-            # Cálculo dos limites (Valor ou Porcentagem)
-            if mode == "percentage":
-                target_win_val = initial_bal * (stop_win / 100)
-                target_loss_val = initial_bal * (stop_loss / 100)
-                desc = "%"
-            else:
-                target_win_val = stop_win
-                target_loss_val = stop_loss
-                desc = "$"
-
-            # Verifica Meta (Stop Win)
             if profit >= target_win_val and target_win_val > 0:
-                self.log_to_db(f"🏆 META BATIDA! Lucro: ${profit:.2f} (Meta: {stop_win}{desc})", "SUCCESS")
+                self.log_to_db(f"🏆 META BATIDA! Lucro: ${profit:.2f}", "SUCCESS")
                 self.pause_bot_by_management()
                 return False
             
-            # Verifica Stop Loss
             if profit <= -target_loss_val and target_loss_val > 0:
-                self.log_to_db(f"🛑 STOP LOSS ATINGIDO! Perda: ${profit:.2f} (Limit: {stop_loss}{desc})", "ERROR")
+                self.log_to_db(f"🛑 STOP LOSS ATINGIDO! Perda: ${profit:.2f}", "ERROR")
                 self.pause_bot_by_management()
                 return False
 
             return True
-
         except Exception as e:
             self.log_to_db(f"Erro no gerenciamento: {e}", "ERROR")
-            return True # Em caso de erro, por segurança, permite continuar (ou poderia travar)
+            return True
 
     def pause_bot_by_management(self):
         self.config["status"] = "PAUSED"
         if self.supabase:
             self.supabase.table("bot_config").update({"status": "PAUSED"}).eq("id", 1).execute()
-        time.sleep(2) # Pausa dramática para logs processarem
+        time.sleep(2)
 
     def connect(self):
         self.log_to_db(f"🔌 Conectando...", "SYSTEM")
@@ -293,7 +304,6 @@ class SimpleBot:
                     self.api.api.close()
                 except:
                     pass
-            
             self.api = Exnova(EXNOVA_EMAIL, EXNOVA_PASSWORD)
             check, reason = self.api.connect()
             if check:
@@ -330,7 +340,6 @@ class SimpleBot:
                     results.append({"pair": asset, "win_rate": wr, "wins": wins, "losses": total-wins, "best_strategy": "Nano SMA14+SR"})
             except: pass
             time.sleep(0.05)
-        
         results.sort(key=lambda x: x['win_rate'], reverse=True)
         top_3 = results[:3]
         if top_3:
@@ -358,7 +367,12 @@ class SimpleBot:
     def execute_trade(self, asset, direction):
         if not self.api: return
         
-        # VERIFICAÇÃO FINAL DE GERENCIAMENTO ANTES DE ENTRAR
+        try:
+            balance_before = self.api.get_balance()
+        except:
+            self.log_to_db("Erro ao ler saldo inicial. Abortando entrada.", "ERROR")
+            return
+
         if not self.check_management(): return
 
         with self.trade_lock:
@@ -373,7 +387,7 @@ class SimpleBot:
             if self.supabase:
                 res = self.supabase.table("trade_signals").insert({
                     "pair": asset, "direction": direction, "strategy": "Nano SMA14+SR",
-                    "status": "PENDING", "result": "PENDING", "created_at": datetime.now().isoformat()
+                    "status": "PENDING", "result": "PENDING", "created_at": datetime.now().isoformat(), "profit": 0
                 }).execute()
                 if res.data: sig_id = res.data[0]['id']
         except: pass
@@ -382,35 +396,46 @@ class SimpleBot:
         if not status: status, id = self.safe_buy(asset, amount, direction, "binary")
 
         if status:
-            self.log_to_db(f"✅ Ordem {id} aceita.", "INFO")
-            time.sleep(60) 
-            is_win, profit = False, 0.0
-            try:
-                win_v = self.api.check_win_digital_v2(id)
-                if isinstance(win_v, tuple) and win_v[1] > 0: is_win, profit = True, float(win_v[1])
-                elif isinstance(win_v, (int, float)) and win_v > 0: is_win, profit = True, float(win_v)
-            except: pass
-
-            res_str = 'WIN' if is_win else 'LOSS'
-            if not is_win: 
-                profit = -float(amount)
-                self.last_loss_time = time.time()
-                self.log_to_db("🛑 Cooldown ativo: Pausa de 2 min.", "WARNING")
+            self.log_to_db(f"✅ Ordem {id} aceita. Aguardando resultado (64s)...", "INFO")
             
-            self.log_to_db(f"{'🏆' if is_win else '🔻'} {res_str}: ${profit:.2f}", "SUCCESS" if is_win else "ERROR")
+            time.sleep(64)
+            
+            profit = 0.0
+            res_str = "PENDING"
+            
+            try:
+                balance_after = self.api.get_balance()
+                delta = balance_after - balance_before
+                
+                if delta > 0:
+                    res_str = 'WIN'
+                    profit = delta
+                elif delta < 0:
+                    res_str = 'LOSS'
+                    profit = delta
+                else:
+                    res_str = 'DOJI'
+                    profit = 0.0
+            except Exception as e:
+                self.log_to_db(f"Erro verificação saldo: {e}", "ERROR")
+                res_str = 'UNKNOWN'
+
+            if res_str == 'LOSS': 
+                self.last_loss_time = time.time()
+                self.log_to_db(f"🛑 Cooldown ativo: Pausa de 2 min.", "WARNING")
+            
+            log_type = "SUCCESS" if res_str == 'WIN' else "ERROR" if res_str == 'LOSS' else "WARNING"
+            self.log_to_db(f"{'🏆' if res_str == 'WIN' else '🔻'} {res_str}: ${profit:.2f}", log_type)
 
             if sig_id and self.supabase:
                 try: self.supabase.table("trade_signals").update({"status": res_str, "result": res_str, "profit": profit}).eq("id", sig_id).execute()
                 except: pass
             
             self.update_balance_remote()
-            
-            # VERIFICA GERENCIAMENTO PÓS-RESULTADO
             self.check_management()
-
             with self.trade_lock: self.active_trades.discard(asset)
         else:
-            self.log_to_db("❌ Falha ordem.", "ERROR")
+            self.log_to_db("❌ Falha ordem na corretora.", "ERROR")
             with self.trade_lock: self.active_trades.discard(asset)
             if sig_id and self.supabase: 
                 try: self.supabase.table("trade_signals").delete().eq("id", sig_id).execute()
@@ -443,12 +468,12 @@ class SimpleBot:
                         self.best_assets = self.catalog_assets(ASSETS_POOL)
                         last_catalog = time.time()
 
-                    # --- LOG DE ANÁLISE PERIÓDICA ---
+                    # VERIFICA AGENDAMENTO A CADA CICLO
+                    self.check_schedule()
+
                     if time.time() - last_scan > 10:
                         try:
-                            # ATUALIZA SALDO NO BANCO PERIODICAMENTE
                             self.update_balance_remote()
-                            
                             primary = self.best_assets[0] if self.best_assets else "EURUSD-OTC"
                             candles = self.api.get_candles(primary, 60, 40, int(time.time()))
                             if candles:
@@ -465,12 +490,10 @@ class SimpleBot:
                         time.sleep(2)
                         continue
                     
-                    # VERIFICAÇÃO DE GERENCIAMENTO NO LOOP PRINCIPAL
                     if not self.check_management():
-                        time.sleep(5) # Se bateu meta/stop, espera
+                        time.sleep(5)
                         continue
 
-                    # 2.3. Janela de Execução Estrita
                     now_sec = datetime.now().second
                     if 57 <= now_sec <= 58:
                         if time.time() - self.last_loss_time < 120:
@@ -484,6 +507,8 @@ class SimpleBot:
                             with self.trade_lock:
                                 if asset in self.active_trades: continue
                             try:
+                                self.log_to_db(f"SCAN_ENTRADA::{asset}", "SYSTEM")
+                                
                                 candles = self.api.get_candles(asset, 60, 40, int(time.time()))
                                 sig, reason = TechnicalAnalysis.get_signal(candles)
                                 if sig: 
