@@ -308,16 +308,24 @@
             await supabaseClient.from('bot_config').update({ status: newStatus }).eq('id', 1);
         });
 
-        // RESTART BOT - VERSÃO SAFE PARA IOS
+        // RESTART BOT - VERSÃO SAFE PARA IOS (CORRIGIDO)
         document.getElementById('restart-bot-btn').addEventListener('click', async () => {
             if (!confirm("Reiniciar o bot agora?")) return;
 
             const btn = document.getElementById('restart-bot-btn');
-            btn.disabled = true;
+            const originalIcon = btn.innerHTML;
+            
+            // 1. Usa CSS para desativar (evita cancelamento da Promise no Safari)
+            btn.classList.add("opacity-50", "pointer-events-none");
+            btn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i>';
+            lucide.createIcons();
 
             try {
                 const { data: { session } } = await supabaseClient.auth.getSession();
                 if (!session) throw new Error("Sessão inválida");
+
+                // ⏱️ Delay curto (fix Safari)
+                await new Promise(r => setTimeout(r, 150));
 
                 const res = await fetch(
                   "https://ioduahwknfsktujthfyc.supabase.co/functions/v1/restart-bot",
@@ -332,12 +340,28 @@
 
                 if (!res.ok) throw new Error("Falha no restart");
 
-                console.log("Restart solicitado com sucesso");
+                // 2. Feedback Visual Sucesso (Check Verde)
+                btn.innerHTML = '<i data-lucide="check" class="w-4 h-4 text-green-500"></i>';
+                lucide.createIcons();
+                
+                // Volta ao normal após 2s
+                setTimeout(() => {
+                    btn.innerHTML = originalIcon;
+                    lucide.createIcons();
+                }, 2000);
 
             } catch (err) {
                 console.error(err);
+                // Feedback Visual Erro (X Vermelho)
+                btn.innerHTML = '<i data-lucide="x" class="w-4 h-4 text-red-500"></i>';
+                lucide.createIcons();
+                setTimeout(() => {
+                    btn.innerHTML = originalIcon;
+                    lucide.createIcons();
+                }, 2000);
             } finally {
-                btn.disabled = false;
+                // Remove bloqueio
+                btn.classList.remove("opacity-50", "pointer-events-none");
             }
         });
 
