@@ -308,37 +308,36 @@
             await supabaseClient.from('bot_config').update({ status: newStatus }).eq('id', 1);
         });
 
-        // RESTART BOT COM EDGE FUNCTION (CORRIGIDO: Authorization Header com Bearer Token)
+        // RESTART BOT - VERSÃO SAFE PARA IOS
         document.getElementById('restart-bot-btn').addEventListener('click', async () => {
-            if(!confirm("Tem certeza que deseja reiniciar o bot?")) return;
-            
+            if (!confirm("Reiniciar o bot agora?")) return;
+
             const btn = document.getElementById('restart-bot-btn');
-            const originalIcon = btn.innerHTML;
-            btn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i>';
-            lucide.createIcons();
+            btn.disabled = true;
 
             try {
-                // OBTER SESSÃO PARA AUTENTICAÇÃO
                 const { data: { session } } = await supabaseClient.auth.getSession();
                 if (!session) throw new Error("Sessão inválida");
 
-                await fetch(
+                const res = await fetch(
                   "https://ioduahwknfsktujthfyc.supabase.co/functions/v1/restart-bot",
-                  { 
+                  {
                     method: "POST",
                     headers: {
-                        "Authorization": `Bearer ${session.access_token}`, // CHAVE CORRETA
-                        "Content-Type": "application/json"
+                      "Authorization": `Bearer ${session.access_token}`,
+                      "Content-Type": "application/json"
                     }
                   }
                 );
-                alert("Bot reiniciando...");
+
+                if (!res.ok) throw new Error("Falha no restart");
+
+                console.log("Restart solicitado com sucesso");
+
             } catch (err) {
-                console.error("Erro ao reiniciar:", err);
-                alert("Erro ao reiniciar o bot.");
+                console.error(err);
             } finally {
-                btn.innerHTML = originalIcon;
-                lucide.createIcons();
+                btn.disabled = false;
             }
         });
 
