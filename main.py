@@ -148,12 +148,10 @@ class TechnicalAnalysis:
         if last['body'] < avg_body * 0.4: return None, "Correção muito fraca (Doji)"
         if last['body'] > avg_body * 1.5: return None, "Correção muito forte (Engolfo?)"
 
-        # --- AJUSTE 2: FILTRO DE INCLINAÇÃO DA SMA (MUITO IMPORTANTE) ---
-        # Calcula a SMA anterior para ver se há inclinação real
-        # candles[:-1] pega até a penúltima vela
+        # --- AJUSTE: INCLINAÇÃO AUMENTADA PARA 0.15 ---
         sma_prev = TechnicalAnalysis.calculate_sma(candles[:-1], 14)
-        if abs(sma - sma_prev) < atr * 0.1:
-            return None, "Pullback sem inclinação de SMA (Flat)"
+        if abs(sma - sma_prev) < atr * 0.15:
+            return None, "Pullback sem inclinação suficiente (Flat)"
 
         # Definição de Tendência Recente
         recent_trend_candles = candles[-4:-1]
@@ -209,7 +207,8 @@ class SimpleBot:
         self.operating_mode = "TREND"
         self.trend_blocked_count = 0
         self.pullback_win_count = 0
-        self.last_trend_block_time = 0 # AJUSTE 1: Temporizador para bloqueio
+        self.last_trend_block_time = 0
+        self.pullback_block_until = 0 # AJUSTE 3: Timestamp de bloqueio
         
         self.config = { 
             "status": "PAUSED", "account_type": "PRACTICE", "entry_value": 1.0,
@@ -457,7 +456,13 @@ class SimpleBot:
             if res_str == 'LOSS': 
                 self.last_loss_time = time.time()
                 self.log_to_db(f"🛑 Cooldown ativo: Pausa de 2 min.", "WARNING")
-                if self.operating_mode == "PULLBACK": self.pullback_win_count = 0
+                
+                # AJUSTE 3: Proteção pós-loss em PULLBACK
+                if self.operating_mode == "PULLBACK": 
+                    self.pullback_win_count = 0
+                    self.operating_mode = "TREND"
+                    self.pullback_block_until = time.time() + 900 # 15 minutos
+                    self.log_to_db("MODE_CHANGE::PULLBACK->TREND::Proteção pós-loss (15m block)", "WARNING")
             
             if res_str == 'WIN' and self.operating_mode == "PULLBACK":
                 self.pullback_win_count += 1
@@ -562,7 +567,6 @@ class SimpleBot:
                                 sig, reason = TechnicalAnalysis.get_signal_by_mode(candles, self.operating_mode)
                                 
                                 if sig: 
-                                    # AJUSTE 3: Reset de contadores em par válido
                                     if self.operating_mode == "TREND": 
                                         self.trend_blocked_count = 0
                                     
@@ -572,19 +576,23 @@ class SimpleBot:
                                     break 
                                 else:
                                     # Lógica de Troca de Modo: TREND -> PULLBACK
-                                    # AJUSTE 1: Temporizador para bloqueio
                                     if (
                                         self.operating_mode == "TREND" 
                                         and "Lateralizado" in reason 
                                         and time.time() - self.last_trend_block_time > 60
                                     ):
-                                        self.trend_blocked_count += 1
-                                        self.last_trend_block_time = time.time()
-                                        
-                                        if self.trend_blocked_count >= 3:
-                                            self.operating_mode = "PULLBACK"
-                                            self.trend_blocked_count = 0
-                                            self.log_to_db("MODE_CHANGE::TREND->PULLBACK::Lateralização excessiva detectada", "WARNING")
+                                        # Verifica se Pullback está bloqueado por Loss recente
+                                        if time.time() < self.pullback_block_until:
+                                            # Pullback bloqueado, ignora
+                                            pass
+                                        else:
+                                            self.trend_blocked_count += 1
+                                            self.last_trend_block_time = time.time()
+                                            
+                                            if self.trend_blocked_count >= 3:
+                                                self.operating_mode = "PULLBACK"
+                                                self.trend_blocked_count = 0
+                                                self.log_to_db("MODE_CHANGE::TREND->PULLBACK::Lateralização excessiva detectada", "WARNING")
                             except: pass
                         
                         if trade_executed: time.sleep(50) 
