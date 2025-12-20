@@ -82,7 +82,7 @@
                         <h1 class="text-xl md:text-2xl font-bold text-white truncate">Dashboard</h1>
                         <div class="flex items-center gap-2 mt-1 flex-wrap">
                             <span id="bot-status-indicator" class="text-[10px] md:text-xs font-bold text-slate-500 whitespace-nowrap">CARREGANDO...</span>
-                            <!-- BADGE DE MODO (NOVO) -->
+                            <!-- BADGE DE MODO -->
                             <span id="mode-badge" class="px-2 py-0.5 rounded text-[10px] font-bold tracking-wider border border-slate-700 bg-slate-800 text-slate-400 transition-colors duration-300 hidden">
                                 MODO: ...
                             </span>
@@ -307,8 +307,34 @@
             await supabaseClient.from('bot_config').update({ status: newStatus }).eq('id', 1);
         });
 
+        // RESTART BOT COM EDGE FUNCTION (CORRIGIDO)
         document.getElementById('restart-bot-btn').addEventListener('click', async () => {
-            if(confirm("Reiniciar conexão?")) await supabaseClient.from('bot_config').update({ status: 'RESTARTING' }).eq('id', 1);
+            if(!confirm("Tem certeza que deseja reiniciar o bot via Edge Function?")) return;
+            
+            const btn = document.getElementById('restart-bot-btn');
+            const originalIcon = btn.innerHTML;
+            btn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i>';
+            lucide.createIcons();
+
+            try {
+                await fetch(
+                  "https://ioduahwknfsktujthfyc.supabase.co/functions/v1/restart-bot",
+                  { 
+                    method: "POST",
+                    headers: {
+                        "Authorization": `Bearer ${SUPABASE_KEY}`,
+                        "Content-Type": "application/json"
+                    }
+                  }
+                );
+                alert("Bot reiniciando...");
+            } catch (err) {
+                console.error("Erro ao reiniciar:", err);
+                alert("Erro ao chamar Edge Function.");
+            } finally {
+                btn.innerHTML = originalIcon;
+                lucide.createIcons();
+            }
         });
 
         function startDataLoop() {
@@ -336,28 +362,32 @@
             updateConfigUI(config);
             refreshSignals();
 
-            const { data: logs } = await supabaseClient.from('logs').select('*').order('created_at', { ascending: false }).limit(15);
+            // AUMENTADO PARA 10 PARA PEGAR LOGS DE MÚLTIPLOS CARDS E ATUALIZAR TERMINAL
+            const { data: logs } = await supabaseClient.from('logs').select('*').order('created_at', { ascending: false }).limit(10);
             if(logs && logs.length > 0) {
                 if (state.lastLogId !== logs[0].id) {
-                    // Detect NEW logs that were missed by Realtime
-                    const newLogs = [];
+                    const newId = logs[0].id;
+                    
                     if (state.lastLogId) {
+                        const newLogs = [];
                         for(let log of logs) {
                             if (log.id === state.lastLogId) break;
                             newLogs.push(log);
                         }
+                        // Reverse to process oldest to newest
+                        newLogs.reverse().forEach(log => {
+                            appendLog(log);
+                            processScannerLog(log);
+                        });
                     } else {
-                        // First load or reset
-                        newLogs.push(...logs); 
+                        // First load/reset
+                        logs.slice().reverse().forEach(l => {
+                            appendLog(l);
+                            processScannerLog(l);
+                        });
                     }
-                    
-                    // Process them in chronological order
-                    newLogs.reverse().forEach(log => {
-                        appendLog(log);
-                        processScannerLog(log);
-                    });
 
-                    state.lastLogId = logs[0].id;
+                    state.lastLogId = newId;
                     state.lastLogTime = new Date(logs[0].created_at);
                 }
             }
@@ -424,6 +454,7 @@
                 document.getElementById('conf-entry').value = config.entry_value;
                 document.getElementById('conf-account').value = config.account_type;
                 document.getElementById('conf-stop-mode').value = config.stop_mode || 'percentage';
+                // Timer
                 document.getElementById('conf-timer-enabled').checked = config.timer_enabled || false;
                 document.getElementById('conf-timer-start').value = config.timer_start || '00:00';
                 document.getElementById('conf-timer-end').value = config.timer_end || '00:00';
