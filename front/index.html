@@ -76,15 +76,15 @@
             <!-- HOME -->
             <div id="view-home" class="view-section space-y-6 max-w-6xl mx-auto">
                 
-                <!-- TOP BAR (AJUSTADO: BOTÕES ALINHADOS À DIREITA NO MOBILE) -->
+                <!-- TOP BAR -->
                 <div class="flex flex-row justify-between items-center gap-2 mb-4">
                     <div class="flex-1 min-w-0">
                         <h1 class="text-xl md:text-2xl font-bold text-white truncate">Dashboard</h1>
                         <div class="flex items-center gap-2 mt-1 flex-wrap">
                             <span id="bot-status-indicator" class="text-[10px] md:text-xs font-bold text-slate-500 whitespace-nowrap">CARREGANDO...</span>
-                            <!-- BADGE DE MODO -->
-                            <span id="mode-badge" class="px-2 py-0.5 rounded text-[10px] font-bold tracking-wider border border-slate-700 bg-slate-800 text-slate-400 transition-colors duration-300">
-                                ...
+                            <!-- BADGE DE MODO (NOVO) -->
+                            <span id="mode-badge" class="px-2 py-0.5 rounded text-[10px] font-bold tracking-wider border border-slate-700 bg-slate-800 text-slate-400 transition-colors duration-300 hidden">
+                                MODO: ...
                             </span>
                         </div>
                     </div>
@@ -98,7 +98,7 @@
                     </div>
                 </div>
 
-                <!-- TOP 3 ASSETS GRID (COMPACTO) -->
+                <!-- TOP 3 ASSETS GRID -->
                 <div class="flex items-center justify-between mb-2">
                     <div class="flex items-center gap-2">
                         <i data-lucide="trending-up" class="w-4 h-4 text-amber-500"></i>
@@ -106,11 +106,10 @@
                     </div>
                 </div>
                 
-                <!-- GRID DE CARDS (Horizontal, menor) -->
+                <!-- GRID DE CARDS -->
                 <div id="top-assets-container" class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
-                    <!-- Cards serão injetados aqui via JS -->
                     <div class="glass-card p-4 rounded-xl border-t-4 border-slate-700 animate-pulse h-24 flex items-center justify-center text-slate-600 text-xs">
-                        Aguardando...
+                        A aguardar dados do bot...
                     </div>
                 </div>
 
@@ -236,12 +235,11 @@
                 });
                 state.lastLogTime = new Date(logs[0].created_at);
                 state.lastLogId = logs[0].id;
-                logs.slice(0, 10).forEach(l => processScannerLog(l));
+                logs.slice(0, 10).forEach(l => processScannerLog(l)); // Update UI
                 updateBotStatus();
             }
         }
 
-        // --- TOP 3 CARDS LOGIC ---
         async function fetchTopAssets() {
             const { data: assets } = await supabaseClient.from('cataloged_assets').select('*').order('win_rate', { ascending: false }).limit(3);
             renderAssetCards(assets || []);
@@ -250,54 +248,33 @@
         function renderAssetCards(assets) {
             const container = document.getElementById('top-assets-container');
             if (assets.length === 0) {
-                container.innerHTML = `<div class="col-span-1 md:col-span-3 text-center text-slate-500 py-8 text-sm bg-slate-900/50 rounded-xl border border-dashed border-slate-800">
-                    <i data-lucide="search" class="w-6 h-6 mx-auto mb-2 opacity-50"></i>
-                    Nenhum par qualificado (>60%) encontrado no momento.
-                </div>`;
+                container.innerHTML = `<div class="col-span-1 md:col-span-3 text-center text-slate-500 py-8 text-sm bg-slate-900/50 rounded-xl border border-dashed border-slate-800"><i data-lucide="search" class="w-6 h-6 mx-auto mb-2 opacity-50"></i> Nenhum par qualificado (>60%)</div>`;
                 lucide.createIcons();
                 return;
             }
-
             container.innerHTML = '';
             state.activePairs = [];
-
-            assets.forEach((asset, index) => {
+            assets.forEach((asset) => {
                 state.activePairs.push(asset.pair);
                 const safePairId = asset.pair.replace(/[^a-zA-Z0-9]/g, ''); 
-                
                 const card = document.createElement('div');
                 card.id = `card-${safePairId}`;
-                // COMPACT CARD STYLE
                 card.className = "glass-card p-3 rounded-xl border-t-4 border-slate-700 relative overflow-hidden transition-all duration-300";
-                
                 card.innerHTML = `
                     <div class="flex justify-between items-start mb-2">
                         <div>
                             <h3 class="font-bold text-sm text-white tracking-tight">${asset.pair}</h3>
-                            <p class="text-[9px] text-slate-400 font-mono flex items-center gap-1">
-                                <span class="w-1.5 h-1.5 rounded-full bg-slate-500" id="led-${safePairId}"></span> 
-                                ${asset.best_strategy || 'SMA14'}
-                            </p>
+                            <p class="text-[9px] text-slate-400 font-mono flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-slate-500" id="led-${safePairId}"></span> ${asset.best_strategy || 'SMA14'}</p>
                         </div>
                         <div class="text-right">
                             <span class="text-green-400 font-bold text-xs bg-green-500/10 px-1.5 py-0.5 rounded">${Math.round(asset.win_rate)}%</span>
                         </div>
                     </div>
-                    
                     <div class="flex justify-between items-end">
-                        <div>
-                            <p class="text-[8px] text-slate-500 mb-0.5">PREÇO</p>
-                            <p class="text-base font-mono text-slate-300" id="price-${safePairId}">---</p>
-                        </div>
-                        <div class="text-right">
-                             <p class="text-[8px] text-slate-500 mb-0.5">STATUS</p>
-                             <p class="text-[10px] font-bold text-slate-400" id="status-${safePairId}">AGUARDANDO</p>
-                        </div>
+                        <div><p class="text-[8px] text-slate-500 mb-0.5">PREÇO</p><p class="text-base font-mono text-slate-300" id="price-${safePairId}">---</p></div>
+                        <div class="text-right"><p class="text-[8px] text-slate-500 mb-0.5">STATUS</p><p class="text-[10px] font-bold text-slate-400" id="status-${safePairId}">AGUARDANDO</p></div>
                     </div>
-                    
-                    <div class="mt-2 pt-2 border-t border-white/5">
-                        <p class="text-[8px] text-slate-500 font-mono truncate" id="log-${safePairId}">Sincronizando...</p>
-                    </div>
+                    <div class="mt-2 pt-2 border-t border-white/5"><p class="text-[8px] text-slate-500 font-mono truncate" id="log-${safePairId}">Sincronizando...</p></div>
                 `;
                 container.appendChild(card);
             });
@@ -306,14 +283,8 @@
         document.getElementById('login-form').addEventListener('submit', async (e) => {
             e.preventDefault();
             const { data, error } = await supabaseClient.auth.signInWithPassword({ email: document.getElementById('email').value, password: document.getElementById('password').value });
-            if (error) {
-                document.getElementById('login-error').textContent = error.message;
-                document.getElementById('login-error').classList.remove('hidden');
-            } else {
-                state.user = data.user;
-                showApp();
-                startDataLoop();
-            }
+            if (error) { document.getElementById('login-error').textContent = error.message; document.getElementById('login-error').classList.remove('hidden'); }
+            else { state.user = data.user; showApp(); startDataLoop(); }
         });
 
         document.getElementById('logout-btn').addEventListener('click', async () => { await supabaseClient.auth.signOut(); window.location.reload(); });
@@ -356,41 +327,37 @@
 
         async function refreshSignals() {
             const { data: signals } = await supabaseClient.from('trade_signals').select('*').order('created_at', { ascending: false }).limit(50);
-            if(signals) {
-                syncSignalsList(signals);
-                updateStats(signals);
-            }
+            if(signals) { syncSignalsList(signals); updateStats(signals); }
         }
 
         async function fetchData() {
             let { data: config } = await supabaseClient.from('bot_config').select('*').eq('id', 1).single();
             if (!config) config = { id: 1, status: 'PAUSED', stop_win: 500, stop_loss: 200, entry_value: 10, account_type: 'PRACTICE' };
             updateConfigUI(config);
-
             refreshSignals();
 
-            // AUMENTADO PARA 10 PARA PEGAR LOGS DE MÚLTIPLOS CARDS E ATUALIZAR TERMINAL
-            const { data: logs } = await supabaseClient.from('logs').select('*').order('created_at', { ascending: false }).limit(10);
+            const { data: logs } = await supabaseClient.from('logs').select('*').order('created_at', { ascending: false }).limit(15);
             if(logs && logs.length > 0) {
                 if (state.lastLogId !== logs[0].id) {
-                    const newId = logs[0].id;
-                    
+                    // Detect NEW logs that were missed by Realtime
+                    const newLogs = [];
                     if (state.lastLogId) {
-                        const newLogs = [];
                         for(let log of logs) {
                             if (log.id === state.lastLogId) break;
                             newLogs.push(log);
                         }
-                        
-                        newLogs.reverse().forEach(log => {
-                            appendLog(log);
-                            processScannerLog(log);
-                        });
                     } else {
-                        logs.forEach(l => processScannerLog(l));
+                        // First load or reset
+                        newLogs.push(...logs); 
                     }
+                    
+                    // Process them in chronological order
+                    newLogs.reverse().forEach(log => {
+                        appendLog(log);
+                        processScannerLog(log);
+                    });
 
-                    state.lastLogId = newId;
+                    state.lastLogId = logs[0].id;
                     state.lastLogTime = new Date(logs[0].created_at);
                 }
             }
@@ -403,7 +370,6 @@
                 updateStats([]);
                 return;
             }
-            
             signals.forEach(s => {
                 const existing = document.getElementById(`signal-${s.id}`);
                 if (!existing) {
@@ -413,9 +379,7 @@
                 } else {
                     const rawStatus = s.result || s.status || 'PENDING';
                     const currentStatus = existing.getAttribute('data-status');
-                    if (currentStatus !== rawStatus) {
-                        existing.replaceWith(createSignalElement(s));
-                    }
+                    if (currentStatus !== rawStatus) existing.replaceWith(createSignalElement(s));
                 }
             });
         }
@@ -426,22 +390,17 @@
                 const result = (s.result || '').toUpperCase();
                 const status = (s.status || '').toUpperCase();
                 const profit = parseFloat(s.profit);
-
                 const isWin = result.includes('WIN') || status.includes('WIN') || (!isNaN(profit) && profit > 0);
                 const isLoss = result.includes('LOSS') || status.includes('LOSS') || (!isNaN(profit) && profit < 0);
-
                 if (isWin) wins++;
                 else if (isLoss) losses++;
             });
-            
             document.getElementById('score-wins').textContent = wins;
             document.getElementById('score-losses').textContent = losses;
-            
             const total = wins + losses;
             const rate = total > 0 ? Math.round((wins / total) * 100) : 0;
             const rateEl = document.getElementById('score-rate');
             rateEl.textContent = `${rate}%`;
-            
             if(rate >= 50) rateEl.className = "text-2xl font-bold text-green-400";
             else rateEl.className = "text-2xl font-bold text-red-400";
         }
@@ -453,7 +412,7 @@
             const isRestarting = config.status === 'RESTARTING';
             if (isRestarting) {
                 btn.className = "flex items-center gap-2 px-3 py-2 rounded-lg text-xs md:text-sm font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20";
-                btn.innerHTML = '<i data-lucide="loader-2" class="w-3 h-3 md:w-4 md:h-4 animate-spin"></i> <span class="hidden sm:inline">...</span>';
+                btn.innerHTML = '<i data-lucide="loader-2" class="w-3 h-3 md:w-4 md:h-4 animate-spin"></i> ...';
             } else {
                 btn.className = `flex items-center gap-2 px-3 py-2 rounded-lg text-xs md:text-sm font-bold shadow-lg transition-all min-w-[90px] justify-center ${isRunning ? 'bg-red-500/10 text-red-400 border border-red-500/20' : 'bg-green-500 text-white'}`;
                 btn.innerHTML = isRunning ? '<i data-lucide="pause" class="w-3 h-3 md:w-4 md:h-4"></i> PAUSAR' : '<i data-lucide="play" class="w-3 h-3 md:w-4 md:h-4"></i> INICIAR';
@@ -465,7 +424,6 @@
                 document.getElementById('conf-entry').value = config.entry_value;
                 document.getElementById('conf-account').value = config.account_type;
                 document.getElementById('conf-stop-mode').value = config.stop_mode || 'percentage';
-                // Timer
                 document.getElementById('conf-timer-enabled').checked = config.timer_enabled || false;
                 document.getElementById('conf-timer-start').value = config.timer_start || '00:00';
                 document.getElementById('conf-timer-end').value = config.timer_end || '00:00';
@@ -482,17 +440,12 @@
             el.id = `signal-${s.id}`;
             const rawStatus = s.result || s.status || 'PENDING';
             el.setAttribute('data-status', rawStatus);
-            
             const status = rawStatus.toUpperCase();
             const profit = parseFloat(s.profit);
-            
             let isWin = status.includes('WIN') || (!isNaN(profit) && profit > 0);
             let isLoss = status.includes('LOSS') || (!isNaN(profit) && profit < 0);
-            
             const borderClass = s.direction === 'call' ? 'border-green-500' : 'border-red-500';
-            let statusBadge;
-            let profitDisplay = '';
-
+            let statusBadge, profitDisplay = '';
             if (isWin) {
                 statusBadge = '<span class="text-green-400 font-bold text-sm flex items-center gap-1"><i data-lucide="check" class="w-4 h-4"></i> WIN</span>';
                 if (!isNaN(profit)) profitDisplay = `<span class="block text-xs font-bold text-green-400 mt-1">+$${Math.abs(profit).toFixed(2)}</span>`;
@@ -502,18 +455,11 @@
             } else {
                 statusBadge = '<span class="text-amber-400 text-xs font-bold animate-pulse flex items-center gap-1"><i data-lucide="loader" class="w-3 h-3 animate-spin"></i> Pendente</span>';
             }
-
             el.className = `glass-card p-4 rounded-xl flex items-center justify-between border-l-4 ${borderClass}`;
-            
             el.innerHTML = `
                 <div class="flex items-center gap-4">
-                    <div class="w-10 h-10 rounded-full flex items-center justify-center ${s.direction === 'call' ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'}">
-                        <i data-lucide="${s.direction === 'call' ? 'arrow-up' : 'arrow-down'}" class="w-5 h-5"></i>
-                    </div>
-                    <div>
-                        <p class="font-bold text-white text-sm">${s.pair || '---'}</p>
-                        <span class="text-[10px] text-slate-500">${new Date(s.created_at).toLocaleTimeString()}</span>
-                    </div>
+                    <div class="w-10 h-10 rounded-full flex items-center justify-center ${s.direction === 'call' ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'}"><i data-lucide="${s.direction === 'call' ? 'arrow-up' : 'arrow-down'}" class="w-5 h-5"></i></div>
+                    <div><p class="font-bold text-white text-sm">${s.pair || '---'}</p><span class="text-[10px] text-slate-500">${new Date(s.created_at).toLocaleTimeString()}</span></div>
                 </div>
                 <div class="text-right">${statusBadge}${profitDisplay}</div>
             `;
@@ -527,14 +473,12 @@
             line.className = 'flex gap-2 opacity-80 text-slate-300';
             line.innerHTML = `<span class="text-slate-600 shrink-0">[${new Date(log.created_at).toLocaleTimeString()}]</span> <span>${log.message}</span>`;
             term.appendChild(line);
-            
-            // Fix: scroll term itself
-            if(term) term.scrollTop = term.scrollHeight;
+            term.scrollTop = term.scrollHeight;
         }
 
         function scrollToBottom() {
             const term = document.getElementById('terminal-output');
-            term.scrollTop = term.scrollHeight;
+            if(term) term.scrollTop = term.scrollHeight;
         }
 
         function processScannerLog(log) {
@@ -546,11 +490,9 @@
                 const badge = document.getElementById('mode-badge');
                 if (badge) {
                     badge.innerText = `MODO: ${mode}`;
-                    if (mode === 'TREND') {
-                        badge.className = "px-2 py-0.5 rounded text-[10px] font-bold tracking-wider border border-green-500/30 bg-green-500/10 text-green-400";
-                    } else {
-                        badge.className = "px-2 py-0.5 rounded text-[10px] font-bold tracking-wider border border-blue-500/30 bg-blue-500/10 text-blue-400";
-                    }
+                    badge.classList.remove('hidden');
+                    if (mode === 'TREND') badge.className = "px-2 py-0.5 rounded text-[10px] font-bold tracking-wider border border-green-500/30 bg-green-500/10 text-green-400";
+                    else badge.className = "px-2 py-0.5 rounded text-[10px] font-bold tracking-wider border border-blue-500/30 bg-blue-500/10 text-blue-400";
                 }
                 return;
             }
@@ -568,7 +510,6 @@
             }
 
             if (!pair) return;
-
             const safePairId = pair.replace(/[^a-zA-Z0-9]/g, '');
             const card = document.getElementById(`card-${safePairId}`);
             
@@ -579,7 +520,6 @@
                     if(cleanMsg.length > 40) cleanMsg = cleanMsg.substring(0, 40) + '...';
                     logEl.textContent = cleanMsg;
                 }
-
                 const statusEl = document.getElementById(`status-${safePairId}`);
                 const ledEl = document.getElementById(`led-${safePairId}`);
                 const priceEl = document.getElementById(`price-${safePairId}`);
@@ -601,14 +541,8 @@
                     const oldPrice = parseFloat(priceEl.textContent) || 0;
                     const newPrice = parseFloat(price);
                     priceEl.textContent = price;
-                    
-                    if (newPrice > oldPrice) {
-                        priceEl.classList.remove('text-slate-300', 'text-red-400');
-                        priceEl.classList.add('text-green-400');
-                    } else if (newPrice < oldPrice) {
-                        priceEl.classList.remove('text-slate-300', 'text-green-400');
-                        priceEl.classList.add('text-red-400');
-                    }
+                    if (newPrice > oldPrice) { priceEl.classList.remove('text-slate-300', 'text-red-400'); priceEl.classList.add('text-green-400'); }
+                    else if (newPrice < oldPrice) { priceEl.classList.remove('text-slate-300', 'text-green-400'); priceEl.classList.add('text-red-400'); }
                 }
             }
         }
@@ -619,7 +553,6 @@
             const ind = document.getElementById('bot-status-indicator');
             const warn = document.getElementById('connection-warning');
             const isPaused = state.config.status === 'PAUSED';
-            
             if (diff < (isPaused ? 86400000 : 180000)) { 
                 ind.innerHTML = '<span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span> ONLINE';
                 ind.className = 'text-xs font-bold flex items-center gap-1 text-green-400';
@@ -645,7 +578,6 @@
                 entry_value: Number(document.getElementById('conf-entry').value),
                 account_type: document.getElementById('conf-account').value,
                 stop_mode: document.getElementById('conf-stop-mode').value,
-                // Timer Updates
                 timer_enabled: document.getElementById('conf-timer-enabled').checked,
                 timer_start: document.getElementById('conf-timer-start').value,
                 timer_end: document.getElementById('conf-timer-end').value
