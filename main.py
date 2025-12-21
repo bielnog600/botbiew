@@ -24,26 +24,46 @@ EXNOVA_PASSWORD = os.environ.get("EXNOVA_PASSWORD", "sua_senha")
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
 logging.getLogger("urllib3").setLevel(logging.WARNING)
 
-# --- ANÁLISE TÉCNICA (ESTRATÉGIA V2 REFINADA) ---
+# --- ANÁLISE TÉCNICA (ESTRATÉGIA V2 REFINADA + FLOW OTIMIZADO) ---
 class TechnicalAnalysis:
     
     @staticmethod
+    def calculate_sma(candles, period):
+        """Calcula a SMA (Média Móvel Simples)."""
+        if len(candles) < period:
+            return 0
+        return sum(c['close'] for c in candles[-period:]) / period
+
+    @staticmethod
     def calculate_ema(candles, period):
-        """Calcula a EMA (Média Móvel Exponencial) para uma lista de candles."""
+        """Calcula a EMA (Média Móvel Exponencial)."""
         if len(candles) < period: return 0
         
-        # Usa preços de fechamento
         prices = [c['close'] for c in candles]
-        
-        # SMA inicial para a primeira EMA
         ema = sum(prices[:period]) / period
         k = 2 / (period + 1)
         
-        # Calcula o restante da série
         for price in prices[period:]:
             ema = (price * k) + (ema * (1 - k))
             
         return ema
+
+    @staticmethod
+    def calculate_ema_series(values, period):
+        """Calcula uma série de valores EMA."""
+        if len(values) < period:
+            return []
+
+        ema_values = []
+        sma = sum(values[:period]) / period
+        ema_values.append(sma)
+
+        k = 2 / (period + 1)
+        for price in values[period:]:
+            ema = price * k + ema_values[-1] * (1 - k)
+            ema_values.append(ema)
+
+        return ema_values
 
     @staticmethod
     def analyze_candle(candle):
@@ -56,35 +76,97 @@ class TechnicalAnalysis:
         lower_wick = min(open_p, close_p) - low_p
         
         color = 'green' if close_p > open_p else 'red' if close_p < open_p else 'doji'
+        
+        # CORREÇÃO 1: Removida duplicação de chaves 'close' e 'open'
         return {
             'color': color, 'body': body, 'upper_wick': upper_wick,
             'lower_wick': lower_wick, 'close': close_p, 'open': open_p, 
             'max': high_p, 'min': low_p
         }
+    
+    @staticmethod
+    def flow_filter(candles):
+        """
+        Filtro de Fluxo (MACD-like simplificado).
+        Verifica se a inércia do movimento é favorável.
+        """
+        if len(candles) < 50: return None 
+
+        # OTIMIZAÇÃO 2: Limita histórico para performance (evita lag em OTC)
+        candles = candles[-80:]
+
+        buffer_series = []
+        # Começa do 35 para garantir dados para a SMA34
+        for i in range(35, len(candles) + 1):
+            slice_c = candles[:i]
+            fast = TechnicalAnalysis.calculate_sma(slice_c, 3)
+            slow = TechnicalAnalysis.calculate_sma(slice_c, 34)
+            buffer_series.append(fast - slow)
+
+        signal_series = TechnicalAnalysis.calculate_ema_series(buffer_series, 6)
+
+        if len(signal_series) < 2 or len(buffer_series) < 2:
+            return None
+
+        buffer_now = buffer_series[-1]
+        signal_now = signal_series[-1]
+
+        if buffer_now > signal_now:
+            return "BULL"
+        elif buffer_now < signal_now:
+            return "BEAR"
+
+        return None
+
+    @staticmethod
+    def engulf_filter(candles, direction):
+        """
+        Verifica confirmação de força (Engolfo adaptado para OTC).
+        """
+        last = TechnicalAnalysis.analyze_candle(candles[-1])
+        prev = TechnicalAnalysis.analyze_candle(candles[-2])
+
+        # AJUSTE 3: Engolfo menos rígido (80% do corpo anterior já é válido em OTC)
+        if direction == "call":
+            return (
+                last['color'] == 'green' and
+                prev['color'] == 'red' and
+                last['body'] >= prev['body'] * 0.8
+            )
+
+        if direction == "put":
+            return (
+                last['color'] == 'red' and
+                prev['color'] == 'green' and
+                last['body'] >= prev['body'] * 0.8
+            )
+
+        return False
 
     @staticmethod
     def get_signal(candles):
         """
-        Nova Estratégia V2 (Refinada): EMA 9 + EMA 21 + Confirmação de Continuação
-        Ajustes Finos: Rejeição dominante e Confirmação acima da média.
+        Estratégia V2 Otimizada: EMA 9 + EMA 21 + Confirmação
         """
-        if len(candles) < 50: return None, "Dados insuficientes"
+        if len(candles) < 60: return None, "Dados insuficientes"
 
         # 1. CÁLCULO DE INDICADORES
         ema9 = TechnicalAnalysis.calculate_ema(candles, 9)
         ema21 = TechnicalAnalysis.calculate_ema(candles, 21)
         ema21_prev = TechnicalAnalysis.calculate_ema(candles[:-1], 21)
         
-        confirm_candle = TechnicalAnalysis.analyze_candle(candles[-1]) # Vela N (Atual/Fechando)
-        reject_candle = TechnicalAnalysis.analyze_candle(candles[-2])  # Vela N-1 (Gatilho)
+        confirm_candle = TechnicalAnalysis.analyze_candle(candles[-1])
+        reject_candle = TechnicalAnalysis.analyze_candle(candles[-2])
         
-        # Contexto: Média dos corpos (excluindo gatilhos)
+        # Contexto: Média dos corpos
         avg_body = sum([abs(c['close']-c['open']) for c in candles[-7:-2]]) / 5
         
         # 2. FILTROS GLOBAIS
         spread = abs(ema9 - ema21)
-        min_spread = avg_body * 0.15
-        if spread < min_spread: return None, f"Filtro: EMAs muito coladas (Spread baixo)"
+        
+        # AJUSTE 4: Spread mínimo reduzido para 0.1 (Mais adaptável)
+        min_spread = avg_body * 0.1
+        if spread < min_spread: return None, f"Filtro: EMAs coladas"
 
         ema21_slope = ema21 - ema21_prev
         min_slope = avg_body * 0.05 
@@ -92,82 +174,70 @@ class TechnicalAnalysis:
         # --- LÓGICA CALL (COMPRA) ---
         if ema9 > ema21 and ema21_slope > min_slope:
             
-            # 1. ANÁLISE DA VELA DE REJEIÇÃO (N-1)
+            # 1. ANÁLISE DA REJEIÇÃO
             touched_ema = reject_candle['min'] <= (ema21 + (avg_body * 0.1))
             held_support = reject_candle['close'] >= (ema21 - (avg_body * 0.3))
             
             if touched_ema and held_support:
                 
-                # AJUSTE 2: Rejeição deve ter pavio dominante
                 if reject_candle['lower_wick'] < (reject_candle['body'] * 0.6):
-                    return None, "Rejeição fraca (Pavio inferior curto)"
+                    return None, "Rejeição fraca (Pavio)"
                 
-                # 2. ANÁLISE DA VELA DE CONFIRMAÇÃO (N)
+                # 2. CONFIRMAÇÃO
                 if confirm_candle['color'] == 'green':
-                    # AJUSTE 1: Força real (Corpo > 60% da rejeição E > 80% da média)
+                    # Força real
                     has_strength = (
                         confirm_candle['body'] >= (reject_candle['body'] * 0.6) and
                         confirm_candle['body'] >= (avg_body * 0.8)
                     )
-                    
                     clean_top = confirm_candle['upper_wick'] < (confirm_candle['body'] * 0.5)
                     
                     if has_strength and clean_top:
-                        return 'call', "V2 CALL (Rejeição Dominante + Força Real)"
+                        # --- FILTROS FINAIS ---
+                        flow = TechnicalAnalysis.flow_filter(candles)
+                        if flow != "BULL": return None, "Filtro Fluxo contra"
+                        if not TechnicalAnalysis.engulf_filter(candles, "call"): return None, "Sem força (Engolfo)"
+
+                        return 'call', "V2 CALL (Rejeição + Força + Fluxo)"
                     else:
-                        return None, "Confirmação fraca (corpo pequeno)"
+                        return None, "Confirmação fraca"
                 else:
-                    return None, "Sem confirmação verde"
+                    return None, "Sem candle verde"
 
         # --- LÓGICA PUT (VENDA) ---
         elif ema9 < ema21 and ema21_slope < -min_slope:
             
-            # 1. ANÁLISE DA VELA DE REJEIÇÃO (N-1)
+            # 1. ANÁLISE DA REJEIÇÃO
             touched_ema = reject_candle['max'] >= (ema21 - (avg_body * 0.1))
             held_resistance = reject_candle['close'] <= (ema21 + (avg_body * 0.3))
             
             if touched_ema and held_resistance:
                 
-                # AJUSTE 2: Rejeição deve ter pavio dominante
                 if reject_candle['upper_wick'] < (reject_candle['body'] * 0.6):
-                    return None, "Rejeição fraca (Pavio superior curto)"
+                    return None, "Rejeição fraca (Pavio)"
                 
-                # 2. ANÁLISE DA VELA DE CONFIRMAÇÃO (N)
+                # 2. CONFIRMAÇÃO
                 if confirm_candle['color'] == 'red':
-                    # AJUSTE 1: Força real
+                    # Força real
                     has_strength = (
                         confirm_candle['body'] >= (reject_candle['body'] * 0.6) and
                         confirm_candle['body'] >= (avg_body * 0.8)
                     )
-                    
                     clean_bottom = confirm_candle['lower_wick'] < (confirm_candle['body'] * 0.5)
                     
                     if has_strength and clean_bottom:
-                        return 'put', "V2 PUT (Rejeição Dominante + Força Real)"
+                        # --- FILTROS FINAIS ---
+                        flow = TechnicalAnalysis.flow_filter(candles)
+                        if flow != "BEAR": return None, "Filtro Fluxo contra"
+                        if not TechnicalAnalysis.engulf_filter(candles, "put"): return None, "Sem força (Engolfo)"
+
+                        return 'put', "V2 PUT (Rejeição + Força + Fluxo)"
                     else:
-                        return None, "Confirmação fraca (corpo pequeno)"
+                        return None, "Confirmação fraca"
                 else:
-                    return None, "Sem confirmação vermelha"
+                    return None, "Sem candle vermelho"
                     
         return None, "Sem configuração V2"
-
-# --- CORREÇÕES OTC ---
-try:
-    def update_consts():
-        import exnovaapi.constants as OP_code
-        OTC_MAP = {
-            "EURUSD-OTC": 76, "EURGBP-OTC": 77, "USDCHF-OTC": 78, "EURJPY-OTC": 79,
-            "NZDUSD-OTC": 80, "GBPUSD-OTC": 81, "GBPJPY-OTC": 84, "USDJPY-OTC": 85,
-            "AUDCAD-OTC": 86, "AUDUSD-OTC": 2111, "USDCAD-OTC": 2112, "AUDJPY-OTC": 2113,
-            "GBPCAD-OTC": 2114, "GBPCHF-OTC": 2115, "GBPAUD-OTC": 2116, "EURCAD-OTC": 2117,
-            "CHFJPY-OTC": 2118, "CADCHF-OTC": 2119, "EURAUD-OTC": 2120, "USDNOK-OTC": 2121,
-            "EURNZD-OTC": 2122, "USDSEK-OTC": 2123, "USDTRY-OTC": 2124, "AUDCHF-OTC": 2129,
-            "AUDNZD-OTC": 2130, "EURCHF-OTC": 2131, "GBPNZD-OTC": 2132, "CADJPY-OTC": 2136,
-            "NZDCAD-OTC": 2137, "NZDJPY-OTC": 2138
-        }
-        OP_code.ACTIVES.update(OTC_MAP)
-    update_consts()
-except: pass
 
 class SimpleBot:
     def __init__(self):
@@ -334,9 +404,8 @@ class SimpleBot:
                 candles = self.api.get_candles(asset, 60, 100, int(time.time()))
                 if not candles or len(candles) < 100: continue
                 wins, total = 0, 0
-                for i in range(50, len(candles)-1):
-                    subset = candles[i-50:i+1]
-                    # Testa a estratégia nova no passado
+                for i in range(60, len(candles)-1): # Buffer 60 para flow filter
+                    subset = candles[i-60:i+1]
                     signal, _ = TechnicalAnalysis.get_signal(subset)
                     if signal:
                         total += 1
@@ -345,13 +414,14 @@ class SimpleBot:
                                  (signal == 'put' and nxt['close'] < nxt['open'])
                         if is_win: wins += 1
                 
-                # Filtro mais rigoroso de assertividade (>60%)
+                # Critério de aceitação de pares
                 if total >= 2: 
                     wr = (wins / total) * 100
-                    results.append({"pair": asset, "win_rate": wr, "wins": wins, "losses": total-wins, "best_strategy": "EMA V2"})
+                    results.append({"pair": asset, "win_rate": wr, "wins": wins, "losses": total-wins, "best_strategy": "EMA V2+Flow"})
             except: pass
             time.sleep(0.05)
         
+        # Filtro de assertividade > 60%
         valid_results = [r for r in results if r['win_rate'] >= 60]
         valid_results.sort(key=lambda x: x['win_rate'], reverse=True)
         top_3 = valid_results[:3]
@@ -478,8 +548,7 @@ class SimpleBot:
                             self.update_balance_remote()
                             targets = self.best_assets[:3] if self.best_assets else ["EURUSD-OTC"]
                             
-                            # Log do modo fixo para UI
-                            self.log_to_db(f"MODE_ATIVO::EMA_V2_CONFIRM", "SYSTEM")
+                            self.log_to_db(f"MODE_ATIVO::EMA_V2_FLOW", "SYSTEM")
 
                             for asset in targets:
                                 try:
