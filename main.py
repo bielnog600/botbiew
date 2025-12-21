@@ -401,11 +401,13 @@ class SimpleBot:
         results = []
         for asset in assets_list:
             try:
-                candles = self.api.get_candles(asset, 60, 100, int(time.time()))
+                # AUMENTADO PARA 200 CANDLES (Estatística mais robusta)
+                candles = self.api.get_candles(asset, 60, 200, int(time.time()))
                 if not candles or len(candles) < 100: continue
                 wins, total = 0, 0
                 for i in range(60, len(candles)-1): # Buffer 60 para flow filter
                     subset = candles[i-60:i+1]
+                    # Testa a estratégia nova no passado
                     signal, _ = TechnicalAnalysis.get_signal(subset)
                     if signal:
                         total += 1
