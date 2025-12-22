@@ -82,7 +82,6 @@
                         <h1 class="text-xl md:text-2xl font-bold text-white truncate">Dashboard</h1>
                         <div class="flex items-center gap-2 mt-1 flex-wrap">
                             <span id="bot-status-indicator" class="text-[10px] md:text-xs font-bold text-slate-500 whitespace-nowrap">CARREGANDO...</span>
-                            <!-- BADGE DE MODO -->
                             <span id="mode-badge" class="px-2 py-0.5 rounded text-[10px] font-bold tracking-wider border border-slate-700 bg-slate-800 text-slate-400 transition-colors duration-300 hidden">
                                 MODO: ...
                             </span>
@@ -248,13 +247,13 @@
         function renderAssetCards(assets) {
             const container = document.getElementById('top-assets-container');
             
-            // Remove apenas o placeholder de "aguardando"
+            // Remove apenas placeholder
             if (container.innerText.includes('Aguardando') || container.innerText.includes('Nenhum par')) {
                  container.innerHTML = '';
             }
 
             if (assets.length === 0) {
-                // Se a lista estiver vazia (e antes não estava), mostrar msg de vazio
+                // Se a lista estiver vazia e já estava vazia ou tinha placeholder, mostra msg
                 if (container.children.length === 0) {
                     container.innerHTML = `<div class="col-span-1 md:col-span-3 text-center text-slate-500 py-8 text-sm bg-slate-900/50 rounded-xl border border-dashed border-slate-800"><i data-lucide="search" class="w-6 h-6 mx-auto mb-2 opacity-50"></i> Nenhum par qualificado (>60%)</div>`;
                     lucide.createIcons();
@@ -263,19 +262,27 @@
             }
             
             state.pairTimestamps = {}; 
-            
-            assets.forEach((asset) => {
-                createOrUpdateCard(asset.pair, asset.best_strategy || 'SMA14', asset.win_rate);
-                state.pairTimestamps[asset.pair.replace(/[^a-zA-Z0-9]/g, '')] = Date.now();
+            const badges = ['🥇', '🥈', '🥉'];
+
+            assets.forEach((asset, index) => {
+                const badge = badges[index] || '';
+                createOrUpdateCard(asset.pair, asset.best_strategy || 'SMA14', asset.win_rate, badge);
+                
+                const safeId = asset.pair.replace(/[^a-zA-Z0-9]/g, '');
+                state.pairTimestamps[safeId] = Date.now();
             });
         }
         
-        function createOrUpdateCard(pair, strategy = 'EMA', winRate = 0) {
+        function createOrUpdateCard(pair, strategy = 'EMA', winRate = null, badge = '') {
             const safePairId = pair.replace(/[^a-zA-Z0-9]/g, '');
             const container = document.getElementById('top-assets-container');
             let card = document.getElementById(`card-${safePairId}`);
             
-            if (container.innerText.includes('Aguardando') || container.innerText.includes('Nenhum par')) container.innerHTML = '';
+            // Formata o winrate
+            let winRateDisplay = '--';
+            if (winRate !== null && winRate !== undefined && !isNaN(parseFloat(winRate))) {
+                winRateDisplay = `${Math.round(parseFloat(winRate))}%`;
+            }
 
             if (!card) {
                 card = document.createElement('div');
@@ -284,11 +291,13 @@
                 card.innerHTML = `
                     <div class="flex justify-between items-start mb-2">
                         <div>
-                            <h3 class="font-bold text-sm text-white tracking-tight">${pair}</h3>
+                            <h3 class="font-bold text-sm text-white tracking-tight flex items-center gap-2">
+                                ${pair} <span id="badge-${safePairId}" class="text-sm">${badge}</span>
+                            </h3>
                             <p class="text-[9px] text-slate-400 font-mono flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-slate-500" id="led-${safePairId}"></span> <span id="strat-${safePairId}">${strategy}</span></p>
                         </div>
                         <div class="text-right">
-                            <span id="winrate-${safePairId}" class="text-green-400 font-bold text-xs bg-green-500/10 px-1.5 py-0.5 rounded">${Math.round(winRate)}%</span>
+                            <span id="winrate-${safePairId}" class="text-green-400 font-bold text-xs bg-green-500/10 px-1.5 py-0.5 rounded">${winRateDisplay}</span>
                         </div>
                     </div>
                     <div class="flex justify-between items-end">
@@ -299,14 +308,18 @@
                 `;
                 container.appendChild(card);
             } else {
-                // UPDATE EXISTING CARD DATA
-                if (winRate > 0) {
+                // ATUALIZAÇÃO FORTE: Garante que os dados sejam sobrescritos
+                if (winRate !== null && winRate !== undefined) {
                      const wrEl = document.getElementById(`winrate-${safePairId}`);
-                     if (wrEl) wrEl.innerText = `${Math.round(winRate)}%`;
+                     if (wrEl) wrEl.innerText = winRateDisplay;
                 }
                 if (strategy && strategy !== 'LIVE') {
                      const stEl = document.getElementById(`strat-${safePairId}`);
                      if (stEl) stEl.innerText = strategy;
+                }
+                if (badge) {
+                    const bgEl = document.getElementById(`badge-${safePairId}`);
+                    if (bgEl) bgEl.innerText = badge;
                 }
             }
         }
@@ -345,9 +358,8 @@
             state.pairTimestamps[safePairId] = Date.now();
             
             if (!document.getElementById(`card-${safePairId}`)) {
-                // If it doesn't exist, create it. 
-                // IMPORTANT: Default winrate is placeholder 60, but will be updated by fetchTopAssets
-                createOrUpdateCard(pair, 'LIVE', 60); 
+                // Pass null for winrate to show placeholder
+                createOrUpdateCard(pair, 'LIVE', null); 
             }
             
             const card = document.getElementById(`card-${safePairId}`);
@@ -392,20 +404,12 @@
         function checkInactivePairs() {
             const now = Date.now();
             for (const [safePairId, ts] of Object.entries(state.pairTimestamps)) {
-                if (now - ts > 300000) { 
-                    const statusEl = document.getElementById(`status-${safePairId}`);
-                    const ledEl = document.getElementById(`led-${safePairId}`);
+                // > 15 minutes inactive
+                if (now - ts > 900000) { 
                     const card = document.getElementById(`card-${safePairId}`);
-                    
-                    if (statusEl) {
-                        statusEl.innerText = 'INATIVO';
-                        statusEl.className = 'text-[10px] font-bold text-slate-600';
-                    }
-                    if (ledEl) {
-                        ledEl.className = 'w-1.5 h-1.5 rounded-full bg-slate-700';
-                    }
                     if (card) {
-                        card.classList.add('opacity-50');
+                        card.remove();
+                        delete state.pairTimestamps[safePairId];
                     }
                 }
             }
