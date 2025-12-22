@@ -5,14 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Marombiew Bot</title>
     
-    <!-- PWA Settings -->
     <meta name="theme-color" content="#0f172a">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="manifest" href="manifest.json">
     <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/4712/4712109.png">
 
-    <!-- Tailwind & Supabase -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
@@ -23,13 +21,10 @@
         body { font-family: 'Inter', sans-serif; background-color: #020617; color: #e2e8f0; overflow: hidden; user-select: none; }
         .font-mono { font-family: 'JetBrains Mono', monospace; }
         .glass-card { background: var(--glass); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.08); }
-        
         .price-up { color: #4ade80; animation: flashGreen 0.5s; }
         .price-down { color: #f87171; animation: flashRed 0.5s; }
-        
         @keyframes flashGreen { 0% { color: #fff; } 100% { color: #4ade80; } }
         @keyframes flashRed { 0% { color: #fff; } 100% { color: #f87171; } }
-
         ::-webkit-scrollbar { width: 4px; background: #0f172a; }
         ::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
         .hidden { display: none !important; }
@@ -81,76 +76,60 @@
                         <h1 class="text-xl md:text-2xl font-bold text-white truncate">Dashboard</h1>
                         <div class="flex items-center gap-2 mt-1 flex-wrap">
                             <span id="bot-status-indicator" class="text-[10px] md:text-xs font-bold text-slate-500 whitespace-nowrap">CARREGANDO...</span>
-                            <span id="mode-badge" class="px-2 py-0.5 rounded text-[10px] font-bold tracking-wider border border-slate-700 bg-slate-800 text-slate-400 transition-colors duration-300 hidden">MODO: ...</span>
+                            <span id="mode-badge" class="px-2 py-0.5 rounded text-[10px] font-bold tracking-wider border border-slate-700 bg-slate-800 text-slate-400 transition-colors duration-300 hidden">...</span>
                         </div>
                     </div>
                     <div class="flex items-center gap-2 shrink-0">
-                        <button id="restart-bot-btn" class="p-2 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20 transition-colors" title="Reiniciar Conexão">
-                            <i data-lucide="power" class="w-4 h-4"></i>
-                        </button>
-                        <button id="toggle-bot-btn" class="flex items-center gap-2 px-3 py-2 rounded-lg text-xs md:text-sm font-bold bg-slate-700 text-white shadow-lg transition-all hover:brightness-110 min-w-[90px] justify-center">
-                            <i data-lucide="loader-2" class="w-3 h-3 md:w-4 md:h-4 animate-spin"></i> ...
-                        </button>
+                        <button id="restart-bot-btn" class="p-2 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20 transition-colors"><i data-lucide="power" class="w-4 h-4"></i></button>
+                        <button id="toggle-bot-btn" class="flex items-center gap-2 px-3 py-2 rounded-lg text-xs md:text-sm font-bold bg-slate-700 text-white shadow-lg transition-all hover:brightness-110 min-w-[90px] justify-center"><i data-lucide="loader-2" class="w-3 h-3 md:w-4 md:h-4 animate-spin"></i> ...</button>
                     </div>
                 </div>
 
                 <div class="flex items-center justify-between mb-2">
-                    <div class="flex items-center gap-2">
-                        <i data-lucide="trending-up" class="w-4 h-4 text-amber-500"></i>
-                        <h3 class="text-sm font-bold text-slate-400 uppercase tracking-widest">Melhores Oportunidades (>60%)</h3>
-                    </div>
+                    <div class="flex items-center gap-2"><i data-lucide="trending-up" class="w-4 h-4 text-amber-500"></i><h3 class="text-sm font-bold text-slate-400 uppercase tracking-widest">Melhores Oportunidades (>60%)</h3></div>
                 </div>
-                
                 <div id="top-assets-container" class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
-                    <div class="glass-card p-4 rounded-xl border-t-4 border-slate-700 animate-pulse h-24 flex items-center justify-center text-slate-600 text-xs">
-                        A aguardar dados do bot...
-                    </div>
+                    <div class="glass-card p-4 rounded-xl border-t-4 border-slate-700 animate-pulse h-24 flex items-center justify-center text-slate-600 text-xs">A aguardar dados do bot...</div>
                 </div>
 
                 <div class="grid grid-cols-2 gap-4">
-                    <div class="glass-card p-5 rounded-xl"><p class="text-xs text-slate-500 font-bold mb-1">SALDO</p><p id="stat-balance" class="text-2xl font-bold text-white">$0.00</p></div>
-                    <div class="glass-card p-5 rounded-xl"><p class="text-xs text-slate-500 font-bold mb-1">LUCRO (DIA)</p><p id="stat-profit" class="text-2xl font-bold text-slate-200">$0.00</p></div>
+                    <div class="glass-card p-5 rounded-xl"><p class="text-xs text-slate-500 font-bold mb-1">SALDO ATUAL</p><p id="stat-balance" class="text-2xl font-bold text-white">$0.00</p></div>
+                    <div class="glass-card p-5 rounded-xl"><p class="text-xs text-slate-500 font-bold mb-1">LUCRO (HOJE)</p><p id="stat-profit" class="text-2xl font-bold text-slate-200">$0.00</p></div>
                 </div>
 
                 <div class="glass-card p-4 rounded-xl border-t-4 border-amber-500">
                     <div class="flex divide-x divide-slate-700">
-                        <div class="flex-1 px-2 text-center"><p class="text-[10px] text-green-500 font-bold mb-1">WINS</p><span id="score-wins" class="text-2xl font-bold text-white">0</span></div>
-                        <div class="flex-1 px-2 text-center"><p class="text-[10px] text-red-500 font-bold mb-1">LOSS</p><span id="score-losses" class="text-2xl font-bold text-white">0</span></div>
-                        <div class="flex-1 px-2 text-center"><p class="text-[10px] text-blue-400 font-bold mb-1">ASSERT.</p><span id="score-rate" class="text-2xl font-bold text-white">0%</span></div>
+                        <div class="flex-1 px-2 text-center"><p class="text-[10px] text-green-500 font-bold mb-1">WINS (DIA)</p><span id="score-wins" class="text-2xl font-bold text-white">0</span></div>
+                        <div class="flex-1 px-2 text-center"><p class="text-[10px] text-red-500 font-bold mb-1">LOSS (DIA)</p><span id="score-losses" class="text-2xl font-bold text-white">0</span></div>
+                        <div class="flex-1 px-2 text-center"><p class="text-[10px] text-blue-400 font-bold mb-1">ASSERTIVIDADE</p><span id="score-rate" class="text-2xl font-bold text-white">0%</span></div>
                     </div>
                 </div>
 
                 <div>
-                    <div class="flex justify-between items-center mb-3">
-                        <h3 class="text-sm font-bold text-slate-400 flex items-center gap-2"><i data-lucide="history" class="w-4 h-4"></i> Histórico Recente</h3>
-                    </div>
+                    <div class="flex justify-between items-center mb-3"><h3 class="text-sm font-bold text-slate-400 flex items-center gap-2"><i data-lucide="history" class="w-4 h-4"></i> Últimos Sinais</h3></div>
                     <div id="signals-list" class="space-y-3 pb-8"><div class="text-center text-slate-600 text-xs">A carregar...</div></div>
                 </div>
             </div>
 
-            <!-- RELATÓRIOS (NOVA ABA) -->
+            <!-- RELATÓRIOS -->
             <div id="view-reports" class="view-section hidden space-y-6 max-w-6xl mx-auto">
                 <h1 class="text-2xl font-bold text-white mb-4">Relatório de Performance</h1>
-                
-                <!-- CARD MENSAL -->
                 <div class="glass-card p-6 rounded-xl border border-slate-700 relative overflow-hidden bg-gradient-to-br from-slate-900 to-slate-800">
                     <div class="absolute -right-10 -top-10 w-32 h-32 bg-blue-500/10 rounded-full blur-2xl"></div>
                     <div class="relative z-10 flex flex-wrap justify-between items-center gap-4">
                         <div>
-                            <p class="text-xs text-slate-400 font-bold uppercase tracking-wider mb-1">LUCRO MENSAL (ESTIMADO)</p>
+                            <p class="text-xs text-slate-400 font-bold uppercase tracking-wider mb-1">LUCRO MENSAL</p>
                             <h2 id="report-month-profit" class="text-3xl md:text-4xl font-black text-white">---</h2>
-                            <p class="text-[10px] text-slate-500 mt-2 flex items-center gap-1"><i data-lucide="info" class="w-3 h-3"></i> Baseado no histórico de sinais</p>
+                            <p class="text-[10px] text-slate-500 mt-2 flex items-center gap-1"><i data-lucide="calendar" class="w-3 h-3"></i> Mês atual</p>
                         </div>
                         <div class="text-right">
-                             <p class="text-xs text-slate-400 font-bold uppercase tracking-wider mb-1">WIN RATE</p>
+                             <p class="text-xs text-slate-400 font-bold uppercase tracking-wider mb-1">WIN RATE (MÊS)</p>
                              <h2 id="report-month-rate" class="text-3xl md:text-4xl font-black text-blue-400">---</h2>
                         </div>
                     </div>
                 </div>
-
-                <!-- LISTA DIÁRIA -->
                 <div>
-                    <h3 class="text-sm font-bold text-slate-400 flex items-center gap-2 mb-4"><i data-lucide="calendar" class="w-4 h-4"></i> Resultado Diário</h3>
+                    <h3 class="text-sm font-bold text-slate-400 flex items-center gap-2 mb-4"><i data-lucide="list" class="w-4 h-4"></i> Histórico Diário</h3>
                     <div id="reports-daily-list" class="space-y-3 pb-24">
                         <div class="text-center text-slate-600 text-xs py-8">Carregando dados...</div>
                     </div>
@@ -224,7 +203,7 @@
                 document.querySelectorAll('nav button').forEach(btn => btn.classList.remove('active-nav'));
                 document.querySelectorAll(`button[data-target="${target}"]`).forEach(btn => btn.classList.add('active-nav'));
                 if(target === 'logs') scrollToBottom();
-                if(target === 'reports') fetchReports(); // Carrega Relatórios
+                if(target === 'reports') fetchReports();
             }
         };
 
@@ -241,17 +220,13 @@
             fetchTopAssets(); 
         }
 
-        // --- RELATÓRIOS INTELIGENTES ---
+        // --- RELATÓRIOS ---
         async function fetchReports() {
             const list = document.getElementById('reports-daily-list');
             list.innerHTML = '<div class="text-center text-slate-500 py-8 text-xs"><i data-lucide="loader-2" class="w-6 h-6 animate-spin mx-auto mb-2"></i> Calculando...</div>';
             lucide.createIcons();
 
-            // Busca histórico (Limite 2000 para cobrir o mês)
-            const { data: trades } = await supabaseClient.from('trade_signals')
-                .select('*')
-                .order('created_at', { ascending: false })
-                .limit(2000);
+            const { data: trades } = await supabaseClient.from('trade_signals').select('*').order('created_at', { ascending: false }).limit(2000);
 
             if (!trades || trades.length === 0) {
                 list.innerHTML = '<div class="text-center text-slate-600 py-8 text-xs">Sem dados históricos.</div>';
@@ -259,9 +234,7 @@
             }
 
             const dailyStats = {};
-            let monthProfit = 0;
-            let monthWins = 0;
-            let monthTotal = 0;
+            let monthProfit = 0, monthWins = 0, monthTotal = 0;
             const currentMonth = new Date().getMonth();
 
             trades.forEach(t => {
@@ -270,67 +243,35 @@
                 const profit = parseFloat(t.profit);
                 const result = (t.result || t.status || '').toUpperCase();
                 
-                // Agrupa por dia
-                if (!dailyStats[dateKey]) {
-                    dailyStats[dateKey] = { wins: 0, losses: 0, profit: 0, date: t.created_at };
-                }
+                if (!dailyStats[dateKey]) dailyStats[dateKey] = { wins: 0, losses: 0, profit: 0, date: t.created_at };
 
-                let isWin = false;
-                if (!isNaN(profit) && profit > 0) isWin = true;
-                else if (result.includes('WIN')) isWin = true;
-
-                // Contabiliza apenas trades finalizados
+                let isWin = result.includes('WIN') || (!isNaN(profit) && profit > 0);
                 if (result.includes('WIN') || result.includes('LOSS') || profit !== 0) {
                     if (isWin) {
                         dailyStats[dateKey].wins++;
-                        if (!isNaN(profit)) {
-                             dailyStats[dateKey].profit += profit;
-                             if (d.getMonth() === currentMonth) monthProfit += profit;
-                        }
+                        if (!isNaN(profit)) { dailyStats[dateKey].profit += profit; if (d.getMonth() === currentMonth) monthProfit += profit; }
                         if (d.getMonth() === currentMonth) monthWins++;
                     } else {
                         dailyStats[dateKey].losses++;
-                        if (!isNaN(profit)) {
-                            dailyStats[dateKey].profit += profit;
-                            if (d.getMonth() === currentMonth) monthProfit += profit;
-                        }
+                        if (!isNaN(profit)) { dailyStats[dateKey].profit += profit; if (d.getMonth() === currentMonth) monthProfit += profit; }
                     }
                     if (d.getMonth() === currentMonth) monthTotal++;
                 }
             });
 
-            // Atualiza Card Mensal
             const monthRate = monthTotal > 0 ? Math.round((monthWins / monthTotal) * 100) : 0;
             const mpEl = document.getElementById('report-month-profit');
             mpEl.innerText = `${monthProfit >= 0 ? '+' : ''}$${monthProfit.toFixed(2)}`;
             mpEl.className = `text-3xl md:text-4xl font-black ${monthProfit >= 0 ? 'text-green-400' : 'text-red-400'}`;
             document.getElementById('report-month-rate').innerText = `${monthRate}%`;
 
-            // Renderiza Lista
             list.innerHTML = '';
-            // Ordena datas (mais recente primeiro)
-            const sortedDays = Object.values(dailyStats).sort((a,b) => new Date(b.date) - new Date(a.date));
-            
-            sortedDays.forEach(day => {
+            Object.values(dailyStats).sort((a,b) => new Date(b.date) - new Date(a.date)).forEach(day => {
                 const item = document.createElement('div');
                 item.className = "glass-card p-4 rounded-xl flex justify-between items-center border-l-4 " + (day.profit >= 0 ? "border-l-green-500" : "border-l-red-500");
-                const dateLabel = new Date(day.date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long' });
-                
-                item.innerHTML = `
-                    <div>
-                        <p class="text-sm font-bold text-white capitalize">${dateLabel}</p>
-                        <p class="text-[10px] text-slate-400 font-mono mt-1">${day.wins} Wins / ${day.losses} Loss</p>
-                    </div>
-                    <div class="text-right">
-                        <p class="text-lg font-bold font-mono ${day.profit >= 0 ? 'text-green-400' : 'text-red-400'}">
-                            ${day.profit >= 0 ? '+' : ''}$${day.profit.toFixed(2)}
-                        </p>
-                    </div>
-                `;
+                item.innerHTML = `<div><p class="text-sm font-bold text-white capitalize">${new Date(day.date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long' })}</p><p class="text-[10px] text-slate-400 font-mono mt-1">${day.wins} Wins / ${day.losses} Loss</p></div><div class="text-right"><p class="text-lg font-bold font-mono ${day.profit >= 0 ? 'text-green-400' : 'text-red-400'}">${day.profit >= 0 ? '+' : ''}$${day.profit.toFixed(2)}</p></div>`;
                 list.appendChild(item);
             });
-            
-            if (sortedDays.length === 0) list.innerHTML = '<div class="text-center text-slate-600 py-8 text-xs">Nenhum trade finalizado.</div>';
         }
 
         async function fetchInitialLogs() {
@@ -338,9 +279,7 @@
             if(logs && logs.length > 0) {
                 const term = document.getElementById('terminal-output');
                 term.innerHTML = '<div class="text-slate-500 mb-2 border-b border-slate-800 pb-2">Marombiew Bot Terminal v2.0 <br> Carregando histórico...</div>';
-                [...logs].reverse().forEach(l => {
-                    appendLog(l);
-                });
+                [...logs].reverse().forEach(l => { appendLog(l); });
                 state.lastLogTime = new Date(logs[0].created_at);
                 state.lastLogId = logs[0].id;
                 logs.slice(0, 10).forEach(l => processScannerLog(l)); 
@@ -584,11 +523,9 @@
             if (!confirm("Reiniciar o bot agora?")) return;
             const btn = document.getElementById('restart-bot-btn');
             const originalIcon = btn.innerHTML;
-            
             btn.classList.add("opacity-50", "pointer-events-none");
             btn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i>';
             lucide.createIcons();
-
             try {
                 const { data: { session } } = await supabaseClient.auth.getSession();
                 if (!session) throw new Error("Sessão inválida");
@@ -616,12 +553,10 @@
             const btn = document.getElementById('login-btn');
             const originalText = btn.innerHTML;
             const errorDiv = document.getElementById('login-error');
-            
             btn.innerHTML = '<i data-lucide="loader-2" class="w-5 h-5 animate-spin mx-auto"></i>';
             btn.classList.add('opacity-70', 'pointer-events-none'); 
             errorDiv.classList.add('hidden');
             lucide.createIcons();
-
             try {
                 const email = document.getElementById('email').value;
                 const password = document.getElementById('password').value;
@@ -629,7 +564,8 @@
                 if (error) { throw error; } 
                 else { state.user = data.user; showApp(); startDataLoop(); }
             } catch (err) {
-                errorDiv.textContent = err.message || "Erro de conexão.";
+                console.error("Erro login:", err);
+                errorDiv.textContent = err.message || "Erro de conexão. Tente novamente.";
                 errorDiv.classList.remove('hidden');
                 btn.innerHTML = originalText;
                 btn.classList.remove('opacity-70', 'pointer-events-none');
@@ -653,7 +589,7 @@
         }
 
         async function refreshSignals() {
-            const { data: signals } = await supabaseClient.from('trade_signals').select('*').order('created_at', { ascending: false }).limit(50);
+            const { data: signals } = await supabaseClient.from('trade_signals').select('*').order('created_at', { ascending: false }).limit(200);
             if(signals) { syncSignalsList(signals); updateStats(signals); }
         }
 
@@ -681,33 +617,43 @@
 
         function syncSignalsList(signals) {
             const list = document.getElementById('signals-list');
-            if (signals.length === 0 && !list.innerHTML.includes('Limpo')) { list.innerHTML = '<div class="text-center text-slate-600 py-8 text-xs">Sem dados.</div>'; updateStats([]); return; }
-            signals.forEach(s => {
-                const existing = document.getElementById(`signal-${s.id}`);
-                if (!existing) {
-                    const el = createSignalElement(s);
-                    if(list.firstChild && !list.innerHTML.includes('Sem dados') && !list.innerHTML.includes('Limpo')) list.insertBefore(el, list.firstChild);
-                    else list.innerHTML = '', list.appendChild(el);
-                } else {
-                    const rawStatus = s.result || s.status || 'PENDING';
-                    const currentStatus = existing.getAttribute('data-status');
-                    if (currentStatus !== rawStatus) existing.replaceWith(createSignalElement(s));
-                }
+            // Filter to show only today's signals in the main list if desired, or keep recent.
+            // Keeping recent 8 for main view.
+            const displaySignals = signals.slice(0, 10);
+
+            if (displaySignals.length === 0) { list.innerHTML = '<div class="text-center text-slate-600 py-8 text-xs">Sem dados recentes.</div>'; return; }
+            
+            list.innerHTML = ''; // Clear and rebuild to ensure order
+            displaySignals.forEach(s => {
+                const el = createSignalElement(s);
+                list.appendChild(el);
             });
         }
 
         function updateStats(signals) {
-            let wins = 0, losses = 0;
+            let wins = 0, losses = 0, dayProfit = 0;
+            const today = new Date().toLocaleDateString('pt-BR');
+
             signals.forEach(s => {
-                const result = (s.result || '').toUpperCase();
-                const status = (s.status || '').toUpperCase();
-                const profit = parseFloat(s.profit);
-                const isWin = result.includes('WIN') || status.includes('WIN') || (!isNaN(profit) && profit > 0);
-                const isLoss = result.includes('LOSS') || status.includes('LOSS') || (!isNaN(profit) && profit < 0);
-                if (isWin) wins++; else if (isLoss) losses++;
+                const sDate = new Date(s.created_at).toLocaleDateString('pt-BR');
+                // LOGIC: Only count stats for TODAY
+                if (sDate === today) {
+                    const result = (s.result || '').toUpperCase();
+                    const profit = parseFloat(s.profit);
+                    const isWin = result.includes('WIN') || (!isNaN(profit) && profit > 0);
+                    const isLoss = result.includes('LOSS') || (!isNaN(profit) && profit < 0);
+
+                    if (isWin) { wins++; if(!isNaN(profit)) dayProfit += profit; }
+                    else if (isLoss) { losses++; if(!isNaN(profit)) dayProfit += profit; }
+                }
             });
+            
+            // DOM Updates
             document.getElementById('score-wins').textContent = wins;
             document.getElementById('score-losses').textContent = losses;
+            document.getElementById('stat-profit').textContent = `${dayProfit >= 0 ? '+' : ''}$${dayProfit.toFixed(2)}`;
+            document.getElementById('stat-profit').className = `text-2xl font-bold ${dayProfit >= 0 ? 'text-green-400' : 'text-red-400'}`;
+
             const total = wins + losses;
             const rate = total > 0 ? Math.round((wins / total) * 100) : 0;
             const rateEl = document.getElementById('score-rate');
@@ -715,6 +661,7 @@
             if(rate >= 50) rateEl.className = "text-2xl font-bold text-green-400"; else rateEl.className = "text-2xl font-bold text-red-400";
         }
 
+        // ... (Remaining functions unchanged) ...
         function createSignalElement(s) {
             const el = document.createElement('div');
             el.id = `signal-${s.id}`;
@@ -774,15 +721,13 @@
                 document.getElementById('conf-entry').value = config.entry_value;
                 document.getElementById('conf-account').value = config.account_type;
                 document.getElementById('conf-stop-mode').value = config.stop_mode || 'percentage';
+                // Timer
                 document.getElementById('conf-timer-enabled').checked = config.timer_enabled || false;
                 document.getElementById('conf-timer-start').value = config.timer_start || '00:00';
                 document.getElementById('conf-timer-end').value = config.timer_end || '00:00';
             }
             document.getElementById('stat-balance').textContent = `$${(config.current_balance || 0).toFixed(2)}`;
-            const profit = (config.current_balance || 0) - (config.daily_initial_balance || 0);
-            const profitEl = document.getElementById('stat-profit');
-            profitEl.textContent = `${profit >= 0 ? '+' : ''}$${profit.toFixed(2)}`;
-            profitEl.className = `text-2xl font-bold ${profit >= 0 ? 'text-green-400' : 'text-red-400'}`;
+            // PROFIT IN HOME IS CALCULATED LIVE IN updateStats, not from config here.
         }
         
         checkSession();
