@@ -34,6 +34,9 @@
         ::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
         .hidden { display: none !important; }
         .active-nav { color: var(--gold); }
+        
+        /* Fix iOS inputs */
+        input, select, textarea { -webkit-appearance: none; border-radius: 0.75rem; }
     </style>
 </head>
 <body class="flex flex-col h-screen">
@@ -48,10 +51,10 @@
                 <h1 class="text-2xl font-bold text-white">Marombiew Bot</h1>
             </div>
             <form id="login-form" class="space-y-4">
-                <input type="email" id="email" class="w-full bg-slate-900/50 border border-slate-700 text-white text-sm rounded-xl pl-4 py-3" placeholder="Email" required>
-                <input type="password" id="password" class="w-full bg-slate-900/50 border border-slate-700 text-white text-sm rounded-xl pl-4 py-3" placeholder="Senha" required>
-                <button type="submit" id="login-btn" class="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-3.5 rounded-xl transition-all">Entrar</button>
-                <div id="login-error" class="text-red-400 text-xs text-center hidden"></div>
+                <input type="email" id="email" class="w-full bg-slate-900/50 border border-slate-700 text-white text-sm rounded-xl pl-4 py-3 focus:outline-none focus:border-amber-500 transition-colors" placeholder="Email" required>
+                <input type="password" id="password" class="w-full bg-slate-900/50 border border-slate-700 text-white text-sm rounded-xl pl-4 py-3 focus:outline-none focus:border-amber-500 transition-colors" placeholder="Senha" required>
+                <button type="submit" id="login-btn" class="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-3.5 rounded-xl transition-all flex items-center justify-center">Entrar</button>
+                <div id="login-error" class="text-red-400 text-xs text-center hidden p-2 bg-red-500/10 rounded-lg border border-red-500/20"></div>
             </form>
         </div>
     </div>
@@ -75,17 +78,12 @@
 
             <!-- HOME -->
             <div id="view-home" class="view-section space-y-6 max-w-6xl mx-auto">
-                
-                <!-- TOP BAR -->
                 <div class="flex flex-row justify-between items-center gap-2 mb-4">
                     <div class="flex-1 min-w-0">
                         <h1 class="text-xl md:text-2xl font-bold text-white truncate">Dashboard</h1>
                         <div class="flex items-center gap-2 mt-1 flex-wrap">
                             <span id="bot-status-indicator" class="text-[10px] md:text-xs font-bold text-slate-500 whitespace-nowrap">CARREGANDO...</span>
-                            <!-- BADGE DE MODO -->
-                            <span id="mode-badge" class="px-2 py-0.5 rounded text-[10px] font-bold tracking-wider border border-slate-700 bg-slate-800 text-slate-400 transition-colors duration-300 hidden">
-                                MODO: ...
-                            </span>
+                            <span id="mode-badge" class="px-2 py-0.5 rounded text-[10px] font-bold tracking-wider border border-slate-700 bg-slate-800 text-slate-400 transition-colors duration-300 hidden">MODO: ...</span>
                         </div>
                     </div>
                     <div class="flex items-center gap-2 shrink-0">
@@ -98,7 +96,6 @@
                     </div>
                 </div>
 
-                <!-- TOP 3 ASSETS GRID -->
                 <div class="flex items-center justify-between mb-2">
                     <div class="flex items-center gap-2">
                         <i data-lucide="trending-up" class="w-4 h-4 text-amber-500"></i>
@@ -106,7 +103,6 @@
                     </div>
                 </div>
                 
-                <!-- GRID DE CARDS -->
                 <div id="top-assets-container" class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
                     <div class="glass-card p-4 rounded-xl border-t-4 border-slate-700 animate-pulse h-24 flex items-center justify-center text-slate-600 text-xs">
                         A aguardar dados do bot...
@@ -143,7 +139,6 @@
                 <h1 class="text-2xl font-bold text-white">Configurações</h1>
                 <form id="settings-form" class="space-y-6">
                     <div class="glass-card p-6 rounded-xl space-y-6">
-                        
                         <div>
                             <label class="text-xs text-slate-400 block mb-1">Modo de Gerenciamento</label>
                             <select id="conf-stop-mode" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white outline-none">
@@ -151,12 +146,9 @@
                                 <option value="value">Valor Fixo ($)</option>
                             </select>
                         </div>
-
                         <div class="border-t border-slate-700 pt-4">
                             <div class="flex items-center justify-between mb-4">
-                                <label class="text-sm font-bold text-white flex items-center gap-2">
-                                    <i data-lucide="clock" class="w-4 h-4 text-amber-500"></i> Agendamento Automático
-                                </label>
+                                <label class="text-sm font-bold text-white flex items-center gap-2"><i data-lucide="clock" class="w-4 h-4 text-amber-500"></i> Agendamento Automático</label>
                                 <label class="relative inline-flex items-center cursor-pointer">
                                     <input type="checkbox" id="conf-timer-enabled" class="sr-only peer">
                                     <div class="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600"></div>
@@ -167,7 +159,6 @@
                                 <div><label class="text-xs text-slate-400 block mb-1">Fim (HH:MM)</label><input type="time" id="conf-timer-end" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white outline-none"></div>
                             </div>
                         </div>
-
                         <div class="grid grid-cols-2 gap-4">
                             <div><label class="text-xs text-slate-400 block mb-1">Stop Win</label><input type="number" id="conf-stop-win" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white outline-none"></div>
                             <div><label class="text-xs text-slate-400 block mb-1">Stop Loss</label><input type="number" id="conf-stop-loss" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white outline-none"></div>
@@ -199,7 +190,6 @@
         const SUPABASE_URL = 'https://ioduahwknfsktujthfyc.supabase.co';
         const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlvZHVhaHdrbmZza3R1anRoZnljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEzMDc0NDcsImV4cCI6MjA2Njg4MzQ0N30.96f8wZO6SvABKFMWjIiw1pSugAB4Isldj7yxLcLJRSE';
         const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-        // Added pairTimestamps for watchdog
         const state = { user: null, config: {}, lastLogTime: null, lastLogId: null, pairTimestamps: {} };
         lucide.createIcons();
 
@@ -254,12 +244,10 @@
                 return;
             }
             container.innerHTML = '';
-            // Reset timestamps mostly, or keep existing. For simplicity reset, scan will re-populate.
             state.pairTimestamps = {}; 
             
             assets.forEach((asset) => {
                 createOrUpdateCard(asset.pair, asset.best_strategy || 'SMA14', asset.win_rate);
-                // Mark as seen now so they don't go inactive immediately
                 state.pairTimestamps[asset.pair.replace(/[^a-zA-Z0-9]/g, '')] = Date.now();
             });
         }
@@ -326,7 +314,6 @@
             if (!pair) return;
 
             const safePairId = pair.replace(/[^a-zA-Z0-9]/g, '');
-            // Update timestamp for watchdog
             state.pairTimestamps[safePairId] = Date.now();
             
             if (!document.getElementById(`card-${safePairId}`)) {
@@ -336,7 +323,6 @@
             const card = document.getElementById(`card-${safePairId}`);
             
             if (card) {
-                // Ensure card is fully visible/active if it was inactive
                 card.classList.remove('opacity-50');
                 
                 const logEl = document.getElementById(`log-${safePairId}`);
@@ -373,11 +359,9 @@
             }
         }
         
-        // --- WATCHDOG FUNCTION (NOVA) ---
         function checkInactivePairs() {
             const now = Date.now();
             for (const [safePairId, ts] of Object.entries(state.pairTimestamps)) {
-                // 5 minutes inactivity
                 if (now - ts > 300000) { 
                     const statusEl = document.getElementById(`status-${safePairId}`);
                     const ledEl = document.getElementById(`led-${safePairId}`);
@@ -470,6 +454,44 @@
             }
         });
 
+        // LOGIN HANDLER COM FEEDBACK VISUAL
+        document.getElementById('login-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const btn = document.getElementById('login-btn');
+            const originalText = btn.innerHTML;
+            const errorDiv = document.getElementById('login-error');
+            
+            // Estado de Carregamento
+            btn.innerHTML = '<i data-lucide="loader-2" class="w-5 h-5 animate-spin mx-auto"></i>';
+            btn.classList.add('opacity-70', 'pointer-events-none'); 
+            errorDiv.classList.add('hidden');
+            lucide.createIcons();
+
+            try {
+                const email = document.getElementById('email').value;
+                const password = document.getElementById('password').value;
+
+                const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+
+                if (error) {
+                    throw error;
+                } else {
+                    state.user = data.user;
+                    showApp();
+                    startDataLoop();
+                }
+            } catch (err) {
+                console.error("Erro login:", err);
+                errorDiv.textContent = err.message || "Erro de conexão. Tente novamente.";
+                errorDiv.classList.remove('hidden');
+                
+                // Reset botão
+                btn.innerHTML = originalText;
+                btn.classList.remove('opacity-70', 'pointer-events-none');
+            }
+        });
+
         function startDataLoop() {
             fetchData();
             supabaseClient.channel('dash').on('postgres_changes', { event: '*', schema: 'public', table: 'bot_config' }, p => updateConfigUI(p.new))
@@ -482,7 +504,7 @@
                 .subscribe();
             setInterval(fetchData, 3000);
             setInterval(updateBotStatus, 5000);
-            setInterval(checkInactivePairs, 30000); // Check inactivity every 30s
+            setInterval(checkInactivePairs, 30000); 
         }
 
         async function refreshSignals() {
