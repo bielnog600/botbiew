@@ -50,7 +50,8 @@ def watchdog():
                         headers={"Authorization": f"Bearer {COOLIFY_API_TOKEN}", "Content-Type": "application/json"},
                         timeout=15
                     )
-                except: pass
+                except: 
+                    pass
             os._exit(1)
 
 # --- ANÁLISE TÉCNICA ---
@@ -212,8 +213,10 @@ class SimpleBot:
                 "message": message, "level": level, "created_at": datetime.now().isoformat()
             }).execute()
         except: 
-            try: self.supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-            except: pass
+            try: 
+                self.supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+            except: 
+                pass
 
     def update_balance_remote(self):
         if not self.api or not self.supabase: return
@@ -298,7 +301,10 @@ class SimpleBot:
         self.log_to_db(f"🔌 Conectando...", "SYSTEM")
         try:
             if self.api: 
-                try: self.api.api.close(); except: pass
+                try: 
+                    self.api.api.close() 
+                except: 
+                    pass
             self.api = Exnova(EXNOVA_EMAIL, EXNOVA_PASSWORD)
             check, reason = self.api.connect()
             if check:
@@ -392,13 +398,12 @@ class SimpleBot:
         amount = self.config["entry_value"]
         self.log_to_db(f"➡️ ABRINDO (V2): {asset} | {direction.upper()} | ${amount}", "INFO")
         
-        # 1. REGISTRO INICIAL (PROCESSING)
         sig_id = None
         try:
             if self.supabase:
                 res = self.supabase.table("trade_signals").insert({
                     "pair": asset, "direction": direction, "strategy": f"EMA V2",
-                    "status": "PROCESSING", "result": "PENDING", "created_at": datetime.now().isoformat(), "profit": 0
+                    "status": "PENDING", "result": "PENDING", "created_at": datetime.now().isoformat(), "profit": 0
                 }).execute()
                 if res.data: sig_id = res.data[0]['id']
         except: pass
@@ -413,8 +418,8 @@ class SimpleBot:
             try:
                 balance_after = self.api.get_balance()
                 delta = balance_after - balance_before
-                if delta > 0.01: res_str, profit = 'WIN', delta
-                elif delta < -0.01: res_str, profit = 'LOSS', delta
+                if delta > 0: res_str, profit = 'WIN', delta
+                elif delta < 0: res_str, profit = 'LOSS', delta
                 else: res_str, profit = 'DOJI', 0.0
             except: res_str = 'UNKNOWN'
 
@@ -425,9 +430,8 @@ class SimpleBot:
             log_type = "SUCCESS" if res_str == 'WIN' else "ERROR" if res_str == 'LOSS' else "WARNING"
             self.log_to_db(f"{'🏆' if res_str == 'WIN' else '🔻'} {res_str}: ${profit:.2f}", log_type)
 
-            # 2. ATUALIZAÇÃO DO RESULTADO (COMPLETED)
             if sig_id and self.supabase:
-                try: self.supabase.table("trade_signals").update({"status": "COMPLETED", "result": res_str, "profit": profit}).eq("id", sig_id).execute()
+                try: self.supabase.table("trade_signals").update({"status": res_str, "result": res_str, "profit": profit}).eq("id", sig_id).execute()
                 except: pass
             
             self.update_balance_remote()
@@ -435,11 +439,12 @@ class SimpleBot:
             with self.trade_lock: self.active_trades.discard(asset)
         else:
             self.log_to_db("❌ Falha ordem na corretora.", "ERROR")
-            # 3. REGISTRO DE FALHA (FAILED)
-            if sig_id and self.supabase:
-                 try: self.supabase.table("trade_signals").update({"status": "FAILED", "result": "ERROR", "profit": 0}).eq("id", sig_id).execute()
-                 except: pass
             with self.trade_lock: self.active_trades.discard(asset)
+            if sig_id and self.supabase: 
+                try: 
+                    self.supabase.table("trade_signals").delete().eq("id", sig_id).execute()
+                except: 
+                    pass
 
     def start(self):
         t_watchdog = threading.Thread(target=watchdog, daemon=True)
