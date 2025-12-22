@@ -5,9 +5,8 @@ import json
 import threading
 import os
 import random
-import requests # Necessário para o Watchdog chamar o Coolify
+import requests
 from datetime import datetime, timedelta
-# Certifique-se de instalar: pip install supabase exnovaapi requests
 from supabase import create_client, Client
 
 # --- IMPORTAÇÃO DA EXNOVA ---
@@ -24,50 +23,37 @@ EXNOVA_PASSWORD = os.environ.get("EXNOVA_PASSWORD", "sua_senha")
 
 # --- CONFIGURAÇÃO DO WATCHDOG ---
 LAST_LOG_TIME = time.time()
-WATCHDOG_CHECK_EVERY = 60      # Verifica a cada 60 segundos
-WATCHDOG_MAX_SILENCE = 180     # 3 minutos de silêncio = Reiniciar
-# URL do Coolify para reiniciar esta aplicação específica
+WATCHDOG_CHECK_EVERY = 60
+WATCHDOG_MAX_SILENCE = 180
 COOLIFY_RESTART_URL = "https://biewdev.se/api/v1/applications/ig80skg8ssog04g4oo88wswg/restart"
-COOLIFY_API_TOKEN = os.environ.get("COOLIFY_API_TOKEN") # Defina isso nas variáveis de ambiente do Coolify
+COOLIFY_API_TOKEN = os.environ.get("COOLIFY_API_TOKEN")
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
 logging.getLogger("urllib3").setLevel(logging.WARNING)
 
-# --- FUNÇÃO WATCHDOG (Executada em Thread Separada) ---
+# --- FUNÇÃO WATCHDOG ---
 def watchdog():
     global LAST_LOG_TIME
     print("[WATCHDOG] Monitoramento iniciado.")
     
     while True:
         time.sleep(WATCHDOG_CHECK_EVERY)
-        
         silence_duration = time.time() - LAST_LOG_TIME
         
         if silence_duration > WATCHDOG_MAX_SILENCE:
-            print(f"[WATCHDOG] ⚠️ ALERTA: Bot silencioso por {int(silence_duration)}s. Forçando reinício via Coolify...")
-            
+            print(f"[WATCHDOG] ⚠️ ALERTA: Bot silencioso por {int(silence_duration)}s. Forçando reinício...")
             if COOLIFY_API_TOKEN:
                 try:
-                    response = requests.post(
+                    requests.post(
                         COOLIFY_RESTART_URL,
-                        headers={
-                            "Authorization": f"Bearer {COOLIFY_API_TOKEN}",
-                            "Content-Type": "application/json"
-                        },
+                        headers={"Authorization": f"Bearer {COOLIFY_API_TOKEN}", "Content-Type": "application/json"},
                         timeout=15
                     )
-                    print(f"[WATCHDOG] Comando de restart enviado. Status: {response.status_code}")
-                except Exception as e:
-                    print(f"[WATCHDOG] ❌ Erro ao chamar API Coolify: {e}")
-            else:
-                print("[WATCHDOG] ❌ Token do Coolify não configurado.")
-            
-            print("[WATCHDOG] Encerrando processo atual...")
+                except: pass
             os._exit(1)
 
-# --- ANÁLISE TÉCNICA (ESTRATÉGIA V2 REFINADA + FLOW OTIMIZADO) ---
+# --- ANÁLISE TÉCNICA ---
 class TechnicalAnalysis:
-    
     @staticmethod
     def calculate_sma(candles, period):
         if len(candles) < period: return 0
@@ -188,7 +174,6 @@ class TechnicalAnalysis:
                         return 'put', "V2 PUT (Rejeição + Força + Fluxo)"
                     else: return None, "Confirmação fraca"
                 else: return None, "Sem confirmação vermelha"
-                    
         return None, "Sem configuração V2"
 
 class SimpleBot:
@@ -199,23 +184,14 @@ class SimpleBot:
         self.active_trades = set()
         self.active_account_type = None
         self.best_assets = []
-        
-        self.asset_stats = {}
-        
-        # Ajuste B: Controle de Tempo de Fallback
-        self.fallback_active = False 
-        self.fallback_start_time = 0
-        
+        self.asset_stats = {} 
         self.config = { 
             "status": "PAUSED", "account_type": "PRACTICE", "entry_value": 1.0,
             "stop_win": 10.0, "stop_loss": 5.0, "stop_mode": "percentage", "daily_initial_balance": 0.0,
             "timer_enabled": False, "timer_start": "00:00", "timer_end": "00:00"
         }
-        
-        # Ajuste C: Cooldown 100% por ativo
+        self.last_loss_time = 0
         self.asset_cooldowns = {} 
-        self.last_mode_log = "" # Ajuste A: Redutor de ruído
-        
         self.init_supabase()
 
     def init_supabase(self):
@@ -228,7 +204,6 @@ class SimpleBot:
     def log_to_db(self, message, level="INFO"):
         global LAST_LOG_TIME
         LAST_LOG_TIME = time.time()
-
         print(f"[{level}] {message}")
         if not self.supabase: return
         try:
@@ -322,7 +297,10 @@ class SimpleBot:
         self.log_to_db(f"🔌 Conectando...", "SYSTEM")
         try:
             if self.api: 
-                try: self.api.api.close(); except: pass
+                try: 
+                    self.api.api.close()
+                except: 
+                    pass
             self.api = Exnova(EXNOVA_EMAIL, EXNOVA_PASSWORD)
             check, reason = self.api.connect()
             if check:
@@ -338,16 +316,10 @@ class SimpleBot:
         return False
 
     def catalog_assets(self, assets_list):
-        # Ajuste B: Se o fallback estiver ativo por muito tempo, reseta
-        if self.fallback_active and (time.time() - self.fallback_start_time > 1800):
-             self.log_to_db("🛑 Fallback time limit (30m). Resetando catalogação.", "WARNING")
-             self.fallback_active = False
-
         self.log_to_db(f"📊 Catalogando Top 3 (Estratégia V2)...", "SYSTEM")
         results = []
         for asset in assets_list:
             try:
-                # AUMENTADO PARA 200 CANDLES
                 candles = self.api.get_candles(asset, 60, 200, int(time.time()))
                 if not candles or len(candles) < 100: continue
                 wins, total = 0, 0
@@ -372,7 +344,6 @@ class SimpleBot:
         
         top_list = []
         if valid_results:
-            self.fallback_active = False 
             top_3 = valid_results[:3]
             pairs_str = ", ".join([f"{r['pair']} ({r['win_rate']:.0f}%)" for r in top_3])
             self.log_to_db(f"💎 Melhores: {pairs_str}", "SUCCESS")
@@ -382,29 +353,22 @@ class SimpleBot:
              wr_fb = top_1[0]['win_rate']
              if wr_fb < 45:
                  self.log_to_db(f"⛔ Fallback abortado: WR muito baixo ({wr_fb:.1f}%)", "ERROR")
-                 self.fallback_active = False 
                  top_list = []
              else:
-                 # Inicia cronometro do fallback se nao estiver ativo
-                 if not self.fallback_active:
-                     self.fallback_start_time = time.time()
-                 self.fallback_active = True
                  self.log_to_db(f"⚠️ Fallback agressivo: {top_1[0]['pair']} (WR: {wr_fb:.1f}%)", "WARNING")
                  top_list = top_1
         else:
             self.log_to_db("⚠️ Sem ativos viáveis.", "WARNING")
-            self.fallback_active = False
         
         if top_list:
             for r in top_list:
-                self.asset_stats[r['pair']] = r 
+                self.asset_stats[r['pair']] = r
             try:
                 if self.supabase:
                     self.supabase.table("cataloged_assets").delete().neq("pair", "XYZ").execute() 
                     self.supabase.table("cataloged_assets").insert(top_list).execute()
             except: pass
             return [r['pair'] for r in top_list]
-
         return []
 
     def safe_buy(self, asset, amount, direction, type="digital"):
@@ -457,7 +421,6 @@ class SimpleBot:
             except: res_str = 'UNKNOWN'
 
             if res_str == 'LOSS': 
-                # Ajuste C: Cooldown no ativo especifico
                 self.asset_cooldowns[asset] = time.time()
                 self.log_to_db(f"🛑 Cooldown no ativo {asset}: 60s.", "WARNING")
 
@@ -474,7 +437,11 @@ class SimpleBot:
         else:
             self.log_to_db("❌ Falha ordem na corretora.", "ERROR")
             with self.trade_lock: self.active_trades.discard(asset)
-            if sig_id and self.supabase: try: self.supabase.table("trade_signals").delete().eq("id", sig_id).execute(); except: pass
+            if sig_id and self.supabase: 
+                try: 
+                    self.supabase.table("trade_signals").delete().eq("id", sig_id).execute()
+                except: 
+                    pass
 
     def start(self):
         t_watchdog = threading.Thread(target=watchdog, daemon=True)
@@ -512,13 +479,7 @@ class SimpleBot:
                         try:
                             self.update_balance_remote()
                             targets = self.best_assets[:3] if self.best_assets else ["EURUSD-OTC"]
-                            
-                            mode_suffix = "_FALLBACK" if self.fallback_active else ""
-                            # Ajuste A: Redutor de ruído de logs
-                            current_mode_str = f"MODE_ATIVO::EMA_V2_FLOW_AGGRESSIVE{mode_suffix}"
-                            if current_mode_str != self.last_mode_log:
-                                self.log_to_db(current_mode_str, "SYSTEM")
-                                self.last_mode_log = current_mode_str
+                            self.log_to_db(f"MODE_ATIVO::EMA_V2_FLOW_AGGRESSIVE", "SYSTEM")
 
                             for asset in targets:
                                 try:
@@ -526,7 +487,6 @@ class SimpleBot:
                                     if candles:
                                         price = candles[-1]['close']
                                         ema21 = TechnicalAnalysis.calculate_ema(candles, 21)
-                                        # Ajuste C: Verifica Cooldown por ativo para o log
                                         cd_msg = ""
                                         if asset in self.asset_cooldowns:
                                              if time.time() - self.asset_cooldowns[asset] < 60:
@@ -548,7 +508,6 @@ class SimpleBot:
 
                     now_sec = datetime.now().second
                     if 55 <= now_sec <= 59:
-                        # Removido cooldown global, agora é por ativo no loop abaixo
                         if not self.best_assets:
                             self.log_to_db("⛔ Sem ativos válidos (nem fallback).", "WARNING")
                             time.sleep(2); continue
@@ -558,7 +517,6 @@ class SimpleBot:
                         trade_executed = False
                         
                         for asset in current_assets:
-                            # Ajuste C: Pula ativo se estiver em cooldown
                             if asset in self.asset_cooldowns:
                                  if time.time() - self.asset_cooldowns[asset] < 60: continue
 
