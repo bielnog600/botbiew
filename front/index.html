@@ -82,6 +82,7 @@
                         <h1 class="text-xl md:text-2xl font-bold text-white truncate">Dashboard</h1>
                         <div class="flex items-center gap-2 mt-1 flex-wrap">
                             <span id="bot-status-indicator" class="text-[10px] md:text-xs font-bold text-slate-500 whitespace-nowrap">CARREGANDO...</span>
+                            <!-- BADGE DE MODO -->
                             <span id="mode-badge" class="px-2 py-0.5 rounded text-[10px] font-bold tracking-wider border border-slate-700 bg-slate-800 text-slate-400 transition-colors duration-300 hidden">
                                 MODO: ...
                             </span>
@@ -247,13 +248,12 @@
         function renderAssetCards(assets) {
             const container = document.getElementById('top-assets-container');
             
-            // Remove apenas placeholder
+            // Remove placeholders se houver cards reais ou se a lista estiver vazia mas não for inicial
             if (container.innerText.includes('Aguardando') || container.innerText.includes('Nenhum par')) {
                  container.innerHTML = '';
             }
 
             if (assets.length === 0) {
-                // Se a lista estiver vazia e já estava vazia ou tinha placeholder, mostra msg
                 if (container.children.length === 0) {
                     container.innerHTML = `<div class="col-span-1 md:col-span-3 text-center text-slate-500 py-8 text-sm bg-slate-900/50 rounded-xl border border-dashed border-slate-800"><i data-lucide="search" class="w-6 h-6 mx-auto mb-2 opacity-50"></i> Nenhum par qualificado (>60%)</div>`;
                     lucide.createIcons();
@@ -266,6 +266,7 @@
 
             assets.forEach((asset, index) => {
                 const badge = badges[index] || '';
+                // Importante: Passa o win_rate do banco
                 createOrUpdateCard(asset.pair, asset.best_strategy || 'SMA14', asset.win_rate, badge);
                 
                 const safeId = asset.pair.replace(/[^a-zA-Z0-9]/g, '');
@@ -278,6 +279,8 @@
             const container = document.getElementById('top-assets-container');
             let card = document.getElementById(`card-${safePairId}`);
             
+            if (container.innerText.includes('Aguardando') || container.innerText.includes('Nenhum par')) container.innerHTML = '';
+
             // Formata o winrate
             let winRateDisplay = '--';
             if (winRate !== null && winRate !== undefined && !isNaN(parseFloat(winRate))) {
@@ -308,7 +311,7 @@
                 `;
                 container.appendChild(card);
             } else {
-                // ATUALIZAÇÃO FORTE: Garante que os dados sejam sobrescritos
+                // ATUALIZAÇÃO FORTE: Garante que os dados sejam sobrescritos apenas se válidos
                 if (winRate !== null && winRate !== undefined) {
                      const wrEl = document.getElementById(`winrate-${safePairId}`);
                      if (wrEl) wrEl.innerText = winRateDisplay;
@@ -321,6 +324,8 @@
                     const bgEl = document.getElementById(`badge-${safePairId}`);
                     if (bgEl) bgEl.innerText = badge;
                 }
+                // Garante que o card esteja visível
+                card.classList.remove('opacity-50');
             }
         }
 
@@ -351,14 +356,47 @@
                 const p1 = msg.split('SINAL EM ')[1];
                 if (p1) pair = p1.split(':')[0].trim();
             }
+            
+            // 3. PARSER PARA ATUALIZAR WINRATE VIA LOG (IMEDIATO)
+            // Ex: "💎 Melhores: EURUSD-OTC (85%), GBPUSD-OTC (70%)"
+            if (msg.includes('💎 Melhores:')) {
+                const content = msg.split('💎 Melhores:')[1];
+                if (content) {
+                    // Split por vírgula para pegar cada par
+                    const parts = content.split(',');
+                    parts.forEach(part => {
+                        // Regex para pegar Nome e Porcentagem:  "PAIR (80%)"
+                        const match = part.trim().match(/^([A-Z0-9\-]+)\s*\((\d+)%\)/);
+                        if (match) {
+                            const pName = match[1];
+                            const pRate = match[2];
+                            createOrUpdateCard(pName, 'EMA V2', pRate, ''); // Atualiza card
+                        }
+                    });
+                }
+                return;
+            }
+            
+            // 4. PARSER PARA ATUALIZAR WINRATE VIA LOG FALLBACK (IMEDIATO)
+            // Ex: "⚠️ Fallback agressivo: EURUSD-OTC (WR: 55.0%)"
+            if (msg.includes('Fallback agressivo:')) {
+                const match = msg.match(/Fallback agressivo:\s*([A-Z0-9\-]+)\s*\(WR:\s*(\d+(?:\.\d+)?)%\)/);
+                 if (match) {
+                    const pName = match[1];
+                    const pRate = match[2];
+                    createOrUpdateCard(pName, 'EMA V2', pRate, ''); // Atualiza card
+                }
+                return;
+            }
+
 
             if (!pair) return;
 
             const safePairId = pair.replace(/[^a-zA-Z0-9]/g, '');
             state.pairTimestamps[safePairId] = Date.now();
             
+            // SE CARD NÃO EXISTE, CRIA (mas sem winrate ainda)
             if (!document.getElementById(`card-${safePairId}`)) {
-                // Pass null for winrate to show placeholder
                 createOrUpdateCard(pair, 'LIVE', null); 
             }
             
@@ -404,12 +442,20 @@
         function checkInactivePairs() {
             const now = Date.now();
             for (const [safePairId, ts] of Object.entries(state.pairTimestamps)) {
-                // > 15 minutes inactive
-                if (now - ts > 900000) { 
+                if (now - ts > 300000) { 
+                    const statusEl = document.getElementById(`status-${safePairId}`);
+                    const ledEl = document.getElementById(`led-${safePairId}`);
                     const card = document.getElementById(`card-${safePairId}`);
+                    
+                    if (statusEl) {
+                        statusEl.innerText = 'INATIVO';
+                        statusEl.className = 'text-[10px] font-bold text-slate-600';
+                    }
+                    if (ledEl) {
+                        ledEl.className = 'w-1.5 h-1.5 rounded-full bg-slate-700';
+                    }
                     if (card) {
-                        card.remove();
-                        delete state.pairTimestamps[safePairId];
+                        card.classList.add('opacity-50');
                     }
                 }
             }
@@ -491,12 +537,10 @@
         // LOGIN HANDLER COM FEEDBACK VISUAL
         document.getElementById('login-form').addEventListener('submit', async (e) => {
             e.preventDefault();
-            
             const btn = document.getElementById('login-btn');
             const originalText = btn.innerHTML;
             const errorDiv = document.getElementById('login-error');
             
-            // Estado de Carregamento
             btn.innerHTML = '<i data-lucide="loader-2" class="w-5 h-5 animate-spin mx-auto"></i>';
             btn.classList.add('opacity-70', 'pointer-events-none'); 
             errorDiv.classList.add('hidden');
@@ -508,19 +552,12 @@
 
                 const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
 
-                if (error) {
-                    throw error;
-                } else {
-                    state.user = data.user;
-                    showApp();
-                    startDataLoop();
-                }
+                if (error) { throw error; } 
+                else { state.user = data.user; showApp(); startDataLoop(); }
             } catch (err) {
                 console.error("Erro login:", err);
                 errorDiv.textContent = err.message || "Erro de conexão. Tente novamente.";
                 errorDiv.classList.remove('hidden');
-                
-                // Reset botão
                 btn.innerHTML = originalText;
                 btn.classList.remove('opacity-70', 'pointer-events-none');
             }
@@ -539,6 +576,8 @@
             setInterval(fetchData, 3000);
             setInterval(updateBotStatus, 5000);
             setInterval(checkInactivePairs, 30000); 
+            // ADICIONADO: Polling de Top Assets
+            setInterval(fetchTopAssets, 5000);
         }
 
         async function refreshSignals() {
