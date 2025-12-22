@@ -64,6 +64,7 @@
             </div>
             <nav class="flex-1 p-4 space-y-2">
                 <button onclick="router.navigate('home')" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800/50 hover:text-white" data-target="home"><i data-lucide="layout-dashboard" class="w-5 h-5"></i> Dashboard</button>
+                <button onclick="router.navigate('reports')" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800/50 hover:text-white" data-target="reports"><i data-lucide="bar-chart-2" class="w-5 h-5"></i> Relatórios</button>
                 <button onclick="router.navigate('settings')" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800/50 hover:text-white" data-target="settings"><i data-lucide="settings" class="w-5 h-5"></i> Configurações</button>
                 <button onclick="router.navigate('logs')" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800/50 hover:text-white" data-target="logs"><i data-lucide="terminal" class="w-5 h-5"></i> Terminal</button>
             </nav>
@@ -75,7 +76,6 @@
 
             <!-- HOME -->
             <div id="view-home" class="view-section space-y-6 max-w-6xl mx-auto">
-                
                 <!-- TOP BAR -->
                 <div class="flex flex-row justify-between items-center gap-2 mb-4">
                     <div class="flex-1 min-w-0">
@@ -105,10 +105,9 @@
                     </div>
                 </div>
                 
-                <!-- GRID DE CARDS -->
                 <div id="top-assets-container" class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
                     <div class="glass-card p-4 rounded-xl border-t-4 border-slate-700 animate-pulse h-24 flex items-center justify-center text-slate-600 text-xs">
-                        Aguardando dados do bot...
+                        A aguardar dados do bot...
                     </div>
                 </div>
 
@@ -127,13 +126,38 @@
 
                 <div>
                     <div class="flex justify-between items-center mb-3">
-                        <h3 class="text-sm font-bold text-slate-400 flex items-center gap-2"><i data-lucide="history" class="w-4 h-4"></i> Histórico</h3>
-                        <div class="flex gap-2">
-                             <button onclick="fetchData()" class="p-1.5 text-slate-500 hover:text-white hover:bg-slate-800 rounded-lg"><i data-lucide="refresh-cw" class="w-4 h-4"></i></button>
-                             <button id="clear-history-btn" class="p-1.5 text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-lg"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
-                        </div>
+                        <h3 class="text-sm font-bold text-slate-400 flex items-center gap-2"><i data-lucide="history" class="w-4 h-4"></i> Histórico Recente</h3>
                     </div>
                     <div id="signals-list" class="space-y-3 pb-8"><div class="text-center text-slate-600 text-xs">A carregar...</div></div>
+                </div>
+            </div>
+
+            <!-- REPORTS VIEW (NOVA ABA) -->
+            <div id="view-reports" class="view-section hidden space-y-6 max-w-6xl mx-auto">
+                <h1 class="text-2xl font-bold text-white mb-4">Relatório de Performance</h1>
+                
+                <!-- CARD MENSAL -->
+                <div class="glass-card p-6 rounded-xl border border-slate-700 relative overflow-hidden">
+                    <div class="absolute -right-10 -top-10 w-32 h-32 bg-blue-500/10 rounded-full blur-2xl"></div>
+                    <div class="relative z-10 flex justify-between items-center">
+                        <div>
+                            <p class="text-xs text-slate-400 font-bold uppercase tracking-wider mb-1">LUCRO MENSAL (ESTIMADO)</p>
+                            <h2 id="report-month-profit" class="text-3xl font-black text-white">---</h2>
+                            <p class="text-[10px] text-slate-500 mt-2">Baseado no histórico de sinais</p>
+                        </div>
+                        <div class="text-right">
+                             <p class="text-xs text-slate-400 font-bold uppercase tracking-wider mb-1">WIN RATE</p>
+                             <h2 id="report-month-rate" class="text-3xl font-black text-blue-400">---</h2>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- LISTA DIÁRIA -->
+                <div>
+                    <h3 class="text-sm font-bold text-slate-400 flex items-center gap-2 mb-4"><i data-lucide="calendar" class="w-4 h-4"></i> Resultado Diário</h3>
+                    <div id="reports-daily-list" class="space-y-3">
+                        <div class="text-center text-slate-600 text-xs py-8">Carregando dados...</div>
+                    </div>
                 </div>
             </div>
 
@@ -142,7 +166,6 @@
                 <h1 class="text-2xl font-bold text-white">Configurações</h1>
                 <form id="settings-form" class="space-y-6">
                     <div class="glass-card p-6 rounded-xl space-y-6">
-                        
                         <div>
                             <label class="text-xs text-slate-400 block mb-1">Modo de Gerenciamento</label>
                             <select id="conf-stop-mode" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white outline-none">
@@ -150,12 +173,9 @@
                                 <option value="value">Valor Fixo ($)</option>
                             </select>
                         </div>
-
                         <div class="border-t border-slate-700 pt-4">
                             <div class="flex items-center justify-between mb-4">
-                                <label class="text-sm font-bold text-white flex items-center gap-2">
-                                    <i data-lucide="clock" class="w-4 h-4 text-amber-500"></i> Agendamento Automático
-                                </label>
+                                <label class="text-sm font-bold text-white flex items-center gap-2"><i data-lucide="clock" class="w-4 h-4 text-amber-500"></i> Agendamento Automático</label>
                                 <label class="relative inline-flex items-center cursor-pointer">
                                     <input type="checkbox" id="conf-timer-enabled" class="sr-only peer">
                                     <div class="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600"></div>
@@ -166,7 +186,6 @@
                                 <div><label class="text-xs text-slate-400 block mb-1">Fim (HH:MM)</label><input type="time" id="conf-timer-end" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white outline-none"></div>
                             </div>
                         </div>
-
                         <div class="grid grid-cols-2 gap-4">
                             <div><label class="text-xs text-slate-400 block mb-1">Stop Win</label><input type="number" id="conf-stop-win" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white outline-none"></div>
                             <div><label class="text-xs text-slate-400 block mb-1">Stop Loss</label><input type="number" id="conf-stop-loss" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white outline-none"></div>
@@ -189,6 +208,7 @@
 
         <nav class="md:hidden fixed bottom-0 left-0 right-0 bg-[#0f172a]/95 backdrop-blur-xl border-t border-slate-800 flex justify-around px-2 pb-safe z-40 h-16 items-center">
             <button onclick="router.navigate('home')" class="flex flex-col items-center p-2 text-slate-500 active-nav" data-target="home"><i data-lucide="layout-dashboard" class="w-5 h-5"></i></button>
+            <button onclick="router.navigate('reports')" class="flex flex-col items-center p-2 text-slate-500" data-target="reports"><i data-lucide="bar-chart-2" class="w-5 h-5"></i></button>
             <button onclick="router.navigate('settings')" class="flex flex-col items-center p-2 text-slate-500" data-target="settings"><i data-lucide="settings" class="w-5 h-5"></i></button>
             <button onclick="router.navigate('logs')" class="flex flex-col items-center p-2 text-slate-500" data-target="logs"><i data-lucide="terminal" class="w-5 h-5"></i></button>
         </nav>
@@ -208,6 +228,7 @@
                 document.querySelectorAll('nav button').forEach(btn => btn.classList.remove('active-nav'));
                 document.querySelectorAll(`button[data-target="${target}"]`).forEach(btn => btn.classList.add('active-nav'));
                 if(target === 'logs') scrollToBottom();
+                if(target === 'reports') fetchReports(); // Carrega relatórios ao entrar
             }
         };
 
@@ -224,6 +245,89 @@
             fetchTopAssets(); 
         }
 
+        // --- LÓGICA DE RELATÓRIOS ---
+        async function fetchReports() {
+            const list = document.getElementById('reports-daily-list');
+            list.innerHTML = '<div class="text-center text-slate-500 py-8 text-xs"><i data-lucide="loader-2" class="w-6 h-6 animate-spin mx-auto mb-2"></i> Calculando...</div>';
+            lucide.createIcons();
+
+            // Pega todo o histórico de sinais
+            const { data: trades } = await supabaseClient.from('trade_signals')
+                .select('*')
+                .order('created_at', { ascending: false })
+                .limit(1000); // Limite seguro
+
+            if (!trades || trades.length === 0) {
+                list.innerHTML = '<div class="text-center text-slate-600 py-8 text-xs">Sem dados históricos.</div>';
+                return;
+            }
+
+            const dailyStats = {};
+            let monthProfit = 0;
+            let monthWins = 0;
+            let monthTotal = 0;
+
+            trades.forEach(t => {
+                const date = new Date(t.created_at).toLocaleDateString('pt-BR');
+                const profit = parseFloat(t.profit);
+                const result = (t.result || t.status || '').toUpperCase();
+                
+                // Inicializa o dia
+                if (!dailyStats[date]) {
+                    dailyStats[date] = { wins: 0, losses: 0, profit: 0, date: t.created_at };
+                }
+
+                // Contabiliza
+                let isWin = false;
+                if (!isNaN(profit) && profit > 0) isWin = true;
+                else if (result.includes('WIN')) isWin = true;
+
+                if (isWin) {
+                    dailyStats[date].wins++;
+                    if (!isNaN(profit)) {
+                         dailyStats[date].profit += profit;
+                         monthProfit += profit;
+                    }
+                    monthWins++;
+                } else if (result.includes('LOSS') || profit < 0) {
+                    dailyStats[date].losses++;
+                    if (!isNaN(profit)) {
+                        dailyStats[date].profit += profit; // profit é negativo no loss
+                        monthProfit += profit;
+                    }
+                }
+                monthTotal++;
+            });
+
+            // Atualiza Card Mensal
+            const monthRate = monthTotal > 0 ? Math.round((monthWins / monthTotal) * 100) : 0;
+            const mpEl = document.getElementById('report-month-profit');
+            mpEl.innerText = `$${monthProfit.toFixed(2)}`;
+            mpEl.className = `text-3xl font-black ${monthProfit >= 0 ? 'text-green-400' : 'text-red-400'}`;
+            document.getElementById('report-month-rate').innerText = `${monthRate}%`;
+
+            // Renderiza Lista Diária
+            list.innerHTML = '';
+            Object.values(dailyStats).sort((a,b) => new Date(b.date) - new Date(a.date)).forEach(day => {
+                const item = document.createElement('div');
+                item.className = "glass-card p-4 rounded-xl flex justify-between items-center border-l-4 " + (day.profit >= 0 ? "border-l-green-500" : "border-l-red-500");
+                const dateLabel = new Date(day.date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long' });
+                
+                item.innerHTML = `
+                    <div>
+                        <p class="text-sm font-bold text-white capitalize">${dateLabel}</p>
+                        <p class="text-[10px] text-slate-400 font-mono mt-1">${day.wins} Wins / ${day.losses} Loss</p>
+                    </div>
+                    <div class="text-right">
+                        <p class="text-lg font-bold font-mono ${day.profit >= 0 ? 'text-green-400' : 'text-red-400'}">
+                            ${day.profit >= 0 ? '+' : ''}$${day.profit.toFixed(2)}
+                        </p>
+                    </div>
+                `;
+                list.appendChild(item);
+            });
+        }
+        
         async function fetchInitialLogs() {
             const { data: logs } = await supabaseClient.from('logs').select('*').order('created_at', { ascending: false }).limit(50);
             if(logs && logs.length > 0) {
@@ -246,11 +350,7 @@
 
         function renderAssetCards(assets) {
             const container = document.getElementById('top-assets-container');
-            
-            // Remove apenas placeholder se ele existir
-            if (container.innerText.includes('Aguardando') || container.innerText.includes('Nenhum par')) {
-                 container.innerHTML = '';
-            }
+            if (container.innerText.includes('Aguardando') || container.innerText.includes('Nenhum par')) { container.innerHTML = ''; }
 
             if (assets.length === 0) {
                 if (container.children.length === 0) {
@@ -259,15 +359,11 @@
                 }
                 return;
             }
-            
             state.pairTimestamps = {}; 
             const badges = ['🥇', '🥈', '🥉'];
-
             assets.forEach((asset, index) => {
                 const badge = badges[index] || '';
-                // Importante: Passa o win_rate do banco
                 createOrUpdateCard(asset.pair, asset.best_strategy || 'SMA14', asset.win_rate, badge);
-                
                 const safeId = asset.pair.replace(/[^a-zA-Z0-9]/g, '');
                 state.pairTimestamps[safeId] = Date.now();
             });
@@ -277,10 +373,8 @@
             const safePairId = pair.replace(/[^a-zA-Z0-9]/g, '');
             const container = document.getElementById('top-assets-container');
             let card = document.getElementById(`card-${safePairId}`);
-            
             if (container.innerText.includes('Aguardando') || container.innerText.includes('Nenhum par')) container.innerHTML = '';
 
-            // Formata o winrate
             let winRateDisplay = '--';
             if (winRate !== null && winRate !== undefined && !isNaN(parseFloat(winRate))) {
                 winRateDisplay = `${Math.round(parseFloat(winRate))}%`;
@@ -293,9 +387,7 @@
                 card.innerHTML = `
                     <div class="flex justify-between items-start mb-2">
                         <div>
-                            <h3 class="font-bold text-sm text-white tracking-tight flex items-center gap-2">
-                                ${pair} <span id="badge-${safePairId}" class="text-sm">${badge}</span>
-                            </h3>
+                            <h3 class="font-bold text-sm text-white tracking-tight flex items-center gap-2">${pair} <span id="badge-${safePairId}" class="text-sm">${badge}</span></h3>
                             <p class="text-[9px] text-slate-400 font-mono flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-slate-500" id="led-${safePairId}"></span> <span id="strat-${safePairId}">${strategy}</span></p>
                         </div>
                         <div class="text-right">
@@ -310,7 +402,6 @@
                 `;
                 container.appendChild(card);
             } else {
-                // ATUALIZAÇÃO FORTE: Garante que os dados sejam sobrescritos
                 if (winRate !== null && winRate !== undefined) {
                      const wrEl = document.getElementById(`winrate-${safePairId}`);
                      if (wrEl) wrEl.innerText = winRateDisplay;
@@ -323,7 +414,6 @@
                     const bgEl = document.getElementById(`badge-${safePairId}`);
                     if (bgEl) bgEl.innerText = badge;
                 }
-                // Garante que o card esteja visível
                 card.classList.remove('opacity-50');
             }
         }
@@ -351,8 +441,6 @@
                     const pPart = parts.find(p => p.startsWith('Preço:'));
                     if(pPart) price = pPart.split(':')[1];
                 }
-                
-                // --- NOVO PARSER PARA WINRATE (WR) ---
                 if (msg.includes('WR:')) {
                     const wrPart = parts.find(p => p.startsWith('WR:'));
                     if (wrPart) {
@@ -365,18 +453,13 @@
                 if (p1) pair = p1.split(':')[0].trim();
             }
             
-            // 3. PARSER PARA ATUALIZAR WINRATE VIA LOG (IMEDIATO)
             if (msg.includes('💎 Melhores:')) {
                 const content = msg.split('💎 Melhores:')[1];
                 if (content) {
                     const parts = content.split(',');
                     parts.forEach(part => {
                         const match = part.trim().match(/^([A-Z0-9\-]+)\s*\((\d+)%\)/);
-                        if (match) {
-                            const pName = match[1];
-                            const pRate = match[2];
-                            createOrUpdateCard(pName, 'EMA V2', pRate, ''); 
-                        }
+                        if (match) { createOrUpdateCard(match[1], 'EMA V2', match[2], ''); }
                     });
                 }
                 return;
@@ -384,11 +467,7 @@
             
             if (msg.includes('Fallback agressivo:')) {
                 const match = msg.match(/Fallback agressivo:\s*([A-Z0-9\-]+)\s*\(WR:\s*(\d+(?:\.\d+)?)%\)/);
-                 if (match) {
-                    const pName = match[1];
-                    const pRate = match[2];
-                    createOrUpdateCard(pName, 'EMA V2', pRate, ''); 
-                }
+                 if (match) { createOrUpdateCard(match[1], 'EMA V2', match[2], ''); }
                 return;
             }
 
@@ -397,20 +476,15 @@
             const safePairId = pair.replace(/[^a-zA-Z0-9]/g, '');
             state.pairTimestamps[safePairId] = Date.now();
             
-            if (!document.getElementById(`card-${safePairId}`)) {
-                createOrUpdateCard(pair, 'LIVE', winRate); 
-            }
+            if (!document.getElementById(`card-${safePairId}`)) { createOrUpdateCard(pair, 'LIVE', winRate); }
             
             const card = document.getElementById(`card-${safePairId}`);
-            
             if (card) {
                 if (winRate !== null) {
                     const wrEl = document.getElementById(`winrate-${safePairId}`);
                     if (wrEl) wrEl.innerText = `${Math.round(winRate)}%`;
                 }
-
                 card.classList.remove('opacity-50');
-                
                 const logEl = document.getElementById(`log-${safePairId}`);
                 if(logEl) {
                     let cleanMsg = msg.replace('ANALISE_DETALHADA::', '').replace('SCAN_ENTRADA::', 'SCAN: ').replace(/::/g, ' ').replace('SYSTEM', '').replace('INFO', '').trim();
@@ -452,17 +526,9 @@
                     const statusEl = document.getElementById(`status-${safePairId}`);
                     const ledEl = document.getElementById(`led-${safePairId}`);
                     const card = document.getElementById(`card-${safePairId}`);
-                    
-                    if (statusEl) {
-                        statusEl.innerText = 'INATIVO';
-                        statusEl.className = 'text-[10px] font-bold text-slate-600';
-                    }
-                    if (ledEl) {
-                        ledEl.className = 'w-1.5 h-1.5 rounded-full bg-slate-700';
-                    }
-                    if (card) {
-                        card.classList.add('opacity-50');
-                    }
+                    if (statusEl) { statusEl.innerText = 'INATIVO'; statusEl.className = 'text-[10px] font-bold text-slate-600'; }
+                    if (ledEl) { ledEl.className = 'w-1.5 h-1.5 rounded-full bg-slate-700'; }
+                    if (card) { card.classList.add('opacity-50'); }
                 }
             }
         }
@@ -514,11 +580,9 @@
             if (!confirm("Reiniciar o bot agora?")) return;
             const btn = document.getElementById('restart-bot-btn');
             const originalIcon = btn.innerHTML;
-            
             btn.classList.add("opacity-50", "pointer-events-none");
             btn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i>';
             lucide.createIcons();
-
             try {
                 const { data: { session } } = await supabaseClient.auth.getSession();
                 if (!session) throw new Error("Sessão inválida");
@@ -540,24 +604,19 @@
             }
         });
 
-        // LOGIN HANDLER COM FEEDBACK VISUAL
         document.getElementById('login-form').addEventListener('submit', async (e) => {
             e.preventDefault();
             const btn = document.getElementById('login-btn');
             const originalText = btn.innerHTML;
             const errorDiv = document.getElementById('login-error');
-            
             btn.innerHTML = '<i data-lucide="loader-2" class="w-5 h-5 animate-spin mx-auto"></i>';
             btn.classList.add('opacity-70', 'pointer-events-none'); 
             errorDiv.classList.add('hidden');
             lucide.createIcons();
-
             try {
                 const email = document.getElementById('email').value;
                 const password = document.getElementById('password').value;
-
                 const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
-
                 if (error) { throw error; } 
                 else { state.user = data.user; showApp(); startDataLoop(); }
             } catch (err) {
@@ -707,7 +766,6 @@
                 document.getElementById('conf-entry').value = config.entry_value;
                 document.getElementById('conf-account').value = config.account_type;
                 document.getElementById('conf-stop-mode').value = config.stop_mode || 'percentage';
-                // Timer
                 document.getElementById('conf-timer-enabled').checked = config.timer_enabled || false;
                 document.getElementById('conf-timer-start').value = config.timer_start || '00:00';
                 document.getElementById('conf-timer-end').value = config.timer_end || '00:00';
@@ -722,4 +780,4 @@
         checkSession();
     </script>
 </body>
-</html>
+</html>c
