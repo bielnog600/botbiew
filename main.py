@@ -122,18 +122,19 @@ class TechnicalAnalysis:
         last = TechnicalAnalysis.analyze_candle(candles[-1])
         prev = TechnicalAnalysis.analyze_candle(candles[-2])
 
+        # AJUSTE 3: Engolfo ainda mais flexível (60% do corpo anterior)
         if direction == "call":
             return (
                 last['color'] == 'green' and
                 prev['color'] == 'red' and
-                last['body'] >= prev['body'] * 0.8
+                last['body'] >= prev['body'] * 0.6
             )
 
         if direction == "put":
             return (
                 last['color'] == 'red' and
                 prev['color'] == 'green' and
-                last['body'] >= prev['body'] * 0.8
+                last['body'] >= prev['body'] * 0.6
             )
 
         return False
@@ -147,8 +148,6 @@ class TechnicalAnalysis:
         if len(candles) < 60: return None, "Dados insuficientes"
 
         # --- FILTRO DINÂMICO POR HORÁRIO ---
-        # Se for tarde/noite (>= 14h), o mercado é mais lento, então
-        # não exigimos engolfo perfeito para não perder entradas.
         current_hour = datetime.now().hour
         engulf_required = True
         if current_hour >= 14:
@@ -170,7 +169,9 @@ class TechnicalAnalysis:
         if spread < min_spread: return None, f"Filtro: EMAs coladas"
 
         ema21_slope = ema21 - ema21_prev
-        min_slope = avg_body * 0.05 
+        
+        # AJUSTE 1: Inclinação relaxada para 0.02
+        min_slope = avg_body * 0.02 
         
         # --- LÓGICA CALL (COMPRA) ---
         if ema9 > ema21 and ema21_slope > min_slope:
@@ -178,7 +179,8 @@ class TechnicalAnalysis:
             held_support = reject_candle['close'] >= (ema21 - (avg_body * 0.3))
             
             if touched_ema and held_support:
-                if reject_candle['lower_wick'] < (reject_candle['body'] * 0.6):
+                # AJUSTE 2: Rejeição menos exigente (0.4)
+                if reject_candle['lower_wick'] < (reject_candle['body'] * 0.4):
                     return None, "Rejeição fraca (Pavio)"
                 
                 if confirm_candle['color'] == 'green':
@@ -193,7 +195,6 @@ class TechnicalAnalysis:
                         flow = TechnicalAnalysis.flow_filter(candles)
                         if flow != "BULL": return None, "Filtro Fluxo contra"
                         
-                        # FILTRO DINÂMICO DE ENGOLFO
                         if engulf_required:
                             if not TechnicalAnalysis.engulf_filter(candles, "call"): 
                                 return None, "Sem força (Engolfo)"
@@ -210,7 +211,8 @@ class TechnicalAnalysis:
             held_resistance = reject_candle['close'] <= (ema21 + (avg_body * 0.3))
             
             if touched_ema and held_resistance:
-                if reject_candle['upper_wick'] < (reject_candle['body'] * 0.6):
+                # AJUSTE 2: Rejeição menos exigente (0.4)
+                if reject_candle['upper_wick'] < (reject_candle['body'] * 0.4):
                     return None, "Rejeição fraca (Pavio)"
                 
                 if confirm_candle['color'] == 'red':
@@ -224,7 +226,6 @@ class TechnicalAnalysis:
                         flow = TechnicalAnalysis.flow_filter(candles)
                         if flow != "BEAR": return None, "Filtro Fluxo contra"
                         
-                        # FILTRO DINÂMICO DE ENGOLFO
                         if engulf_required:
                             if not TechnicalAnalysis.engulf_filter(candles, "put"): 
                                 return None, "Sem força (Engolfo)"
@@ -405,6 +406,7 @@ class SimpleBot:
                 wins, total = 0, 0
                 for i in range(60, len(candles)-1): # Buffer 60 para flow filter
                     subset = candles[i-60:i+1]
+                    # Testa a estratégia nova no passado
                     signal, _ = TechnicalAnalysis.get_signal(subset)
                     if signal:
                         total += 1
@@ -434,7 +436,7 @@ class SimpleBot:
         results.sort(key=lambda x: x['score'], reverse=True)
 
         # Filtro Rigoroso
-        valid_results = [r for r in results if r['win_rate'] >= 55]
+        valid_results = [r for r in results if r['win_rate'] >= 60]
         
         if valid_results:
             top_3 = valid_results[:3]
@@ -571,7 +573,8 @@ class SimpleBot:
                             self.update_balance_remote()
                             targets = self.best_assets[:3] if self.best_assets else ["EURUSD-OTC"]
                             
-                            self.log_to_db(f"MODE_ATIVO::EMA_V2_FLOW", "SYSTEM")
+                            # Log do modo fixo para UI
+                            self.log_to_db(f"MODE_ATIVO::EMA_V2_CONFIRM", "SYSTEM")
 
                             for asset in targets:
                                 try:
