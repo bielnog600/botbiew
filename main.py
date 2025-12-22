@@ -77,7 +77,6 @@ class TechnicalAnalysis:
         
         color = 'green' if close_p > open_p else 'red' if close_p < open_p else 'doji'
         
-        # CORREÇÃO 1: Removida duplicação de chaves 'close' e 'open'
         return {
             'color': color, 'body': body, 'upper_wick': upper_wick,
             'lower_wick': lower_wick, 'close': close_p, 'open': open_p, 
@@ -88,15 +87,12 @@ class TechnicalAnalysis:
     def flow_filter(candles):
         """
         Filtro de Fluxo (MACD-like simplificado).
-        Verifica se a inércia do movimento é favorável.
         """
         if len(candles) < 50: return None 
 
-        # OTIMIZAÇÃO 2: Limita histórico para performance (evita lag em OTC)
         candles = candles[-80:]
 
         buffer_series = []
-        # Começa do 35 para garantir dados para a SMA34
         for i in range(35, len(candles) + 1):
             slice_c = candles[:i]
             fast = TechnicalAnalysis.calculate_sma(slice_c, 3)
@@ -126,7 +122,6 @@ class TechnicalAnalysis:
         last = TechnicalAnalysis.analyze_candle(candles[-1])
         prev = TechnicalAnalysis.analyze_candle(candles[-2])
 
-        # AJUSTE 3: Engolfo menos rígido (80% do corpo anterior já é válido em OTC)
         if direction == "call":
             return (
                 last['color'] == 'green' and
@@ -147,8 +142,17 @@ class TechnicalAnalysis:
     def get_signal(candles):
         """
         Estratégia V2 Otimizada: EMA 9 + EMA 21 + Confirmação
+        AGRESSIVO: Relaxa filtros dependendo do horário
         """
         if len(candles) < 60: return None, "Dados insuficientes"
+
+        # --- FILTRO DINÂMICO POR HORÁRIO ---
+        # Se for tarde/noite (>= 14h), o mercado é mais lento, então
+        # não exigimos engolfo perfeito para não perder entradas.
+        current_hour = datetime.now().hour
+        engulf_required = True
+        if current_hour >= 14:
+             engulf_required = False
 
         # 1. CÁLCULO DE INDICADORES
         ema9 = TechnicalAnalysis.calculate_ema(candles, 9)
@@ -158,13 +162,10 @@ class TechnicalAnalysis:
         confirm_candle = TechnicalAnalysis.analyze_candle(candles[-1])
         reject_candle = TechnicalAnalysis.analyze_candle(candles[-2])
         
-        # Contexto: Média dos corpos
         avg_body = sum([abs(c['close']-c['open']) for c in candles[-7:-2]]) / 5
         
         # 2. FILTROS GLOBAIS
         spread = abs(ema9 - ema21)
-        
-        # AJUSTE 4: Spread mínimo reduzido para 0.1 (Mais adaptável)
         min_spread = avg_body * 0.1
         if spread < min_spread: return None, f"Filtro: EMAs coladas"
 
@@ -173,19 +174,14 @@ class TechnicalAnalysis:
         
         # --- LÓGICA CALL (COMPRA) ---
         if ema9 > ema21 and ema21_slope > min_slope:
-            
-            # 1. ANÁLISE DA REJEIÇÃO
             touched_ema = reject_candle['min'] <= (ema21 + (avg_body * 0.1))
             held_support = reject_candle['close'] >= (ema21 - (avg_body * 0.3))
             
             if touched_ema and held_support:
-                
                 if reject_candle['lower_wick'] < (reject_candle['body'] * 0.6):
                     return None, "Rejeição fraca (Pavio)"
                 
-                # 2. CONFIRMAÇÃO
                 if confirm_candle['color'] == 'green':
-                    # Força real
                     has_strength = (
                         confirm_candle['body'] >= (reject_candle['body'] * 0.6) and
                         confirm_candle['body'] >= (avg_body * 0.8)
@@ -193,32 +189,31 @@ class TechnicalAnalysis:
                     clean_top = confirm_candle['upper_wick'] < (confirm_candle['body'] * 0.5)
                     
                     if has_strength and clean_top:
-                        # --- FILTROS FINAIS ---
+                        # Filtros Finais
                         flow = TechnicalAnalysis.flow_filter(candles)
                         if flow != "BULL": return None, "Filtro Fluxo contra"
-                        if not TechnicalAnalysis.engulf_filter(candles, "call"): return None, "Sem força (Engolfo)"
+                        
+                        # FILTRO DINÂMICO DE ENGOLFO
+                        if engulf_required:
+                            if not TechnicalAnalysis.engulf_filter(candles, "call"): 
+                                return None, "Sem força (Engolfo)"
 
                         return 'call', "V2 CALL (Rejeição + Força + Fluxo)"
                     else:
                         return None, "Confirmação fraca"
                 else:
-                    return None, "Sem candle verde"
+                    return None, "Sem confirmação verde"
 
         # --- LÓGICA PUT (VENDA) ---
         elif ema9 < ema21 and ema21_slope < -min_slope:
-            
-            # 1. ANÁLISE DA REJEIÇÃO
             touched_ema = reject_candle['max'] >= (ema21 - (avg_body * 0.1))
             held_resistance = reject_candle['close'] <= (ema21 + (avg_body * 0.3))
             
             if touched_ema and held_resistance:
-                
                 if reject_candle['upper_wick'] < (reject_candle['body'] * 0.6):
                     return None, "Rejeição fraca (Pavio)"
                 
-                # 2. CONFIRMAÇÃO
                 if confirm_candle['color'] == 'red':
-                    # Força real
                     has_strength = (
                         confirm_candle['body'] >= (reject_candle['body'] * 0.6) and
                         confirm_candle['body'] >= (avg_body * 0.8)
@@ -226,16 +221,19 @@ class TechnicalAnalysis:
                     clean_bottom = confirm_candle['lower_wick'] < (confirm_candle['body'] * 0.5)
                     
                     if has_strength and clean_bottom:
-                        # --- FILTROS FINAIS ---
                         flow = TechnicalAnalysis.flow_filter(candles)
                         if flow != "BEAR": return None, "Filtro Fluxo contra"
-                        if not TechnicalAnalysis.engulf_filter(candles, "put"): return None, "Sem força (Engolfo)"
+                        
+                        # FILTRO DINÂMICO DE ENGOLFO
+                        if engulf_required:
+                            if not TechnicalAnalysis.engulf_filter(candles, "put"): 
+                                return None, "Sem força (Engolfo)"
 
                         return 'put', "V2 PUT (Rejeição + Força + Fluxo)"
                     else:
                         return None, "Confirmação fraca"
                 else:
-                    return None, "Sem candle vermelho"
+                    return None, "Sem confirmação vermelha"
                     
         return None, "Sem configuração V2"
 
@@ -407,7 +405,6 @@ class SimpleBot:
                 wins, total = 0, 0
                 for i in range(60, len(candles)-1): # Buffer 60 para flow filter
                     subset = candles[i-60:i+1]
-                    # Testa a estratégia nova no passado
                     signal, _ = TechnicalAnalysis.get_signal(subset)
                     if signal:
                         total += 1
@@ -416,21 +413,33 @@ class SimpleBot:
                                  (signal == 'put' and nxt['close'] < nxt['open'])
                         if is_win: wins += 1
                 
-                # Critério de aceitação de pares
+                # Critério de aceitação de pares com SCORE
                 if total >= 2: 
                     wr = (wins / total) * 100
-                    results.append({"pair": asset, "win_rate": wr, "wins": wins, "losses": total-wins, "best_strategy": "EMA V2+Flow"})
+                    # NOVO SCORE: Peso para winrate E volume
+                    score = (wr * 0.7) + (total * 5)
+                    
+                    results.append({
+                        "pair": asset, 
+                        "win_rate": wr, 
+                        "wins": wins, 
+                        "losses": total-wins, 
+                        "best_strategy": "EMA V2+Flow",
+                        "score": score
+                    })
             except: pass
             time.sleep(0.05)
         
-        # Filtro de assertividade > 60%
-        valid_results = [r for r in results if r['win_rate'] >= 60]
-        valid_results.sort(key=lambda x: x['win_rate'], reverse=True)
-        top_3 = valid_results[:3]
+        # Ordena por SCORE, não apenas WinRate
+        results.sort(key=lambda x: x['score'], reverse=True)
+
+        # Filtro Rigoroso
+        valid_results = [r for r in results if r['win_rate'] >= 55]
         
-        if top_3:
+        if valid_results:
+            top_3 = valid_results[:3]
             pairs_str = ", ".join([f"{r['pair']} ({r['win_rate']:.0f}%)" for r in top_3])
-            self.log_to_db(f"💎 Melhores: {pairs_str}", "SUCCESS")
+            self.log_to_db(f"💎 Melhores (Score): {pairs_str}", "SUCCESS")
             try:
                 if self.supabase:
                     self.supabase.table("cataloged_assets").delete().neq("pair", "XYZ").execute() 
@@ -438,7 +447,18 @@ class SimpleBot:
             except: pass
             return [r['pair'] for r in top_3]
         
-        self.log_to_db("⚠️ Nenhum par com Winrate > 60% na estratégia V2.", "WARNING")
+        # FALLBACK AGRESSIVO
+        if results:
+             top_1 = results[:1]
+             self.log_to_db(f"⚠️ Fallback agressivo: {top_1[0]['pair']} (WR: {top_1[0]['win_rate']:.1f}%)", "WARNING")
+             try:
+                if self.supabase:
+                    self.supabase.table("cataloged_assets").delete().neq("pair", "XYZ").execute() 
+                    self.supabase.table("cataloged_assets").insert(top_1).execute()
+             except: pass
+             return [top_1[0]['pair']]
+        
+        self.log_to_db("⚠️ Sem ativos viáveis (nem para fallback).", "WARNING")
         return []
 
     def safe_buy(self, asset, amount, direction, type="digital"):
@@ -497,7 +517,8 @@ class SimpleBot:
 
             if res_str == 'LOSS': 
                 self.last_loss_time = time.time()
-                self.log_to_db(f"🛑 Cooldown ativo: Pausa de 2 min.", "WARNING")
+                # COOLDOWN AGRESSIVO: Reduzido para 60s
+                self.log_to_db(f"🛑 Cooldown ativo: Pausa de 60s.", "WARNING")
 
             log_type = "SUCCESS" if res_str == 'WIN' else "ERROR" if res_str == 'LOSS' else "WARNING"
             self.log_to_db(f"{'🏆' if res_str == 'WIN' else '🔻'} {res_str}: ${profit:.2f}", log_type)
@@ -558,7 +579,8 @@ class SimpleBot:
                                     if candles:
                                         price = candles[-1]['close']
                                         ema21 = TechnicalAnalysis.calculate_ema(candles, 21)
-                                        cd_msg = " [COOLDOWN]" if (time.time() - self.last_loss_time < 120) else ""
+                                        # COOLDOWN CHECK REDUZIDO: 60s
+                                        cd_msg = " [COOLDOWN]" if (time.time() - self.last_loss_time < 60) else ""
                                         self.log_to_db(f"ANALISE_DETALHADA::{asset}::Preço:{price:.5f}::EMA21:{ema21:.5f}{cd_msg}", "SYSTEM")
                                         time.sleep(0.2)
                                 except: pass
@@ -572,9 +594,10 @@ class SimpleBot:
 
                     now_sec = datetime.now().second
                     if 57 <= now_sec <= 58:
-                        if time.time() - self.last_loss_time < 120: time.sleep(2); continue
+                        # COOLDOWN CHECK REDUZIDO: 60s
+                        if time.time() - self.last_loss_time < 60: time.sleep(2); continue
                         if not self.best_assets:
-                            self.log_to_db("⛔ Sem ativos válidos (>60%).", "WARNING")
+                            self.log_to_db("⛔ Sem ativos válidos (nem fallback).", "WARNING")
                             time.sleep(2); continue
 
                         current_assets = self.best_assets.copy()
