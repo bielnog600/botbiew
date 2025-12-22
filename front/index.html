@@ -76,15 +76,12 @@
 
             <!-- HOME -->
             <div id="view-home" class="view-section space-y-6 max-w-6xl mx-auto">
-                <!-- TOP BAR -->
                 <div class="flex flex-row justify-between items-center gap-2 mb-4">
                     <div class="flex-1 min-w-0">
                         <h1 class="text-xl md:text-2xl font-bold text-white truncate">Dashboard</h1>
                         <div class="flex items-center gap-2 mt-1 flex-wrap">
                             <span id="bot-status-indicator" class="text-[10px] md:text-xs font-bold text-slate-500 whitespace-nowrap">CARREGANDO...</span>
-                            <span id="mode-badge" class="px-2 py-0.5 rounded text-[10px] font-bold tracking-wider border border-slate-700 bg-slate-800 text-slate-400 transition-colors duration-300 hidden">
-                                MODO: ...
-                            </span>
+                            <span id="mode-badge" class="px-2 py-0.5 rounded text-[10px] font-bold tracking-wider border border-slate-700 bg-slate-800 text-slate-400 transition-colors duration-300 hidden">MODO: ...</span>
                         </div>
                     </div>
                     <div class="flex items-center gap-2 shrink-0">
@@ -97,7 +94,6 @@
                     </div>
                 </div>
 
-                <!-- TOP 3 ASSETS GRID -->
                 <div class="flex items-center justify-between mb-2">
                     <div class="flex items-center gap-2">
                         <i data-lucide="trending-up" class="w-4 h-4 text-amber-500"></i>
@@ -132,22 +128,22 @@
                 </div>
             </div>
 
-            <!-- REPORTS VIEW (NOVA ABA) -->
+            <!-- RELATÓRIOS (NOVA ABA) -->
             <div id="view-reports" class="view-section hidden space-y-6 max-w-6xl mx-auto">
                 <h1 class="text-2xl font-bold text-white mb-4">Relatório de Performance</h1>
                 
                 <!-- CARD MENSAL -->
-                <div class="glass-card p-6 rounded-xl border border-slate-700 relative overflow-hidden">
+                <div class="glass-card p-6 rounded-xl border border-slate-700 relative overflow-hidden bg-gradient-to-br from-slate-900 to-slate-800">
                     <div class="absolute -right-10 -top-10 w-32 h-32 bg-blue-500/10 rounded-full blur-2xl"></div>
-                    <div class="relative z-10 flex justify-between items-center">
+                    <div class="relative z-10 flex flex-wrap justify-between items-center gap-4">
                         <div>
                             <p class="text-xs text-slate-400 font-bold uppercase tracking-wider mb-1">LUCRO MENSAL (ESTIMADO)</p>
-                            <h2 id="report-month-profit" class="text-3xl font-black text-white">---</h2>
-                            <p class="text-[10px] text-slate-500 mt-2">Baseado no histórico de sinais</p>
+                            <h2 id="report-month-profit" class="text-3xl md:text-4xl font-black text-white">---</h2>
+                            <p class="text-[10px] text-slate-500 mt-2 flex items-center gap-1"><i data-lucide="info" class="w-3 h-3"></i> Baseado no histórico de sinais</p>
                         </div>
                         <div class="text-right">
                              <p class="text-xs text-slate-400 font-bold uppercase tracking-wider mb-1">WIN RATE</p>
-                             <h2 id="report-month-rate" class="text-3xl font-black text-blue-400">---</h2>
+                             <h2 id="report-month-rate" class="text-3xl md:text-4xl font-black text-blue-400">---</h2>
                         </div>
                     </div>
                 </div>
@@ -155,7 +151,7 @@
                 <!-- LISTA DIÁRIA -->
                 <div>
                     <h3 class="text-sm font-bold text-slate-400 flex items-center gap-2 mb-4"><i data-lucide="calendar" class="w-4 h-4"></i> Resultado Diário</h3>
-                    <div id="reports-daily-list" class="space-y-3">
+                    <div id="reports-daily-list" class="space-y-3 pb-24">
                         <div class="text-center text-slate-600 text-xs py-8">Carregando dados...</div>
                     </div>
                 </div>
@@ -228,7 +224,7 @@
                 document.querySelectorAll('nav button').forEach(btn => btn.classList.remove('active-nav'));
                 document.querySelectorAll(`button[data-target="${target}"]`).forEach(btn => btn.classList.add('active-nav'));
                 if(target === 'logs') scrollToBottom();
-                if(target === 'reports') fetchReports(); // Carrega relatórios ao entrar
+                if(target === 'reports') fetchReports(); // Carrega Relatórios
             }
         };
 
@@ -245,17 +241,17 @@
             fetchTopAssets(); 
         }
 
-        // --- LÓGICA DE RELATÓRIOS ---
+        // --- RELATÓRIOS INTELIGENTES ---
         async function fetchReports() {
             const list = document.getElementById('reports-daily-list');
             list.innerHTML = '<div class="text-center text-slate-500 py-8 text-xs"><i data-lucide="loader-2" class="w-6 h-6 animate-spin mx-auto mb-2"></i> Calculando...</div>';
             lucide.createIcons();
 
-            // Pega todo o histórico de sinais
+            // Busca histórico (Limite 2000 para cobrir o mês)
             const { data: trades } = await supabaseClient.from('trade_signals')
                 .select('*')
                 .order('created_at', { ascending: false })
-                .limit(1000); // Limite seguro
+                .limit(2000);
 
             if (!trades || trades.length === 0) {
                 list.innerHTML = '<div class="text-center text-slate-600 py-8 text-xs">Sem dados históricos.</div>';
@@ -266,49 +262,56 @@
             let monthProfit = 0;
             let monthWins = 0;
             let monthTotal = 0;
+            const currentMonth = new Date().getMonth();
 
             trades.forEach(t => {
-                const date = new Date(t.created_at).toLocaleDateString('pt-BR');
+                const d = new Date(t.created_at);
+                const dateKey = d.toLocaleDateString('pt-BR');
                 const profit = parseFloat(t.profit);
                 const result = (t.result || t.status || '').toUpperCase();
                 
-                // Inicializa o dia
-                if (!dailyStats[date]) {
-                    dailyStats[date] = { wins: 0, losses: 0, profit: 0, date: t.created_at };
+                // Agrupa por dia
+                if (!dailyStats[dateKey]) {
+                    dailyStats[dateKey] = { wins: 0, losses: 0, profit: 0, date: t.created_at };
                 }
 
-                // Contabiliza
                 let isWin = false;
                 if (!isNaN(profit) && profit > 0) isWin = true;
                 else if (result.includes('WIN')) isWin = true;
 
-                if (isWin) {
-                    dailyStats[date].wins++;
-                    if (!isNaN(profit)) {
-                         dailyStats[date].profit += profit;
-                         monthProfit += profit;
+                // Contabiliza apenas trades finalizados
+                if (result.includes('WIN') || result.includes('LOSS') || profit !== 0) {
+                    if (isWin) {
+                        dailyStats[dateKey].wins++;
+                        if (!isNaN(profit)) {
+                             dailyStats[dateKey].profit += profit;
+                             if (d.getMonth() === currentMonth) monthProfit += profit;
+                        }
+                        if (d.getMonth() === currentMonth) monthWins++;
+                    } else {
+                        dailyStats[dateKey].losses++;
+                        if (!isNaN(profit)) {
+                            dailyStats[dateKey].profit += profit;
+                            if (d.getMonth() === currentMonth) monthProfit += profit;
+                        }
                     }
-                    monthWins++;
-                } else if (result.includes('LOSS') || profit < 0) {
-                    dailyStats[date].losses++;
-                    if (!isNaN(profit)) {
-                        dailyStats[date].profit += profit; // profit é negativo no loss
-                        monthProfit += profit;
-                    }
+                    if (d.getMonth() === currentMonth) monthTotal++;
                 }
-                monthTotal++;
             });
 
             // Atualiza Card Mensal
             const monthRate = monthTotal > 0 ? Math.round((monthWins / monthTotal) * 100) : 0;
             const mpEl = document.getElementById('report-month-profit');
-            mpEl.innerText = `$${monthProfit.toFixed(2)}`;
-            mpEl.className = `text-3xl font-black ${monthProfit >= 0 ? 'text-green-400' : 'text-red-400'}`;
+            mpEl.innerText = `${monthProfit >= 0 ? '+' : ''}$${monthProfit.toFixed(2)}`;
+            mpEl.className = `text-3xl md:text-4xl font-black ${monthProfit >= 0 ? 'text-green-400' : 'text-red-400'}`;
             document.getElementById('report-month-rate').innerText = `${monthRate}%`;
 
-            // Renderiza Lista Diária
+            // Renderiza Lista
             list.innerHTML = '';
-            Object.values(dailyStats).sort((a,b) => new Date(b.date) - new Date(a.date)).forEach(day => {
+            // Ordena datas (mais recente primeiro)
+            const sortedDays = Object.values(dailyStats).sort((a,b) => new Date(b.date) - new Date(a.date));
+            
+            sortedDays.forEach(day => {
                 const item = document.createElement('div');
                 item.className = "glass-card p-4 rounded-xl flex justify-between items-center border-l-4 " + (day.profit >= 0 ? "border-l-green-500" : "border-l-red-500");
                 const dateLabel = new Date(day.date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long' });
@@ -326,8 +329,10 @@
                 `;
                 list.appendChild(item);
             });
+            
+            if (sortedDays.length === 0) list.innerHTML = '<div class="text-center text-slate-600 py-8 text-xs">Nenhum trade finalizado.</div>';
         }
-        
+
         async function fetchInitialLogs() {
             const { data: logs } = await supabaseClient.from('logs').select('*').order('created_at', { ascending: false }).limit(50);
             if(logs && logs.length > 0) {
@@ -351,7 +356,6 @@
         function renderAssetCards(assets) {
             const container = document.getElementById('top-assets-container');
             if (container.innerText.includes('Aguardando') || container.innerText.includes('Nenhum par')) { container.innerHTML = ''; }
-
             if (assets.length === 0) {
                 if (container.children.length === 0) {
                     container.innerHTML = `<div class="col-span-1 md:col-span-3 text-center text-slate-500 py-8 text-sm bg-slate-900/50 rounded-xl border border-dashed border-slate-800"><i data-lucide="search" class="w-6 h-6 mx-auto mb-2 opacity-50"></i> Nenhum par qualificado (>60%)</div>`;
@@ -580,9 +584,11 @@
             if (!confirm("Reiniciar o bot agora?")) return;
             const btn = document.getElementById('restart-bot-btn');
             const originalIcon = btn.innerHTML;
+            
             btn.classList.add("opacity-50", "pointer-events-none");
             btn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i>';
             lucide.createIcons();
+
             try {
                 const { data: { session } } = await supabaseClient.auth.getSession();
                 if (!session) throw new Error("Sessão inválida");
@@ -604,15 +610,18 @@
             }
         });
 
+        // LOGIN HANDLER
         document.getElementById('login-form').addEventListener('submit', async (e) => {
             e.preventDefault();
             const btn = document.getElementById('login-btn');
             const originalText = btn.innerHTML;
             const errorDiv = document.getElementById('login-error');
+            
             btn.innerHTML = '<i data-lucide="loader-2" class="w-5 h-5 animate-spin mx-auto"></i>';
             btn.classList.add('opacity-70', 'pointer-events-none'); 
             errorDiv.classList.add('hidden');
             lucide.createIcons();
+
             try {
                 const email = document.getElementById('email').value;
                 const password = document.getElementById('password').value;
@@ -620,8 +629,7 @@
                 if (error) { throw error; } 
                 else { state.user = data.user; showApp(); startDataLoop(); }
             } catch (err) {
-                console.error("Erro login:", err);
-                errorDiv.textContent = err.message || "Erro de conexão. Tente novamente.";
+                errorDiv.textContent = err.message || "Erro de conexão.";
                 errorDiv.classList.remove('hidden');
                 btn.innerHTML = originalText;
                 btn.classList.remove('opacity-70', 'pointer-events-none');
@@ -780,4 +788,4 @@
         checkSession();
     </script>
 </body>
-</html>c
+</html>
