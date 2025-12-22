@@ -82,7 +82,6 @@
                         <h1 class="text-xl md:text-2xl font-bold text-white truncate">Dashboard</h1>
                         <div class="flex items-center gap-2 mt-1 flex-wrap">
                             <span id="bot-status-indicator" class="text-[10px] md:text-xs font-bold text-slate-500 whitespace-nowrap">CARREGANDO...</span>
-                            <!-- BADGE DE MODO -->
                             <span id="mode-badge" class="px-2 py-0.5 rounded text-[10px] font-bold tracking-wider border border-slate-700 bg-slate-800 text-slate-400 transition-colors duration-300 hidden">
                                 MODO: ...
                             </span>
@@ -109,7 +108,7 @@
                 <!-- GRID DE CARDS -->
                 <div id="top-assets-container" class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
                     <div class="glass-card p-4 rounded-xl border-t-4 border-slate-700 animate-pulse h-24 flex items-center justify-center text-slate-600 text-xs">
-                        A aguardar dados do bot...
+                        Aguardando dados do bot...
                     </div>
                 </div>
 
@@ -248,7 +247,7 @@
         function renderAssetCards(assets) {
             const container = document.getElementById('top-assets-container');
             
-            // Remove placeholders se houver cards reais ou se a lista estiver vazia mas não for inicial
+            // Remove apenas placeholder se ele existir
             if (container.innerText.includes('Aguardando') || container.innerText.includes('Nenhum par')) {
                  container.innerHTML = '';
             }
@@ -311,7 +310,7 @@
                 `;
                 container.appendChild(card);
             } else {
-                // ATUALIZAÇÃO FORTE: Garante que os dados sejam sobrescritos apenas se válidos
+                // ATUALIZAÇÃO FORTE: Garante que os dados sejam sobrescritos
                 if (winRate !== null && winRate !== undefined) {
                      const wrEl = document.getElementById(`winrate-${safePairId}`);
                      if (wrEl) wrEl.innerText = winRateDisplay;
@@ -331,7 +330,7 @@
 
         function processScannerLog(log) {
             const msg = log.message || "";
-            let pair = "", price = "";
+            let pair = "", price = "", winRate = null;
 
             if (msg.startsWith('MODE_ATIVO::')) {
                 const mode = msg.split('::')[1];
@@ -352,57 +351,64 @@
                     const pPart = parts.find(p => p.startsWith('Preço:'));
                     if(pPart) price = pPart.split(':')[1];
                 }
+                
+                // --- NOVO PARSER PARA WINRATE (WR) ---
+                if (msg.includes('WR:')) {
+                    const wrPart = parts.find(p => p.startsWith('WR:'));
+                    if (wrPart) {
+                        const wrStr = wrPart.split(':')[1].replace('%', '');
+                        if (!isNaN(parseFloat(wrStr))) winRate = parseFloat(wrStr);
+                    }
+                }
             } else if (msg.includes('SINAL EM')) {
                 const p1 = msg.split('SINAL EM ')[1];
                 if (p1) pair = p1.split(':')[0].trim();
             }
             
             // 3. PARSER PARA ATUALIZAR WINRATE VIA LOG (IMEDIATO)
-            // Ex: "💎 Melhores: EURUSD-OTC (85%), GBPUSD-OTC (70%)"
             if (msg.includes('💎 Melhores:')) {
                 const content = msg.split('💎 Melhores:')[1];
                 if (content) {
-                    // Split por vírgula para pegar cada par
                     const parts = content.split(',');
                     parts.forEach(part => {
-                        // Regex para pegar Nome e Porcentagem:  "PAIR (80%)"
                         const match = part.trim().match(/^([A-Z0-9\-]+)\s*\((\d+)%\)/);
                         if (match) {
                             const pName = match[1];
                             const pRate = match[2];
-                            createOrUpdateCard(pName, 'EMA V2', pRate, ''); // Atualiza card
+                            createOrUpdateCard(pName, 'EMA V2', pRate, ''); 
                         }
                     });
                 }
                 return;
             }
             
-            // 4. PARSER PARA ATUALIZAR WINRATE VIA LOG FALLBACK (IMEDIATO)
-            // Ex: "⚠️ Fallback agressivo: EURUSD-OTC (WR: 55.0%)"
             if (msg.includes('Fallback agressivo:')) {
                 const match = msg.match(/Fallback agressivo:\s*([A-Z0-9\-]+)\s*\(WR:\s*(\d+(?:\.\d+)?)%\)/);
                  if (match) {
                     const pName = match[1];
                     const pRate = match[2];
-                    createOrUpdateCard(pName, 'EMA V2', pRate, ''); // Atualiza card
+                    createOrUpdateCard(pName, 'EMA V2', pRate, ''); 
                 }
                 return;
             }
-
 
             if (!pair) return;
 
             const safePairId = pair.replace(/[^a-zA-Z0-9]/g, '');
             state.pairTimestamps[safePairId] = Date.now();
             
-            // SE CARD NÃO EXISTE, CRIA (mas sem winrate ainda)
             if (!document.getElementById(`card-${safePairId}`)) {
-                createOrUpdateCard(pair, 'LIVE', null); 
+                createOrUpdateCard(pair, 'LIVE', winRate); 
             }
             
             const card = document.getElementById(`card-${safePairId}`);
             
             if (card) {
+                if (winRate !== null) {
+                    const wrEl = document.getElementById(`winrate-${safePairId}`);
+                    if (wrEl) wrEl.innerText = `${Math.round(winRate)}%`;
+                }
+
                 card.classList.remove('opacity-50');
                 
                 const logEl = document.getElementById(`log-${safePairId}`);
@@ -576,7 +582,6 @@
             setInterval(fetchData, 3000);
             setInterval(updateBotStatus, 5000);
             setInterval(checkInactivePairs, 30000); 
-            // ADICIONADO: Polling de Top Assets
             setInterval(fetchTopAssets, 5000);
         }
 
