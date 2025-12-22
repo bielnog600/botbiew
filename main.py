@@ -122,7 +122,7 @@ class TechnicalAnalysis:
         last = TechnicalAnalysis.analyze_candle(candles[-1])
         prev = TechnicalAnalysis.analyze_candle(candles[-2])
 
-        # AJUSTE 3: Engolfo ainda mais flexível (60% do corpo anterior)
+        # Engolfo flexível (60% do corpo anterior)
         if direction == "call":
             return (
                 last['color'] == 'green' and
@@ -169,8 +169,6 @@ class TechnicalAnalysis:
         if spread < min_spread: return None, f"Filtro: EMAs coladas"
 
         ema21_slope = ema21 - ema21_prev
-        
-        # AJUSTE 1: Inclinação relaxada para 0.02
         min_slope = avg_body * 0.02 
         
         # --- LÓGICA CALL (COMPRA) ---
@@ -179,7 +177,6 @@ class TechnicalAnalysis:
             held_support = reject_candle['close'] >= (ema21 - (avg_body * 0.3))
             
             if touched_ema and held_support:
-                # AJUSTE 2: Rejeição menos exigente (0.4)
                 if reject_candle['lower_wick'] < (reject_candle['body'] * 0.4):
                     return None, "Rejeição fraca (Pavio)"
                 
@@ -195,9 +192,12 @@ class TechnicalAnalysis:
                         flow = TechnicalAnalysis.flow_filter(candles)
                         if flow != "BULL": return None, "Filtro Fluxo contra"
                         
-                        if engulf_required:
-                            if not TechnicalAnalysis.engulf_filter(candles, "call"): 
-                                return None, "Sem força (Engolfo)"
+                        # Fallback horário: Permite entrada sem engolfo perfeito
+                        if not engulf_required:
+                             return 'call', "V2 CALL (Sem engolfo - fallback horário)"
+
+                        if not TechnicalAnalysis.engulf_filter(candles, "call"): 
+                             return None, "Sem força (Engolfo)"
 
                         return 'call', "V2 CALL (Rejeição + Força + Fluxo)"
                     else:
@@ -211,7 +211,6 @@ class TechnicalAnalysis:
             held_resistance = reject_candle['close'] <= (ema21 + (avg_body * 0.3))
             
             if touched_ema and held_resistance:
-                # AJUSTE 2: Rejeição menos exigente (0.4)
                 if reject_candle['upper_wick'] < (reject_candle['body'] * 0.4):
                     return None, "Rejeição fraca (Pavio)"
                 
@@ -226,9 +225,12 @@ class TechnicalAnalysis:
                         flow = TechnicalAnalysis.flow_filter(candles)
                         if flow != "BEAR": return None, "Filtro Fluxo contra"
                         
-                        if engulf_required:
-                            if not TechnicalAnalysis.engulf_filter(candles, "put"): 
-                                return None, "Sem força (Engolfo)"
+                        # Fallback horário: Permite entrada sem engolfo perfeito
+                        if not engulf_required:
+                             return 'put', "V2 PUT (Sem engolfo - fallback horário)"
+
+                        if not TechnicalAnalysis.engulf_filter(candles, "put"): 
+                             return None, "Sem força (Engolfo)"
 
                         return 'put', "V2 PUT (Rejeição + Força + Fluxo)"
                     else:
@@ -400,13 +402,12 @@ class SimpleBot:
         results = []
         for asset in assets_list:
             try:
-                # AUMENTADO PARA 200 CANDLES (Estatística mais robusta)
+                # AUMENTADO PARA 200 CANDLES
                 candles = self.api.get_candles(asset, 60, 200, int(time.time()))
                 if not candles or len(candles) < 100: continue
                 wins, total = 0, 0
-                for i in range(60, len(candles)-1): # Buffer 60 para flow filter
+                for i in range(60, len(candles)-1): # Buffer 60
                     subset = candles[i-60:i+1]
-                    # Testa a estratégia nova no passado
                     signal, _ = TechnicalAnalysis.get_signal(subset)
                     if signal:
                         total += 1
@@ -415,12 +416,10 @@ class SimpleBot:
                                  (signal == 'put' and nxt['close'] < nxt['open'])
                         if is_win: wins += 1
                 
-                # Critério de aceitação de pares com SCORE
+                # SCORE COM PESO EM QUANTIDADE
                 if total >= 2: 
                     wr = (wins / total) * 100
-                    # NOVO SCORE: Peso para winrate E volume
                     score = (wr * 0.7) + (total * 5)
-                    
                     results.append({
                         "pair": asset, 
                         "win_rate": wr, 
@@ -432,10 +431,10 @@ class SimpleBot:
             except: pass
             time.sleep(0.05)
         
-        # Ordena por SCORE, não apenas WinRate
+        # ORDENA POR SCORE
         results.sort(key=lambda x: x['score'], reverse=True)
-
-        # Filtro Rigoroso
+        
+        # Filtro Rigoroso 60%
         valid_results = [r for r in results if r['win_rate'] >= 60]
         
         if valid_results:
@@ -517,9 +516,9 @@ class SimpleBot:
                 else: res_str, profit = 'DOJI', 0.0
             except: res_str = 'UNKNOWN'
 
+            # COOLDOWN REDUZIDO (60s)
             if res_str == 'LOSS': 
                 self.last_loss_time = time.time()
-                # COOLDOWN AGRESSIVO: Reduzido para 60s
                 self.log_to_db(f"🛑 Cooldown ativo: Pausa de 60s.", "WARNING")
 
             log_type = "SUCCESS" if res_str == 'WIN' else "ERROR" if res_str == 'LOSS' else "WARNING"
@@ -573,8 +572,8 @@ class SimpleBot:
                             self.update_balance_remote()
                             targets = self.best_assets[:3] if self.best_assets else ["EURUSD-OTC"]
                             
-                            # Log do modo fixo para UI
-                            self.log_to_db(f"MODE_ATIVO::EMA_V2_CONFIRM", "SYSTEM")
+                            # Log com sufixo AGGRESSIVE
+                            self.log_to_db(f"MODE_ATIVO::EMA_V2_FLOW_AGGRESSIVE", "SYSTEM")
 
                             for asset in targets:
                                 try:
@@ -582,7 +581,7 @@ class SimpleBot:
                                     if candles:
                                         price = candles[-1]['close']
                                         ema21 = TechnicalAnalysis.calculate_ema(candles, 21)
-                                        # COOLDOWN CHECK REDUZIDO: 60s
+                                        # COOLDOWN CHECK 60s
                                         cd_msg = " [COOLDOWN]" if (time.time() - self.last_loss_time < 60) else ""
                                         self.log_to_db(f"ANALISE_DETALHADA::{asset}::Preço:{price:.5f}::EMA21:{ema21:.5f}{cd_msg}", "SYSTEM")
                                         time.sleep(0.2)
@@ -596,8 +595,9 @@ class SimpleBot:
                     if not self.check_management(): time.sleep(5); continue
 
                     now_sec = datetime.now().second
-                    if 57 <= now_sec <= 58:
-                        # COOLDOWN CHECK REDUZIDO: 60s
+                    # JANELA DE EXECUÇÃO AMPLIADA 55-59
+                    if 55 <= now_sec <= 59:
+                        # COOLDOWN CHECK 60s
                         if time.time() - self.last_loss_time < 60: time.sleep(2); continue
                         if not self.best_assets:
                             self.log_to_db("⛔ Sem ativos válidos (nem fallback).", "WARNING")
