@@ -41,6 +41,12 @@
         input, select, textarea, button { -webkit-appearance: none; border-radius: 0.75rem; }
         .scrollbar-hide::-webkit-scrollbar { display: none; }
         .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+
+        /* Animation for details expansion */
+        .details-content { transition: max-height 0.3s ease-in-out, opacity 0.3s ease-in-out; max-height: 0; opacity: 0; overflow: hidden; }
+        .details-content.open { max-height: 500px; opacity: 1; }
+        .rotate-icon { transition: transform 0.3s ease; }
+        .rotate-icon.open { transform: rotate(180deg); }
     </style>
 </head>
 <body class="flex flex-col h-screen">
@@ -146,7 +152,7 @@
                     </div>
                 </div>
                 <div>
-                    <h3 class="text-sm font-bold text-slate-400 flex items-center gap-2 mb-4"><i data-lucide="list" class="w-4 h-4"></i> Histórico Diário</h3>
+                    <h3 class="text-sm font-bold text-slate-400 flex items-center gap-2 mb-4"><i data-lucide="list" class="w-4 h-4"></i> Histórico Diário <span class="text-[10px] text-slate-500 font-normal ml-2">(Clique para expandir)</span></h3>
                     <div id="reports-daily-list" class="space-y-3 pb-24">
                         <div class="text-center text-slate-600 text-xs py-8">Carregando dados...</div>
                     </div>
@@ -158,6 +164,11 @@
                 <h1 class="text-2xl font-bold text-white">Configurações</h1>
                 <form id="settings-form" class="space-y-6">
                     <div class="glass-card p-6 rounded-xl space-y-6">
+                        <div class="flex items-center justify-between border-b border-slate-700 pb-4">
+                            <label class="text-sm font-bold text-white flex items-center gap-2"><i data-lucide="bell" class="w-4 h-4 text-amber-500"></i> Notificações</label>
+                            <button type="button" onclick="requestNotificationPermission(true)" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded-lg border border-slate-700 transition-colors">Testar / Ativar</button>
+                        </div>
+
                         <div>
                             <label class="text-xs text-slate-400 block mb-1">Modo de Gerenciamento</label>
                             <select id="conf-stop-mode" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white outline-none">
@@ -212,7 +223,7 @@
         // Ensure RLS (Row Level Security) is enabled on your Supabase tables.
         const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlvZHVhaHdrbmZza3R1anRoZnljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEzMDc0NDcsImV4cCI6MjA2Njg4MzQ0N30.96f8wZO6SvABKFMWjIiw1pSugAB4Isldj7yxLcLJRSE';
         let supabaseClient;
-        const state = { user: null, config: {}, lastLogTime: null, lastLogId: null, pairTimestamps: {} };
+        const state = { user: null, config: {}, lastLogTime: null, lastLogId: null, pairTimestamps: {}, appStartTime: new Date() };
 
         // ---------------- ROUTER ----------------
         // Defines the router object used by the onclick handlers
@@ -274,6 +285,7 @@
                 if(clearHistoryBtn) clearHistoryBtn.addEventListener('click', handleClearHistory);
 
                 checkSession();
+                requestNotificationPermission(false);
             } catch(e) {
                 console.error("Init Error:", e);
                 alert("Erro ao iniciar aplicativo. Verifique sua conexão.");
@@ -398,7 +410,7 @@
                     const profit = parseFloat(t.profit);
                     const result = (t.result || t.status || '').toUpperCase();
                     
-                    if (!dailyStats[dateKey]) dailyStats[dateKey] = { wins: 0, losses: 0, profit: 0, date: t.created_at };
+                    if (!dailyStats[dateKey]) dailyStats[dateKey] = { wins: 0, losses: 0, profit: 0, date: t.created_at, trades: [] };
 
                     let isWin = result.includes('WIN') || (!isNaN(profit) && profit > 0);
                     if (result.includes('WIN') || result.includes('LOSS') || (profit !== 0 && !isNaN(profit))) {
@@ -412,6 +424,7 @@
                         }
                         if (d.getMonth() === currentMonth) monthTotal++;
                     }
+                    dailyStats[dateKey].trades.push(t);
                 });
 
                 const monthRate = monthTotal > 0 ? Math.round((monthWins / monthTotal) * 100) : 0;
@@ -426,16 +439,68 @@
                 list.innerHTML = '';
                 Object.values(dailyStats).sort((a,b) => new Date(b.date) - new Date(a.date)).forEach(day => {
                     const item = document.createElement('div');
-                    item.className = "glass-card p-4 rounded-xl flex justify-between items-center border-l-4 " + (day.profit >= 0 ? "border-l-green-500" : "border-l-red-500");
-                    item.innerHTML = `<div><p class="text-sm font-bold text-white capitalize">${new Date(day.date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long' })}</p><p class="text-[10px] text-slate-400 font-mono mt-1">${day.wins} Wins / ${day.losses} Loss</p></div><div class="text-right"><p class="text-lg font-bold font-mono ${day.profit >= 0 ? 'text-green-400' : 'text-red-400'}">${day.profit >= 0 ? '+' : ''}$${day.profit.toFixed(2)}</p></div>`;
+                    item.className = "glass-card rounded-xl overflow-hidden border-l-4 " + (day.profit >= 0 ? "border-l-green-500" : "border-l-red-500");
+                    const safeDate = new Date(day.date).getTime();
+                    
+                    const tradesHtml = day.trades.map(t => {
+                        const tProfit = parseFloat(t.profit);
+                        const tResult = (t.result || t.status || '').toUpperCase();
+                        const isWin = tResult.includes('WIN') || (!isNaN(tProfit) && tProfit > 0);
+                        const isLoss = tResult.includes('LOSS') || (!isNaN(tProfit) && tProfit < 0);
+                        const colorClass = isWin ? 'text-green-400' : (isLoss ? 'text-red-400' : 'text-slate-400');
+                        const icon = t.direction === 'call' ? 'arrow-up' : 'arrow-down';
+                        return `
+                            <div class="flex justify-between items-center py-2 border-b border-white/5 last:border-0 hover:bg-white/5 px-2 rounded">
+                                <div class="flex items-center gap-2">
+                                    <span class="text-[10px] text-slate-500 font-mono">${new Date(t.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                                    <span class="text-xs font-bold text-white">${t.pair}</span>
+                                    <i data-lucide="${icon}" class="w-3 h-3 ${t.direction === 'call' ? 'text-green-500' : 'text-red-500'}"></i>
+                                </div>
+                                <div class="text-right">
+                                    <span class="text-[10px] font-bold ${colorClass}">${isWin ? 'WIN' : (isLoss ? 'LOSS' : 'PEND')}</span>
+                                    <span class="text-[10px] font-mono block ${colorClass}">${!isNaN(tProfit) ? (tProfit>=0?'+':'') + '$'+tProfit.toFixed(2) : '-'}</span>
+                                </div>
+                            </div>
+                        `;
+                    }).join('');
+
+                    item.innerHTML = `
+                        <div class="p-4 cursor-pointer hover:bg-white/5 transition-colors" onclick="toggleDetails('${safeDate}')">
+                            <div class="flex justify-between items-center">
+                                <div>
+                                    <p class="text-sm font-bold text-white capitalize flex items-center gap-2">
+                                        ${new Date(day.date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long' })}
+                                        <i data-lucide="chevron-down" id="icon-${safeDate}" class="w-4 h-4 text-slate-500 rotate-icon"></i>
+                                    </p>
+                                    <p class="text-[10px] text-slate-400 font-mono mt-1">${day.wins} Wins / ${day.losses} Loss</p>
+                                </div>
+                                <div class="text-right">
+                                    <p class="text-lg font-bold font-mono ${day.profit >= 0 ? 'text-green-400' : 'text-red-400'}">${day.profit >= 0 ? '+' : ''}$${day.profit.toFixed(2)}</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="details-${safeDate}" class="details-content bg-black/20 px-4">
+                            <div class="py-2 space-y-1">
+                                ${tradesHtml}
+                            </div>
+                        </div>
+                    `;
                     list.appendChild(item);
                 });
+                lucide.createIcons();
             } catch (e) {
                 console.error("Erro reports", e);
                 list.innerHTML = '<div class="text-center text-red-500 py-8 text-xs">Erro ao carregar dados.</div>';
             }
         }
         
+        function toggleDetails(id) {
+            const content = document.getElementById(`details-${id}`);
+            const icon = document.getElementById(`icon-${id}`);
+            if (content) content.classList.toggle('open');
+            if (icon) icon.classList.toggle('open');
+        }
+
         async function fetchInitialLogs() {
             try {
                 const { data: logs } = await supabaseClient.from('logs').select('*').order('created_at', { ascending: false }).limit(50);
@@ -451,6 +516,43 @@
                     updateBotStatus();
                 }
             } catch (e) { console.error("Logs error", e); }
+        }
+
+        // ---------------- NOTIFICATIONS ----------------
+
+        function requestNotificationPermission(isManual = false) {
+            if (!("Notification" in window)) {
+                if(isManual) alert("Este navegador não suporta notificações.");
+                return;
+            }
+
+            if (Notification.permission === "granted") {
+                if(isManual) new Notification("Marombiew Bot", { body: "Notificações ativas! 🚀", icon: "https://cdn-icons-png.flaticon.com/512/4712/4712109.png" });
+                return;
+            }
+
+            if (Notification.permission !== "denied") {
+                Notification.requestPermission().then((permission) => {
+                    if (permission === "granted" && isManual) {
+                        new Notification("Marombiew Bot", { body: "Notificações ativadas com sucesso! 🚀", icon: "https://cdn-icons-png.flaticon.com/512/4712/4712109.png" });
+                    }
+                });
+            } else if(isManual) {
+                alert("Notificações bloqueadas. Habilite nas configurações do navegador/sistema.");
+            }
+        }
+
+        function sendSignalNotification(pair, direction) {
+            if (Notification.permission === "granted") {
+                // Tenta vibrar em dispositivos Android
+                if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+                
+                new Notification("Sinal Identificado! 🚀", {
+                    body: `${pair} - ${direction} 🤑`,
+                    icon: "https://cdn-icons-png.flaticon.com/512/4712/4712109.png",
+                    tag: "marombiew-signal"
+                });
+            }
         }
 
         // ---------------- HANDLERS ----------------
@@ -644,7 +746,7 @@
                     </div>
                     <div class="flex justify-between items-end">
                         <div><p class="text-[8px] text-slate-500 mb-0.5">PREÇO</p><p class="text-base font-mono text-slate-300" id="price-${safePairId}">---</p></div>
-                        <div class="text-right"><p class="text-[8px] text-slate-500 mb-0.5">STATUS</p><p class="text-[10px] font-bold text-slate-400" id="status-${safePairId}">AGUARDANDO</p></div>
+                        <div class="text-right"><p class="text-[8px] text-slate-500 mb-0.5">STATUS</p><p class="text-[9px] font-bold text-slate-400" id="status-${safePairId}">AGUARDANDO</p></div>
                     </div>
                     <div class="mt-2 pt-2 border-t border-white/5"><p class="text-[8px] text-slate-500 font-mono truncate" id="log-${safePairId}">Sincronizando...</p></div>
                 `;
@@ -669,6 +771,22 @@
         function processScannerLog(log) {
             const msg = log.message || "";
             let pair = "", price = "", winRate = null;
+
+            // --- NOTIFICATIONS LOGIC START ---
+            if (msg.includes('SINAL') && !msg.includes('PENDING') && new Date(log.created_at) > state.appStartTime) {
+                // Tenta extrair par e direção
+                let notifPair = "PAR";
+                let notifDir = "ENTRADA";
+                if(msg.includes('SINAL EM')) {
+                     const parts = msg.split('SINAL EM ');
+                     if(parts[1]) notifPair = parts[1].split(':')[0].trim();
+                }
+                if(msg.includes('CALL') || msg.includes('COMPRA')) notifDir = "COMPRA 🔼";
+                if(msg.includes('PUT') || msg.includes('VENDA')) notifDir = "VENDA 🔽";
+                
+                sendSignalNotification(notifPair, notifDir);
+            }
+            // --- NOTIFICATIONS LOGIC END ---
 
             if (msg.startsWith('MODE_ATIVO::')) {
                 const mode = msg.split('::')[1];
@@ -744,15 +862,15 @@
                 const priceEl = document.getElementById(`price-${safePairId}`);
 
                 if (msg.includes('SCAN_ENTRADA')) {
-                    if(statusEl) { statusEl.textContent = 'ANALISANDO'; statusEl.className = 'text-xs font-bold text-amber-400 animate-pulse'; }
+                    if(statusEl) { statusEl.textContent = 'ANALISANDO'; statusEl.className = 'text-[9px] font-bold text-amber-400 animate-pulse'; }
                     if(ledEl) ledEl.className = 'w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse';
                     card.classList.add('border-amber-500');
                     setTimeout(() => card.classList.remove('border-amber-500'), 1000);
                 } else if (msg.includes('SINAL')) {
-                    if(statusEl) { statusEl.textContent = 'SINAL!'; statusEl.className = 'text-xs font-bold text-green-400 animate-bounce'; }
+                    if(statusEl) { statusEl.textContent = 'SINAL!'; statusEl.className = 'text-[9px] font-bold text-green-400 animate-bounce'; }
                     if(ledEl) ledEl.className = 'w-1.5 h-1.5 rounded-full bg-green-500 animate-ping';
                 } else if (msg.includes('ANALISE_DETALHADA')) {
-                    if(statusEl) { statusEl.textContent = 'MONITORANDO'; statusEl.className = 'text-xs font-bold text-blue-400'; }
+                    if(statusEl) { statusEl.textContent = 'MONITORANDO'; statusEl.className = 'text-[9px] font-bold text-blue-400'; }
                     if(ledEl) ledEl.className = 'w-1.5 h-1.5 rounded-full bg-blue-500';
                     card.classList.remove('border-amber-500');
                 }
@@ -774,7 +892,7 @@
                     const statusEl = document.getElementById(`status-${safePairId}`);
                     const ledEl = document.getElementById(`led-${safePairId}`);
                     const card = document.getElementById(`card-${safePairId}`);
-                    if (statusEl) { statusEl.innerText = 'INATIVO'; statusEl.className = 'text-[10px] font-bold text-slate-600'; }
+                    if (statusEl) { statusEl.innerText = 'INATIVO'; statusEl.className = 'text-[9px] font-bold text-slate-600'; }
                     if (ledEl) { ledEl.className = 'w-1.5 h-1.5 rounded-full bg-slate-700'; }
                     if (card) { card.classList.add('opacity-50'); }
                 }
