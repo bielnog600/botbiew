@@ -6,7 +6,7 @@ import threading
 import os
 import random
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 # Certifique-se de instalar: pip install supabase exnovaapi requests
 from supabase import create_client, Client
 
@@ -124,7 +124,7 @@ class TechnicalAnalysis:
     @staticmethod
     def get_signal(candles):
         if len(candles) < 60: return None, "Dados insuficientes"
-        current_hour = datetime.now().hour
+        current_hour = datetime.now(timezone.utc).hour
         engulf_required = True
         if current_hour >= 14: engulf_required = False
 
@@ -193,7 +193,8 @@ class SimpleBot:
             "timer_enabled": False, "timer_start": "00:00", "timer_end": "00:00"
         }
         self.last_loss_time = 0
-        self.asset_cooldowns = {} 
+        self.asset_cooldowns = {}  # Cooldown por LOSS
+        self.last_trade_time = {}  # Anti-duplicação
         self.init_supabase()
 
     def init_supabase(self):
@@ -210,7 +211,7 @@ class SimpleBot:
         if not self.supabase: return
         try:
             self.supabase.table("logs").insert({
-                "message": message, "level": level, "created_at": datetime.now().isoformat()
+                "message": message, "level": level, "created_at": datetime.now(timezone.utc).isoformat()
             }).execute()
         except: 
             try: 
@@ -247,7 +248,7 @@ class SimpleBot:
 
     def check_schedule(self):
         if not self.config.get("timer_enabled", False): return 
-        now_str = datetime.now().strftime("%H:%M")
+        now_str = datetime.now(timezone.utc).strftime("%H:%M") # UTC para consistência
         start_str = self.config.get("timer_start", "00:00")
         end_str = self.config.get("timer_end", "00:00")
         is_inside = False
@@ -388,6 +389,12 @@ class SimpleBot:
         return result[0] if result[0] else (False, None)
 
     def execute_trade(self, asset, direction):
+        # 3. PROTEÇÃO DE DUPLICAÇÃO DE TRADES (USANDO DICIONÁRIO DEDICADO)
+        last = self.last_trade_time.get(asset)
+        if last and time.time() - last < 70:
+            return
+        self.last_trade_time[asset] = time.time()
+
         if not self.api: return
         try: balance_before = self.api.get_balance()
         except: return
@@ -405,7 +412,9 @@ class SimpleBot:
             if self.supabase:
                 res = self.supabase.table("trade_signals").insert({
                     "pair": asset, "direction": direction, "strategy": f"EMA V2",
-                    "status": "PENDING", "result": "PENDING", "created_at": datetime.now().isoformat(), "profit": 0
+                    "status": "PENDING", "result": "PENDING", 
+                    "created_at": datetime.now(timezone.utc).isoformat(), # 2. TIMEZONE CORRIGIDO
+                    "profit": 0
                 }).execute()
                 if res.data: sig_id = res.data[0]['id']
         except: pass
@@ -422,8 +431,22 @@ class SimpleBot:
                 delta = balance_after - balance_before
                 if delta > 0: res_str, profit = 'WIN', delta
                 elif delta < 0: res_str, profit = 'LOSS', delta
-                else: res_str, profit = 'DOJI', 0.0
+                else: 
+                    # 1. DOJI LOGIC
+                    res_str = 'DOJI'
+                    profit = None
             except: res_str = 'UNKNOWN'
+
+            # 1. DOJI IGNORED
+            if res_str == 'DOJI':
+                self.log_to_db("⚠️ DOJI ignorado (não contabilizado)", "WARNING")
+                with self.trade_lock:
+                    self.active_trades.discard(asset)
+                # Opcional: Remover sinal do banco se quiser limpar totalmente
+                if sig_id and self.supabase:
+                    try: self.supabase.table("trade_signals").delete().eq("id", sig_id).execute()
+                    except: pass
+                return
 
             if res_str == 'LOSS': 
                 self.asset_cooldowns[asset] = time.time()
