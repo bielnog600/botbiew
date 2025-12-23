@@ -9,7 +9,6 @@
     <meta name="theme-color" content="#0f172a">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <link rel="manifest" href="manifest.json">
     <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/4712/4712109.png">
 
     <!-- Tailwind & Supabase -->
@@ -33,7 +32,10 @@
         ::-webkit-scrollbar { width: 4px; background: #0f172a; }
         ::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
         .hidden { display: none !important; }
-        .active-nav { color: var(--gold); }
+        
+        /* Active Navigation State */
+        .active-nav { color: var(--gold) !important; background-color: rgba(245, 158, 11, 0.1); }
+        .active-nav i { color: var(--gold); }
         
         /* Fix iOS inputs */
         input, select, textarea, button { -webkit-appearance: none; border-radius: 0.75rem; }
@@ -68,7 +70,7 @@
                 <i data-lucide="zap" class="text-amber-500 w-6 h-6 mr-3"></i><span class="font-bold text-lg text-white">MAROMBIEW</span>
             </div>
             <nav class="flex-1 p-4 space-y-2">
-                <button onclick="router.navigate('home')" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800/50 hover:text-white" data-target="home"><i data-lucide="layout-dashboard" class="w-5 h-5"></i> Dashboard</button>
+                <button onclick="router.navigate('home')" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800/50 hover:text-white active-nav" data-target="home"><i data-lucide="layout-dashboard" class="w-5 h-5"></i> Dashboard</button>
                 <button onclick="router.navigate('reports')" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800/50 hover:text-white" data-target="reports"><i data-lucide="bar-chart-2" class="w-5 h-5"></i> Relatórios</button>
                 <button onclick="router.navigate('settings')" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800/50 hover:text-white" data-target="settings"><i data-lucide="settings" class="w-5 h-5"></i> Configurações</button>
                 <button onclick="router.navigate('logs')" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800/50 hover:text-white" data-target="logs"><i data-lucide="terminal" class="w-5 h-5"></i> Terminal</button>
@@ -197,18 +199,53 @@
         </main>
 
         <nav class="md:hidden fixed bottom-0 left-0 right-0 bg-[#0f172a]/95 backdrop-blur-xl border-t border-slate-800 flex justify-around px-2 pb-safe z-40 h-16 items-center">
-            <button onclick="router.navigate('home')" class="flex flex-col items-center p-2 text-slate-500 active-nav" data-target="home"><i data-lucide="layout-dashboard" class="w-5 h-5"></i></button>
-            <button onclick="router.navigate('reports')" class="flex flex-col items-center p-2 text-slate-500" data-target="reports"><i data-lucide="bar-chart-2" class="w-5 h-5"></i></button>
-            <button onclick="router.navigate('settings')" class="flex flex-col items-center p-2 text-slate-500" data-target="settings"><i data-lucide="settings" class="w-5 h-5"></i></button>
-            <button onclick="router.navigate('logs')" class="flex flex-col items-center p-2 text-slate-500" data-target="logs"><i data-lucide="terminal" class="w-5 h-5"></i></button>
+            <button onclick="router.navigate('home')" class="flex flex-col items-center p-2 text-slate-500 active-nav rounded-lg" data-target="home"><i data-lucide="layout-dashboard" class="w-5 h-5"></i></button>
+            <button onclick="router.navigate('reports')" class="flex flex-col items-center p-2 text-slate-500 rounded-lg" data-target="reports"><i data-lucide="bar-chart-2" class="w-5 h-5"></i></button>
+            <button onclick="router.navigate('settings')" class="flex flex-col items-center p-2 text-slate-500 rounded-lg" data-target="settings"><i data-lucide="settings" class="w-5 h-5"></i></button>
+            <button onclick="router.navigate('logs')" class="flex flex-col items-center p-2 text-slate-500 rounded-lg" data-target="logs"><i data-lucide="terminal" class="w-5 h-5"></i></button>
         </nav>
     </div>
 
     <script>
         const SUPABASE_URL = 'https://ioduahwknfsktujthfyc.supabase.co';
+        // Note: It's generally not safe to expose API keys in frontend code. 
+        // Ensure RLS (Row Level Security) is enabled on your Supabase tables.
         const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlvZHVhaHdrbmZza3R1anRoZnljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEzMDc0NDcsImV4cCI6MjA2Njg4MzQ0N30.96f8wZO6SvABKFMWjIiw1pSugAB4Isldj7yxLcLJRSE';
         let supabaseClient;
         const state = { user: null, config: {}, lastLogTime: null, lastLogId: null, pairTimestamps: {} };
+
+        // ---------------- ROUTER ----------------
+        // Defines the router object used by the onclick handlers
+        const router = {
+            navigate: (viewName) => {
+                // Hide all sections
+                document.querySelectorAll('.view-section').forEach(el => el.classList.add('hidden'));
+                
+                // Show target section
+                const targetEl = document.getElementById(`view-${viewName}`);
+                if (targetEl) targetEl.classList.remove('hidden');
+
+                // Update navigation buttons (Desktop & Mobile)
+                document.querySelectorAll('[data-target]').forEach(btn => {
+                    if (btn.dataset.target === viewName) {
+                        btn.classList.add('active-nav', 'text-amber-500');
+                        btn.classList.remove('text-slate-400', 'text-slate-500');
+                    } else {
+                        btn.classList.remove('active-nav', 'text-amber-500');
+                        btn.classList.add('text-slate-400'); // Standard text color
+                        btn.classList.remove('text-slate-500'); // Reset mobile specific
+                        if(btn.parentElement.tagName === 'NAV' && btn.parentElement.classList.contains('md:hidden')) {
+                             btn.classList.add('text-slate-500'); // Re-add mobile color
+                        }
+                    }
+                });
+
+                // Trigger specific fetch if needed
+                if (viewName === 'reports') {
+                    fetchReports();
+                }
+            }
+        };
 
         // ---------------- INICIALIZAÇÃO ----------------
 
@@ -554,8 +591,8 @@
                     lucide.createIcons();
                 }
                 else if (container.querySelector('[id^="card-"]')) {
-                     container.innerHTML = `<div class="col-span-1 md:col-span-3 text-center text-slate-500 py-8 text-sm bg-slate-900/50 rounded-xl border border-dashed border-slate-800 w-full flex-shrink-0"><i data-lucide="search" class="w-6 h-6 mx-auto mb-2 opacity-50"></i> Nenhum par qualificado (>60%)</div>`;
-                     lucide.createIcons();
+                      container.innerHTML = `<div class="col-span-1 md:col-span-3 text-center text-slate-500 py-8 text-sm bg-slate-900/50 rounded-xl border border-dashed border-slate-800 w-full flex-shrink-0"><i data-lucide="search" class="w-6 h-6 mx-auto mb-2 opacity-50"></i> Nenhum par qualificado (>60%)</div>`;
+                      lucide.createIcons();
                 }
                 return;
             }
@@ -614,12 +651,12 @@
                 container.appendChild(card);
             } else {
                 if (winRate !== null && winRate !== undefined) {
-                     const wrEl = document.getElementById(`winrate-${safePairId}`);
-                     if (wrEl) wrEl.innerText = winRateDisplay;
+                      const wrEl = document.getElementById(`winrate-${safePairId}`);
+                      if (wrEl) wrEl.innerText = winRateDisplay;
                 }
                 if (strategy && strategy !== 'LIVE') {
-                     const stEl = document.getElementById(`strat-${safePairId}`);
-                     if (stEl) stEl.innerText = strategy;
+                      const stEl = document.getElementById(`strat-${safePairId}`);
+                      if (stEl) stEl.innerText = strategy;
                 }
                 if (badge) {
                     const bgEl = document.getElementById(`badge-${safePairId}`);
