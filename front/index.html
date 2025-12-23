@@ -93,11 +93,9 @@
                     <div class="flex items-center gap-2"><i data-lucide="trending-up" class="w-4 h-4 text-amber-500"></i><h3 class="text-sm font-bold text-slate-400 uppercase tracking-widest">Melhores Oportunidades (>60%)</h3></div>
                 </div>
                 
-                <!-- GRID DE CARDS (Horizontal Scroll no Mobile) -->
-                <div id="top-assets-container" class="flex overflow-x-auto pb-4 gap-3 snap-x md:grid md:grid-cols-3 md:pb-0 md:overflow-visible mb-6 scrollbar-hide">
-                    <div class="glass-card p-4 rounded-xl border-t-4 border-slate-700 animate-pulse h-24 flex items-center justify-center text-slate-600 text-xs w-full flex-shrink-0 md:w-auto md:col-span-3">
-                        A aguardar dados do bot...
-                    </div>
+                <!-- GRID DE CARDS (Horizontal Scroll no Mobile, Limpo Inicialmente) -->
+                <div id="top-assets-container" class="flex overflow-x-auto pb-4 gap-3 snap-x md:grid md:grid-cols-3 md:pb-0 md:overflow-visible mb-6 scrollbar-hide min-h-[120px]">
+                    <!-- Será preenchido via JS -->
                 </div>
 
                 <div class="grid grid-cols-2 gap-4">
@@ -228,72 +226,7 @@
             fetchTopAssets(); 
         }
 
-        async function fetchReports() {
-            const list = document.getElementById('reports-daily-list');
-            list.innerHTML = '<div class="text-center text-slate-500 py-8 text-xs"><i data-lucide="loader-2" class="w-6 h-6 animate-spin mx-auto mb-2"></i> Calculando...</div>';
-            lucide.createIcons();
-
-            const { data: trades } = await supabaseClient.from('trade_signals').select('*').order('created_at', { ascending: false }).limit(2000);
-
-            if (!trades || trades.length === 0) {
-                list.innerHTML = '<div class="text-center text-slate-600 py-8 text-xs">Sem dados históricos.</div>';
-                return;
-            }
-
-            const dailyStats = {};
-            let monthProfit = 0, monthWins = 0, monthTotal = 0;
-            const currentMonth = new Date().getMonth();
-
-            trades.forEach(t => {
-                const d = new Date(t.created_at);
-                const dateKey = d.toLocaleDateString('pt-BR');
-                const profit = parseFloat(t.profit);
-                const result = (t.result || t.status || '').toUpperCase();
-                
-                if (!dailyStats[dateKey]) dailyStats[dateKey] = { wins: 0, losses: 0, profit: 0, date: t.created_at };
-
-                let isWin = result.includes('WIN') || (!isNaN(profit) && profit > 0);
-                if (result.includes('WIN') || result.includes('LOSS') || profit !== 0) {
-                    if (isWin) {
-                        dailyStats[dateKey].wins++;
-                        if (!isNaN(profit)) { dailyStats[dateKey].profit += profit; if (d.getMonth() === currentMonth) monthProfit += profit; }
-                        if (d.getMonth() === currentMonth) monthWins++;
-                    } else {
-                        dailyStats[dateKey].losses++;
-                        if (!isNaN(profit)) { dailyStats[dateKey].profit += profit; if (d.getMonth() === currentMonth) monthProfit += profit; }
-                    }
-                    if (d.getMonth() === currentMonth) monthTotal++;
-                }
-            });
-
-            const monthRate = monthTotal > 0 ? Math.round((monthWins / monthTotal) * 100) : 0;
-            const mpEl = document.getElementById('report-month-profit');
-            mpEl.innerText = `${monthProfit >= 0 ? '+' : ''}$${monthProfit.toFixed(2)}`;
-            mpEl.className = `text-3xl md:text-4xl font-black ${monthProfit >= 0 ? 'text-green-400' : 'text-red-400'}`;
-            document.getElementById('report-month-rate').innerText = `${monthRate}%`;
-
-            list.innerHTML = '';
-            Object.values(dailyStats).sort((a,b) => new Date(b.date) - new Date(a.date)).forEach(day => {
-                const item = document.createElement('div');
-                item.className = "glass-card p-4 rounded-xl flex justify-between items-center border-l-4 " + (day.profit >= 0 ? "border-l-green-500" : "border-l-red-500");
-                item.innerHTML = `<div><p class="text-sm font-bold text-white capitalize">${new Date(day.date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long' })}</p><p class="text-[10px] text-slate-400 font-mono mt-1">${day.wins} Wins / ${day.losses} Loss</p></div><div class="text-right"><p class="text-lg font-bold font-mono ${day.profit >= 0 ? 'text-green-400' : 'text-red-400'}">${day.profit >= 0 ? '+' : ''}$${day.profit.toFixed(2)}</p></div>`;
-                list.appendChild(item);
-            });
-        }
-
-        async function fetchInitialLogs() {
-            const { data: logs } = await supabaseClient.from('logs').select('*').order('created_at', { ascending: false }).limit(50);
-            if(logs && logs.length > 0) {
-                const term = document.getElementById('terminal-output');
-                term.innerHTML = '<div class="text-slate-500 mb-2 border-b border-slate-800 pb-2">Marombiew Bot Terminal v2.0 <br> Carregando histórico...</div>';
-                [...logs].reverse().forEach(l => { appendLog(l); });
-                state.lastLogTime = new Date(logs[0].created_at);
-                state.lastLogId = logs[0].id;
-                logs.slice(0, 10).forEach(l => processScannerLog(l)); 
-                updateBotStatus();
-            }
-        }
-
+        // --- FETCH TOP ASSETS AUTOMÁTICO ---
         async function fetchTopAssets() {
             const { data: assets } = await supabaseClient.from('cataloged_assets').select('*').order('win_rate', { ascending: false }).limit(3);
             renderAssetCards(assets || []);
@@ -301,21 +234,44 @@
 
         function renderAssetCards(assets) {
             const container = document.getElementById('top-assets-container');
-            if (container.innerText.includes('Aguardando') || container.innerText.includes('Nenhum par')) { container.innerHTML = ''; }
+            
+            if (container.innerText.includes('Aguardando') || container.innerText.includes('Nenhum par')) {
+                 container.innerHTML = '';
+            }
+
             if (assets.length === 0) {
                 if (container.children.length === 0) {
-                    container.innerHTML = `<div class="col-span-1 md:col-span-3 text-center text-slate-500 py-8 text-sm bg-slate-900/50 rounded-xl border border-dashed border-slate-800 flex-shrink-0 w-full md:w-auto"><i data-lucide="search" class="w-6 h-6 mx-auto mb-2 opacity-50"></i> Nenhum par qualificado (>60%)</div>`;
+                    container.innerHTML = `<div class="col-span-1 md:col-span-3 text-center text-slate-500 py-8 text-sm bg-slate-900/50 rounded-xl border border-dashed border-slate-800 w-full flex-shrink-0"><i data-lucide="search" class="w-6 h-6 mx-auto mb-2 opacity-50"></i> Nenhum par qualificado (>60%)</div>`;
+                    lucide.createIcons();
+                }
+                // Limpa cards antigos se existirem
+                else if (container.querySelector('[id^="card-"]')) {
+                    container.innerHTML = `<div class="col-span-1 md:col-span-3 text-center text-slate-500 py-8 text-sm bg-slate-900/50 rounded-xl border border-dashed border-slate-800 w-full flex-shrink-0"><i data-lucide="search" class="w-6 h-6 mx-auto mb-2 opacity-50"></i> Nenhum par qualificado (>60%)</div>`;
                     lucide.createIcons();
                 }
                 return;
             }
-            state.pairTimestamps = {}; 
+            
+            // Sincronização: Marca IDs válidos
+            const currentAssetIds = new Set();
             const badges = ['🥇', '🥈', '🥉'];
+
             assets.forEach((asset, index) => {
                 const badge = badges[index] || '';
-                createOrUpdateCard(asset.pair, asset.best_strategy || 'SMA14', asset.win_rate, badge);
                 const safeId = asset.pair.replace(/[^a-zA-Z0-9]/g, '');
+                currentAssetIds.add(`card-${safeId}`);
+                
+                createOrUpdateCard(asset.pair, asset.best_strategy || 'SMA14', asset.win_rate, badge);
+                
+                // Watchdog alive
                 state.pairTimestamps[safeId] = Date.now();
+            });
+
+            // Remove cards que não estão mais no top (Sync visual real)
+            Array.from(container.children).forEach(child => {
+                if (child.id && child.id.startsWith('card-') && !currentAssetIds.has(child.id)) {
+                    child.remove();
+                }
             });
         }
         
@@ -323,6 +279,7 @@
             const safePairId = pair.replace(/[^a-zA-Z0-9]/g, '');
             const container = document.getElementById('top-assets-container');
             let card = document.getElementById(`card-${safePairId}`);
+            
             if (container.innerText.includes('Aguardando') || container.innerText.includes('Nenhum par')) container.innerHTML = '';
 
             let winRateDisplay = '--';
@@ -338,7 +295,9 @@
                 card.innerHTML = `
                     <div class="flex justify-between items-start mb-2">
                         <div>
-                            <h3 class="font-bold text-sm text-white tracking-tight flex items-center gap-2">${pair} <span id="badge-${safePairId}" class="text-sm">${badge}</span></h3>
+                            <h3 class="font-bold text-sm text-white tracking-tight flex items-center gap-2">
+                                ${pair} <span id="badge-${safePairId}" class="text-sm">${badge}</span>
+                            </h3>
                             <p class="text-[9px] text-slate-400 font-mono flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-slate-500" id="led-${safePairId}"></span> <span id="strat-${safePairId}">${strategy}</span></p>
                         </div>
                         <div class="text-right">
@@ -346,13 +305,14 @@
                         </div>
                     </div>
                     <div class="flex justify-between items-end">
-                        <div><p class="text-[8px] text-slate-500 mb-0.5">PREÇO</p><p class="text-sm font-mono text-slate-300" id="price-${safePairId}">---</p></div>
+                        <div><p class="text-[8px] text-slate-500 mb-0.5">PREÇO</p><p class="text-base font-mono text-slate-300" id="price-${safePairId}">---</p></div>
                         <div class="text-right"><p class="text-[8px] text-slate-500 mb-0.5">STATUS</p><p class="text-[10px] font-bold text-slate-400" id="status-${safePairId}">AGUARDANDO</p></div>
                     </div>
                     <div class="mt-2 pt-2 border-t border-white/5"><p class="text-[8px] text-slate-500 font-mono truncate" id="log-${safePairId}">Sincronizando...</p></div>
                 `;
                 container.appendChild(card);
             } else {
+                // ATUALIZAÇÃO FORTE
                 if (winRate !== null && winRate !== undefined) {
                      const wrEl = document.getElementById(`winrate-${safePairId}`);
                      if (wrEl) wrEl.innerText = winRateDisplay;
@@ -369,10 +329,55 @@
             }
         }
 
+        // Restante do código (processScannerLog, handlers, fetchReports...) mantém igual ao anterior
+        // ... (Reutilizar blocos já existentes)
+        
+        // --- FUNÇÕES DE SUPORTE (Mantidas) ---
+        async function fetchReports() {
+            const list = document.getElementById('reports-daily-list');
+            list.innerHTML = '<div class="text-center text-slate-500 py-8 text-xs"><i data-lucide="loader-2" class="w-6 h-6 animate-spin mx-auto mb-2"></i> Calculando...</div>';
+            lucide.createIcons();
+            const { data: trades } = await supabaseClient.from('trade_signals').select('*').order('created_at', { ascending: false }).limit(2000);
+            if (!trades || trades.length === 0) { list.innerHTML = '<div class="text-center text-slate-600 py-8 text-xs">Sem dados históricos.</div>'; return; }
+            const dailyStats = {};
+            let monthProfit = 0, monthWins = 0, monthTotal = 0;
+            const currentMonth = new Date().getMonth();
+            trades.forEach(t => {
+                const d = new Date(t.created_at);
+                const dateKey = d.toLocaleDateString('pt-BR');
+                const profit = parseFloat(t.profit);
+                const result = (t.result || t.status || '').toUpperCase();
+                if (!dailyStats[dateKey]) dailyStats[dateKey] = { wins: 0, losses: 0, profit: 0, date: t.created_at };
+                let isWin = result.includes('WIN') || (!isNaN(profit) && profit > 0);
+                if (result.includes('WIN') || result.includes('LOSS') || profit !== 0) {
+                    if (isWin) {
+                        dailyStats[dateKey].wins++;
+                        if (!isNaN(profit)) { dailyStats[dateKey].profit += profit; if (d.getMonth() === currentMonth) monthProfit += profit; }
+                        if (d.getMonth() === currentMonth) monthWins++;
+                    } else {
+                        dailyStats[dateKey].losses++;
+                        if (!isNaN(profit)) { dailyStats[dateKey].profit += profit; if (d.getMonth() === currentMonth) monthProfit += profit; }
+                    }
+                    if (d.getMonth() === currentMonth) monthTotal++;
+                }
+            });
+            const monthRate = monthTotal > 0 ? Math.round((monthWins / monthTotal) * 100) : 0;
+            const mpEl = document.getElementById('report-month-profit');
+            mpEl.innerText = `${monthProfit >= 0 ? '+' : ''}$${monthProfit.toFixed(2)}`;
+            mpEl.className = `text-3xl md:text-4xl font-black ${monthProfit >= 0 ? 'text-green-400' : 'text-red-400'}`;
+            document.getElementById('report-month-rate').innerText = `${monthRate}%`;
+            list.innerHTML = '';
+            Object.values(dailyStats).sort((a,b) => new Date(b.date) - new Date(a.date)).forEach(day => {
+                const item = document.createElement('div');
+                item.className = "glass-card p-4 rounded-xl flex justify-between items-center border-l-4 " + (day.profit >= 0 ? "border-l-green-500" : "border-l-red-500");
+                item.innerHTML = `<div><p class="text-sm font-bold text-white capitalize">${new Date(day.date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long' })}</p><p class="text-[10px] text-slate-400 font-mono mt-1">${day.wins} Wins / ${day.losses} Loss</p></div><div class="text-right"><p class="text-lg font-bold font-mono ${day.profit >= 0 ? 'text-green-400' : 'text-red-400'}">${day.profit >= 0 ? '+' : ''}$${day.profit.toFixed(2)}</p></div>`;
+                list.appendChild(item);
+            });
+        }
+
         function processScannerLog(log) {
             const msg = log.message || "";
             let pair = "", price = "", winRate = null;
-
             if (msg.startsWith('MODE_ATIVO::')) {
                 const mode = msg.split('::')[1];
                 const badge = document.getElementById('mode-badge');
@@ -384,7 +389,6 @@
                 }
                 return;
             }
-
             if (msg.includes('::')) {
                 const parts = msg.split('::');
                 if(parts.length > 1) pair = parts[1];
@@ -403,7 +407,6 @@
                 const p1 = msg.split('SINAL EM ')[1];
                 if (p1) pair = p1.split(':')[0].trim();
             }
-            
             if (msg.includes('💎 Melhores:')) {
                 const content = msg.split('💎 Melhores:')[1];
                 if (content) {
@@ -415,20 +418,15 @@
                 }
                 return;
             }
-            
             if (msg.includes('Fallback agressivo:')) {
                 const match = msg.match(/Fallback agressivo:\s*([A-Z0-9\-]+)\s*\(WR:\s*(\d+(?:\.\d+)?)%\)/);
                  if (match) { createOrUpdateCard(match[1], 'EMA V2', match[2], ''); }
                 return;
             }
-
             if (!pair) return;
-
             const safePairId = pair.replace(/[^a-zA-Z0-9]/g, '');
             state.pairTimestamps[safePairId] = Date.now();
-            
             if (!document.getElementById(`card-${safePairId}`)) { createOrUpdateCard(pair, 'LIVE', winRate); }
-            
             const card = document.getElementById(`card-${safePairId}`);
             if (card) {
                 if (winRate !== null) {
@@ -445,7 +443,6 @@
                 const statusEl = document.getElementById(`status-${safePairId}`);
                 const ledEl = document.getElementById(`led-${safePairId}`);
                 const priceEl = document.getElementById(`price-${safePairId}`);
-
                 if (msg.includes('SCAN_ENTRADA')) {
                     if(statusEl) { statusEl.textContent = 'ANALISANDO'; statusEl.className = 'text-xs font-bold text-amber-400 animate-pulse'; }
                     if(ledEl) ledEl.className = 'w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse';
@@ -459,7 +456,6 @@
                     if(ledEl) ledEl.className = 'w-1.5 h-1.5 rounded-full bg-blue-500';
                     card.classList.remove('border-amber-500');
                 }
-
                 if (price && priceEl) {
                     const oldPrice = parseFloat(priceEl.textContent) || 0;
                     const newPrice = parseFloat(price);
@@ -531,9 +527,11 @@
             if (!confirm("Reiniciar o bot agora?")) return;
             const btn = document.getElementById('restart-bot-btn');
             const originalIcon = btn.innerHTML;
+            
             btn.classList.add("opacity-50", "pointer-events-none");
             btn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i>';
             lucide.createIcons();
+
             try {
                 const { data: { session } } = await supabaseClient.auth.getSession();
                 if (!session) throw new Error("Sessão inválida");
@@ -642,7 +640,6 @@
         function updateStats(signals) {
             let wins = 0, losses = 0, dayProfit = 0;
             const today = new Date().toLocaleDateString('pt-BR');
-
             signals.forEach(s => {
                 const sDate = new Date(s.created_at).toLocaleDateString('pt-BR');
                 if (sDate === today) {
@@ -650,17 +647,14 @@
                     const profit = parseFloat(s.profit);
                     const isWin = result.includes('WIN') || (!isNaN(profit) && profit > 0);
                     const isLoss = result.includes('LOSS') || (!isNaN(profit) && profit < 0);
-
                     if (isWin) { wins++; if(!isNaN(profit)) dayProfit += profit; }
                     else if (isLoss) { losses++; if(!isNaN(profit)) dayProfit += profit; }
                 }
             });
-            
             document.getElementById('score-wins').textContent = wins;
             document.getElementById('score-losses').textContent = losses;
             document.getElementById('stat-profit').textContent = `${dayProfit >= 0 ? '+' : ''}$${dayProfit.toFixed(2)}`;
             document.getElementById('stat-profit').className = `text-2xl font-bold ${dayProfit >= 0 ? 'text-green-400' : 'text-red-400'}`;
-
             const total = wins + losses;
             const rate = total > 0 ? Math.round((wins / total) * 100) : 0;
             const rateEl = document.getElementById('score-rate');
@@ -727,13 +721,11 @@
                 document.getElementById('conf-entry').value = config.entry_value;
                 document.getElementById('conf-account').value = config.account_type;
                 document.getElementById('conf-stop-mode').value = config.stop_mode || 'percentage';
-                // Timer
                 document.getElementById('conf-timer-enabled').checked = config.timer_enabled || false;
                 document.getElementById('conf-timer-start').value = config.timer_start || '00:00';
                 document.getElementById('conf-timer-end').value = config.timer_end || '00:00';
             }
             document.getElementById('stat-balance').textContent = `$${(config.current_balance || 0).toFixed(2)}`;
-            // PROFIT IN HOME IS CALCULATED LIVE IN updateStats, not from config here.
         }
         
         checkSession();
