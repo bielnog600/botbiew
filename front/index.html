@@ -378,7 +378,11 @@
 
         async function fetchTopAssets() {
             try {
-                const { data: assets } = await supabaseClient.from('cataloged_assets').select('*').order('win_rate', { ascending: false }).limit(3);
+                let { data: assets } = await supabaseClient.from('cataloged_assets').select('*').order('win_rate', { ascending: false }).limit(3);
+                // Filtro para WinRate >= 65%
+                if (assets) {
+                    assets = assets.filter(a => a.win_rate >= 65);
+                }
                 renderAssetCards(assets || []);
             } catch (e) {
                 console.error("Top assets error", e);
@@ -689,11 +693,11 @@
 
             if (!assets || assets.length === 0) {
                 if (container.children.length === 0) {
-                    container.innerHTML = `<div class="col-span-1 md:col-span-3 text-center text-slate-500 py-8 text-sm bg-slate-900/50 rounded-xl border border-dashed border-slate-800 w-full flex-shrink-0"><i data-lucide="search" class="w-6 h-6 mx-auto mb-2 opacity-50"></i> Nenhum par qualificado (>60%)</div>`;
+                    container.innerHTML = `<div class="col-span-1 md:col-span-3 text-center text-slate-500 py-8 text-sm bg-slate-900/50 rounded-xl border border-dashed border-slate-800 w-full flex-shrink-0"><i data-lucide="search" class="w-6 h-6 mx-auto mb-2 opacity-50"></i> Nenhum par qualificado (>65%)</div>`;
                     lucide.createIcons();
                 }
                 else if (container.querySelector('[id^="card-"]')) {
-                      container.innerHTML = `<div class="col-span-1 md:col-span-3 text-center text-slate-500 py-8 text-sm bg-slate-900/50 rounded-xl border border-dashed border-slate-800 w-full flex-shrink-0"><i data-lucide="search" class="w-6 h-6 mx-auto mb-2 opacity-50"></i> Nenhum par qualificado (>60%)</div>`;
+                      container.innerHTML = `<div class="col-span-1 md:col-span-3 text-center text-slate-500 py-8 text-sm bg-slate-900/50 rounded-xl border border-dashed border-slate-800 w-full flex-shrink-0"><i data-lucide="search" class="w-6 h-6 mx-auto mb-2 opacity-50"></i> Nenhum par qualificado (>65%)</div>`;
                       lucide.createIcons();
                 }
                 return;
@@ -965,7 +969,7 @@
             const rate = total > 0 ? Math.round((wins / total) * 100) : 0;
             const rateEl = document.getElementById('score-rate');
             rateEl.textContent = `${rate}%`;
-            if(rate >= 50) rateEl.className = "text-2xl font-bold text-green-400"; else rateEl.className = "text-2xl font-bold text-red-400";
+            if(rate >= 60) rateEl.className = "text-2xl font-bold text-green-400"; else rateEl.className = "text-2xl font-bold text-red-400";
         }
 
         function createSignalElement(s) {
