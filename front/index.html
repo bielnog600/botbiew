@@ -5,12 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Marombiew Bot</title>
     
+    <!-- PWA Settings -->
     <meta name="theme-color" content="#0f172a">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="manifest" href="manifest.json">
     <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/4712/4712109.png">
 
+    <!-- Tailwind & Supabase -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
@@ -21,16 +23,20 @@
         body { font-family: 'Inter', sans-serif; background-color: #020617; color: #e2e8f0; overflow: hidden; user-select: none; }
         .font-mono { font-family: 'JetBrains Mono', monospace; }
         .glass-card { background: var(--glass); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.08); }
+        
         .price-up { color: #4ade80; animation: flashGreen 0.5s; }
         .price-down { color: #f87171; animation: flashRed 0.5s; }
+        
         @keyframes flashGreen { 0% { color: #fff; } 100% { color: #4ade80; } }
         @keyframes flashRed { 0% { color: #fff; } 100% { color: #f87171; } }
+
         ::-webkit-scrollbar { width: 4px; background: #0f172a; }
         ::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
         .hidden { display: none !important; }
         .active-nav { color: var(--gold); }
         
-        /* Ocultar scrollbar no carrossel mobile mas manter funcionalidade */
+        /* Fix iOS inputs */
+        input, select, textarea, button { -webkit-appearance: none; border-radius: 0.75rem; }
         .scrollbar-hide::-webkit-scrollbar { display: none; }
         .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
     </style>
@@ -46,7 +52,7 @@
                 </div>
                 <h1 class="text-2xl font-bold text-white">Marombiew Bot</h1>
             </div>
-            <form id="login-form" class="space-y-4">
+            <form id="login-form" class="space-y-4" onsubmit="return false;">
                 <input type="email" id="email" class="w-full bg-slate-900/50 border border-slate-700 text-white text-sm rounded-xl pl-4 py-3 focus:outline-none focus:border-amber-500 transition-colors" placeholder="Email" required>
                 <input type="password" id="password" class="w-full bg-slate-900/50 border border-slate-700 text-white text-sm rounded-xl pl-4 py-3 focus:outline-none focus:border-amber-500 transition-colors" placeholder="Senha" required>
                 <button type="submit" id="login-btn" class="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-3.5 rounded-xl transition-all flex items-center justify-center">Entrar</button>
@@ -80,22 +86,25 @@
                         <h1 class="text-xl md:text-2xl font-bold text-white truncate">Dashboard</h1>
                         <div class="flex items-center gap-2 mt-1 flex-wrap">
                             <span id="bot-status-indicator" class="text-[10px] md:text-xs font-bold text-slate-500 whitespace-nowrap">CARREGANDO...</span>
-                            <span id="mode-badge" class="px-2 py-0.5 rounded text-[10px] font-bold tracking-wider border border-slate-700 bg-slate-800 text-slate-400 transition-colors duration-300 hidden">...</span>
+                            <span id="mode-badge" class="px-2 py-0.5 rounded text-[10px] font-bold tracking-wider border border-slate-700 bg-slate-800 text-slate-400 transition-colors duration-300 hidden">MODO: ...</span>
                         </div>
                     </div>
                     <div class="flex items-center gap-2 shrink-0">
-                        <button id="restart-bot-btn" class="p-2 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20 transition-colors"><i data-lucide="power" class="w-4 h-4"></i></button>
-                        <button id="toggle-bot-btn" class="flex items-center gap-2 px-3 py-2 rounded-lg text-xs md:text-sm font-bold bg-slate-700 text-white shadow-lg transition-all hover:brightness-110 min-w-[90px] justify-center"><i data-lucide="loader-2" class="w-3 h-3 md:w-4 md:h-4 animate-spin"></i> ...</button>
+                        <button id="restart-bot-btn" class="p-2 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20 transition-colors" title="Reiniciar Conexão">
+                            <i data-lucide="power" class="w-4 h-4"></i>
+                        </button>
+                        <button id="toggle-bot-btn" class="flex items-center gap-2 px-3 py-2 rounded-lg text-xs md:text-sm font-bold bg-slate-700 text-white shadow-lg transition-all hover:brightness-110 min-w-[90px] justify-center">
+                            <i data-lucide="loader-2" class="w-3 h-3 md:w-4 md:h-4 animate-spin"></i> ...
+                        </button>
                     </div>
                 </div>
 
                 <div class="flex items-center justify-between mb-2">
-                    <div class="flex items-center gap-2"><i data-lucide="trending-up" class="w-4 h-4 text-amber-500"></i><h3 class="text-sm font-bold text-slate-400 uppercase tracking-widest">Melhores Oportunidades (>60%)</h3></div>
+                    <div class="flex items-center gap-2"><i data-lucide="trending-up" class="w-4 h-4 text-amber-500"></i><h3 class="text-sm font-bold text-slate-400 uppercase tracking-widest">Melhores Oportunidades</h3></div>
                 </div>
                 
-                <!-- GRID DE CARDS (Horizontal Scroll no Mobile, Limpo Inicialmente) -->
                 <div id="top-assets-container" class="flex overflow-x-auto pb-4 gap-3 snap-x md:grid md:grid-cols-3 md:pb-0 md:overflow-visible mb-6 scrollbar-hide min-h-[120px]">
-                    <!-- Será preenchido via JS -->
+                     <div class="glass-card p-4 rounded-xl border-t-4 border-slate-700 animate-pulse h-24 flex items-center justify-center text-slate-600 text-xs w-full flex-shrink-0 md:w-auto md:col-span-3">Aguardando dados...</div>
                 </div>
 
                 <div class="grid grid-cols-2 gap-4">
@@ -198,76 +207,371 @@
     <script>
         const SUPABASE_URL = 'https://ioduahwknfsktujthfyc.supabase.co';
         const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlvZHVhaHdrbmZza3R1anRoZnljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEzMDc0NDcsImV4cCI6MjA2Njg4MzQ0N30.96f8wZO6SvABKFMWjIiw1pSugAB4Isldj7yxLcLJRSE';
-        const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+        let supabaseClient;
         const state = { user: null, config: {}, lastLogTime: null, lastLogId: null, pairTimestamps: {} };
-        lucide.createIcons();
 
-        const router = {
-            navigate: (target) => {
-                document.querySelectorAll('.view-section').forEach(el => el.classList.add('hidden'));
-                document.getElementById(`view-${target}`).classList.remove('hidden');
-                document.querySelectorAll('nav button').forEach(btn => btn.classList.remove('active-nav'));
-                document.querySelectorAll(`button[data-target="${target}"]`).forEach(btn => btn.classList.add('active-nav'));
-                if(target === 'logs') scrollToBottom();
-                if(target === 'reports') fetchReports();
+        // ---------------- INICIALIZAÇÃO ----------------
+
+        function initApp() {
+            try {
+                if(!window.supabase) throw new Error("Supabase não carregou.");
+                supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+                lucide.createIcons();
+                
+                const loginForm = document.getElementById('login-form');
+                if(loginForm) loginForm.addEventListener('submit', handleLogin);
+                
+                const restartBtn = document.getElementById('restart-bot-btn');
+                if(restartBtn) restartBtn.addEventListener('click', handleRestart);
+                
+                const settingsForm = document.getElementById('settings-form');
+                if(settingsForm) settingsForm.addEventListener('submit', handleSettings);
+                
+                const toggleBtn = document.getElementById('toggle-bot-btn');
+                if(toggleBtn) toggleBtn.addEventListener('click', handleToggle);
+                
+                const logoutBtn = document.getElementById('logout-btn');
+                if(logoutBtn) logoutBtn.addEventListener('click', handleLogout);
+                
+                const clearHistoryBtn = document.getElementById('clear-history-btn');
+                if(clearHistoryBtn) clearHistoryBtn.addEventListener('click', handleClearHistory);
+
+                checkSession();
+            } catch(e) {
+                console.error("Init Error:", e);
+                alert("Erro ao iniciar aplicativo. Verifique sua conexão.");
             }
-        };
+        }
+
+        // ---------------- FUNÇÕES DE LÓGICA PRINCIPAL ----------------
 
         async function checkSession() {
-            const { data: { session } } = await supabaseClient.auth.getSession();
-            if (session) { state.user = session.user; showApp(); startDataLoop(); }
+            try {
+                const { data: { session } } = await supabaseClient.auth.getSession();
+                if (session) { 
+                    state.user = session.user; 
+                    showApp(); 
+                    startDataLoop(); 
+                }
+            } catch (err) {
+                console.error("Session check failed", err);
+            }
         }
 
         function showApp() {
-            document.getElementById('login-screen').classList.add('hidden');
-            document.getElementById('app').classList.remove('hidden');
-            setTimeout(() => document.getElementById('app').classList.remove('opacity-0'), 50);
+            const login = document.getElementById('login-screen');
+            const app = document.getElementById('app');
+            if(login) login.classList.add('hidden');
+            if(app) {
+                app.classList.remove('hidden');
+                setTimeout(() => app.classList.remove('opacity-0'), 50);
+            }
             fetchInitialLogs();
             fetchTopAssets(); 
         }
 
-        // --- FETCH TOP ASSETS AUTOMÁTICO ---
+        function startDataLoop() {
+            fetchData();
+            supabaseClient.channel('dash').on('postgres_changes', { event: '*', schema: 'public', table: 'bot_config' }, p => updateConfigUI(p.new))
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'trade_signals' }, () => refreshSignals())
+                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'logs' }, p => { 
+                    appendLog(p.new); 
+                    processScannerLog(p.new);
+                })
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'cataloged_assets' }, () => fetchTopAssets()) 
+                .subscribe();
+            setInterval(fetchData, 3000);
+            setInterval(updateBotStatus, 5000);
+            setInterval(checkInactivePairs, 30000); 
+            setInterval(fetchTopAssets, 5000);
+        }
+
+        async function refreshSignals() {
+            try {
+                const { data: signals } = await supabaseClient.from('trade_signals').select('*').order('created_at', { ascending: false }).limit(200);
+                if(signals) { syncSignalsList(signals); updateStats(signals); }
+            } catch(e) { console.error(e); }
+        }
+
+        async function fetchData() {
+            try {
+                let { data: config } = await supabaseClient.from('bot_config').select('*').eq('id', 1).single();
+                if (!config) config = { id: 1, status: 'PAUSED', stop_win: 500, stop_loss: 200, entry_value: 10, account_type: 'PRACTICE' };
+                updateConfigUI(config);
+            } catch(e) { console.error("Config fetch error", e); }
+
+            refreshSignals();
+            
+            try {
+                const { data: logs } = await supabaseClient.from('logs').select('*').order('created_at', { ascending: false }).limit(10);
+                if(logs && logs.length > 0) {
+                    if (state.lastLogId !== logs[0].id) {
+                        const newId = logs[0].id;
+                        if (state.lastLogId) {
+                            const newLogs = [];
+                            for(let log of logs) {
+                                if (log.id === state.lastLogId) break;
+                                newLogs.push(log);
+                            }
+                            newLogs.reverse().forEach(log => {
+                                appendLog(log);
+                                processScannerLog(log);
+                            });
+                        } else {
+                            logs.slice().reverse().forEach(l => { appendLog(l); processScannerLog(l); });
+                        }
+                        state.lastLogId = newId;
+                        state.lastLogTime = new Date(logs[0].created_at);
+                    }
+                }
+            } catch(e) { console.error("Logs fetch error", e); }
+        }
+
         async function fetchTopAssets() {
-            const { data: assets } = await supabaseClient.from('cataloged_assets').select('*').order('win_rate', { ascending: false }).limit(3);
-            renderAssetCards(assets || []);
+            try {
+                const { data: assets } = await supabaseClient.from('cataloged_assets').select('*').order('win_rate', { ascending: false }).limit(3);
+                renderAssetCards(assets || []);
+            } catch (e) {
+                console.error("Top assets error", e);
+                renderAssetCards([]);
+            }
+        }
+
+        async function fetchReports() {
+            const list = document.getElementById('reports-daily-list');
+            if(!list) return;
+            list.innerHTML = '<div class="text-center text-slate-500 py-8 text-xs"><i data-lucide="loader-2" class="w-6 h-6 animate-spin mx-auto mb-2"></i> Calculando...</div>';
+            lucide.createIcons();
+
+            try {
+                const { data: trades } = await supabaseClient.from('trade_signals').select('*').order('created_at', { ascending: false }).limit(2000);
+
+                if (!trades || trades.length === 0) {
+                    list.innerHTML = '<div class="text-center text-slate-600 py-8 text-xs">Sem dados históricos.</div>';
+                    return;
+                }
+
+                const dailyStats = {};
+                let monthProfit = 0, monthWins = 0, monthTotal = 0;
+                const currentMonth = new Date().getMonth();
+
+                trades.forEach(t => {
+                    const d = new Date(t.created_at);
+                    const dateKey = d.toLocaleDateString('pt-BR');
+                    const profit = parseFloat(t.profit);
+                    const result = (t.result || t.status || '').toUpperCase();
+                    
+                    if (!dailyStats[dateKey]) dailyStats[dateKey] = { wins: 0, losses: 0, profit: 0, date: t.created_at };
+
+                    let isWin = result.includes('WIN') || (!isNaN(profit) && profit > 0);
+                    if (result.includes('WIN') || result.includes('LOSS') || (profit !== 0 && !isNaN(profit))) {
+                        if (isWin) {
+                            dailyStats[dateKey].wins++;
+                            if (!isNaN(profit)) { dailyStats[dateKey].profit += profit; if (d.getMonth() === currentMonth) monthProfit += profit; }
+                            if (d.getMonth() === currentMonth) monthWins++;
+                        } else {
+                            dailyStats[dateKey].losses++;
+                            if (!isNaN(profit)) { dailyStats[dateKey].profit += profit; if (d.getMonth() === currentMonth) monthProfit += profit; }
+                        }
+                        if (d.getMonth() === currentMonth) monthTotal++;
+                    }
+                });
+
+                const monthRate = monthTotal > 0 ? Math.round((monthWins / monthTotal) * 100) : 0;
+                const mpEl = document.getElementById('report-month-profit');
+                if(mpEl) {
+                    mpEl.innerText = `${monthProfit >= 0 ? '+' : ''}$${monthProfit.toFixed(2)}`;
+                    mpEl.className = `text-3xl md:text-4xl font-black ${monthProfit >= 0 ? 'text-green-400' : 'text-red-400'}`;
+                }
+                const mrEl = document.getElementById('report-month-rate');
+                if(mrEl) mrEl.innerText = `${monthRate}%`;
+
+                list.innerHTML = '';
+                Object.values(dailyStats).sort((a,b) => new Date(b.date) - new Date(a.date)).forEach(day => {
+                    const item = document.createElement('div');
+                    item.className = "glass-card p-4 rounded-xl flex justify-between items-center border-l-4 " + (day.profit >= 0 ? "border-l-green-500" : "border-l-red-500");
+                    item.innerHTML = `<div><p class="text-sm font-bold text-white capitalize">${new Date(day.date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long' })}</p><p class="text-[10px] text-slate-400 font-mono mt-1">${day.wins} Wins / ${day.losses} Loss</p></div><div class="text-right"><p class="text-lg font-bold font-mono ${day.profit >= 0 ? 'text-green-400' : 'text-red-400'}">${day.profit >= 0 ? '+' : ''}$${day.profit.toFixed(2)}</p></div>`;
+                    list.appendChild(item);
+                });
+            } catch (e) {
+                console.error("Erro reports", e);
+                list.innerHTML = '<div class="text-center text-red-500 py-8 text-xs">Erro ao carregar dados.</div>';
+            }
+        }
+        
+        async function fetchInitialLogs() {
+            try {
+                const { data: logs } = await supabaseClient.from('logs').select('*').order('created_at', { ascending: false }).limit(50);
+                if(logs && logs.length > 0) {
+                    const term = document.getElementById('terminal-output');
+                    if(term) {
+                        term.innerHTML = '<div class="text-slate-500 mb-2 border-b border-slate-800 pb-2">Marombiew Bot Terminal v2.0 <br> Carregando histórico...</div>';
+                        [...logs].reverse().forEach(l => appendLog(l));
+                    }
+                    state.lastLogTime = new Date(logs[0].created_at);
+                    state.lastLogId = logs[0].id;
+                    logs.slice(0, 10).forEach(l => processScannerLog(l)); 
+                    updateBotStatus();
+                }
+            } catch (e) { console.error("Logs error", e); }
+        }
+
+        // ---------------- HANDLERS ----------------
+
+        async function handleLogin(e) {
+            e.preventDefault();
+            const btn = document.getElementById('login-btn');
+            const originalText = btn.innerHTML;
+            const errorDiv = document.getElementById('login-error');
+            
+            btn.innerHTML = '<i data-lucide="loader-2" class="w-5 h-5 animate-spin mx-auto"></i>';
+            btn.classList.add('opacity-70', 'pointer-events-none'); 
+            errorDiv.classList.add('hidden');
+            lucide.createIcons();
+
+            try {
+                const email = document.getElementById('email').value;
+                const password = document.getElementById('password').value;
+
+                const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+
+                if (error) {
+                    throw error;
+                } else {
+                    state.user = data.user;
+                    showApp();
+                    startDataLoop();
+                }
+            } catch (err) {
+                console.error("Erro login:", err);
+                errorDiv.textContent = err.message || "Erro de conexão. Tente novamente.";
+                errorDiv.classList.remove('hidden');
+                btn.innerHTML = originalText;
+                btn.classList.remove('opacity-70', 'pointer-events-none');
+            }
+        }
+        
+        async function handleRestart() {
+            if (!confirm("Reiniciar o bot agora?")) return;
+            const btn = document.getElementById('restart-bot-btn');
+            const originalIcon = btn.innerHTML;
+            btn.classList.add("opacity-50", "pointer-events-none");
+            btn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i>';
+            lucide.createIcons();
+            try {
+                const { data: { session } } = await supabaseClient.auth.getSession();
+                if (!session) throw new Error("Sessão inválida");
+                await new Promise(r => setTimeout(r, 150));
+                const res = await fetch("https://ioduahwknfsktujthfyc.supabase.co/functions/v1/restart-bot", {
+                    method: "POST", headers: { "Authorization": `Bearer ${session.access_token}`, "Content-Type": "application/json" }
+                });
+                if (!res.ok) throw new Error("Falha no restart");
+                btn.innerHTML = '<i data-lucide="check" class="w-4 h-4 text-green-500"></i>';
+                lucide.createIcons();
+                setTimeout(() => { btn.innerHTML = originalIcon; lucide.createIcons(); }, 2000);
+            } catch (err) {
+                console.error(err);
+                btn.innerHTML = '<i data-lucide="x" class="w-4 h-4 text-red-500"></i>';
+                lucide.createIcons();
+                setTimeout(() => { btn.innerHTML = originalIcon; lucide.createIcons(); }, 2000);
+            } finally {
+                btn.classList.remove("opacity-50", "pointer-events-none");
+            }
+        }
+
+        async function handleSettings(e) {
+            e.preventDefault();
+            const updates = {
+                stop_win: Number(document.getElementById('conf-stop-win').value),
+                stop_loss: Number(document.getElementById('conf-stop-loss').value),
+                entry_value: Number(document.getElementById('conf-entry').value),
+                account_type: document.getElementById('conf-account').value,
+                stop_mode: document.getElementById('conf-stop-mode').value,
+                timer_enabled: document.getElementById('conf-timer-enabled').checked,
+                timer_start: document.getElementById('conf-timer-start').value,
+                timer_end: document.getElementById('conf-timer-end').value
+            };
+            const btn = e.target.querySelector('button');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = 'Salvando...';
+            try {
+                 await supabaseClient.from('bot_config').update(updates).eq('id', 1);
+                 alert('Configurações salvas!');
+            } catch(e) { console.error(e); alert("Erro ao salvar."); }
+            btn.innerHTML = originalText;
+        }
+
+        async function handleToggle() {
+            const newStatus = state.config.status === 'RUNNING' ? 'PAUSED' : 'RUNNING';
+            await supabaseClient.from('bot_config').update({ status: newStatus }).eq('id', 1);
+        }
+        
+        async function handleLogout() {
+            await supabaseClient.auth.signOut(); 
+            window.location.reload();
+        }
+        
+        async function handleClearHistory() {
+             if(!confirm("Limpar histórico?")) return;
+            try {
+                await supabaseClient.from('trade_signals').delete().gt('id', 0);
+                const currentBal = state.config.current_balance || 0;
+                await supabaseClient.from('bot_config').update({ daily_initial_balance: currentBal }).eq('id', 1);
+                document.getElementById('signals-list').innerHTML = '<div class="text-center text-slate-600 py-8 text-xs">Limpo.</div>';
+                updateStats([]);
+                state.config.daily_initial_balance = currentBal;
+                updateConfigUI(state.config);
+            } catch (err) { alert(err.message); }
+        }
+
+        // ---------------- UI UPDATES ----------------
+
+        function appendLog(log) {
+            const term = document.getElementById('terminal-output');
+            const line = document.createElement('div');
+            line.className = 'flex gap-2 opacity-80 text-slate-300';
+            line.innerHTML = `<span class="text-slate-600 shrink-0">[${new Date(log.created_at).toLocaleTimeString()}]</span> <span>${log.message}</span>`;
+            term.appendChild(line);
+            scrollToBottom();
+        }
+
+        function scrollToBottom() {
+            const term = document.getElementById('terminal-output');
+            if(term) term.scrollTop = term.scrollHeight;
         }
 
         function renderAssetCards(assets) {
             const container = document.getElementById('top-assets-container');
+            if(!container) return;
             
             if (container.innerText.includes('Aguardando') || container.innerText.includes('Nenhum par')) {
                  container.innerHTML = '';
             }
 
-            if (assets.length === 0) {
+            if (!assets || assets.length === 0) {
                 if (container.children.length === 0) {
                     container.innerHTML = `<div class="col-span-1 md:col-span-3 text-center text-slate-500 py-8 text-sm bg-slate-900/50 rounded-xl border border-dashed border-slate-800 w-full flex-shrink-0"><i data-lucide="search" class="w-6 h-6 mx-auto mb-2 opacity-50"></i> Nenhum par qualificado (>60%)</div>`;
                     lucide.createIcons();
                 }
-                // Limpa cards antigos se existirem
                 else if (container.querySelector('[id^="card-"]')) {
-                    container.innerHTML = `<div class="col-span-1 md:col-span-3 text-center text-slate-500 py-8 text-sm bg-slate-900/50 rounded-xl border border-dashed border-slate-800 w-full flex-shrink-0"><i data-lucide="search" class="w-6 h-6 mx-auto mb-2 opacity-50"></i> Nenhum par qualificado (>60%)</div>`;
-                    lucide.createIcons();
+                     container.innerHTML = `<div class="col-span-1 md:col-span-3 text-center text-slate-500 py-8 text-sm bg-slate-900/50 rounded-xl border border-dashed border-slate-800 w-full flex-shrink-0"><i data-lucide="search" class="w-6 h-6 mx-auto mb-2 opacity-50"></i> Nenhum par qualificado (>60%)</div>`;
+                     lucide.createIcons();
                 }
                 return;
             }
             
-            // Sincronização: Marca IDs válidos
-            const currentAssetIds = new Set();
+            state.pairTimestamps = {}; 
             const badges = ['🥇', '🥈', '🥉'];
+            const currentAssetIds = new Set();
 
             assets.forEach((asset, index) => {
                 const badge = badges[index] || '';
-                const safeId = asset.pair.replace(/[^a-zA-Z0-9]/g, '');
-                currentAssetIds.add(`card-${safeId}`);
-                
                 createOrUpdateCard(asset.pair, asset.best_strategy || 'SMA14', asset.win_rate, badge);
-                
-                // Watchdog alive
+                const safeId = asset.pair.replace(/[^a-zA-Z0-9]/g, '');
                 state.pairTimestamps[safeId] = Date.now();
+                currentAssetIds.add(`card-${safeId}`);
             });
-
-            // Remove cards que não estão mais no top (Sync visual real)
+            
             Array.from(container.children).forEach(child => {
                 if (child.id && child.id.startsWith('card-') && !currentAssetIds.has(child.id)) {
                     child.remove();
@@ -278,8 +582,8 @@
         function createOrUpdateCard(pair, strategy = 'EMA', winRate = null, badge = '') {
             const safePairId = pair.replace(/[^a-zA-Z0-9]/g, '');
             const container = document.getElementById('top-assets-container');
+            if(!container) return;
             let card = document.getElementById(`card-${safePairId}`);
-            
             if (container.innerText.includes('Aguardando') || container.innerText.includes('Nenhum par')) container.innerHTML = '';
 
             let winRateDisplay = '--';
@@ -290,14 +594,11 @@
             if (!card) {
                 card = document.createElement('div');
                 card.id = `card-${safePairId}`;
-                // Classes ajustadas: min-w, flex-shrink-0, snap-center para carrossel funcionar
                 card.className = "glass-card p-3 rounded-xl border-t-4 border-slate-700 relative overflow-hidden transition-all duration-300 min-w-[160px] w-[45%] md:w-auto flex-shrink-0 snap-center";
                 card.innerHTML = `
                     <div class="flex justify-between items-start mb-2">
                         <div>
-                            <h3 class="font-bold text-sm text-white tracking-tight flex items-center gap-2">
-                                ${pair} <span id="badge-${safePairId}" class="text-sm">${badge}</span>
-                            </h3>
+                            <h3 class="font-bold text-sm text-white tracking-tight flex items-center gap-2">${pair} <span id="badge-${safePairId}" class="text-sm">${badge}</span></h3>
                             <p class="text-[9px] text-slate-400 font-mono flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-slate-500" id="led-${safePairId}"></span> <span id="strat-${safePairId}">${strategy}</span></p>
                         </div>
                         <div class="text-right">
@@ -312,7 +613,6 @@
                 `;
                 container.appendChild(card);
             } else {
-                // ATUALIZAÇÃO FORTE
                 if (winRate !== null && winRate !== undefined) {
                      const wrEl = document.getElementById(`winrate-${safePairId}`);
                      if (wrEl) wrEl.innerText = winRateDisplay;
@@ -329,55 +629,10 @@
             }
         }
 
-        // Restante do código (processScannerLog, handlers, fetchReports...) mantém igual ao anterior
-        // ... (Reutilizar blocos já existentes)
-        
-        // --- FUNÇÕES DE SUPORTE (Mantidas) ---
-        async function fetchReports() {
-            const list = document.getElementById('reports-daily-list');
-            list.innerHTML = '<div class="text-center text-slate-500 py-8 text-xs"><i data-lucide="loader-2" class="w-6 h-6 animate-spin mx-auto mb-2"></i> Calculando...</div>';
-            lucide.createIcons();
-            const { data: trades } = await supabaseClient.from('trade_signals').select('*').order('created_at', { ascending: false }).limit(2000);
-            if (!trades || trades.length === 0) { list.innerHTML = '<div class="text-center text-slate-600 py-8 text-xs">Sem dados históricos.</div>'; return; }
-            const dailyStats = {};
-            let monthProfit = 0, monthWins = 0, monthTotal = 0;
-            const currentMonth = new Date().getMonth();
-            trades.forEach(t => {
-                const d = new Date(t.created_at);
-                const dateKey = d.toLocaleDateString('pt-BR');
-                const profit = parseFloat(t.profit);
-                const result = (t.result || t.status || '').toUpperCase();
-                if (!dailyStats[dateKey]) dailyStats[dateKey] = { wins: 0, losses: 0, profit: 0, date: t.created_at };
-                let isWin = result.includes('WIN') || (!isNaN(profit) && profit > 0);
-                if (result.includes('WIN') || result.includes('LOSS') || profit !== 0) {
-                    if (isWin) {
-                        dailyStats[dateKey].wins++;
-                        if (!isNaN(profit)) { dailyStats[dateKey].profit += profit; if (d.getMonth() === currentMonth) monthProfit += profit; }
-                        if (d.getMonth() === currentMonth) monthWins++;
-                    } else {
-                        dailyStats[dateKey].losses++;
-                        if (!isNaN(profit)) { dailyStats[dateKey].profit += profit; if (d.getMonth() === currentMonth) monthProfit += profit; }
-                    }
-                    if (d.getMonth() === currentMonth) monthTotal++;
-                }
-            });
-            const monthRate = monthTotal > 0 ? Math.round((monthWins / monthTotal) * 100) : 0;
-            const mpEl = document.getElementById('report-month-profit');
-            mpEl.innerText = `${monthProfit >= 0 ? '+' : ''}$${monthProfit.toFixed(2)}`;
-            mpEl.className = `text-3xl md:text-4xl font-black ${monthProfit >= 0 ? 'text-green-400' : 'text-red-400'}`;
-            document.getElementById('report-month-rate').innerText = `${monthRate}%`;
-            list.innerHTML = '';
-            Object.values(dailyStats).sort((a,b) => new Date(b.date) - new Date(a.date)).forEach(day => {
-                const item = document.createElement('div');
-                item.className = "glass-card p-4 rounded-xl flex justify-between items-center border-l-4 " + (day.profit >= 0 ? "border-l-green-500" : "border-l-red-500");
-                item.innerHTML = `<div><p class="text-sm font-bold text-white capitalize">${new Date(day.date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long' })}</p><p class="text-[10px] text-slate-400 font-mono mt-1">${day.wins} Wins / ${day.losses} Loss</p></div><div class="text-right"><p class="text-lg font-bold font-mono ${day.profit >= 0 ? 'text-green-400' : 'text-red-400'}">${day.profit >= 0 ? '+' : ''}$${day.profit.toFixed(2)}</p></div>`;
-                list.appendChild(item);
-            });
-        }
-
         function processScannerLog(log) {
             const msg = log.message || "";
             let pair = "", price = "", winRate = null;
+
             if (msg.startsWith('MODE_ATIVO::')) {
                 const mode = msg.split('::')[1];
                 const badge = document.getElementById('mode-badge');
@@ -389,6 +644,7 @@
                 }
                 return;
             }
+
             if (msg.includes('::')) {
                 const parts = msg.split('::');
                 if(parts.length > 1) pair = parts[1];
@@ -407,6 +663,7 @@
                 const p1 = msg.split('SINAL EM ')[1];
                 if (p1) pair = p1.split(':')[0].trim();
             }
+            
             if (msg.includes('💎 Melhores:')) {
                 const content = msg.split('💎 Melhores:')[1];
                 if (content) {
@@ -418,15 +675,20 @@
                 }
                 return;
             }
+            
             if (msg.includes('Fallback agressivo:')) {
                 const match = msg.match(/Fallback agressivo:\s*([A-Z0-9\-]+)\s*\(WR:\s*(\d+(?:\.\d+)?)%\)/);
                  if (match) { createOrUpdateCard(match[1], 'EMA V2', match[2], ''); }
                 return;
             }
+
             if (!pair) return;
+
             const safePairId = pair.replace(/[^a-zA-Z0-9]/g, '');
             state.pairTimestamps[safePairId] = Date.now();
+            
             if (!document.getElementById(`card-${safePairId}`)) { createOrUpdateCard(pair, 'LIVE', winRate); }
+            
             const card = document.getElementById(`card-${safePairId}`);
             if (card) {
                 if (winRate !== null) {
@@ -443,6 +705,7 @@
                 const statusEl = document.getElementById(`status-${safePairId}`);
                 const ledEl = document.getElementById(`led-${safePairId}`);
                 const priceEl = document.getElementById(`price-${safePairId}`);
+
                 if (msg.includes('SCAN_ENTRADA')) {
                     if(statusEl) { statusEl.textContent = 'ANALISANDO'; statusEl.className = 'text-xs font-bold text-amber-400 animate-pulse'; }
                     if(ledEl) ledEl.className = 'w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse';
@@ -456,6 +719,7 @@
                     if(ledEl) ledEl.className = 'w-1.5 h-1.5 rounded-full bg-blue-500';
                     card.classList.remove('border-amber-500');
                 }
+
                 if (price && priceEl) {
                     const oldPrice = parseFloat(priceEl.textContent) || 0;
                     const newPrice = parseFloat(price);
@@ -489,141 +753,24 @@
             if (diff < (isPaused ? 86400000 : 180000)) { 
                 ind.innerHTML = '<span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span> ONLINE';
                 ind.className = 'text-xs font-bold flex items-center gap-1 text-green-400';
-                warn.classList.add('hidden');
+                if(warn) warn.classList.add('hidden');
             } else {
                 if(!isPaused) {
                     ind.innerHTML = '<span class="w-2 h-2 rounded-full bg-red-500"></span> OFFLINE';
                     ind.className = 'text-xs font-bold flex items-center gap-1 text-red-400';
-                    warn.classList.remove('hidden');
+                    if(warn) warn.classList.remove('hidden');
                 } else {
                     ind.innerHTML = '<span class="w-2 h-2 rounded-full bg-amber-500"></span> PAUSADO';
                     ind.className = 'text-xs font-bold flex items-center gap-1 text-amber-400';
-                    warn.classList.add('hidden');
+                    if(warn) warn.classList.add('hidden');
                 }
             }
         }
-
-        document.getElementById('settings-form').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const updates = {
-                stop_win: Number(document.getElementById('conf-stop-win').value),
-                stop_loss: Number(document.getElementById('conf-stop-loss').value),
-                entry_value: Number(document.getElementById('conf-entry').value),
-                account_type: document.getElementById('conf-account').value,
-                stop_mode: document.getElementById('conf-stop-mode').value,
-                timer_enabled: document.getElementById('conf-timer-enabled').checked,
-                timer_start: document.getElementById('conf-timer-start').value,
-                timer_end: document.getElementById('conf-timer-end').value
-            };
-            const btn = e.target.querySelector('button');
-            const originalText = btn.innerHTML;
-            btn.innerHTML = 'Salvando...';
-            await supabaseClient.from('bot_config').update(updates).eq('id', 1);
-            btn.innerHTML = originalText;
-            alert('Configurações salvas!');
-        });
-
-        document.getElementById('restart-bot-btn').addEventListener('click', async () => {
-            if (!confirm("Reiniciar o bot agora?")) return;
-            const btn = document.getElementById('restart-bot-btn');
-            const originalIcon = btn.innerHTML;
-            
-            btn.classList.add("opacity-50", "pointer-events-none");
-            btn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i>';
-            lucide.createIcons();
-
-            try {
-                const { data: { session } } = await supabaseClient.auth.getSession();
-                if (!session) throw new Error("Sessão inválida");
-                await new Promise(r => setTimeout(r, 150));
-                const res = await fetch("https://ioduahwknfsktujthfyc.supabase.co/functions/v1/restart-bot", {
-                    method: "POST", headers: { "Authorization": `Bearer ${session.access_token}`, "Content-Type": "application/json" }
-                });
-                if (!res.ok) throw new Error("Falha no restart");
-                btn.innerHTML = '<i data-lucide="check" class="w-4 h-4 text-green-500"></i>';
-                lucide.createIcons();
-                setTimeout(() => { btn.innerHTML = originalIcon; lucide.createIcons(); }, 2000);
-            } catch (err) {
-                console.error(err);
-                btn.innerHTML = '<i data-lucide="x" class="w-4 h-4 text-red-500"></i>';
-                lucide.createIcons();
-                setTimeout(() => { btn.innerHTML = originalIcon; lucide.createIcons(); }, 2000);
-            } finally {
-                btn.classList.remove("opacity-50", "pointer-events-none");
-            }
-        });
-
-        document.getElementById('login-form').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const btn = document.getElementById('login-btn');
-            const originalText = btn.innerHTML;
-            const errorDiv = document.getElementById('login-error');
-            btn.innerHTML = '<i data-lucide="loader-2" class="w-5 h-5 animate-spin mx-auto"></i>';
-            btn.classList.add('opacity-70', 'pointer-events-none'); 
-            errorDiv.classList.add('hidden');
-            lucide.createIcons();
-            try {
-                const email = document.getElementById('email').value;
-                const password = document.getElementById('password').value;
-                const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
-                if (error) { throw error; } 
-                else { state.user = data.user; showApp(); startDataLoop(); }
-            } catch (err) {
-                console.error("Erro login:", err);
-                errorDiv.textContent = err.message || "Erro de conexão. Tente novamente.";
-                errorDiv.classList.remove('hidden');
-                btn.innerHTML = originalText;
-                btn.classList.remove('opacity-70', 'pointer-events-none');
-            }
-        });
-
-        function startDataLoop() {
-            fetchData();
-            supabaseClient.channel('dash').on('postgres_changes', { event: '*', schema: 'public', table: 'bot_config' }, p => updateConfigUI(p.new))
-                .on('postgres_changes', { event: '*', schema: 'public', table: 'trade_signals' }, () => refreshSignals())
-                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'logs' }, p => { 
-                    appendLog(p.new); 
-                    processScannerLog(p.new);
-                })
-                .on('postgres_changes', { event: '*', schema: 'public', table: 'cataloged_assets' }, () => fetchTopAssets()) 
-                .subscribe();
-            setInterval(fetchData, 3000);
-            setInterval(updateBotStatus, 5000);
-            setInterval(checkInactivePairs, 30000); 
-            setInterval(fetchTopAssets, 5000);
-        }
-
-        async function refreshSignals() {
-            const { data: signals } = await supabaseClient.from('trade_signals').select('*').order('created_at', { ascending: false }).limit(200);
-            if(signals) { syncSignalsList(signals); updateStats(signals); }
-        }
-
-        async function fetchData() {
-            let { data: config } = await supabaseClient.from('bot_config').select('*').eq('id', 1).single();
-            if (!config) config = { id: 1, status: 'PAUSED', stop_win: 500, stop_loss: 200, entry_value: 10, account_type: 'PRACTICE' };
-            updateConfigUI(config);
-            refreshSignals();
-            const { data: logs } = await supabaseClient.from('logs').select('*').order('created_at', { ascending: false }).limit(10);
-            if(logs && logs.length > 0) {
-                if (state.lastLogId !== logs[0].id) {
-                    const newId = logs[0].id;
-                    if (state.lastLogId) {
-                        const newLogs = [];
-                        for(let log of logs) { if (log.id === state.lastLogId) break; newLogs.push(log); }
-                        newLogs.reverse().forEach(log => { appendLog(log); processScannerLog(log); });
-                    } else {
-                        logs.slice().reverse().forEach(l => { appendLog(l); processScannerLog(l); });
-                    }
-                    state.lastLogId = newId;
-                    state.lastLogTime = new Date(logs[0].created_at);
-                }
-            }
-        }
-
+        
         function syncSignalsList(signals) {
             const list = document.getElementById('signals-list');
             if (signals.length === 0 && !list.innerHTML.includes('Limpo')) { list.innerHTML = '<div class="text-center text-slate-600 py-8 text-xs">Sem dados.</div>'; updateStats([]); return; }
-            signals.forEach(s => {
+            signals.slice(0,10).forEach(s => { // Show last 10
                 const existing = document.getElementById(`signal-${s.id}`);
                 if (!existing) {
                     const el = createSignalElement(s);
@@ -640,6 +787,7 @@
         function updateStats(signals) {
             let wins = 0, losses = 0, dayProfit = 0;
             const today = new Date().toLocaleDateString('pt-BR');
+
             signals.forEach(s => {
                 const sDate = new Date(s.created_at).toLocaleDateString('pt-BR');
                 if (sDate === today) {
@@ -647,14 +795,17 @@
                     const profit = parseFloat(s.profit);
                     const isWin = result.includes('WIN') || (!isNaN(profit) && profit > 0);
                     const isLoss = result.includes('LOSS') || (!isNaN(profit) && profit < 0);
+
                     if (isWin) { wins++; if(!isNaN(profit)) dayProfit += profit; }
                     else if (isLoss) { losses++; if(!isNaN(profit)) dayProfit += profit; }
                 }
             });
+            
             document.getElementById('score-wins').textContent = wins;
             document.getElementById('score-losses').textContent = losses;
             document.getElementById('stat-profit').textContent = `${dayProfit >= 0 ? '+' : ''}$${dayProfit.toFixed(2)}`;
             document.getElementById('stat-profit').className = `text-2xl font-bold ${dayProfit >= 0 ? 'text-green-400' : 'text-red-400'}`;
+
             const total = wins + losses;
             const rate = total > 0 ? Math.round((wins / total) * 100) : 0;
             const rateEl = document.getElementById('score-rate');
@@ -688,20 +839,6 @@
             return el;
         }
 
-        function appendLog(log) {
-            const term = document.getElementById('terminal-output');
-            const line = document.createElement('div');
-            line.className = 'flex gap-2 opacity-80 text-slate-300';
-            line.innerHTML = `<span class="text-slate-600 shrink-0">[${new Date(log.created_at).toLocaleTimeString()}]</span> <span>${log.message}</span>`;
-            term.appendChild(line);
-            term.scrollTop = term.scrollHeight;
-        }
-
-        function scrollToBottom() {
-            const term = document.getElementById('terminal-output');
-            if(term) term.scrollTop = term.scrollHeight;
-        }
-
         function updateConfigUI(config) {
             state.config = config;
             const btn = document.getElementById('toggle-bot-btn');
@@ -728,7 +865,10 @@
             document.getElementById('stat-balance').textContent = `$${(config.current_balance || 0).toFixed(2)}`;
         }
         
-        checkSession();
+        // ---------------- ENTRY POINT ----------------
+        
+        document.addEventListener('DOMContentLoaded', initApp);
+
     </script>
 </body>
 </html>
