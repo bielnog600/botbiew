@@ -344,7 +344,8 @@ class SimpleBot:
             time.sleep(0.05)
         
         results.sort(key=lambda x: x['score'], reverse=True)
-        valid_results = [r for r in results if r['win_rate'] >= 60]
+        # CRITÉRIO ATUALIZADO: Apenas pares com >= 65% de assertividade
+        valid_results = [r for r in results if r['win_rate'] >= 65]
         
         top_list = []
         if valid_results:
@@ -355,7 +356,8 @@ class SimpleBot:
         elif results:
              top_1 = results[:1]
              wr_fb = top_1[0]['win_rate']
-             if wr_fb < 45:
+             # FALLBACK ATUALIZADO: Só aceita se >= 60%
+             if wr_fb < 60:
                  self.log_to_db(f"⛔ Fallback abortado: WR muito baixo ({wr_fb:.1f}%)", "ERROR")
                  top_list = []
              else:
