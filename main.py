@@ -375,7 +375,13 @@ class SimpleBot:
                     self.supabase.table("cataloged_assets").insert(top_list).execute()
             except: pass
             return [r['pair'] for r in top_list]
-        return []
+        else:
+            # LIMPEZA SE NÃO TIVER ATIVOS
+            try:
+                if self.supabase:
+                    self.supabase.table("cataloged_assets").delete().neq("pair", "XYZ").execute() 
+            except: pass
+            return []
 
     def safe_buy(self, asset, amount, direction, type="digital"):
         result = [None]
@@ -497,7 +503,13 @@ class SimpleBot:
                         break
                     
                     if not self.api.check_connect(): break
-                    if time.time() - last_catalog > 900:
+                    
+                    # --- LÓGICA DE RECATALOGAÇÃO OTIMIZADA ---
+                    # Se não houver ativos (lista vazia), tenta de novo em 60s. 
+                    # Se houver ativos válidos, mantém os 15 minutos (900s).
+                    catalog_interval = 900 if self.best_assets else 60
+                    
+                    if time.time() - last_catalog > catalog_interval:
                         self.best_assets = self.catalog_assets(ASSETS_POOL)
                         last_catalog = time.time()
 
