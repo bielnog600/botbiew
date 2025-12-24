@@ -58,7 +58,7 @@
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            transition: opacity 0.5s ease-out, visibility 0.5s;
+            transition: opacity 0.6s ease-out, visibility 0.6s;
         }
         #splash-screen.fade-out {
             opacity: 0;
@@ -151,7 +151,7 @@
                 </div>
                 
                 <div id="top-assets-container" class="flex overflow-x-auto pb-4 gap-3 snap-x md:grid md:grid-cols-3 md:pb-0 md:overflow-visible mb-6 scrollbar-hide min-h-[120px]">
-                     <div id="empty-assets-msg" class="glass-card p-4 rounded-xl border-t-4 border-slate-700 animate-pulse h-24 flex items-center justify-center text-slate-600 text-xs w-full flex-shrink-0 md:w-auto md:col-span-3">Aguardando dados...</div>
+                     <div id="empty-assets-msg" class="glass-card p-4 rounded-xl border-t-4 border-slate-700 animate-pulse h-24 flex items-center justify-center text-slate-600 text-xs w-full flex-shrink-0 md:w-auto md:col-span-3">Carregando melhores pares...</div>
                 </div>
 
                 <div class="grid grid-cols-2 gap-4">
@@ -262,6 +262,7 @@
         // Ensure RLS (Row Level Security) is enabled on your Supabase tables.
         const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlvZHVhaHdrbmZza3R1anRoZnljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEzMDc0NDcsImV4cCI6MjA2Njg4MzQ0N30.96f8wZO6SvABKFMWjIiw1pSugAB4Isldj7yxLcLJRSE';
         let supabaseClient;
+        const appStartTime = Date.now();
         const state = { user: null, config: {}, lastLogTime: null, lastLogId: null, pairTimestamps: {}, appStartTime: new Date() };
 
         // ---------------- ROUTER ----------------
@@ -337,8 +338,12 @@
         function hideSplash() {
             const splash = document.getElementById('splash-screen');
             if (splash) {
-                splash.classList.add('fade-out');
-                setTimeout(() => splash.remove(), 600);
+                const elapsed = Date.now() - appStartTime;
+                const remaining = Math.max(0, 4000 - elapsed);
+                setTimeout(() => {
+                    splash.classList.add('fade-out');
+                    setTimeout(() => splash.remove(), 600);
+                }, remaining);
             }
         }
 
@@ -741,21 +746,17 @@
             const container = document.getElementById('top-assets-container');
             if(!container) return;
             
-            // Check specifically if the "empty/loading" message exists to clear it, 
-            // instead of checking innerText which can be unreliable if we have partial cards.
-            const emptyMsg = document.getElementById('empty-assets-msg');
-            if (emptyMsg && (assets && assets.length > 0)) {
-                 container.innerHTML = '';
+            // IF NO ASSETS -> SHOW EMPTY MSG IMMEDIATELY
+            if (!assets || assets.length === 0) {
+                container.innerHTML = `<div id="empty-assets-msg" class="col-span-1 md:col-span-3 text-center text-slate-500 py-8 text-sm bg-slate-900/50 rounded-xl border border-dashed border-slate-800 w-full flex-shrink-0"><i data-lucide="search" class="w-6 h-6 mx-auto mb-2 opacity-50"></i> Nenhum par qualificado (>65%)</div>`;
+                lucide.createIcons();
+                return;
             }
 
-            if (!assets || assets.length === 0) {
-                // Only show empty state if we really have no cards or already have the empty message
-                // This prevents clearing good cards just because of a temporary empty fetch
-                if (container.children.length === 0 || document.getElementById('empty-assets-msg')) {
-                    container.innerHTML = `<div id="empty-assets-msg" class="col-span-1 md:col-span-3 text-center text-slate-500 py-8 text-sm bg-slate-900/50 rounded-xl border border-dashed border-slate-800 w-full flex-shrink-0"><i data-lucide="search" class="w-6 h-6 mx-auto mb-2 opacity-50"></i> Nenhum par qualificado (>65%)</div>`;
-                    lucide.createIcons();
-                }
-                return;
+            // IF ASSETS EXIST -> CLEAR EMPTY MSG IF PRESENT
+            const emptyMsg = document.getElementById('empty-assets-msg');
+            if (emptyMsg) {
+                container.innerHTML = '';
             }
             
             state.pairTimestamps = {}; 
@@ -768,11 +769,9 @@
                 
                 createOrUpdateCard(asset.pair, asset.best_strategy || 'SMA14', asset.win_rate, badge);
                 
-                // Reorder logic: Ensure this card is at the correct index position
+                // Reorder Logic
                 const card = document.getElementById(`card-${safeId}`);
                 if (card && container.children[index] !== card) {
-                    // If there is a node at this index, insert before it (moves the node)
-                    // If index >= length, appendChild (handled by createOrUpdateCard logic usually, but let's be explicit)
                     if (index < container.children.length) {
                         container.insertBefore(card, container.children[index]);
                     } else {
@@ -785,7 +784,6 @@
             });
             
             Array.from(container.children).forEach(child => {
-                // Remove cards that are not in the new list, but don't remove the empty message here (handled above)
                 if (child.id && child.id.startsWith('card-') && !currentAssetIds.has(child.id)) {
                     child.remove();
                 }
@@ -798,7 +796,7 @@
             if(!container) return;
             let card = document.getElementById(`card-${safePairId}`);
             
-            // Just in case we still have the empty message
+            // Double check to remove empty msg if it still exists
             const emptyMsg = document.getElementById('empty-assets-msg');
             if(emptyMsg) emptyMsg.remove();
 
