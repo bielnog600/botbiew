@@ -47,16 +47,55 @@
         .details-content.open { max-height: 500px; opacity: 1; }
         .rotate-icon { transition: transform 0.3s ease; }
         .rotate-icon.open { transform: rotate(180deg); }
+
+        /* Splash Screen Styles */
+        #splash-screen {
+            position: fixed;
+            inset: 0;
+            background-color: #020617;
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            transition: opacity 0.5s ease-out, visibility 0.5s;
+        }
+        #splash-screen.fade-out {
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+        }
+        .pulse-logo {
+            animation: pulse-gold 2s infinite;
+        }
+        @keyframes pulse-gold {
+            0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4); }
+            70% { box-shadow: 0 0 0 20px rgba(245, 158, 11, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
+        }
     </style>
 </head>
 <body class="flex flex-col h-screen">
 
+    <!-- SPLASH SCREEN -->
+    <div id="splash-screen">
+        <div class="w-24 h-24 bg-amber-500/10 rounded-3xl flex items-center justify-center border border-amber-500/20 pulse-logo mb-6">
+            <i data-lucide="dumbbell" class="text-amber-500 w-12 h-12"></i>
+        </div>
+        <h1 class="text-3xl font-bold text-white tracking-wider">MAROMBIEW</h1>
+        <p class="text-amber-500/60 text-xs font-mono mt-2 tracking-widest">TRADING INTELLIGENCE</p>
+        <div class="mt-8 flex items-center gap-2 text-slate-500 text-xs">
+            <i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i>
+            <span>Carregando sistema...</span>
+        </div>
+    </div>
+
     <!-- LOGIN -->
-    <div id="login-screen" class="fixed inset-0 z-50 flex items-center justify-center bg-[#020617] p-4">
+    <div id="login-screen" class="fixed inset-0 z-50 flex items-center justify-center bg-[#020617] p-4 hidden">
         <div class="glass-card w-full max-w-md p-8 rounded-2xl border-t border-slate-700">
             <div class="text-center mb-8">
                 <div class="w-16 h-16 bg-amber-500/10 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-amber-500/20 shadow-[0_0_30px_rgba(245,158,11,0.2)]">
-                    <i data-lucide="zap" class="text-amber-500 w-8 h-8"></i>
+                    <i data-lucide="dumbbell" class="text-amber-500 w-8 h-8"></i>
                 </div>
                 <h1 class="text-2xl font-bold text-white">Marombiew Bot</h1>
             </div>
@@ -73,7 +112,7 @@
     <div id="app" class="flex-1 flex flex-col md:flex-row overflow-hidden hidden opacity-0 transition-opacity duration-500">
         <aside class="hidden md:flex flex-col w-64 glass-card border-r border-slate-800 z-20">
             <div class="h-20 flex items-center px-6 border-b border-slate-800/50">
-                <i data-lucide="zap" class="text-amber-500 w-6 h-6 mr-3"></i><span class="font-bold text-lg text-white">MAROMBIEW</span>
+                <i data-lucide="dumbbell" class="text-amber-500 w-6 h-6 mr-3"></i><span class="font-bold text-lg text-white">MAROMBIEW</span>
             </div>
             <nav class="flex-1 p-4 space-y-2">
                 <button onclick="router.navigate('home')" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800/50 hover:text-white active-nav" data-target="home"><i data-lucide="layout-dashboard" class="w-5 h-5"></i> Dashboard</button>
@@ -112,7 +151,7 @@
                 </div>
                 
                 <div id="top-assets-container" class="flex overflow-x-auto pb-4 gap-3 snap-x md:grid md:grid-cols-3 md:pb-0 md:overflow-visible mb-6 scrollbar-hide min-h-[120px]">
-                     <div class="glass-card p-4 rounded-xl border-t-4 border-slate-700 animate-pulse h-24 flex items-center justify-center text-slate-600 text-xs w-full flex-shrink-0 md:w-auto md:col-span-3">Aguardando dados...</div>
+                     <div id="empty-assets-msg" class="glass-card p-4 rounded-xl border-t-4 border-slate-700 animate-pulse h-24 flex items-center justify-center text-slate-600 text-xs w-full flex-shrink-0 md:w-auto md:col-span-3">Aguardando dados...</div>
                 </div>
 
                 <div class="grid grid-cols-2 gap-4">
@@ -129,7 +168,7 @@
                 </div>
 
                 <div>
-                    <div class="flex justify-between items-center mb-3"><h3 class="text-sm font-bold text-slate-400 flex items-center gap-2"><i data-lucide="history" class="w-4 h-4"></i> Histórico Recente</h3></div>
+                    <div class="flex justify-between items-center mb-3"><h3 class="text-sm font-bold text-slate-400 flex items-center gap-2"><i data-lucide="history" class="w-4 h-4"></i> Histórico Recente (Hoje)</h3></div>
                     <div id="signals-list" class="space-y-3 pb-8"><div class="text-center text-slate-600 text-xs">A carregar...</div></div>
                 </div>
             </div>
@@ -289,10 +328,19 @@
             } catch(e) {
                 console.error("Init Error:", e);
                 alert("Erro ao iniciar aplicativo. Verifique sua conexão.");
+                hideSplash();
             }
         }
 
         // ---------------- FUNÇÕES DE LÓGICA PRINCIPAL ----------------
+
+        function hideSplash() {
+            const splash = document.getElementById('splash-screen');
+            if (splash) {
+                splash.classList.add('fade-out');
+                setTimeout(() => splash.remove(), 600);
+            }
+        }
 
         async function checkSession() {
             try {
@@ -301,9 +349,14 @@
                     state.user = session.user; 
                     showApp(); 
                     startDataLoop(); 
+                } else {
+                    document.getElementById('login-screen').classList.remove('hidden');
+                    hideSplash();
                 }
             } catch (err) {
                 console.error("Session check failed", err);
+                document.getElementById('login-screen').classList.remove('hidden');
+                hideSplash();
             }
         }
 
@@ -315,6 +368,7 @@
                 app.classList.remove('hidden');
                 setTimeout(() => app.classList.remove('opacity-0'), 50);
             }
+            hideSplash();
             fetchInitialLogs();
             fetchTopAssets(); 
         }
@@ -687,18 +741,19 @@
             const container = document.getElementById('top-assets-container');
             if(!container) return;
             
-            if (container.innerText.includes('Aguardando') || container.innerText.includes('Nenhum par')) {
+            // Check specifically if the "empty/loading" message exists to clear it, 
+            // instead of checking innerText which can be unreliable if we have partial cards.
+            const emptyMsg = document.getElementById('empty-assets-msg');
+            if (emptyMsg && (assets && assets.length > 0)) {
                  container.innerHTML = '';
             }
 
             if (!assets || assets.length === 0) {
-                if (container.children.length === 0) {
-                    container.innerHTML = `<div class="col-span-1 md:col-span-3 text-center text-slate-500 py-8 text-sm bg-slate-900/50 rounded-xl border border-dashed border-slate-800 w-full flex-shrink-0"><i data-lucide="search" class="w-6 h-6 mx-auto mb-2 opacity-50"></i> Nenhum par qualificado (>65%)</div>`;
+                // Only show empty state if we really have no cards or already have the empty message
+                // This prevents clearing good cards just because of a temporary empty fetch
+                if (container.children.length === 0 || document.getElementById('empty-assets-msg')) {
+                    container.innerHTML = `<div id="empty-assets-msg" class="col-span-1 md:col-span-3 text-center text-slate-500 py-8 text-sm bg-slate-900/50 rounded-xl border border-dashed border-slate-800 w-full flex-shrink-0"><i data-lucide="search" class="w-6 h-6 mx-auto mb-2 opacity-50"></i> Nenhum par qualificado (>65%)</div>`;
                     lucide.createIcons();
-                }
-                else if (container.querySelector('[id^="card-"]')) {
-                      container.innerHTML = `<div class="col-span-1 md:col-span-3 text-center text-slate-500 py-8 text-sm bg-slate-900/50 rounded-xl border border-dashed border-slate-800 w-full flex-shrink-0"><i data-lucide="search" class="w-6 h-6 mx-auto mb-2 opacity-50"></i> Nenhum par qualificado (>65%)</div>`;
-                      lucide.createIcons();
                 }
                 return;
             }
@@ -709,13 +764,28 @@
 
             assets.forEach((asset, index) => {
                 const badge = badges[index] || '';
-                createOrUpdateCard(asset.pair, asset.best_strategy || 'SMA14', asset.win_rate, badge);
                 const safeId = asset.pair.replace(/[^a-zA-Z0-9]/g, '');
+                
+                createOrUpdateCard(asset.pair, asset.best_strategy || 'SMA14', asset.win_rate, badge);
+                
+                // Reorder logic: Ensure this card is at the correct index position
+                const card = document.getElementById(`card-${safeId}`);
+                if (card && container.children[index] !== card) {
+                    // If there is a node at this index, insert before it (moves the node)
+                    // If index >= length, appendChild (handled by createOrUpdateCard logic usually, but let's be explicit)
+                    if (index < container.children.length) {
+                        container.insertBefore(card, container.children[index]);
+                    } else {
+                        container.appendChild(card);
+                    }
+                }
+
                 state.pairTimestamps[safeId] = Date.now();
                 currentAssetIds.add(`card-${safeId}`);
             });
             
             Array.from(container.children).forEach(child => {
+                // Remove cards that are not in the new list, but don't remove the empty message here (handled above)
                 if (child.id && child.id.startsWith('card-') && !currentAssetIds.has(child.id)) {
                     child.remove();
                 }
@@ -727,7 +797,10 @@
             const container = document.getElementById('top-assets-container');
             if(!container) return;
             let card = document.getElementById(`card-${safePairId}`);
-            if (container.innerText.includes('Aguardando') || container.innerText.includes('Nenhum par')) container.innerHTML = '';
+            
+            // Just in case we still have the empty message
+            const emptyMsg = document.getElementById('empty-assets-msg');
+            if(emptyMsg) emptyMsg.remove();
 
             let winRateDisplay = '--';
             if (winRate !== null && winRate !== undefined && !isNaN(parseFloat(winRate))) {
@@ -750,7 +823,7 @@
                     </div>
                     <div class="flex justify-between items-end">
                         <div><p class="text-[8px] text-slate-500 mb-0.5">PREÇO</p><p class="text-base font-mono text-slate-300" id="price-${safePairId}">---</p></div>
-                        <div class="text-right"><p class="text-[8px] text-slate-500 mb-0.5">STATUS</p><p class="text-[9px] font-bold text-slate-400" id="status-${safePairId}">AGUARDANDO</p></div>
+                        <div class="text-right"><p class="text-[8px] text-slate-500 mb-0.5">STATUS</p><p class="text-[9px] font-bold text-slate-400" id="status-${safePairId}">MONITORANDO</p></div>
                     </div>
                     <div class="mt-2 pt-2 border-t border-white/5"><p class="text-[8px] text-slate-500 font-mono truncate" id="log-${safePairId}">Sincronizando...</p></div>
                 `;
@@ -775,22 +848,6 @@
         function processScannerLog(log) {
             const msg = log.message || "";
             let pair = "", price = "", winRate = null;
-
-            // --- NOTIFICATIONS LOGIC START ---
-            if (msg.includes('SINAL') && !msg.includes('PENDING') && new Date(log.created_at) > state.appStartTime) {
-                // Tenta extrair par e direção
-                let notifPair = "PAR";
-                let notifDir = "ENTRADA";
-                if(msg.includes('SINAL EM')) {
-                     const parts = msg.split('SINAL EM ');
-                     if(parts[1]) notifPair = parts[1].split(':')[0].trim();
-                }
-                if(msg.includes('CALL') || msg.includes('COMPRA')) notifDir = "COMPRA 🔼";
-                if(msg.includes('PUT') || msg.includes('VENDA')) notifDir = "VENDA 🔽";
-                
-                sendSignalNotification(notifPair, notifDir);
-            }
-            // --- NOTIFICATIONS LOGIC END ---
 
             if (msg.startsWith('MODE_ATIVO::')) {
                 const mode = msg.split('::')[1];
@@ -928,28 +985,75 @@
         
         function syncSignalsList(signals) {
             const list = document.getElementById('signals-list');
-            if (signals.length === 0 && !list.innerHTML.includes('Limpo')) { list.innerHTML = '<div class="text-center text-slate-600 py-8 text-xs">Sem dados.</div>'; updateStats([]); return; }
-            signals.slice(0,10).forEach(s => { // Show last 10
-                const existing = document.getElementById(`signal-${s.id}`);
-                if (!existing) {
-                    const el = createSignalElement(s);
-                    if(list.firstChild && !list.innerHTML.includes('Sem dados') && !list.innerHTML.includes('Limpo')) list.insertBefore(el, list.firstChild);
-                    else list.innerHTML = '', list.appendChild(el);
+            const todayDate = new Date();
+            
+            // 1. Filter ONLY for TODAY (Day/Month/Year strict comparison)
+            const visibleSignals = signals
+                .filter(s => {
+                    const sDate = new Date(s.created_at);
+                    return sDate.getDate() === todayDate.getDate() &&
+                           sDate.getMonth() === todayDate.getMonth() &&
+                           sDate.getFullYear() === todayDate.getFullYear();
+                })
+                .sort((a, b) => new Date(b.created_at) - new Date(a.created_at)); // 2. Newest first
+
+            if (visibleSignals.length === 0) {
+                if(!list.innerHTML.includes('Sem histórico hoje')) {
+                     list.innerHTML = '<div class="text-center text-slate-600 py-8 text-xs">Sem histórico hoje.</div>';
+                }
+                return;
+            }
+
+            // Clear empty/loading message if we have data
+            if (list.firstElementChild && !list.firstElementChild.id.startsWith('signal-')) {
+                list.innerHTML = '';
+            }
+
+            const validIds = new Set();
+            
+            // DOM Sync
+            visibleSignals.forEach((s, index) => {
+                validIds.add(`signal-${s.id}`);
+                let el = document.getElementById(`signal-${s.id}`);
+                
+                if (!el) {
+                    el = createSignalElement(s);
+                    if (index < list.children.length) {
+                        list.insertBefore(el, list.children[index]);
+                    } else {
+                        list.appendChild(el);
+                    }
                 } else {
                     const rawStatus = s.result || s.status || 'PENDING';
-                    const currentStatus = existing.getAttribute('data-status');
-                    if (currentStatus !== rawStatus) existing.replaceWith(createSignalElement(s));
+                    if (el.getAttribute('data-status') !== rawStatus) {
+                        const newEl = createSignalElement(s);
+                        list.replaceChild(newEl, el);
+                        el = newEl;
+                    }
+                    if (list.children[index] !== el) {
+                        list.insertBefore(el, list.children[index]);
+                    }
+                }
+            });
+
+            Array.from(list.children).forEach(child => {
+                if (child.id.startsWith('signal-') && !validIds.has(child.id)) {
+                    child.remove();
                 }
             });
         }
 
         function updateStats(signals) {
             let wins = 0, losses = 0, dayProfit = 0;
-            const today = new Date().toLocaleDateString('pt-BR');
+            const todayDate = new Date();
 
             signals.forEach(s => {
-                const sDate = new Date(s.created_at).toLocaleDateString('pt-BR');
-                if (sDate === today) {
+                const sDate = new Date(s.created_at);
+                const isToday = sDate.getDate() === todayDate.getDate() &&
+                                sDate.getMonth() === todayDate.getMonth() &&
+                                sDate.getFullYear() === todayDate.getFullYear();
+
+                if (isToday) {
                     const result = (s.result || '').toUpperCase();
                     const profit = parseFloat(s.profit);
                     const isWin = result.includes('WIN') || (!isNaN(profit) && profit > 0);
