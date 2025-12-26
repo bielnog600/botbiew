@@ -255,7 +255,6 @@ class SimpleBot:
                 self.config["stop_win"] = float(data.get("stop_win", 0))
                 self.config["stop_loss"] = float(data.get("stop_loss", 0))
                 self.config["stop_mode"] = data.get("stop_mode", "percentage")
-                # daily_initial_balance é gerenciado internamente agora, mas lemos para consistência
                 if "daily_initial_balance" in data:
                     self.config["daily_initial_balance"] = float(data["daily_initial_balance"])
                 
@@ -287,7 +286,6 @@ class SimpleBot:
     def calculate_daily_profit(self):
         try:
             today_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
-            # Garante que pegamos apenas trades de hoje UTC (00:00 em diante)
             res = self.supabase.table("trade_signals").select("profit").gte("created_at", f"{today_str}T00:00:00").execute()
             if res.data:
                 total = sum([float(x['profit']) for x in res.data if x['profit'] is not None])
@@ -298,15 +296,11 @@ class SimpleBot:
             return 0.0
 
     def _reconcile_initial_balance(self):
-        # Reconstrói o saldo inicial do dia matematicamente para evitar erros de acumulação
         if not self.api: return
         try:
             current_bal = self.api.get_balance()
             daily_profit = self.calculate_daily_profit()
-            # Saldo Inicial Real de Hoje = Saldo Atual - Lucro de Hoje
             reconciled_initial = current_bal - daily_profit
-            
-            # Só atualiza se houver discrepância significativa (> 1.0)
             stored_initial = self.config.get("daily_initial_balance", 0)
             if abs(reconciled_initial - stored_initial) > 1.0 or stored_initial == 0:
                 self.config["daily_initial_balance"] = reconciled_initial
@@ -318,7 +312,9 @@ class SimpleBot:
     def check_management(self):
         if not self.api: return False
         try:
-            # 1. Reset de Virada de Dia (UTC)
+            # Force Refresh Config
+            self.fetch_config()
+
             now_date = datetime.now(timezone.utc).date()
             if now_date != self.current_date:
                 self.log_to_db(f"📅 Novo dia detectado (UTC). Resetando referência diária.", "SYSTEM")
@@ -328,14 +324,11 @@ class SimpleBot:
                 if self.supabase:
                     self.supabase.table("bot_config").update({"daily_initial_balance": current_bal}).eq("id", 1).execute()
 
-            # 2. Inicialização / Reconciliação
-            # Garante que o saldo inicial esteja sincronizado com o lucro do dia
             initial_bal = self.config.get("daily_initial_balance", 0)
             if initial_bal <= 0:
                 self._reconcile_initial_balance()
                 initial_bal = self.config.get("daily_initial_balance", 0)
 
-            # 3. Cálculo de Lucro Estritamente Diário
             profit = self.calculate_daily_profit()
             
             stop_win = self.config.get("stop_win", 0)
@@ -345,13 +338,16 @@ class SimpleBot:
             target_win_val = initial_bal * (stop_win / 100) if mode == "percentage" else stop_win
             target_loss_val = initial_bal * (stop_loss / 100) if mode == "percentage" else stop_loss
             
-            # Verificação de Stop Win
+            # LOG DE DIAGNOSTICO DETALHADO
+            # Removemos depois se quiser, mas essencial agora
+            # self.log_to_db(f"DEBUG MGMT: P={profit:.2f} | Mode={mode} | SL_Conf={stop_loss} | Limit={target_loss_val:.2f}", "DEBUG")
+
             if profit >= target_win_val and target_win_val > 0:
                 self.log_to_db(f"🏆 META DIÁRIA BATIDA! Lucro: ${profit:.2f}", "SUCCESS")
                 self.pause_bot_by_management()
                 return False
             
-            # Verificação de Stop Loss
+            # CRITICAL FIX: Ensure target_loss_val matches the configured value correctly
             if profit <= -target_loss_val and target_loss_val > 0:
                 self.log_to_db(f"🛑 STOP LOSS DIÁRIO ATINGIDO! Perda Hoje: ${profit:.2f} (Limite: -${target_loss_val:.2f})", "ERROR")
                 self.pause_bot_by_management()
@@ -469,6 +465,8 @@ class SimpleBot:
         if not self.api: return
         try: balance_before = self.api.get_balance()
         except: return
+        
+        # NOTE: Fetch config is now inside check_management for absolute freshness
         if not self.check_management(): return
 
         with self.trade_lock:
