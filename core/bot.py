@@ -1,685 +1,613 @@
-import asyncio
-import traceback
 import sys
-import threading
+import time
 import logging
 import json
-import time
-from datetime import datetime
-from typing import Dict, Optional, Set, List
-from types import SimpleNamespace
-import pandas as pd
+import threading
+import os
+import random
+import requests
+from datetime import datetime, timedelta, timezone
+# Certifique-se de instalar: pip install supabase exnovaapi requests
+from supabase import create_client, Client
 
+# --- IMPORTAÇÃO DA EXNOVA ---
 try:
-    import requests
+    from exnovaapi.stable_api import Exnova
 except ImportError:
-    requests = None
+    print("[ERRO] Biblioteca 'exnovaapi' não instalada.")
 
-from config import settings
-from services.exnova_service import AsyncExnovaService
-from services.supabase_service import SupabaseService
-from analysis.technical import get_m15_sr_zones, get_h1_sr_zones
-from analysis import technical_indicators as ti
-from core.data_models import TradeSignal
+# --- CONFIGURAÇÃO GERAL ---
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://ioduahwknfsktujthfyc.supabase.co")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlvZHVhaHdrbmZza3R1anRoZnljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEzMDc0NDcsImV4cCI6MjA2Njg4MzQ0N30.96f8wZO6SvABKFMWjIiw1pSugAB4Isldj7yxLcLJRSE")
+EXNOVA_EMAIL = os.environ.get("EXNOVA_EMAIL", "seu_email@exemplo.com")
+EXNOVA_PASSWORD = os.environ.get("EXNOVA_PASSWORD", "sua_senha")
 
-# ==============================================================================
-#                       CONSTANTES GERAIS (PARES REAIS + OTC)
-# ==============================================================================
-ACTIVES_MAP = {
-    "EURUSD": 1, "EURGBP": 2, "GBPJPY": 3, "EURJPY": 4, "GBPUSD": 5, "USDJPY": 6, "AUDCAD": 7, "NZDUSD": 8, 
-    "USDCHF": 72, "AUDUSD": 99, "USDCAD": 100, "AUDJPY": 101, "GBPCAD": 102, "GBPCHF": 103, "EURCAD": 105,
-    "EURUSD-OTC": 76, "EURGBP-OTC": 77, "USDCHF-OTC": 78, "EURJPY-OTC": 79, "NZDUSD-OTC": 80, "GBPUSD-OTC": 81,
-    "GBPJPY-OTC": 84, "USDJPY-OTC": 85, "AUDCAD-OTC": 86, "AUDUSD-OTC": 2111, "USDCAD-OTC": 2112, 
-    "USDMXN-OTC": 1548, "FWONA-OTC": 2169, "XNGUSD-OTC": 2170, "AUDJPY-OTC": 2113, "GBPCAD-OTC": 2114,
-    "GBPCHF-OTC": 2115, "GBPAUD-OTC": 2116, "EURCAD-OTC": 2117
-}
-
-# ==============================================================================
-#                       MONKEY PATCHES
-# ==============================================================================
-
+# --- CONFIGURAÇÃO AVANÇADA (DO BOT ANTIGO) ---
+WATCHDOG_CHECK_EVERY = 60
+WATCHDOG_MAX_SILENCE = 180
+COOLIFY_RESTART_URL = "https://biewdev.se/api/v1/applications/ig80skg8ssog04g4oo88wswg/restart"
+COOLIFY_API_TOKEN = os.environ.get("COOLIFY_API_TOKEN")
 GLOBAL_TIME_OFFSET = 0
+LAST_LOG_TIME = time.time()
 
-def _patch_library_constants_aggressive():
-    try:
-        import exnovaapi.constants as OP_code
-        OP_code.ACTIVES.update(ACTIVES_MAP)
-        REVERSE_MAP = {v: k for k, v in ACTIVES_MAP.items()}
-        OP_code.ACTIVES.update(REVERSE_MAP)
-    except: pass
+# --- SUPRESSÃO DE LOGS (PRO) ---
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
+for logger_name in ["websocket", "exnovaapi", "iqoptionapi", "urllib3", "iqoptionapi.websocket.client"]:
+    logging.getLogger(logger_name).setLevel(logging.CRITICAL)
 
-_patch_library_constants_aggressive()
-
-# --- 1. PATCH: INJEÇÃO INTELIGENTE DE GET_CANDLES ---
-def _optimized_get_candles(self, active, duration, count, to):
-    try:
-        self.api.candles.candles_data = None
-        active_id = active
-        if isinstance(active, str):
-            import exnovaapi.constants as OP_code
-            active_id = OP_code.ACTIVES.get(active, None)
-            if active_id is None:
-                active_id = ACTIVES_MAP.get(active, None)
+# --- FUNÇÃO WATCHDOG ---
+def watchdog():
+    global LAST_LOG_TIME
+    print("[WATCHDOG] Monitoramento de saúde iniciado.")
+    
+    while True:
+        time.sleep(WATCHDOG_CHECK_EVERY)
+        silence_duration = time.time() - LAST_LOG_TIME
         
-        if active_id is None:
+        if silence_duration > WATCHDOG_MAX_SILENCE:
+            print(f"[WATCHDOG] ⚠️ ALERTA: Bot travado por {int(silence_duration)}s. Reiniciando via Coolify...")
+            if COOLIFY_API_TOKEN:
+                try:
+                    requests.post(
+                        COOLIFY_RESTART_URL,
+                        headers={"Authorization": f"Bearer {COOLIFY_API_TOKEN}", "Content-Type": "application/json"},
+                        timeout=15
+                    )
+                except Exception as e: 
+                    print(f"[WATCHDOG ERROR] Falha ao reiniciar: {e}")
+            os._exit(1)
+
+# --- ANÁLISE TÉCNICA (V2 ENGINE) ---
+class TechnicalAnalysis:
+    @staticmethod
+    def calculate_sma(candles, period):
+        if len(candles) < period: return 0
+        return sum(c['close'] for c in candles[-period:]) / period
+
+    @staticmethod
+    def calculate_ema(candles, period):
+        if len(candles) < period: return 0
+        prices = [c['close'] for c in candles]
+        ema = sum(prices[:period]) / period
+        k = 2 / (period + 1)
+        for price in prices[period:]:
+            ema = (price * k) + (ema * (1 - k))
+        return ema
+
+    @staticmethod
+    def calculate_ema_series(values, period):
+        if len(values) < period: return []
+        ema_values = []
+        sma = sum(values[:period]) / period
+        ema_values.append(sma)
+        k = 2 / (period + 1)
+        for price in values[period:]:
+            ema = price * k + ema_values[-1] * (1 - k)
+            ema_values.append(ema)
+        return ema_values
+
+    @staticmethod
+    def analyze_candle(candle):
+        open_p = candle['open']
+        close_p = candle['close']
+        high_p = candle['max']
+        low_p = candle['min']
+        body = abs(close_p - open_p)
+        upper_wick = high_p - max(open_p, close_p)
+        lower_wick = min(open_p, close_p) - low_p
+        color = 'green' if close_p > open_p else 'red' if close_p < open_p else 'doji'
+        return { 'color': color, 'body': body, 'upper_wick': upper_wick, 'lower_wick': lower_wick, 'close': close_p, 'open': open_p, 'max': high_p, 'min': low_p }
+    
+    @staticmethod
+    def flow_filter(candles):
+        if len(candles) < 50: return None 
+        candles = candles[-80:]
+        buffer_series = []
+        for i in range(35, len(candles) + 1):
+            slice_c = candles[:i]
+            fast = TechnicalAnalysis.calculate_sma(slice_c, 3)
+            slow = TechnicalAnalysis.calculate_sma(slice_c, 34)
+            buffer_series.append(fast - slow)
+        signal_series = TechnicalAnalysis.calculate_ema_series(buffer_series, 6)
+        if len(signal_series) < 2 or len(buffer_series) < 2: return None
+        buffer_now = buffer_series[-1]
+        signal_now = signal_series[-1]
+        if buffer_now > signal_now: return "BULL"
+        elif buffer_now < signal_now: return "BEAR"
+        return None
+
+    @staticmethod
+    def engulf_filter(candles, direction):
+        last = TechnicalAnalysis.analyze_candle(candles[-1])
+        prev = TechnicalAnalysis.analyze_candle(candles[-2])
+        if direction == "call": return (last['color'] == 'green' and prev['color'] == 'red' and last['body'] >= prev['body'] * 0.6)
+        if direction == "put": return (last['color'] == 'red' and prev['color'] == 'green' and last['body'] >= prev['body'] * 0.6)
+        return False
+
+    @staticmethod
+    def get_signal(candles):
+        if len(candles) < 60: return None, "Dados insuficientes"
+        current_hour = datetime.now(timezone.utc).hour
+        engulf_required = True
+        if current_hour >= 14: engulf_required = False
+
+        ema9 = TechnicalAnalysis.calculate_ema(candles, 9)
+        ema21 = TechnicalAnalysis.calculate_ema(candles, 21)
+        ema21_prev = TechnicalAnalysis.calculate_ema(candles[:-1], 21)
+        
+        confirm_candle = TechnicalAnalysis.analyze_candle(candles[-1])
+        reject_candle = TechnicalAnalysis.analyze_candle(candles[-2])
+        
+        avg_body = sum([abs(c['close']-c['open']) for c in candles[-7:-2]]) / 5
+        spread = abs(ema9 - ema21)
+        min_spread = avg_body * 0.1
+        if spread < min_spread: return None, f"Filtro: EMAs coladas"
+
+        ema21_slope = ema21 - ema21_prev
+        min_slope = avg_body * 0.02 
+        
+        if ema9 > ema21 and ema21_slope > min_slope:
+            touched_ema = reject_candle['min'] <= (ema21 + (avg_body * 0.1))
+            held_support = reject_candle['close'] >= (ema21 - (avg_body * 0.3))
+            if touched_ema and held_support:
+                if reject_candle['lower_wick'] < (reject_candle['body'] * 0.4): return None, "Rejeição fraca (Pavio)"
+                if confirm_candle['color'] == 'green':
+                    has_strength = (confirm_candle['body'] >= (reject_candle['body'] * 0.6) and confirm_candle['body'] >= (avg_body * 0.8))
+                    clean_top = confirm_candle['upper_wick'] < (confirm_candle['body'] * 0.5)
+                    if has_strength and clean_top:
+                        flow = TechnicalAnalysis.flow_filter(candles)
+                        if flow != "BULL": return None, "Filtro Fluxo contra"
+                        if engulf_required:
+                            if not TechnicalAnalysis.engulf_filter(candles, "call"): return None, "Sem força (Engolfo)"
+                        return 'call', "V2 CALL (Rejeição + Força + Fluxo)"
+                    else: return None, "Confirmação fraca"
+                else: return None, "Sem confirmação verde"
+
+        elif ema9 < ema21 and ema21_slope < -min_slope:
+            touched_ema = reject_candle['max'] >= (ema21 - (avg_body * 0.1))
+            held_resistance = reject_candle['close'] <= (ema21 + (avg_body * 0.3))
+            if touched_ema and held_resistance:
+                if reject_candle['upper_wick'] < (reject_candle['body'] * 0.4): return None, "Rejeição fraca (Pavio)"
+                if confirm_candle['color'] == 'red':
+                    has_strength = (confirm_candle['body'] >= (reject_candle['body'] * 0.6) and confirm_candle['body'] >= (avg_body * 0.8))
+                    clean_bottom = confirm_candle['lower_wick'] < (confirm_candle['body'] * 0.5)
+                    if has_strength and clean_bottom:
+                        flow = TechnicalAnalysis.flow_filter(candles)
+                        if flow != "BEAR": return None, "Filtro Fluxo contra"
+                        if engulf_required:
+                            if not TechnicalAnalysis.engulf_filter(candles, "put"): return None, "Sem força (Engolfo)"
+                        return 'put', "V2 PUT (Rejeição + Força + Fluxo)"
+                    else: return None, "Confirmação fraca"
+                else: return None, "Sem confirmação vermelha"
+        return None, "Sem configuração V2"
+
+class SimpleBot:
+    def __init__(self):
+        self.api = None
+        self.supabase = None
+        self.trade_lock = threading.Lock()
+        self.active_trades = set()
+        self.active_account_type = None
+        self.best_assets = []
+        self.asset_stats = {} 
+        self.config = { 
+            "status": "PAUSED", "account_type": "PRACTICE", "entry_value": 1.0,
+            "stop_win": 10.0, "stop_loss": 5.0, "stop_mode": "percentage", "daily_initial_balance": 0.0,
+            "timer_enabled": False, "timer_start": "00:00", "timer_end": "00:00"
+        }
+        self.last_loss_time = 0
+        self.asset_cooldowns = {}  
+        self.last_trade_time = {}  
+        self.current_date = datetime.now(timezone.utc).date() 
+        self.init_supabase()
+
+    def init_supabase(self):
+        try:
+            self.supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+            print("✅ Supabase conectado.")
+        except Exception as e:
+            print(f"❌ Erro Supabase: {e}")
+
+    def log_to_db(self, message, level="INFO"):
+        global LAST_LOG_TIME
+        LAST_LOG_TIME = time.time()
+        print(f"[{level}] {message}")
+        if not self.supabase: return
+        try:
+            self.supabase.table("logs").insert({
+                "message": message, "level": level, "created_at": datetime.now(timezone.utc).isoformat()
+            }).execute()
+        except: 
+            try: self.supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+            except: pass
+
+    def _sync_time(self):
+        # Sincronização de tempo profissional (do bot antigo)
+        try:
+            server_ts = self.api.get_server_timestamp()
+            local_ts = time.time()
+            if server_ts > 0:
+                print(f"[SYNC] Server: {server_ts} | Local: {local_ts}")
+        except: pass
+
+    def check_ip(self):
+        try:
+            ip = requests.get('https://api.ipify.org', timeout=5).text
+            print(f"[NET] IP Público: {ip}")
+        except: 
+            print("[NET] Não foi possível verificar IP")
+
+    def update_balance_remote(self):
+        if not self.api or not self.supabase: return
+        try:
+            balance = self.api.get_balance()
+            self.supabase.table("bot_config").update({"current_balance": balance}).eq("id", 1).execute()
+        except: pass
+
+    def fetch_config(self):
+        if not self.supabase: self.init_supabase(); return
+        try:
+            res = self.supabase.table("bot_config").select("*").eq("id", 1).execute()
+            if res.data:
+                data = res.data[0]
+                self.config["status"] = data.get("status", "PAUSED")
+                self.config["account_type"] = data.get("account_type", "PRACTICE").strip().upper()
+                self.config["entry_value"] = float(data.get("entry_value", 1.0))
+                self.config["stop_win"] = float(data.get("stop_win", 0))
+                self.config["stop_loss"] = float(data.get("stop_loss", 0))
+                self.config["stop_mode"] = data.get("stop_mode", "percentage")
+                self.config["daily_initial_balance"] = float(data.get("daily_initial_balance", 0))
+                self.config["timer_enabled"] = data.get("timer_enabled", False)
+                self.config["timer_start"] = data.get("timer_start", "00:00")
+                self.config["timer_end"] = data.get("timer_end", "00:00")
+            else:
+                self.supabase.table("bot_config").insert({"id": 1, "status": "PAUSED"}).execute()
+        except: pass
+
+    def check_schedule(self):
+        if not self.config.get("timer_enabled", False): return 
+        now_str = datetime.now(timezone.utc).strftime("%H:%M") 
+        start_str = self.config.get("timer_start", "00:00")
+        end_str = self.config.get("timer_end", "00:00")
+        is_inside = False
+        if start_str < end_str: is_inside = start_str <= now_str < end_str
+        else: is_inside = now_str >= start_str or now_str < end_str
+        current_status = self.config["status"]
+        if is_inside and current_status == "PAUSED":
+            self.log_to_db(f"⏰ Agendador: Iniciando operações ({start_str}-{end_str})", "SYSTEM")
+            self.config["status"] = "RUNNING"
+            if self.supabase: self.supabase.table("bot_config").update({"status": "RUNNING"}).eq("id", 1).execute()
+        elif not is_inside and current_status == "RUNNING":
+            self.log_to_db(f"⏰ Agendador: Pausando operações (Fim do horário)", "SYSTEM")
+            self.config["status"] = "PAUSED"
+            if self.supabase: self.supabase.table("bot_config").update({"status": "PAUSED"}).eq("id", 1).execute()
+
+    def calculate_daily_profit(self):
+        try:
+            today_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+            res = self.supabase.table("trade_signals").select("profit").gte("created_at", f"{today_str}T00:00:00").execute()
+            if res.data:
+                total = sum([float(x['profit']) for x in res.data if x['profit'] is not None])
+                return total
+            return 0.0
+        except:
+            return 0.0
+
+    def check_management(self):
+        if not self.api: return False
+        try:
+            now_date = datetime.now(timezone.utc).date()
+            if now_date != self.current_date:
+                self.log_to_db(f"📅 Novo dia detectado. Resetando referência.", "SYSTEM")
+                self.current_date = now_date
+                current_bal = self.api.get_balance()
+                self.config["daily_initial_balance"] = current_bal
+                if self.supabase:
+                    self.supabase.table("bot_config").update({"daily_initial_balance": current_bal}).eq("id", 1).execute()
+
+            initial_bal = self.config.get("daily_initial_balance", 0)
+            if initial_bal <= 0:
+                current_bal = self.api.get_balance()
+                initial_bal = current_bal
+                self.config["daily_initial_balance"] = initial_bal
+                if self.supabase: self.supabase.table("bot_config").update({"daily_initial_balance": initial_bal}).eq("id", 1).execute()
+                self.log_to_db(f"Saldo Inicial definido: ${initial_bal:.2f}", "SYSTEM")
+
+            profit = self.calculate_daily_profit()
+            
+            stop_win = self.config.get("stop_win", 0)
+            stop_loss = self.config.get("stop_loss", 0)
+            mode = self.config.get("stop_mode", "percentage")
+            
+            target_win_val = initial_bal * (stop_win / 100) if mode == "percentage" else stop_win
+            target_loss_val = initial_bal * (stop_loss / 100) if mode == "percentage" else stop_loss
+            
+            if profit >= target_win_val and target_win_val > 0:
+                self.log_to_db(f"🏆 META DIÁRIA BATIDA! Lucro: ${profit:.2f}", "SUCCESS")
+                self.pause_bot_by_management()
+                return False
+            
+            if profit <= -target_loss_val and target_loss_val > 0:
+                self.log_to_db(f"🛑 STOP LOSS DIÁRIO! Perda: ${profit:.2f}", "ERROR")
+                self.pause_bot_by_management()
+                return False
+                
+            return True
+        except Exception as e:
+            self.log_to_db(f"Erro no gerenciamento: {e}", "ERROR")
+            return True
+
+    def pause_bot_by_management(self):
+        self.config["status"] = "PAUSED"
+        if self.supabase: self.supabase.table("bot_config").update({"status": "PAUSED"}).eq("id", 1).execute()
+        time.sleep(2)
+
+    def connect(self):
+        self.log_to_db(f"🔌 Conectando...", "SYSTEM")
+        try:
+            if self.api: 
+                try: self.api.api.close() 
+                except: pass
+            self.api = Exnova(EXNOVA_EMAIL, EXNOVA_PASSWORD)
+            check, reason = self.api.connect()
+            if check:
+                self.log_to_db("✅ Conectado!", "SUCCESS")
+                self.active_account_type = self.config["account_type"]
+                self.api.change_balance(self.active_account_type)
+                self.update_balance_remote()
+                self._sync_time()
+                return True
+            else:
+                self.log_to_db(f"Falha conexão: {reason}", "ERROR")
+        except Exception as e:
+            self.log_to_db(f"Erro critico conexão: {e}", "ERROR")
+        return False
+
+    def catalog_assets(self, assets_list):
+        self.log_to_db(f"📊 Catalogando Top 3 (Estratégia V2)...", "SYSTEM")
+        results = []
+        for asset in assets_list:
+            try:
+                candles = self.api.get_candles(asset, 60, 200, int(time.time()))
+                if not candles or len(candles) < 100: continue
+                wins, total = 0, 0
+                for i in range(60, len(candles)-1):
+                    subset = candles[i-60:i+1]
+                    signal, _ = TechnicalAnalysis.get_signal(subset)
+                    if signal:
+                        total += 1
+                        nxt = candles[i+1]
+                        is_win = (signal == 'call' and nxt['close'] > nxt['open']) or \
+                                 (signal == 'put' and nxt['close'] < nxt['open'])
+                        if is_win: wins += 1
+                if total >= 2: 
+                    wr = (wins / total) * 100
+                    score = (wr * 0.7) + (total * 5)
+                    results.append({"pair": asset, "win_rate": wr, "wins": wins, "losses": total-wins, "best_strategy": "EMA V2+Flow", "score": score})
+            except: pass
+            time.sleep(0.05)
+        
+        results.sort(key=lambda x: x['score'], reverse=True)
+        valid_results = [r for r in results if r['win_rate'] >= 65] # 65% Threshold
+        
+        top_list = []
+        if valid_results:
+            top_3 = valid_results[:3]
+            pairs_str = ", ".join([f"{r['pair']} ({r['win_rate']:.0f}%)" for r in top_3])
+            self.log_to_db(f"💎 Melhores: {pairs_str}", "SUCCESS")
+            top_list = top_3
+        elif results:
+             top_1 = results[:1]
+             wr_fb = top_1[0]['win_rate']
+             if wr_fb < 60: # 60% Fallback Threshold
+                 self.log_to_db(f"⛔ Fallback abortado: WR muito baixo ({wr_fb:.1f}%)", "ERROR")
+                 top_list = []
+             else:
+                 self.log_to_db(f"⚠️ Fallback agressivo: {top_1[0]['pair']} (WR: {wr_fb:.1f}%)", "WARNING")
+                 top_list = top_1
+        else:
+            self.log_to_db("⚠️ Sem ativos viáveis.", "WARNING")
+        
+        if top_list:
+            for r in top_list: self.asset_stats[r['pair']] = r
+            try:
+                if self.supabase:
+                    self.supabase.table("cataloged_assets").delete().neq("pair", "XYZ").execute() 
+                    self.supabase.table("cataloged_assets").insert(top_list).execute()
+            except: pass
+            return [r['pair'] for r in top_list]
+        else:
+            try:
+                if self.supabase:
+                    self.supabase.table("cataloged_assets").delete().neq("pair", "XYZ").execute() 
+            except: pass
             return []
 
-        self.api.getcandles(active_id, duration, count, to)
-        start = time.time()
-        while self.api.candles.candles_data is None:
-            if time.time() - start > 15: 
-                # print(f"[TIMEOUT PATCH] {active} ID:{active_id}")
-                return []
-            time.sleep(0.05)
-        return self.api.candles.candles_data
-    except Exception:
-        return []
-
-# --- 2. PATCH: BALANCE ---
-def _optimized_get_balances(self):
-    self.api.balances_raw = None
-    try:
-        self.api.get_balances()
-    except Exception:
-        return {"msg": []}
-    start = time.time()
-    while self.api.balances_raw is None:
-        if time.time() - start > 10: return {"msg": []} 
-        time.sleep(0.1)
-    return self.api.balances_raw
-
-def _optimized_get_profile_ansyc(self):
-    start = time.time()
-    while self.api.profile.msg is None:
-        if time.time() - start > 10: return None
-        time.sleep(0.1)
-    return self.api.profile.msg
-
-try:
-    import exnovaapi.stable_api
-    TargetClass = None
-    if hasattr(exnovaapi.stable_api, 'Exnova'):
-        TargetClass = exnovaapi.stable_api.Exnova
-    elif hasattr(exnovaapi.stable_api, 'ExnovaAPI'):
-        TargetClass = exnovaapi.stable_api.ExnovaAPI
-
-    if TargetClass:
-        TargetClass.get_candles = _optimized_get_candles
-        TargetClass.get_balances = _optimized_get_balances
-        TargetClass.get_profile_ansyc = _optimized_get_profile_ansyc
-        TargetClass.get_digital_underlying_list_data = lambda self: {"underlying": []}
-        TargetClass.get_instruments = lambda self, *args: {"instruments": []}
-        TargetClass._ExnovaAPI__get_other_open = lambda self, *args, **kwargs: None
-        if hasattr(TargetClass, '_Exnova__get_other_open'):
-             TargetClass._Exnova__get_other_open = lambda self, *args, **kwargs: None
-except ImportError:
-    pass
-
-# --- 3. PATCH SERVICE GET_CANDLES ---
-async def _get_historical_candles_patched(self, asset_name, duration, amount):
-    if not hasattr(self, 'api') or not self.api: return []
-    try:
-        local_time = int(time.time())
-        # TENTA RECUAR 30s PARA EVITAR ERROS DE FUTURO
-        req_time = local_time - GLOBAL_TIME_OFFSET - 30
-
-        candles = await asyncio.wait_for(
-            asyncio.to_thread(self.api.get_candles, asset_name, duration, amount, req_time),
-            timeout=20.0
-        )
-        
-        # DEBUG DIAGNÓSTICO
-        if not candles:
-            # Se for None, é timeout/rede. Se for [], é a API a dizer "não tenho dados".
-            is_none = candles is None
-            is_empty = isinstance(candles, list) and len(candles) == 0
-            if is_none:
-                print(f"[DEBUG VELAS] {asset_name}: Timeout (Sem resposta)")
-            elif is_empty:
-                print(f"[DEBUG VELAS] {asset_name}: Lista Vazia (Bloqueio ou Tempo Errado)")
-        
-        return candles or []
-    except Exception as e:
-        print(f"[ERROR SERVICE] {asset_name}: {e}")
-        return []
-
-AsyncExnovaService.get_historical_candles = _get_historical_candles_patched
-
-# --- 4. PATCH EXECUTE TRADE ---
-async def _execute_trade_robust(self, amount, active_name, direction, duration):
-    try:
-        if hasattr(self, 'api') and self.api:
-            status, id = await asyncio.to_thread(self.api.buy, amount, active_name, direction, duration)
-            if status and id: return id
-    except Exception: pass
-    try:
-        if hasattr(self, 'api') and self.api:
-            status, id = await asyncio.to_thread(self.api.buy_digital_spot, active_name, amount, direction, duration)
-            if status and id: return id
-    except Exception: pass
-    return None
-
-AsyncExnovaService.execute_trade = _execute_trade_robust
-
-# --- 5. PATCH ASSETS ---
-async def _get_open_assets_fix(self):
-    return [
-        "EURUSD-OTC", "GBPUSD-OTC", "USDJPY-OTC", "EURJPY-OTC", 
-        "USDCHF-OTC", "AUDCAD-OTC", "NZDUSD-OTC", "EURGBP-OTC", "AUDUSD-OTC",
-        "USDMXN-OTC", "FWONA-OTC", "XNGUSD-OTC"
-    ]
-AsyncExnovaService.get_open_assets = _get_open_assets_fix
-
-# --- 6. PATCH CONNECT ---
-async def _connect_fresh_instance(self):
-    try:
-        if hasattr(self, 'api') and self.api is not None:
-            try: self.api.websocket_client.close()
+    def safe_buy(self, asset, amount, direction, type="digital"):
+        result = [None]
+        def target():
+            try:
+                if type == "digital": result[0] = self.api.buy_digital_spot(asset, amount, direction, 1)
+                else: result[0] = self.api.buy(amount, asset, direction, 1)
             except: pass
-            self.api = None 
-        from exnovaapi.stable_api import Exnova, ExnovaAPI
-        try: self.api = Exnova("exnova.com", self.email, self.password)
-        except NameError: self.api = ExnovaAPI("exnova.com", self.email, self.password)
-        check = await asyncio.to_thread(self.api.connect)
-        return check
-    except Exception:
-        return False
-AsyncExnovaService.connect = _connect_fresh_instance
+        t = threading.Thread(target=target); t.daemon = True; t.start()
+        t.join(timeout=10.0)
+        return result[0] if result[0] else (False, None)
 
-# --- 7. INDICADORES ---
-def _convert_candles_to_dataframe_fix(candles):
-    if not candles: return pd.DataFrame()
-    normalized = []
-    for c in candles:
-        if isinstance(c, dict): normalized.append(c)
+    def execute_trade(self, asset, direction):
+        last = self.last_trade_time.get(asset)
+        if last and time.time() - last < 70:
+            return
+        self.last_trade_time[asset] = time.time()
+
+        if not self.api: return
+        try: balance_before = self.api.get_balance()
+        except: return
+        if not self.check_management(): return
+
+        with self.trade_lock:
+            if asset in self.active_trades: return
+            self.active_trades.add(asset)
+
+        amount = self.config["entry_value"]
+        self.log_to_db(f"➡️ ABRINDO (V2): {asset} | {direction.upper()} | ${amount}", "INFO")
+        
+        sig_id = None
+        try:
+            if self.supabase:
+                res = self.supabase.table("trade_signals").insert({
+                    "pair": asset, "direction": direction, "strategy": f"EMA V2",
+                    "status": "PENDING", "result": "PENDING", 
+                    "created_at": datetime.now(timezone.utc).isoformat(), 
+                    "profit": 0
+                }).execute()
+                if res.data: sig_id = res.data[0]['id']
+        except: pass
+
+        status, id = self.safe_buy(asset, amount, direction, "digital")
+        if not status: status, id = self.safe_buy(asset, amount, direction, "binary")
+
+        if status:
+            self.log_to_db(f"✅ Ordem {id} aceita. Aguardando (64s)...", "INFO")
+            time.sleep(64)
+            profit = 0.0; res_str = "PENDING"
+            try:
+                balance_after = self.api.get_balance()
+                delta = balance_after - balance_before
+                if delta > 0: res_str, profit = 'WIN', delta
+                elif delta < 0: res_str, profit = 'LOSS', delta
+                else: 
+                    res_str = 'DOJI'
+                    profit = None
+            except: res_str = 'UNKNOWN'
+
+            if res_str == 'DOJI':
+                self.log_to_db("⚠️ DOJI ignorado (não contabilizado)", "WARNING")
+                with self.trade_lock: self.active_trades.discard(asset)
+                if sig_id and self.supabase:
+                    try: self.supabase.table("trade_signals").delete().eq("id", sig_id).execute()
+                    except: pass
+                return
+
+            if res_str == 'LOSS': 
+                self.asset_cooldowns[asset] = time.time()
+                self.log_to_db(f"🛑 Cooldown no ativo {asset}: 60s.", "WARNING")
+
+            log_type = "SUCCESS" if res_str == 'WIN' else "ERROR" if res_str == 'LOSS' else "WARNING"
+            self.log_to_db(f"{'🏆' if res_str == 'WIN' else '🔻'} {res_str}: ${profit:.2f}", log_type)
+
+            if sig_id and self.supabase:
+                try: self.supabase.table("trade_signals").update({"status": res_str, "result": res_str, "profit": profit}).eq("id", sig_id).execute()
+                except: pass
+            
+            self.update_balance_remote()
+            self.check_management()
+            with self.trade_lock: self.active_trades.discard(asset)
         else:
-            try: normalized.append(vars(c))
-            except TypeError:
-                try: normalized.append({'open': c.open, 'close': c.close, 'high': c.high, 'low': c.low, 'volume': getattr(c, 'volume', 0)})
-                except AttributeError: pass
-    df = pd.DataFrame(normalized)
-    for col in ['open', 'close', 'high', 'low', 'volume']:
-        if col in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce')
-    return df
+            self.log_to_db("❌ Falha ordem na corretora.", "ERROR")
+            with self.trade_lock: self.active_trades.discard(asset)
+            if sig_id and self.supabase: 
+                try: self.supabase.table("trade_signals").delete().eq("id", sig_id).execute()
+                except: pass
 
-def _validate_reversal_candle_fix(candle, direction):
-    try:
-        c_open, c_close = float(candle.open), float(candle.close)
-        is_green = c_close >= c_open
-        is_red = c_close <= c_open
-        if direction.lower() == 'call' and not is_green: return False
-        if direction.lower() == 'put' and not is_red: return False
-        return True
-    except: return False
-
-def _check_candlestick_pattern_fix(candles):
-    if len(candles) < 2: return None
-    try:
-        last, prev = candles[-1], candles[-2]
-        get_val = lambda c, a: float(c[a]) if isinstance(c, dict) else float(getattr(c, a))
-        l_open, l_close = get_val(last, 'open'), get_val(last, 'close')
-        l_high, l_low = get_val(last, 'high'), get_val(last, 'low')
-        p_open, p_close = get_val(prev, 'open'), get_val(prev, 'close')
-        l_body = abs(l_close - l_open) or 0.00001
-        l_upper = l_high - max(l_close, l_open)
-        l_lower = min(l_close, l_open) - l_low
-        is_p_red, is_p_green = p_close < p_open, p_close > p_open
-        is_l_green, is_l_red = l_close > l_open, l_close < l_open
-        if is_p_red and is_l_green and l_close > p_open and l_open < p_close: return 'call'
-        if is_p_green and is_l_red and l_close < p_open and l_open > p_close: return 'put'
-        RATIO = 1.5
-        if l_lower >= (RATIO * l_body) and l_upper <= l_body: return 'call'
-        if l_upper >= (RATIO * l_body) and l_lower <= l_body: return 'put'
-    except: return None
-    return None
-
-def _check_rsi_condition_fix(candles, period=14, overbought=65, oversold=35):
-    try:
-        df = _convert_candles_to_dataframe_fix(candles)
-        if df.empty or len(df) < period + 1: return None
-        delta = df['close'].diff()
-        up, down = delta.clip(lower=0), -1 * delta.clip(upper=0)
-        ma_up = up.ewm(com=period - 1, adjust=True, min_periods=period).mean()
-        ma_down = down.ewm(com=period - 1, adjust=True, min_periods=period).mean()
-        rsi = 100 - (100 / (1 + (ma_up / ma_down)))
-        last_rsi = rsi.iloc[-1]
-        signal = None
-        if last_rsi >= overbought: signal = 'put'
-        elif last_rsi <= oversold: signal = 'call'
-        return (signal, last_rsi) 
-    except: return (None, 50.0)
-
-ti._convert_candles_to_dataframe = _convert_candles_to_dataframe_fix
-ti.validate_reversal_candle = _validate_reversal_candle_fix
-ti.check_candlestick_pattern = _check_candlestick_pattern_fix
-ti.check_rsi_condition = _check_rsi_condition_fix
-
-def _safe_send_websocket_request(self, name, msg, request_id=""):
-    try:
-        if self.websocket and self.websocket.sock and self.websocket.sock.connected:
-            data = json.dumps(dict(name=name, msg=msg, request_id=request_id))
-            self.websocket.send(data)
-            return True
-    except Exception: pass
-    return False
-
-try:
-    import exnovaapi.api
-    exnovaapi.api.ExnovaAPI.send_websocket_request = _safe_send_websocket_request
-except: pass
-
-# ==============================================================================
-
-class TradingBot:
-    def __init__(self):
-        self.supabase = SupabaseService(settings.SUPABASE_URL, settings.SUPABASE_KEY)
-        self.exnova = AsyncExnovaService(settings.EXNOVA_EMAIL, settings.EXNOVA_PASSWORD)
-        self.is_running = True
-        self.bot_config: Dict = {}
-        self.martingale_state: Dict[str, Dict] = {} 
-        self.pending_martingale_trades: Dict[str, Dict] = {} 
-        self.active_trading_pairs: Set[str] = set() 
-        self.asset_performance: Dict[str, Dict[str, int]] = {}
-        self.consecutive_losses: Dict[str, int] = {}
-        self.blacklisted_assets: set = set()
-        self.last_reset_time: datetime = datetime.utcnow()
-        self.last_analysis_minute = -1
-        self.last_daily_reset_date = None
-        self.daily_wins = 0
-        self.daily_losses = 0
-
-        # SUPRESSÃO DE LOGS
-        for logger_name in ["websocket", "exnovaapi", "iqoptionapi", "urllib3", "iqoptionapi.websocket.client"]:
-            logger = logging.getLogger(logger_name)
-            logger.setLevel(logging.CRITICAL)
-            logger.propagate = False
-
-    def _get_asset_id(self, asset_name):
-        return asset_name.replace(" (OTC)", "-OTC").strip()
-
-    async def logger(self, level: str, message: str):
-        ts = datetime.utcnow().isoformat()
-        print(f"[{ts}] [{level.upper()}] {message}", flush=True)
-        try: await asyncio.to_thread(self.supabase.insert_log, level, message)
-        except: pass
-
-    def _check_ip_reputation(self):
-        if requests:
-            try:
-                ip = requests.get('https://api.ipify.org', timeout=5).text
-                print(f"[NET DEBUG] IP Público do Bot: {ip}")
-            except:
-                print("[NET DEBUG] Não foi possível verificar o IP.")
-
-    def _is_socket_connected(self):
-        try:
-            if not self.exnova.api:
-                return False
-            # check_connect() verifica global_value.check_websocket_if_connect
-            return self.exnova.api.check_connect()
-        except:
-            return False
-
-    async def _sync_time(self):
-        global GLOBAL_TIME_OFFSET
-        try:
-            server_ts = 0
-            if hasattr(self.exnova.api, 'get_server_timestamp'):
-                server_ts = self.exnova.api.get_server_timestamp()
-            
-            if server_ts == 0 and hasattr(self.exnova.api.api, 'timesync'):
-                 server_ts = self.exnova.api.api.timesync.server_timestamp
-
-            if server_ts > 0:
-                local_ts = time.time()
-                if server_ts > 3000000000: 
-                    server_ts /= 1000
-                elif server_ts < 2000000000 and server_ts > 1000000:
-                     if server_ts < local_ts / 100:
-                         server_ts *= 1000
-
-                offset = local_ts - server_ts
-                if abs(offset) > 86400:
-                    GLOBAL_TIME_OFFSET = 0
-                else:
-                    GLOBAL_TIME_OFFSET = int(offset)
-            else:
-                GLOBAL_TIME_OFFSET = 0
-
-        except Exception:
-            GLOBAL_TIME_OFFSET = 0
-
-    async def _daily_reset_if_needed(self):
-        current_date_utc = datetime.utcnow().date()
-        if self.last_daily_reset_date != current_date_utc:
-            await self.logger('INFO', f"NOVO DIA ({current_date_utc}). Reset metas.")
-            self.daily_wins = 0
-            self.daily_losses = 0
-            self.last_daily_reset_date = current_date_utc
-            try:
-                bal = await self.exnova.get_current_balance()
-                if bal and float(bal) > 0: 
-                    await asyncio.to_thread(self.supabase.update_config, {'daily_initial_balance': bal, 'current_balance': bal})
-            except: pass
-
-    async def _hourly_cycle_reset(self):
-        await self.logger('INFO', "CICLO HORÁRIO: Limpeza de stats.")
-        self.asset_performance.clear()
-        self.consecutive_losses.clear()
-        self.blacklisted_assets.clear()
-        self.last_reset_time = datetime.utcnow()
-
-    async def run(self):
-        await self.logger('INFO', 'Bot a iniciar no modo FORCE OTC ALWAYS...')
+    def start(self):
+        t_watchdog = threading.Thread(target=watchdog, daemon=True)
+        t_watchdog.start()
+        self.check_ip()
         
-        self._check_ip_reputation()
-
-        if not await self.exnova.connect(): await self.logger('ERROR', 'Falha na conexão inicial.')
-        
-        await self._daily_reset_if_needed()
-        _patch_library_constants_aggressive()
-
-        print("[SYSTEM] Aqueçendo API (Warmup 5s)...")
-        await asyncio.sleep(5) 
-        await self._sync_time()
-
-        # BLOCO DE DIAGNÓSTICO DE INICIALIZAÇÃO
-        # Tenta carregar perfil em loop. Se falhar, é Block.
-        print("[SYSTEM] Verificando Perfil...")
-        profile_ok = False
-        for i in range(10):
+        while True:
             try:
-                prof = await asyncio.to_thread(self.exnova.api.get_profile_ansyc)
-                if prof:
-                    print(f"[SYSTEM] Perfil OK! Currency: {prof.get('currency')} (Tentativa {i+1})")
-                    profile_ok = True
-                    break
-            except: pass
-            await asyncio.sleep(1)
-        
-        if not profile_ok:
-            print("[ALERTA CRÍTICO] Falha ao carregar perfil. O IP pode estar bloqueado para dados.")
+                self.fetch_config()
+                if not self.connect(): time.sleep(10); continue
+                
+                ASSETS_POOL = [
+                    "EURUSD-OTC", "EURGBP-OTC", "USDCHF-OTC", "EURJPY-OTC", "NZDUSD-OTC", "GBPUSD-OTC", 
+                    "GBPJPY-OTC", "USDJPY-OTC", "AUDCAD-OTC", "AUDUSD-OTC", "USDCAD-OTC", "AUDJPY-OTC"
+                ]
+                
+                self.best_assets = self.catalog_assets(ASSETS_POOL)
+                last_scan = 0
+                last_bal = 0
+                last_catalog = time.time()
 
-        print("[SYSTEM] Loop principal iniciado...")
-        
-        while self.is_running:
-            try:
-                if not self._is_socket_connected():
-                    print("[AVISO] Conexão perdida. Tentando reconectar...")
-                    reconnected = False
-                    for i in range(3):
-                        if await self.exnova.connect():
-                            await self.logger('SUCCESS', 'Reconectado.')
-                            await asyncio.sleep(3)
-                            await self._sync_time()
-                            reconnected = True
-                            break
-                        await asyncio.sleep(5)
+                while True:
+                    self.fetch_config()
+                    if self.config["status"] == "RESTARTING":
+                        if self.supabase: self.supabase.table("bot_config").update({"status": "RUNNING"}).eq("id", 1).execute()
+                        break
                     
-                    if not reconnected:
-                        await asyncio.sleep(5)
-                        continue
+                    if not self.api.check_connect(): break
+                    
+                    catalog_interval = 900 if self.best_assets else 60
+                    if time.time() - last_catalog > catalog_interval:
+                        self.best_assets = self.catalog_assets(ASSETS_POOL)
+                        last_catalog = time.time()
 
-                await self._daily_reset_if_needed()
-                if (datetime.utcnow() - self.last_reset_time).total_seconds() >= 3600:
-                    await self._hourly_cycle_reset()
+                    self.check_schedule()
 
-                self.bot_config = await asyncio.to_thread(self.supabase.get_bot_config)
-                status = self.bot_config.get('status', 'PAUSED')
+                    if time.time() - last_scan > 10:
+                        try:
+                            self.update_balance_remote()
+                            targets = self.best_assets[:3] if self.best_assets else ["EURUSD-OTC"]
+                            self.log_to_db(f"MODE_ATIVO::EMA_V2_FLOW_AGGRESSIVE", "SYSTEM")
 
-                if status == 'RUNNING':
-                    pending = list(self.pending_martingale_trades.keys())
-                    for pair in pending:
-                        if pair not in self.active_trading_pairs:
-                            asyncio.create_task(self._execute_martingale_trade(pair))
-                    await self.trading_cycle()
-                elif status != 'RUNNING':
-                    if len(self.active_trading_pairs) > 0: print(f"[PAUSA] Aguardando {len(self.active_trading_pairs)} trades.")
-                    await asyncio.sleep(2)
-                await asyncio.sleep(1)
+                            for asset in targets:
+                                try:
+                                    candles = self.api.get_candles(asset, 60, 100, int(time.time()))
+                                    if candles:
+                                        price = candles[-1]['close']
+                                        ema21 = TechnicalAnalysis.calculate_ema(candles, 21)
+                                        cd_msg = ""
+                                        if asset in self.asset_cooldowns:
+                                             if time.time() - self.asset_cooldowns[asset] < 60: cd_msg = " [COOLDOWN]"
+                                        
+                                        stats = self.asset_stats.get(asset, {})
+                                        wr_val = f"{stats['win_rate']:.0f}%" if 'win_rate' in stats else "--"
+                                        
+                                        self.log_to_db(f"ANALISE_DETALHADA::{asset}::Preço:{price:.5f}::EMA21:{ema21:.5f}::WR:{wr_val}{cd_msg}", "SYSTEM")
+                                        time.sleep(0.2)
+                                except: pass
+                        except Exception as e: self.log_to_db(f"Erro monitoramento: {e}", "WARNING")
+                        last_scan = time.time()
+                    
+                    if time.time() - last_bal > 60: self.update_balance_remote(); last_bal = time.time()
+
+                    if self.config["status"] == "PAUSED": time.sleep(2); continue
+                    if not self.check_management(): time.sleep(5); continue
+
+                    now_sec = datetime.now().second
+                    if 55 <= now_sec <= 59:
+                        if not self.best_assets:
+                            self.log_to_db("⛔ Sem ativos válidos (nem fallback).", "WARNING")
+                            time.sleep(2); continue
+
+                        current_assets = self.best_assets.copy()
+                        random.shuffle(current_assets)
+                        trade_executed = False
+                        
+                        for asset in current_assets:
+                            if asset in self.asset_cooldowns:
+                                 if time.time() - self.asset_cooldowns[asset] < 60: continue
+
+                            with self.trade_lock:
+                                if asset in self.active_trades: continue
+                            try:
+                                self.log_to_db(f"SCAN_ENTRADA::{asset}", "SYSTEM")
+                                candles = self.api.get_candles(asset, 60, 100, int(time.time()))
+                                sig, reason = TechnicalAnalysis.get_signal(candles)
+                                if sig: 
+                                    self.log_to_db(f"🔔 SINAL EM {asset}: {sig.upper()} ({reason})", "INFO")
+                                    self.execute_trade(asset, sig)
+                                    trade_executed = True
+                                    break 
+                            except: pass
+                        
+                        if trade_executed: time.sleep(50) 
+                        else: time.sleep(4) 
+                    time.sleep(0.5)
             except Exception as e:
-                print(f"[LOOP ERROR] {e}")
-                await asyncio.sleep(5)
+                self.log_to_db(f"Erro loop principal: {e}", "ERROR")
+                time.sleep(5)
 
-    async def trading_cycle(self):
-        now = datetime.utcnow()
-        if now.second >= 50:
-            if now.minute != self.last_analysis_minute:
-                self.last_analysis_minute = now.minute
-                is_m5 = (now.minute + 1) % 5 == 0
-                if is_m5:
-                    await self.logger('INFO', f"Varredura M5...")
-                    asyncio.create_task(self.run_analysis_for_timeframe(300, 5))
-                else:
-                    await self.logger('INFO', f"Varredura M1...")
-                    asyncio.create_task(self.run_analysis_for_timeframe(60, 1))
-
-    async def run_analysis_for_timeframe(self, timeframe_seconds: int, expiration_minutes: int):
-        try:
-            try:
-                # DEBUG VISUAL ATIVO
-                bal = await self.exnova.get_current_balance()
-                print(f"[STATUS] Saldo: {bal} | {expiration_minutes}M Scan")
-                await asyncio.wait_for(self.exnova.change_balance(self.bot_config.get('account_type', 'PRACTICE')), timeout=2.0)
-            except: pass
-
-            assets = await _get_open_assets_fix(None)
-            available_assets = [a for a in assets if a not in self.blacklisted_assets]
-            if not available_assets: available_assets = assets
-
-            def get_asset_score(asset_name):
-                stats = self.asset_performance.get(asset_name, {'wins': 0, 'losses': 0})
-                total = stats['wins'] + stats['losses']
-                return stats['wins'] / total if total > 0 else 0.5
-
-            target_assets = sorted(available_assets, key=get_asset_score, reverse=True)[:15]
-            max_sim = self.bot_config.get('max_simultaneous_trades', 1)
-            if len(self.active_trading_pairs) >= max_sim: return
-
-            for asset_name in target_assets:
-                try:
-                    if not self._is_socket_connected(): break
-                except: break
-                if asset_name in self.active_trading_pairs: continue
-                try:
-                    await self._analyze_asset(asset_name, timeframe_seconds, expiration_minutes)
-                except Exception: pass
-                await asyncio.sleep(4.0)
-
-        except Exception as e:
-            await self.logger('ERROR', f"Erro em run_analysis: {e}")
-
-    async def _analyze_asset(self, full_name: str, timeframe_seconds: int, expiration_minutes: int):
-        if full_name in self.active_trading_pairs: return
-
-        try:
-            if expiration_minutes == 1: t1, t2, res_func = 60, 900, get_m15_sr_zones
-            elif expiration_minutes == 5: t1, t2, res_func = 300, 3600, get_h1_sr_zones
-            else: return
-
-            # DEBUG VISUAL ATIVO
-            print(f"[DEBUG] Analisando: {full_name}")
-
-            try:
-                candles = await asyncio.gather(
-                    self.exnova.get_historical_candles(full_name, t1, 200),
-                    self.exnova.get_historical_candles(full_name, t2, 100)
-                )
-            except: return
-
-            analysis_candles, sr_candles = candles
-            if not analysis_candles:
-                return
-
-            analysis_candles_objs = []
-            for c in analysis_candles:
-                clean_c = c.copy()
-                for field in ['open', 'close', 'high', 'low', 'volume']:
-                    if field in clean_c:
-                        try: clean_c[field] = float(clean_c[field])
-                        except: pass
-                analysis_candles_objs.append(SimpleNamespace(**clean_c))
-            
-            signal_candle_obj = analysis_candles_objs[-1]
-            signal_candle_dict = analysis_candles[-1]
-            
-            res, sup = res_func(sr_candles)
-            zones = {'resistance': res, 'support': sup}
-            threshold = self.bot_config.get('confirmation_threshold', 2)
-            final_direction, confluences = None, []
-
-            close_price = float(signal_candle_obj.close)
-            rsi_res = ti.check_rsi_condition(analysis_candles_objs) 
-            rsi_sig, rsi_val = rsi_res if isinstance(rsi_res, tuple) else (None, 50.0)
-            
-            # DEBUG VISUAL ATIVO
-            msg = f"ANALISE_DETALHADA::{full_name}::Preço:{close_price:.5f}::RSI:{rsi_val:.1f}"
-            await self.logger('DEBUG', msg)
-
-            if expiration_minutes == 1:
-                sr_signal = ti.check_price_near_sr(signal_candle_obj, zones)
-                pattern = ti.check_candlestick_pattern(analysis_candles_objs)
-                
-                if sr_signal:
-                    print(f"[SINAL M1] {full_name}: SR {sr_signal}. RSI {rsi_val:.1f}")
-                    confluences.append("SR_Zone")
-                    if pattern == sr_signal: confluences.append("Candle_Pattern")
-                    if rsi_sig == sr_signal: confluences.append("RSI_Condition")
-                    if len(confluences) >= threshold: final_direction = sr_signal
-
-            elif expiration_minutes == 5:
-                m5_signal = ti.check_m5_price_action(analysis_candles_objs, zones)
-                if m5_signal:
-                    temp_conf = m5_signal['confluences']
-                    if rsi_sig == m5_signal['direction']: temp_conf.append("RSI_Condition")
-                    if len(temp_conf) >= threshold:
-                        final_direction = m5_signal['direction']
-                        confluences = temp_conf
-            
-            if final_direction:
-                if not ti.validate_reversal_candle(signal_candle_obj, final_direction): 
-                    return
-                
-                max_trades = self.bot_config.get('max_simultaneous_trades', 1)
-                if len(self.active_trading_pairs) >= max_trades: return
-
-                now = datetime.utcnow()
-                wait_sec = (60 - now.second - 1) + (1 - now.microsecond / 1000000) + 0.2
-                await self.logger('INFO', f"Sinal {full_name} CONFIRMADO. Aguardando {wait_sec:.1f}s.")
-                await asyncio.sleep(wait_sec)
-                
-                if full_name in self.active_trading_pairs: return
-                self.active_trading_pairs.add(full_name)
-
-                strategy = f"M{expiration_minutes}_" + ', '.join(confluences)
-                await self.logger('SUCCESS', f"ENTRADA: {full_name} | {final_direction.upper()} | {strategy}")
-                
-                signal = TradeSignal(
-                    pair=full_name, direction=final_direction, strategy=strategy,
-                    open=signal_candle_dict['open'], high=signal_candle_dict['high'],
-                    low=signal_candle_dict['low'], close=signal_candle_dict['close']
-                )
-                
-                trade_exp = 4 if expiration_minutes == 5 else expiration_minutes
-                asyncio.create_task(self._execute_and_wait(signal, full_name, trade_exp))
-
-        except Exception as e:
-            pass
-
-    async def _execute_martingale_trade(self, pair: str):
-        trade_info = self.pending_martingale_trades.pop(pair, None)
-        if not trade_info: return
-        self.active_trading_pairs.add(pair)
-        now = datetime.utcnow()
-        next_min = (now.timestamp() // 60 + 1) * 60
-        wait_sec = next_min - now.timestamp() + 0.2
-        
-        lvl = self.martingale_state.get(pair, {}).get('level', 1)
-        await self.logger('WARNING', f"GALE {lvl} para {pair}. Aguardando {wait_sec:.2f}s.")
-        await asyncio.sleep(wait_sec)
-
-        strategy = f"M{trade_info['expiration_minutes']}_Gale_{lvl}"
-        signal = TradeSignal(pair=pair, direction=trade_info['direction'], strategy=strategy)
-        await self.logger('SUCCESS', f"ENTRADA GALE {pair}!")
-        trade_exp = 4 if trade_info['expiration_minutes'] == 5 else trade_info['expiration_minutes']
-        await self._execute_and_wait(signal, pair, trade_exp)
-
-    def _get_entry_value(self, asset: str, is_martingale: bool = False) -> float:
-        base_val = self.bot_config.get('entry_value', 1.0)
-        if not self.bot_config.get('use_martingale', False): return base_val
-        mg_level = self.martingale_state.get(asset, {}).get('level', 0)
-        level_calc = mg_level if is_martingale else 0
-        if level_calc == 0: return base_val
-        factor = self.bot_config.get('martingale_factor', 2.3)
-        return round(base_val * (factor ** level_calc), 2)
-
-    async def _execute_and_wait(self, signal: TradeSignal, full_name: str, expiration: int):
-        try:
-            is_gale = "Gale" in signal.strategy or "Martingale" in signal.strategy
-            val = self._get_entry_value(signal.pair, is_martingale=is_gale)
-            active_name = full_name 
-            
-            oid = None
-            retries = 2
-            
-            for attempt in range(retries):
-                oid = await self.exnova.execute_trade(val, active_name, signal.direction.lower(), expiration)
-                if oid: break
-                await asyncio.sleep(1)
-            
-            if not oid:
-                await self.logger('ERROR', f"FALHA FATAL na ordem {full_name} (${val}).")
-                if is_gale: self.martingale_state[signal.pair] = {'level': 0}
-                self.active_trading_pairs.discard(signal.pair)
-                return
-
-            await self.logger('INFO', f"Ordem {oid} aceita. ${val}. Monitorando...")
-            sid = await asyncio.to_thread(self.supabase.insert_trade_signal, signal)
-            
-            await asyncio.sleep(expiration * 60 + 15)
-            result = await self.exnova.check_win(oid)
-            
-            await self.process_trade_result(signal.pair, full_name, result, sid, is_gale, expiration, signal.direction)
-
-        except Exception as e:
-            await self.logger('ERROR', f"Erro execução {full_name}: {e}")
-        finally:
-            self.active_trading_pairs.discard(signal.pair)
-
-    async def process_trade_result(self, pair, full_name, result, sid, is_martingale, expiration, direction):
-        await self.logger('SUCCESS' if result == 'win' else 'ERROR', f"Resultado {pair}: {result.upper()}")
-        mg_lv = self.martingale_state.get(pair, {}).get('level', 0)
-        if sid: await asyncio.to_thread(self.supabase.update_trade_result, sid, result.upper(), mg_lv)
-        try:
-            bal = await self.exnova.get_current_balance()
-            if bal: await asyncio.to_thread(self.supabase.update_current_balance, bal)
-        except: pass
-
-        self.asset_performance.setdefault(pair, {'wins': 0, 'losses': 0})
-        self.consecutive_losses.setdefault(pair, 0)
-
-        if result == 'win':
-            self.daily_wins += 1
-            self.asset_performance[pair]['wins'] += 1
-            self.consecutive_losses[pair] = 0
-            self.martingale_state[pair] = {'level': 0}
-            if pair in self.blacklisted_assets: self.blacklisted_assets.remove(pair)
-        elif result == 'loss':
-            self.daily_losses += 1
-            self.asset_performance[pair]['losses'] += 1
-            self.consecutive_losses[pair] += 1
-            if self.consecutive_losses[pair] >= 2: self.blacklisted_assets.add(pair)
-
-            if self.bot_config.get('use_martingale', False):
-                cur_lv = self.martingale_state.get(pair, {}).get('level', 0)
-                max_lv = self.bot_config.get('martingale_levels', 2)
-                if cur_lv < max_lv:
-                    self.martingale_state[pair] = {'level': cur_lv + 1}
-                    self.pending_martingale_trades[pair] = {
-                        "full_name": full_name, "direction": direction,
-                        "expiration_minutes": expiration, "pair": pair
-                    }
-                    await self.logger('WARNING', f"Agendado Gale {cur_lv + 1} em {pair}")
-                else:
-                    self.martingale_state[pair] = {'level': 0}
-                    await self.logger('ERROR', f"Stop Gale em {pair}.")
+if __name__ == "__main__":
+    SimpleBot().start()
