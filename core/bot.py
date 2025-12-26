@@ -22,7 +22,7 @@ SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXV
 EXNOVA_EMAIL = os.environ.get("EXNOVA_EMAIL", "seu_email@exemplo.com")
 EXNOVA_PASSWORD = os.environ.get("EXNOVA_PASSWORD", "sua_senha")
 
-# --- CONFIGURAÇÃO AVANÇADA (DO BOT ANTIGO) ---
+# --- CONFIGURAÇÃO AVANÇADA ---
 WATCHDOG_CHECK_EVERY = 60
 WATCHDOG_MAX_SILENCE = 180
 COOLIFY_RESTART_URL = "https://biewdev.se/api/v1/applications/ig80skg8ssog04g4oo88wswg/restart"
@@ -30,7 +30,7 @@ COOLIFY_API_TOKEN = os.environ.get("COOLIFY_API_TOKEN")
 GLOBAL_TIME_OFFSET = 0
 LAST_LOG_TIME = time.time()
 
-# --- SUPRESSÃO DE LOGS (PRO) ---
+# --- SUPRESSÃO DE LOGS ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
 for logger_name in ["websocket", "exnovaapi", "iqoptionapi", "urllib3", "iqoptionapi.websocket.client"]:
     logging.getLogger(logger_name).setLevel(logging.CRITICAL)
@@ -222,7 +222,6 @@ class SimpleBot:
             except: pass
 
     def _sync_time(self):
-        # Sincronização de tempo profissional (do bot antigo)
         try:
             server_ts = self.api.get_server_timestamp()
             local_ts = time.time()
@@ -256,7 +255,10 @@ class SimpleBot:
                 self.config["stop_win"] = float(data.get("stop_win", 0))
                 self.config["stop_loss"] = float(data.get("stop_loss", 0))
                 self.config["stop_mode"] = data.get("stop_mode", "percentage")
-                self.config["daily_initial_balance"] = float(data.get("daily_initial_balance", 0))
+                # daily_initial_balance é gerenciado internamente agora, mas lemos para consistência
+                if "daily_initial_balance" in data:
+                    self.config["daily_initial_balance"] = float(data["daily_initial_balance"])
+                
                 self.config["timer_enabled"] = data.get("timer_enabled", False)
                 self.config["timer_start"] = data.get("timer_start", "00:00")
                 self.config["timer_end"] = data.get("timer_end", "00:00")
@@ -285,34 +287,55 @@ class SimpleBot:
     def calculate_daily_profit(self):
         try:
             today_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+            # Garante que pegamos apenas trades de hoje UTC (00:00 em diante)
             res = self.supabase.table("trade_signals").select("profit").gte("created_at", f"{today_str}T00:00:00").execute()
             if res.data:
                 total = sum([float(x['profit']) for x in res.data if x['profit'] is not None])
                 return total
             return 0.0
-        except:
+        except Exception as e:
+            print(f"[CALC ERROR] {e}")
             return 0.0
+
+    def _reconcile_initial_balance(self):
+        # Reconstrói o saldo inicial do dia matematicamente para evitar erros de acumulação
+        if not self.api: return
+        try:
+            current_bal = self.api.get_balance()
+            daily_profit = self.calculate_daily_profit()
+            # Saldo Inicial Real de Hoje = Saldo Atual - Lucro de Hoje
+            reconciled_initial = current_bal - daily_profit
+            
+            # Só atualiza se houver discrepância significativa (> 1.0)
+            stored_initial = self.config.get("daily_initial_balance", 0)
+            if abs(reconciled_initial - stored_initial) > 1.0 or stored_initial == 0:
+                self.config["daily_initial_balance"] = reconciled_initial
+                if self.supabase:
+                    self.supabase.table("bot_config").update({"daily_initial_balance": reconciled_initial}).eq("id", 1).execute()
+                self.log_to_db(f"🔄 Ref Diária Ajustada: Inicial ${reconciled_initial:.2f} (Lucro Hoje: ${daily_profit:.2f})", "SYSTEM")
+        except: pass
 
     def check_management(self):
         if not self.api: return False
         try:
+            # 1. Reset de Virada de Dia (UTC)
             now_date = datetime.now(timezone.utc).date()
             if now_date != self.current_date:
-                self.log_to_db(f"📅 Novo dia detectado. Resetando referência.", "SYSTEM")
+                self.log_to_db(f"📅 Novo dia detectado (UTC). Resetando referência diária.", "SYSTEM")
                 self.current_date = now_date
                 current_bal = self.api.get_balance()
                 self.config["daily_initial_balance"] = current_bal
                 if self.supabase:
                     self.supabase.table("bot_config").update({"daily_initial_balance": current_bal}).eq("id", 1).execute()
 
+            # 2. Inicialização / Reconciliação
+            # Garante que o saldo inicial esteja sincronizado com o lucro do dia
             initial_bal = self.config.get("daily_initial_balance", 0)
             if initial_bal <= 0:
-                current_bal = self.api.get_balance()
-                initial_bal = current_bal
-                self.config["daily_initial_balance"] = initial_bal
-                if self.supabase: self.supabase.table("bot_config").update({"daily_initial_balance": initial_bal}).eq("id", 1).execute()
-                self.log_to_db(f"Saldo Inicial definido: ${initial_bal:.2f}", "SYSTEM")
+                self._reconcile_initial_balance()
+                initial_bal = self.config.get("daily_initial_balance", 0)
 
+            # 3. Cálculo de Lucro Estritamente Diário
             profit = self.calculate_daily_profit()
             
             stop_win = self.config.get("stop_win", 0)
@@ -322,13 +345,15 @@ class SimpleBot:
             target_win_val = initial_bal * (stop_win / 100) if mode == "percentage" else stop_win
             target_loss_val = initial_bal * (stop_loss / 100) if mode == "percentage" else stop_loss
             
+            # Verificação de Stop Win
             if profit >= target_win_val and target_win_val > 0:
                 self.log_to_db(f"🏆 META DIÁRIA BATIDA! Lucro: ${profit:.2f}", "SUCCESS")
                 self.pause_bot_by_management()
                 return False
             
+            # Verificação de Stop Loss
             if profit <= -target_loss_val and target_loss_val > 0:
-                self.log_to_db(f"🛑 STOP LOSS DIÁRIO! Perda: ${profit:.2f}", "ERROR")
+                self.log_to_db(f"🛑 STOP LOSS DIÁRIO ATINGIDO! Perda Hoje: ${profit:.2f} (Limite: -${target_loss_val:.2f})", "ERROR")
                 self.pause_bot_by_management()
                 return False
                 
@@ -356,6 +381,7 @@ class SimpleBot:
                 self.api.change_balance(self.active_account_type)
                 self.update_balance_remote()
                 self._sync_time()
+                self._reconcile_initial_balance() # Chama reconciliação ao conectar
                 return True
             else:
                 self.log_to_db(f"Falha conexão: {reason}", "ERROR")
@@ -501,7 +527,7 @@ class SimpleBot:
                 except: pass
             
             self.update_balance_remote()
-            self.check_management()
+            self.check_management() # Verifica stop após trade
             with self.trade_lock: self.active_trades.discard(asset)
         else:
             self.log_to_db("❌ Falha ordem na corretora.", "ERROR")
@@ -538,6 +564,7 @@ class SimpleBot:
                     
                     if not self.api.check_connect(): break
                     
+                    # Logica de recatalogação inteligente
                     catalog_interval = 900 if self.best_assets else 60
                     if time.time() - last_catalog > catalog_interval:
                         self.best_assets = self.catalog_assets(ASSETS_POOL)
