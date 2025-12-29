@@ -198,7 +198,8 @@ class SimpleBot:
         self.last_loss_time = 0
         self.asset_cooldowns = {}  
         self.last_trade_time = {}  
-        self.current_date = datetime.now(timezone.utc).date() 
+        self.current_date = datetime.now(timezone.utc).date()
+        self.stop_hit_date = None # Rastreamento de data de stop
         self.init_supabase()
 
     def init_supabase(self):
@@ -273,11 +274,20 @@ class SimpleBot:
         is_inside = False
         if start_str < end_str: is_inside = start_str <= now_str < end_str
         else: is_inside = now_str >= start_str or now_str < end_str
+        
         current_status = self.config["status"]
+        
+        # LÓGICA CORRIGIDA: Se estiver dentro do horário, mas pausado, verifica se o stop já foi atingido antes de iniciar
         if is_inside and current_status == "PAUSED":
+            if not self.check_management(): # Se check_management retornar False, significa que meta foi batida
+                if self.stop_hit_date == datetime.now(timezone.utc).date():
+                    self.log_to_db(f"⏰ Agendador BLOQUEADO: Meta diária já atingida hoje.", "WARNING")
+                    return
+
             self.log_to_db(f"⏰ Agendador: Iniciando operações ({start_str}-{end_str})", "SYSTEM")
             self.config["status"] = "RUNNING"
             if self.supabase: self.supabase.table("bot_config").update({"status": "RUNNING"}).eq("id", 1).execute()
+            
         elif not is_inside and current_status == "RUNNING":
             self.log_to_db(f"⏰ Agendador: Pausando operações (Fim do horário)", "SYSTEM")
             self.config["status"] = "PAUSED"
@@ -320,6 +330,7 @@ class SimpleBot:
             if now_date != self.current_date:
                 self.log_to_db(f"📅 Novo dia detectado (UTC). Resetando referência diária.", "SYSTEM")
                 self.current_date = now_date
+                self.stop_hit_date = None # Reseta flag de stop do dia anterior
                 current_bal = self.api.get_balance()
                 self.config["daily_initial_balance"] = current_bal
                 if self.supabase:
@@ -349,13 +360,14 @@ class SimpleBot:
             # Verificação de Stop Win
             if target_win > 0 and profit >= target_win:
                 self.log_to_db(f"🏆 META DIÁRIA BATIDA! Lucro: ${profit:.2f}", "SUCCESS")
+                self.stop_hit_date = now_date # Marca que parou hoje
                 self.pause_bot_by_management()
                 return False
             
             # Verificação de Stop Loss
-            # Se o lucro for menor ou igual ao negativo da meta de perda (ex: -10 <= -10)
             if target_loss > 0 and profit <= -target_loss:
                 self.log_to_db(f"🛑 STOP LOSS DIÁRIO ATINGIDO! Perda Hoje: ${profit:.2f} (Limite: -${target_loss:.2f})", "ERROR")
+                self.stop_hit_date = now_date # Marca que parou hoje
                 self.pause_bot_by_management()
                 return False
                 
