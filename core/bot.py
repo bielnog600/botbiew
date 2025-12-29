@@ -271,6 +271,11 @@ class SimpleBot:
         except: pass
 
     def check_schedule(self):
+        # ⛔ PRIORIDADE ABSOLUTA: STOP DIÁRIO
+        # Se o stop do dia já foi batido, o agendador NÃO DEVE interferir.
+        if self.stop_hit_date == datetime.now(timezone.utc).date():
+            return
+
         if not self.config.get("timer_enabled", False): return 
         now_str = datetime.now(timezone.utc).strftime("%H:%M") 
         start_str = self.config.get("timer_start", "00:00")
@@ -282,11 +287,6 @@ class SimpleBot:
         current_status = self.config["status"]
         
         if is_inside and current_status == "PAUSED":
-            # Se o stop do dia já foi batido, não religa!
-            if self.stop_hit_date == datetime.now(timezone.utc).date():
-                self.log_to_db("⛔ BLOQUEADO: Stop diário já atingido hoje.", "WARNING")
-                return
-
             self.log_to_db(f"⏰ Agendador: Iniciando operações ({start_str}-{end_str})", "SYSTEM")
             self.config["status"] = "RUNNING"
             if self.supabase: self.supabase.table("bot_config").update({"status": "RUNNING"}).eq("id", 1).execute()
@@ -600,9 +600,10 @@ class SimpleBot:
                 while True:
                     self.fetch_config()
                     
-                    # 3. BLOQUEIO IRREVOGÁVEL NO LOOP PRINCIPAL (ANTI-RESET)
+                    # ⛔ BLOQUEIO GLOBAL SE STOP DO DIA FOI ATINGIDO
+                    # Esta verificação garante que nem o agendador nem intervenção manual (banco) religue o bot hoje
                     if self.stop_hit_date == datetime.now(timezone.utc).date():
-                        if self.config["status"] == "RUNNING":
+                        if self.config["status"] != "PAUSED":
                             self.log_to_db("⛔ Execução bloqueada: Stop diário já atingido.", "WARNING")
                             self.pause_bot_by_management()
                         time.sleep(5)
@@ -620,7 +621,7 @@ class SimpleBot:
                         self.best_assets = self.catalog_assets(ASSETS_POOL)
                         last_catalog = time.time()
 
-                    self.check_schedule()
+                    self.check_schedule() # Agora protegido pelo stop_hit_date dentro da função
 
                     if time.time() - last_scan > 10:
                         try:
