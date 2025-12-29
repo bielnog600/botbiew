@@ -262,7 +262,11 @@ class SimpleBot:
                 
                 # AJUSTE 3: REMOVIDA LEITURA DE daily_initial_balance DO BANCO
                 # O saldo inicial do dia é gerenciado internamente pelo bot para evitar sobrescrita pelo front.
-                
+                if "daily_initial_balance" in data:
+                     # Apenas para inicialização se local for zero, mas check_management cuidará disso
+                     if self.config["daily_initial_balance"] == 0:
+                         self.config["daily_initial_balance"] = float(data["daily_initial_balance"])
+
                 self.config["timer_enabled"] = data.get("timer_enabled", False)
                 self.config["timer_start"] = data.get("timer_start", "00:00")
                 self.config["timer_end"] = data.get("timer_end", "00:00")
@@ -272,7 +276,6 @@ class SimpleBot:
 
     def check_schedule(self):
         # ⛔ PRIORIDADE ABSOLUTA: STOP DIÁRIO
-        # Se o stop do dia já foi batido, o agendador NÃO DEVE interferir.
         if self.stop_hit_date == datetime.now(timezone.utc).date():
             return
 
@@ -298,7 +301,6 @@ class SimpleBot:
 
     def calculate_daily_profit(self):
         try:
-            # AJUSTE 1: Timezone UTC robusto para evitar bugs de virada de dia
             today_start = datetime.now(timezone.utc).replace(
                 hour=0, minute=0, second=0, microsecond=0
             ).isoformat()
@@ -332,11 +334,10 @@ class SimpleBot:
                 self.current_date = today
                 self.stop_hit_date = None
                 
-                balance = self.api.get_balance()
-                self.config["daily_initial_balance"] = balance
-                self.supabase.table("bot_config") \
-                    .update({"daily_initial_balance": balance}) \
-                    .eq("id", 1).execute()
+                # Zera o saldo inicial para o novo dia
+                self.config["daily_initial_balance"] = 0
+                if self.supabase:
+                    self.supabase.table("bot_config").update({"daily_initial_balance": 0}).eq("id", 1).execute()
 
             # --- Validação de Modo ---
             stop_mode = self.config.get("stop_mode")
@@ -345,19 +346,19 @@ class SimpleBot:
                 self.pause_bot_by_management()
                 return False
 
-            # Inicialização de saldo (apenas se zero ou inválido)
+            # --- Captura de Saldo Inicial (UMA VEZ POR DIA) ---
             if self.config.get("daily_initial_balance", 0) <= 0:
                 balance = self.api.get_balance()
                 self.config["daily_initial_balance"] = balance
                 self.supabase.table("bot_config") \
                     .update({"daily_initial_balance": balance}) \
                     .eq("id", 1).execute()
+                self.log_to_db(f"💰 Saldo inicial do dia definido: ${balance:.2f}", "SYSTEM")
 
             daily_initial = self.config["daily_initial_balance"]
-            
-            # --- Lucro REAL do dia (somente trades de hoje) ---
             profit = self.calculate_daily_profit()
 
+            # Uso de ABS para evitar problemas com sinais
             stop_win = abs(float(self.config.get("stop_win", 0)))
             stop_loss = abs(float(self.config.get("stop_loss", 0)))
 
@@ -368,7 +369,6 @@ class SimpleBot:
                 target_win = stop_win
                 target_loss = stop_loss
 
-            # 🔎 Log claro (debug real) - Não vai para o banco pois é nível DEBUG
             self.log_to_db(
                 f"[MGMT] DIA={today} | MODE={stop_mode.upper()} | "
                 f"PNL={profit:.2f} | "
@@ -389,7 +389,7 @@ class SimpleBot:
             # 🛑 STOP LOSS
             if target_loss > 0 and profit <= -target_loss:
                 self.log_to_db(
-                    f"🛑 STOP LOSS ATINGIDO | Perda do dia: ${profit:.2f}",
+                    f"🛑 STOP LOSS ATINGIDO | Perda do dia: ${profit:.2f} (Limite: -${target_loss:.2f})",
                     "ERROR"
                 )
                 self.stop_hit_date = today
@@ -509,7 +509,6 @@ class SimpleBot:
         try: balance_before = self.api.get_balance()
         except: return
         
-        # NOTE: Fetch config is now inside check_management for absolute freshness
         if not self.check_management(): return
 
         with self.trade_lock:
@@ -600,10 +599,9 @@ class SimpleBot:
                 while True:
                     self.fetch_config()
                     
-                    # ⛔ BLOQUEIO GLOBAL SE STOP DO DIA FOI ATINGIDO
-                    # Esta verificação garante que nem o agendador nem intervenção manual (banco) religue o bot hoje
+                    # 3. BLOQUEIO IRREVOGÁVEL NO LOOP PRINCIPAL (ANTI-RESET)
                     if self.stop_hit_date == datetime.now(timezone.utc).date():
-                        if self.config["status"] != "PAUSED":
+                        if self.config["status"] == "RUNNING":
                             self.log_to_db("⛔ Execução bloqueada: Stop diário já atingido.", "WARNING")
                             self.pause_bot_by_management()
                         time.sleep(5)
@@ -621,7 +619,7 @@ class SimpleBot:
                         self.best_assets = self.catalog_assets(ASSETS_POOL)
                         last_catalog = time.time()
 
-                    self.check_schedule() # Agora protegido pelo stop_hit_date dentro da função
+                    self.check_schedule()
 
                     if time.time() - last_scan > 10:
                         try:
