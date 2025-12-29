@@ -285,8 +285,9 @@ class SimpleBot:
 
     def calculate_daily_profit(self):
         try:
-            today_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
-            res = self.supabase.table("trade_signals").select("profit").gte("created_at", f"{today_str}T00:00:00").execute()
+            # Garante formato ISO correto com Timezone UTC
+            today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+            res = self.supabase.table("trade_signals").select("profit").gte("created_at", today_start).execute()
             if res.data:
                 total = sum([float(x['profit']) for x in res.data if x['profit'] is not None])
                 return total
@@ -331,25 +332,30 @@ class SimpleBot:
 
             profit = self.calculate_daily_profit()
             
-            stop_win = self.config.get("stop_win", 0)
-            stop_loss = self.config.get("stop_loss", 0)
+            stop_win_cfg = abs(self.config.get("stop_win", 0))
+            stop_loss_cfg = abs(self.config.get("stop_loss", 0))
             mode = self.config.get("stop_mode", "percentage")
             
-            target_win_val = initial_bal * (stop_win / 100) if mode == "percentage" else stop_win
-            target_loss_val = initial_bal * (stop_loss / 100) if mode == "percentage" else stop_loss
+            if mode == "percentage":
+                target_win = initial_bal * (stop_win_cfg / 100)
+                target_loss = initial_bal * (stop_loss_cfg / 100)
+            else:
+                target_win = stop_win_cfg
+                target_loss = stop_loss_cfg
             
-            # LOG DE DIAGNOSTICO DETALHADO
-            # Removemos depois se quiser, mas essencial agora
-            # self.log_to_db(f"DEBUG MGMT: P={profit:.2f} | Mode={mode} | SL_Conf={stop_loss} | Limit={target_loss_val:.2f}", "DEBUG")
+            # Log de Diagnóstico (Visível no Terminal)
+            self.log_to_db(f"[MGMT] P/L Hoje: ${profit:.2f} | Meta Win: ${target_win:.2f} | Meta Loss: -${target_loss:.2f}", "DEBUG")
 
-            if profit >= target_win_val and target_win_val > 0:
+            # Verificação de Stop Win
+            if target_win > 0 and profit >= target_win:
                 self.log_to_db(f"🏆 META DIÁRIA BATIDA! Lucro: ${profit:.2f}", "SUCCESS")
                 self.pause_bot_by_management()
                 return False
             
-            # CRITICAL FIX: Ensure target_loss_val matches the configured value correctly
-            if profit <= -target_loss_val and target_loss_val > 0:
-                self.log_to_db(f"🛑 STOP LOSS DIÁRIO ATINGIDO! Perda Hoje: ${profit:.2f} (Limite: -${target_loss_val:.2f})", "ERROR")
+            # Verificação de Stop Loss
+            # Se o lucro for menor ou igual ao negativo da meta de perda (ex: -10 <= -10)
+            if target_loss > 0 and profit <= -target_loss:
+                self.log_to_db(f"🛑 STOP LOSS DIÁRIO ATINGIDO! Perda Hoje: ${profit:.2f} (Limite: -${target_loss:.2f})", "ERROR")
                 self.pause_bot_by_management()
                 return False
                 
