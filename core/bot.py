@@ -260,13 +260,8 @@ class SimpleBot:
                 self.config["stop_loss"] = float(data.get("stop_loss", 0))
                 self.config["stop_mode"] = data.get("stop_mode", "percentage")
                 
-                # AJUSTE 3: REMOVIDA LEITURA DE daily_initial_balance DO BANCO
-                # O saldo inicial do dia é gerenciado internamente pelo bot para evitar sobrescrita pelo front.
-                if "daily_initial_balance" in data:
-                     # Apenas para inicialização se local for zero, mas check_management cuidará disso
-                     if self.config["daily_initial_balance"] == 0:
-                         self.config["daily_initial_balance"] = float(data["daily_initial_balance"])
-
+                # O saldo inicial é gerenciado internamente pelo _reconcile
+                
                 self.config["timer_enabled"] = data.get("timer_enabled", False)
                 self.config["timer_start"] = data.get("timer_start", "00:00")
                 self.config["timer_end"] = data.get("timer_end", "00:00")
@@ -319,6 +314,26 @@ class SimpleBot:
             print(f"[CALC ERROR] {e}")
             return 0.0
 
+    def _reconcile_initial_balance(self):
+        # CORREÇÃO CRÍTICA: Ajusta o saldo inicial no banco se estiver desatualizado
+        if not self.api: return
+        try:
+            current_bal = self.api.get_balance()
+            daily_profit = self.calculate_daily_profit()
+            
+            # Saldo Inicial Real = Saldo Atual - Lucro do Dia
+            reconciled_initial = current_bal - daily_profit
+            
+            stored_initial = self.config.get("daily_initial_balance", 0)
+            
+            # Se a diferença for > 1.0 (para ignorar arredondamentos), atualiza o banco
+            if abs(reconciled_initial - stored_initial) > 1.0 or stored_initial == 0:
+                self.config["daily_initial_balance"] = reconciled_initial
+                if self.supabase:
+                    self.supabase.table("bot_config").update({"daily_initial_balance": reconciled_initial}).eq("id", 1).execute()
+                self.log_to_db(f"🔄 Ref Diária Ajustada: Inicial ${reconciled_initial:.2f} (Lucro Hoje: ${daily_profit:.2f})", "SYSTEM")
+        except: pass
+
     def check_management(self):
         if not self.supabase or not self.api:
             return True
@@ -333,12 +348,14 @@ class SimpleBot:
                 self.log_to_db(f"📅 Novo dia detectado ({today}). Resetando referência diária.", "SYSTEM")
                 self.current_date = today
                 self.stop_hit_date = None
-                
-                # Zera o saldo inicial para o novo dia
-                self.config["daily_initial_balance"] = 0
-                if self.supabase:
-                    self.supabase.table("bot_config").update({"daily_initial_balance": 0}).eq("id", 1).execute()
+                # No virar do dia, o lucro é 0, então inicial = atual
+                balance = self.api.get_balance()
+                self.config["daily_initial_balance"] = balance
+                self.supabase.table("bot_config").update({"daily_initial_balance": balance}).eq("id", 1).execute()
 
+            # --- Reconciliação (Auto-Correção do Banco) ---
+            self._reconcile_initial_balance()
+            
             # --- Validação de Modo ---
             stop_mode = self.config.get("stop_mode")
             if stop_mode not in ["percentage", "value"]:
@@ -346,19 +363,9 @@ class SimpleBot:
                 self.pause_bot_by_management()
                 return False
 
-            # --- Captura de Saldo Inicial (UMA VEZ POR DIA) ---
-            if self.config.get("daily_initial_balance", 0) <= 0:
-                balance = self.api.get_balance()
-                self.config["daily_initial_balance"] = balance
-                self.supabase.table("bot_config") \
-                    .update({"daily_initial_balance": balance}) \
-                    .eq("id", 1).execute()
-                self.log_to_db(f"💰 Saldo inicial do dia definido: ${balance:.2f}", "SYSTEM")
-
             daily_initial = self.config["daily_initial_balance"]
             profit = self.calculate_daily_profit()
 
-            # Uso de ABS para evitar problemas com sinais
             stop_win = abs(float(self.config.get("stop_win", 0)))
             stop_loss = abs(float(self.config.get("stop_loss", 0)))
 
@@ -421,6 +428,7 @@ class SimpleBot:
                 self.api.change_balance(self.active_account_type)
                 self.update_balance_remote()
                 self._sync_time()
+                self._reconcile_initial_balance() # Chama reconciliação ao conectar
                 return True
             else:
                 self.log_to_db(f"Falha conexão: {reason}", "ERROR")
