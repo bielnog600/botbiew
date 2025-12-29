@@ -260,8 +260,13 @@ class SimpleBot:
                 self.config["stop_loss"] = float(data.get("stop_loss", 0))
                 self.config["stop_mode"] = data.get("stop_mode", "percentage")
                 
-                # O saldo inicial é gerenciado internamente pelo _reconcile
-                
+                # AJUSTE 3: REMOVIDA LEITURA DE daily_initial_balance DO BANCO
+                # O saldo inicial do dia é gerenciado internamente pelo bot para evitar sobrescrita pelo front.
+                if "daily_initial_balance" in data:
+                     # Apenas para inicialização se local for zero, mas check_management cuidará disso
+                     if self.config["daily_initial_balance"] == 0:
+                         self.config["daily_initial_balance"] = float(data["daily_initial_balance"])
+
                 self.config["timer_enabled"] = data.get("timer_enabled", False)
                 self.config["timer_start"] = data.get("timer_start", "00:00")
                 self.config["timer_end"] = data.get("timer_end", "00:00")
@@ -271,6 +276,7 @@ class SimpleBot:
 
     def check_schedule(self):
         # ⛔ PRIORIDADE ABSOLUTA: STOP DIÁRIO
+        # Se o stop do dia já foi batido, o agendador NÃO DEVE interferir.
         if self.stop_hit_date == datetime.now(timezone.utc).date():
             return
 
@@ -296,6 +302,7 @@ class SimpleBot:
 
     def calculate_daily_profit(self):
         try:
+            # AJUSTE 1: Timezone UTC robusto para evitar bugs de virada de dia
             today_start = datetime.now(timezone.utc).replace(
                 hour=0, minute=0, second=0, microsecond=0
             ).isoformat()
@@ -314,24 +321,15 @@ class SimpleBot:
             print(f"[CALC ERROR] {e}")
             return 0.0
 
-    def _reconcile_initial_balance(self):
-        # CORREÇÃO CRÍTICA: Ajusta o saldo inicial no banco se estiver desatualizado
+    def _force_clean_db_initial_balance(self):
+        # Limpeza forçada na inicialização
         if not self.api: return
         try:
             current_bal = self.api.get_balance()
-            daily_profit = self.calculate_daily_profit()
-            
-            # Saldo Inicial Real = Saldo Atual - Lucro do Dia
-            reconciled_initial = current_bal - daily_profit
-            
-            stored_initial = self.config.get("daily_initial_balance", 0)
-            
-            # Se a diferença for > 1.0 (para ignorar arredondamentos), atualiza o banco
-            if abs(reconciled_initial - stored_initial) > 1.0 or stored_initial == 0:
-                self.config["daily_initial_balance"] = reconciled_initial
-                if self.supabase:
-                    self.supabase.table("bot_config").update({"daily_initial_balance": reconciled_initial}).eq("id", 1).execute()
-                self.log_to_db(f"🔄 Ref Diária Ajustada: Inicial ${reconciled_initial:.2f} (Lucro Hoje: ${daily_profit:.2f})", "SYSTEM")
+            self.config["daily_initial_balance"] = current_bal
+            if self.supabase:
+                self.supabase.table("bot_config").update({"daily_initial_balance": current_bal}).eq("id", 1).execute()
+            print(f"[BOOT] Banco limpo. Saldo Inicial definido para: ${current_bal:.2f}")
         except: pass
 
     def check_management(self):
@@ -348,14 +346,11 @@ class SimpleBot:
                 self.log_to_db(f"📅 Novo dia detectado ({today}). Resetando referência diária.", "SYSTEM")
                 self.current_date = today
                 self.stop_hit_date = None
-                # No virar do dia, o lucro é 0, então inicial = atual
+                
                 balance = self.api.get_balance()
                 self.config["daily_initial_balance"] = balance
                 self.supabase.table("bot_config").update({"daily_initial_balance": balance}).eq("id", 1).execute()
 
-            # --- Reconciliação (Auto-Correção do Banco) ---
-            self._reconcile_initial_balance()
-            
             # --- Validação de Modo ---
             stop_mode = self.config.get("stop_mode")
             if stop_mode not in ["percentage", "value"]:
@@ -363,19 +358,27 @@ class SimpleBot:
                 self.pause_bot_by_management()
                 return False
 
-            daily_initial = self.config["daily_initial_balance"]
+            daily_initial = self.config.get("daily_initial_balance", 0)
+            
+            # --- Lucro REAL do dia (somente trades de hoje) ---
             profit = self.calculate_daily_profit()
 
             stop_win = abs(float(self.config.get("stop_win", 0)))
             stop_loss = abs(float(self.config.get("stop_loss", 0)))
 
             if stop_mode == "percentage":
+                if daily_initial <= 0: # Segurança se valor for 0
+                    daily_initial = self.api.get_balance()
+                
                 target_win = daily_initial * (stop_win / 100)
                 target_loss = daily_initial * (stop_loss / 100)
-            else: # "value"
+            else: # "value" (FIXO)
+                # No modo valor fixo, ignoramos o saldo inicial. 
+                # A meta é puramente sobre o lucro/prejuízo acumulado.
                 target_win = stop_win
                 target_loss = stop_loss
 
+            # 🔎 Log claro (debug real) - Não vai para o banco pois é nível DEBUG
             self.log_to_db(
                 f"[MGMT] DIA={today} | MODE={stop_mode.upper()} | "
                 f"PNL={profit:.2f} | "
@@ -428,7 +431,7 @@ class SimpleBot:
                 self.api.change_balance(self.active_account_type)
                 self.update_balance_remote()
                 self._sync_time()
-                self._reconcile_initial_balance() # Chama reconciliação ao conectar
+                self._force_clean_db_initial_balance() # Limpeza forçada na conexão
                 return True
             else:
                 self.log_to_db(f"Falha conexão: {reason}", "ERROR")
@@ -517,6 +520,7 @@ class SimpleBot:
         try: balance_before = self.api.get_balance()
         except: return
         
+        # NOTE: Fetch config is now inside check_management for absolute freshness
         if not self.check_management(): return
 
         with self.trade_lock:
