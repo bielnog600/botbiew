@@ -27,6 +27,7 @@ WATCHDOG_CHECK_EVERY = 60
 WATCHDOG_MAX_SILENCE = 180
 COOLIFY_RESTART_URL = "https://biewdev.se/api/v1/applications/ig80skg8ssog04g4oo88wswg/restart"
 COOLIFY_API_TOKEN = os.environ.get("COOLIFY_API_TOKEN")
+GLOBAL_TIME_OFFSET = 0
 LAST_LOG_TIME = time.time()
 
 # --- FUSO HORÁRIO BRASIL (UTC-3) ---
@@ -77,6 +78,18 @@ class TechnicalAnalysis:
         return ema
 
     @staticmethod
+    def calculate_ema_series(values, period):
+        if len(values) < period: return []
+        ema_values = []
+        sma = sum(values[:period]) / period
+        ema_values.append(sma)
+        k = 2 / (period + 1)
+        for price in values[period:]:
+            ema = price * k + ema_values[-1] * (1 - k)
+            ema_values.append(ema)
+        return ema_values
+
+    @staticmethod
     def analyze_candle(candle):
         open_p = candle['open']
         close_p = candle['close']
@@ -98,7 +111,7 @@ class TechnicalAnalysis:
             fast = TechnicalAnalysis.calculate_sma(slice_c, 3)
             slow = TechnicalAnalysis.calculate_sma(slice_c, 34)
             buffer_series.append(fast - slow)
-        # Cálculo manual simplificado de EMA para série
+        
         ema_values = []
         if buffer_series:
              ema = buffer_series[0]
@@ -127,7 +140,6 @@ class TechnicalAnalysis:
     def get_signal(candles):
         if len(candles) < 60: return None, "Dados insuficientes"
         
-        # Horário baseado no Brasil para filtro de engolfo
         current_hour = datetime.now(BR_TIMEZONE).hour
         engulf_required = True
         if current_hour >= 14: engulf_required = False
@@ -197,10 +209,16 @@ class SimpleBot:
             "timer_enabled": False, "timer_start": "00:00", "timer_end": "00:00"
         }
         self.last_loss_time = 0
-        self.asset_cooldowns = {}  
-        self.last_trade_time = {}  
-        self.current_date = datetime.now(BR_TIMEZONE).date()
-        self.stop_hit_date = None 
+        self.asset_cooldowns = {} # Armazena TIME DE LIBERAÇÃO
+        self.consecutive_losses = {} # Rastreia losses seguidos por ativo
+        self.last_trade_time = {}
+        
+        # --- CONTROLE DE SESSÃO ---
+        self.session_blocked = False
+        self.session_start_time = None
+        self.session_initial_balance = 0.0
+        self.last_blocked_log = 0 # Throttle para log de bloqueio
+        
         self.init_supabase()
 
     def init_supabase(self):
@@ -239,24 +257,39 @@ class SimpleBot:
             self.supabase.table("bot_config").update({"current_balance": balance}).eq("id", 1).execute()
         except: pass
 
+    def start_new_session(self):
+        """Inicia uma nova sessão de trading, zerando o contador de lucro e removendo bloqueios"""
+        self.session_blocked = False # ZERA O BLOQUEIO
+        self.session_start_time = datetime.now(timezone.utc)
+        self.consecutive_losses.clear() # Zera contagem de losses da sessão anterior
+        
+        if self.api:
+            self.session_initial_balance = self.api.get_balance()
+            if self.supabase:
+                try: self.supabase.table("bot_config").update({"daily_initial_balance": self.session_initial_balance}).eq("id", 1).execute()
+                except: pass
+        
+        self.log_to_db(f"🚀 NOVA SESSÃO INICIADA. Saldo ref: ${self.session_initial_balance:.2f}", "SYSTEM")
+
     def fetch_config(self):
         if not self.supabase: self.init_supabase(); return
         try:
             res = self.supabase.table("bot_config").select("*").eq("id", 1).execute()
             if res.data:
                 data = res.data[0]
-                self.config["status"] = data.get("status", "PAUSED")
+                prev_status = self.config.get("status")
+                new_status = data.get("status", "PAUSED")
+                
+                # --- DETECTA TRANSIÇÃO PARA RUNNING (INÍCIO DE SESSÃO) ---
+                if prev_status != "RUNNING" and new_status == "RUNNING":
+                    self.start_new_session()
+                
+                self.config["status"] = new_status
                 self.config["account_type"] = data.get("account_type", "PRACTICE").strip().upper()
                 self.config["entry_value"] = float(data.get("entry_value", 1.0))
                 self.config["stop_win"] = float(data.get("stop_win", 0))
                 self.config["stop_loss"] = float(data.get("stop_loss", 0))
                 self.config["stop_mode"] = data.get("stop_mode", "value")
-                
-                # daily_initial_balance é apenas para porcentagem, gerenciado internamente
-                if "daily_initial_balance" in data:
-                     if self.config["daily_initial_balance"] == 0:
-                         self.config["daily_initial_balance"] = float(data["daily_initial_balance"])
-
                 self.config["timer_enabled"] = data.get("timer_enabled", False)
                 self.config["timer_start"] = data.get("timer_start", "00:00")
                 self.config["timer_end"] = data.get("timer_end", "00:00")
@@ -265,13 +298,8 @@ class SimpleBot:
         except: pass
 
     def check_schedule(self):
-        # ⛔ PRIORIDADE ABSOLUTA: STOP DIÁRIO NA DATA BRASIL
-        if self.stop_hit_date == datetime.now(BR_TIMEZONE).date():
-            return
-
         if not self.config.get("timer_enabled", False): return 
         
-        # USA HORÁRIO BRASIL PARA O AGENDADOR
         now_br = datetime.now(BR_TIMEZONE)
         now_str = now_br.strftime("%H:%M")
         start_str = self.config.get("timer_start", "00:00")
@@ -284,33 +312,31 @@ class SimpleBot:
         current_status = self.config["status"]
         
         if is_inside and current_status == "PAUSED":
-            # Dupla verificação de stop antes de ligar
-            if self.stop_hit_date == datetime.now(BR_TIMEZONE).date():
-                self.log_to_db("⛔ BLOQUEADO P/ SCHEDULE: Stop do dia já atingido.", "WARNING")
+            # Se sessão está bloqueada por stop, o agendador NÃO DEVE interferir
+            # Essa verificação no banco impede que o agendador force RUNNING se o stop já ocorreu
+            # Mas como stop_hit_date foi removido, confiamos em session_blocked que está na memória.
+            # Se o bot reiniciar, session_blocked é False, então o agendador pode reiniciar.
+            # Isso é o comportamento correto: reiniciar o script = nova tentativa/sessão.
+            if self.session_blocked: 
                 return
 
-            self.log_to_db(f"⏰ Agendador (BR): Iniciando operações ({start_str}-{end_str})", "SYSTEM")
-            self.config["status"] = "RUNNING"
+            self.log_to_db(f"⏰ Agendador: Iniciando operações ({start_str}-{end_str})", "SYSTEM")
             if self.supabase: self.supabase.table("bot_config").update({"status": "RUNNING"}).eq("id", 1).execute()
+            # Nota: A transição para RUNNING no banco será detectada por fetch_config, que chamará start_new_session
             
         elif not is_inside and current_status == "RUNNING":
-            self.log_to_db(f"⏰ Agendador (BR): Pausando operações (Fim do horário)", "SYSTEM")
-            self.config["status"] = "PAUSED"
+            self.log_to_db(f"⏰ Agendador: Pausando operações (Fim do horário)", "SYSTEM")
             if self.supabase: self.supabase.table("bot_config").update({"status": "PAUSED"}).eq("id", 1).execute()
 
-    def calculate_daily_profit(self):
+    def calculate_session_profit(self):
+        if not self.session_start_time: return 0.0
         try:
-            # CORREÇÃO CRUCIAL: Pega o início do dia no BRASIL e converte para UTC para a query
-            now_br = datetime.now(BR_TIMEZONE)
-            start_of_day_br = now_br.replace(hour=0, minute=0, second=0, microsecond=0)
-            start_of_day_utc_iso = start_of_day_br.astimezone(timezone.utc).isoformat()
-
+            start_iso = self.session_start_time.isoformat()
             res = self.supabase \
                 .table("trade_signals") \
                 .select("profit") \
-                .gte("created_at", start_of_day_utc_iso) \
+                .gte("created_at", start_iso) \
                 .execute()
-                
             if res.data:
                 total = sum([float(x['profit']) for x in res.data if x['profit'] is not None])
                 return total
@@ -319,89 +345,43 @@ class SimpleBot:
             print(f"[CALC ERROR] {e}")
             return 0.0
 
-    def _reconcile_initial_balance(self):
-        if not self.api: return
-        try:
-            current_bal = self.api.get_balance()
-            daily_profit = self.calculate_daily_profit()
-            reconciled_initial = current_bal - daily_profit
-            stored_initial = self.config.get("daily_initial_balance", 0)
-            if abs(reconciled_initial - stored_initial) > 1.0 or stored_initial == 0:
-                self.config["daily_initial_balance"] = reconciled_initial
-                if self.supabase:
-                    self.supabase.table("bot_config").update({"daily_initial_balance": reconciled_initial}).eq("id", 1).execute()
-                self.log_to_db(f"🔄 Ref Diária (BR) Ajustada: Inicial ${reconciled_initial:.2f}", "SYSTEM")
-        except: pass
-
     def check_management(self):
-        if not self.supabase or not self.api:
-            return True
+        if not self.supabase or not self.api: return True
+        if not self.session_start_time: return True 
 
         try:
-            self.fetch_config()
-
-            # DATA DE HOJE (BRASIL)
-            today_br = datetime.now(BR_TIMEZONE).date()
-
-            # --- Reset Diário Automático (baseado no BR) ---
-            if self.current_date != today_br:
-                self.log_to_db(f"📅 Novo dia (BR) detectado ({today_br}). Resetando metas.", "SYSTEM")
-                self.current_date = today_br
-                self.stop_hit_date = None
-                balance = self.api.get_balance()
-                self.config["daily_initial_balance"] = balance
-                self.supabase.table("bot_config").update({"daily_initial_balance": balance}).eq("id", 1).execute()
-
-            # --- Validação de Modo ---
+            # AJUSTE 1: Verificar se EXISTEM trades nesta sessão antes de calcular
+            res_exists = self.supabase.table("trade_signals").select("id").gte("created_at", self.session_start_time.isoformat()).limit(1).execute()
+            if not res_exists.data:
+                return True # Sem trades, sem lucro/prejuízo, segue o jogo
+            
+            profit = self.calculate_session_profit()
+            
             stop_mode = self.config.get("stop_mode")
-            if stop_mode not in ["percentage", "value"]:
-                self.log_to_db(f"❌ stop_mode inválido: {stop_mode}. Pausando.", "ERROR")
-                self.pause_bot_by_management()
-                return False
-
-            # Inicialização
-            if self.config.get("daily_initial_balance", 0) <= 0:
-                self._reconcile_initial_balance()
-
-            daily_initial = self.config.get("daily_initial_balance", 0)
-            if daily_initial == 0: daily_initial = self.api.get_balance()
-
-            # --- CÁLCULO DE LUCRO/PREJUÍZO ACUMULADO NO DIA (BR) ---
-            profit = self.calculate_daily_profit()
-
             stop_win = abs(float(self.config.get("stop_win", 0)))
             stop_loss = abs(float(self.config.get("stop_loss", 0)))
 
             if stop_mode == "percentage":
-                target_win = daily_initial * (stop_win / 100)
-                target_loss = daily_initial * (stop_loss / 100)
+                target_win = self.session_initial_balance * (stop_win / 100)
+                target_loss = self.session_initial_balance * (stop_loss / 100)
             else: # "value"
                 target_win = stop_win
                 target_loss = stop_loss
 
             self.log_to_db(
-                f"[MGMT] P/L Hoje: ${profit:.2f} | Alvo Win: ${target_win:.2f} | Limite Loss: -${target_loss:.2f}",
+                f"[MGMT] PnL Sessão: ${profit:.2f} | Meta Win: ${target_win:.2f} | Max Loss: -${target_loss:.2f}",
                 "DEBUG"
             )
 
-            # 🏆 STOP WIN
             if target_win > 0 and profit >= target_win:
-                self.log_to_db(
-                    f"🏆 STOP WIN ATINGIDO | Lucro do dia: ${profit:.2f}",
-                    "SUCCESS"
-                )
-                self.stop_hit_date = today_br
+                self.log_to_db(f"🏆 STOP WIN ATINGIDO! Lucro: ${profit:.2f}", "SUCCESS")
+                self.session_blocked = True 
                 self.pause_bot_by_management()
                 return False
 
-            # 🛑 STOP LOSS
-            # Ex: Se profit = -80 e target_loss = 50 -> -80 <= -50 (Verdadeiro, parou)
             if target_loss > 0 and profit <= -target_loss:
-                self.log_to_db(
-                    f"🛑 STOP LOSS ATINGIDO | Perda do dia: ${profit:.2f} (Limite: -${target_loss:.2f})",
-                    "ERROR"
-                )
-                self.stop_hit_date = today_br
+                self.log_to_db(f"🛑 STOP LOSS ATINGIDO! Perda: ${profit:.2f}", "ERROR")
+                self.session_blocked = True 
                 self.pause_bot_by_management()
                 return False
 
@@ -429,7 +409,11 @@ class SimpleBot:
                 self.active_account_type = self.config["account_type"]
                 self.api.change_balance(self.active_account_type)
                 self.update_balance_remote()
-                self._reconcile_initial_balance() # Garante saldo inicial correto na conexão
+                
+                # Se conectar e estiver configurado como RUNNING, inicia sessão se não houver
+                if self.config.get("status") == "RUNNING" and not self.session_start_time:
+                    self.start_new_session()
+                    
                 return True
             else:
                 self.log_to_db(f"Falha conexão: {reason}", "ERROR")
@@ -564,9 +548,21 @@ class SimpleBot:
                     except: pass
                 return
 
+            if res_str == 'WIN':
+                self.consecutive_losses[asset] = 0 # Reset cooldown agressivo
+
             if res_str == 'LOSS': 
-                self.asset_cooldowns[asset] = time.time()
-                self.log_to_db(f"🛑 Cooldown no ativo {asset}: 60s.", "WARNING")
+                # AJUSTE 3: COOLDOWN PROGRESSIVO
+                current_cons = self.consecutive_losses.get(asset, 0) + 1
+                self.consecutive_losses[asset] = current_cons
+                
+                if current_cons == 1: cd = 60
+                elif current_cons == 2: cd = 120
+                else: cd = 300
+                
+                # Guarda o tempo de LIBERAÇÃO
+                self.asset_cooldowns[asset] = time.time() + cd
+                self.log_to_db(f"🛑 Cooldown {asset}: {cd}s (Loss #{current_cons})", "WARNING")
 
             log_type = "SUCCESS" if res_str == 'WIN' else "ERROR" if res_str == 'LOSS' else "WARNING"
             self.log_to_db(f"{'🏆' if res_str == 'WIN' else '🔻'} {res_str}: ${profit:.2f}", log_type)
@@ -608,13 +604,17 @@ class SimpleBot:
                 while True:
                     self.fetch_config()
                     
-                    # ⛔ BLOQUEIO IRREVOGÁVEL NO LOOP PRINCIPAL (ANTI-RESET)
-                    if self.stop_hit_date == datetime.now(BR_TIMEZONE).date():
+                    # --- BLOQUEIO IRREVOGÁVEL DA SESSÃO ---
+                    if self.session_blocked:
                         if self.config["status"] == "RUNNING":
-                            self.log_to_db("⛔ Execução bloqueada: Stop diário já atingido.", "WARNING")
+                            # AJUSTE 2: Log com Throttle para não floodar
+                            if time.time() - self.last_blocked_log > 60:
+                                self.log_to_db("⛔ Sessão bloqueada — aguardando reset manual (Pause/Play)", "SYSTEM")
+                                self.last_blocked_log = time.time()
+                                
                             self.pause_bot_by_management()
                         time.sleep(5)
-                        continue
+                        continue 
 
                     if self.config["status"] == "RESTARTING":
                         if self.supabase: self.supabase.table("bot_config").update({"status": "RUNNING"}).eq("id", 1).execute()
@@ -622,7 +622,6 @@ class SimpleBot:
                     
                     if not self.api.check_connect(): break
                     
-                    # Logica de recatalogação inteligente
                     catalog_interval = 900 if self.best_assets else 60
                     if time.time() - last_catalog > catalog_interval:
                         self.best_assets = self.catalog_assets(ASSETS_POOL)
@@ -643,8 +642,9 @@ class SimpleBot:
                                         price = candles[-1]['close']
                                         ema21 = TechnicalAnalysis.calculate_ema(candles, 21)
                                         cd_msg = ""
+                                        # Verifica se o cooldown já expirou
                                         if asset in self.asset_cooldowns:
-                                             if time.time() - self.asset_cooldowns[asset] < 60: cd_msg = " [COOLDOWN]"
+                                             if time.time() < self.asset_cooldowns[asset]: cd_msg = " [COOLDOWN]"
                                         
                                         stats = self.asset_stats.get(asset, {})
                                         wr_val = f"{stats['win_rate']:.0f}%" if 'win_rate' in stats else "--"
@@ -671,8 +671,9 @@ class SimpleBot:
                         trade_executed = False
                         
                         for asset in current_assets:
+                            # Checagem de Cooldown Progressivo
                             if asset in self.asset_cooldowns:
-                                 if time.time() - self.asset_cooldowns[asset] < 60: continue
+                                 if time.time() < self.asset_cooldowns[asset]: continue
 
                             with self.trade_lock:
                                 if asset in self.active_trades: continue
