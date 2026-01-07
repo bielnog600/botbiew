@@ -101,13 +101,73 @@ class TechnicalAnalysis:
         color = 'green' if close_p > open_p else 'red' if close_p < open_p else 'doji'
         return { 'color': color, 'body': body, 'upper_wick': upper_wick, 'lower_wick': lower_wick, 'close': close_p, 'open': open_p, 'max': high_p, 'min': low_p }
     
+    # ---------------------------------------------------------
+    # 🔥 FILTROS DE QUALIDADE E VOLATILIDADE
+    # ---------------------------------------------------------
+    @staticmethod
+    def check_candle_quality(candles):
+        """Valida se o candle DE SINAL (fechado, -2) tem qualidade"""
+        if len(candles) < 20: return False, "Dados insuficientes"
+        
+        last_closed = candles[-2] 
+        
+        # 1. Volatilidade Instantânea (Corpo)
+        current_body = abs(last_closed['close'] - last_closed['open'])
+        
+        # Média dos últimos 10 ANTERIORES ao sinal (-12 até -2)
+        bodies = [abs(c['close'] - c['open']) for c in candles[-12:-2]]
+        if not bodies: return False, "Erro dados bodies"
+        avg_body = sum(bodies) / len(bodies)
+        
+        if avg_body == 0: return False, "Mercado Flat"
+
+        if current_body < (avg_body * 0.6):
+            return False, f"Candle morto (Corpo {current_body:.5f} < Média {avg_body:.5f})"
+            
+        # 2. Range Mínimo (High - Low)
+        current_range = last_closed['max'] - last_closed['min']
+        ranges = [c['max'] - c['min'] for c in candles[-12:-2]]
+        avg_range = sum(ranges) / len(ranges) if ranges else 0
+        
+        if current_range < (avg_range * 0.6):
+            return False, "Candle comprimido (Range baixo)"
+
+        # Filtro de Deslocamento Real (Preço vs EMA)
+        ema21 = TechnicalAnalysis.calculate_ema(candles[:-1], 21) 
+        distance = abs(last_closed['close'] - ema21)
+        
+        if distance < (avg_body * 0.5):
+            return False, "Sem deslocamento real (preço colado na EMA)"
+            
+        return True, "OK"
+
+    @staticmethod
+    def check_compression(candles):
+        """Verifica se as médias estão 'esmagadas' (Squeeze) - USA CANDLES FECHADOS"""
+        if len(candles) < 20: return False
+        
+        # ⚠️ CORREÇÃO: Usar candles[:-1] para não pegar o candle vivo instável
+        ema9 = TechnicalAnalysis.calculate_ema(candles[:-1], 9)
+        ema21 = TechnicalAnalysis.calculate_ema(candles[:-1], 21)
+        
+        bodies = [abs(c['close'] - c['open']) for c in candles[-11:-1]]
+        avg_body = sum(bodies) / len(bodies) if bodies else 0.00001
+        
+        spread = abs(ema9 - ema21)
+        
+        if spread < (avg_body * 0.15):
+             return True 
+        return False
+
     @staticmethod
     def flow_filter(candles):
         if len(candles) < 50: return None 
-        candles = candles[-80:]
+        closed_candles = candles[:-1] 
+        candles_slice = closed_candles[-80:]
+        
         buffer_series = []
-        for i in range(35, len(candles) + 1):
-            slice_c = candles[:i]
+        for i in range(35, len(candles_slice) + 1):
+            slice_c = candles_slice[:i]
             fast = TechnicalAnalysis.calculate_sma(slice_c, 3)
             slow = TechnicalAnalysis.calculate_sma(slice_c, 34)
             buffer_series.append(fast - slow)
@@ -130,8 +190,8 @@ class TechnicalAnalysis:
 
     @staticmethod
     def engulf_filter(candles, direction):
-        last = TechnicalAnalysis.analyze_candle(candles[-1])
-        prev = TechnicalAnalysis.analyze_candle(candles[-2])
+        last = TechnicalAnalysis.analyze_candle(candles[-2])
+        prev = TechnicalAnalysis.analyze_candle(candles[-3])
         if direction == "call": return (last['color'] == 'green' and prev['color'] == 'red' and last['body'] >= prev['body'] * 0.6)
         if direction == "put": return (last['color'] == 'red' and prev['color'] == 'green' and last['body'] >= prev['body'] * 0.6)
         return False
@@ -145,14 +205,14 @@ class TechnicalAnalysis:
         engulf_required = True
         if current_hour >= 14: engulf_required = False
 
-        ema9 = TechnicalAnalysis.calculate_ema(candles, 9)
-        ema21 = TechnicalAnalysis.calculate_ema(candles, 21)
-        ema21_prev = TechnicalAnalysis.calculate_ema(candles[:-1], 21)
+        ema9 = TechnicalAnalysis.calculate_ema(candles[:-1], 9)
+        ema21 = TechnicalAnalysis.calculate_ema(candles[:-1], 21)
+        ema21_prev = TechnicalAnalysis.calculate_ema(candles[:-2], 21)
         
-        confirm_candle = TechnicalAnalysis.analyze_candle(candles[-1])
-        reject_candle = TechnicalAnalysis.analyze_candle(candles[-2])
+        confirm_candle = TechnicalAnalysis.analyze_candle(candles[-2])
+        reject_candle = TechnicalAnalysis.analyze_candle(candles[-3])
         
-        avg_body = sum([abs(c['close']-c['open']) for c in candles[-7:-2]]) / 5
+        avg_body = sum([abs(c['close']-c['open']) for c in candles[-8:-3]]) / 5
         spread = abs(ema9 - ema21)
         min_spread = avg_body * 0.1
         if spread < min_spread: return None, f"Filtro: EMAs coladas"
@@ -198,79 +258,63 @@ class TechnicalAnalysis:
 class MarketRegimeClassifier:
     @staticmethod
     def classify(candles):
-        """
-        Retorna: 'TREND' ou 'RANGE'
-        Usa apenas candles M1
-        """
-        if not candles or len(candles) < 50:
-            return "RANGE"
+        if not candles or len(candles) < 50: return "RANGE"
+        
+        if TechnicalAnalysis.check_compression(candles):
+            return "NO_TRADE"
 
-        # --- PARAMETROS ---
-        MIN_SLOPE_MULT = 0.15
-        MIN_SPREAD_MULT = 0.25
-        MIN_DIRECTIONAL_RATIO = 0.55
-
-        # --- CALCULOS BASE ---
-        bodies = [abs(c['close'] - c['open']) for c in candles[-20:]]
+        bodies = [abs(c['close'] - c['open']) for c in candles[-21:-1]]
         avg_body = sum(bodies) / len(bodies) if bodies else 0.00001
+        
+        ema9_now = TechnicalAnalysis.calculate_ema(candles[:-1], 9)
+        ema21_now = TechnicalAnalysis.calculate_ema(candles[:-1], 21)
+        ema21_prev = TechnicalAnalysis.calculate_ema(candles[:-2], 21)
 
-        ema9_now = TechnicalAnalysis.calculate_ema(candles, 9)
-        ema21_now = TechnicalAnalysis.calculate_ema(candles, 21)
-        ema21_prev = TechnicalAnalysis.calculate_ema(candles[:-1], 21)
-
-        # --- FILTRO 1: SLOPE EMA21 ---
         ema_slope = abs(ema21_now - ema21_prev)
-        slope_ok = ema_slope >= (avg_body * MIN_SLOPE_MULT)
-
-        # --- FILTRO 2: SPREAD ENTRE EMAS ---
+        slope_ok = ema_slope >= (avg_body * 0.15)
         spread = abs(ema9_now - ema21_now)
-        spread_ok = spread >= (avg_body * MIN_SPREAD_MULT)
+        spread_ok = spread >= (avg_body * 0.25)
 
-        # --- FILTRO 3: DIRECIONALIDADE ---
         strong_candles = 0
-        for c in candles[-20:]:
+        for c in candles[-21:-1]:
             body = abs(c['close'] - c['open'])
             rng = c['max'] - c['min']
-            if rng == 0: continue
-            if body / rng >= 0.55:
-                strong_candles += 1
+            if rng > 0 and body / rng >= 0.55: strong_candles += 1
 
-        directional_ratio = strong_candles / 20
-        direction_ok = directional_ratio >= MIN_DIRECTIONAL_RATIO
-
-        # --- DECISAO FINAL ---
+        direction_ok = (strong_candles / 20) >= 0.55
         trend_score = sum([slope_ok, spread_ok, direction_ok])
-
         return "TREND" if trend_score >= 2 else "RANGE"
 
 class RangeStrategy:
     @staticmethod
     def get_signal(candles):
         if len(candles) < 40: return None, "Dados insuficientes"
-
-        last = candles[-1]
-        prev = candles[-2]
-        ema21 = TechnicalAnalysis.calculate_ema(candles, 21)
-
-        avg_body = sum(abs(c['close'] - c['open']) for c in candles[-20:]) / 20
+        last = candles[-2]
+        prev = candles[-3]
+        
+        # ⚠️ CORREÇÃO: Verificar inclinação da EMA21 para não operar contra micro-tendência
+        ema21 = TechnicalAnalysis.calculate_ema(candles[:-1], 21)
+        ema21_prev = TechnicalAnalysis.calculate_ema(candles[:-2], 21)
+        
+        avg_body = sum(abs(c['close'] - c['open']) for c in candles[-22:-2]) / 20
+        
+        # Se inclinação for forte (> 15% do corpo médio), aborta Range
+        if abs(ema21 - ema21_prev) > avg_body * 0.15:
+            return None, "Range inválido (EMA inclinada)"
+        
         price = last['close']
         distance = price - ema21
-
-        # --- CONDICAO 1: EXTREMO ---
         if abs(distance) < avg_body * 1.5: return None, "Sem extremo"
-
-        # --- CONDICAO 2: REJEICAO ---
+        
         body = abs(prev['close'] - prev['open'])
         rng = prev['max'] - prev['min']
         if rng == 0: return None, "Range zero"
-
         wick_ratio = (rng - body) / rng
         if wick_ratio < 0.6: return None, "Sem rejeicao clara"
-
-        # --- CONDICAO 3: CONFIRMACAO ---
+        
         confirm = last['close'] < prev['close'] if distance > 0 else last['close'] > prev['close']
         if not confirm: return None, "Sem confirmacao"
-
+        
         direction = "put" if distance > 0 else "call"
         return direction, "SAFE_RANGE_REVERSION"
 
@@ -278,17 +322,14 @@ class TrendStrength:
     @staticmethod
     def classify(candles):
         if len(candles) < 60: return "WEAK"
-
-        ema9 = TechnicalAnalysis.calculate_ema(candles, 9)
-        ema21 = TechnicalAnalysis.calculate_ema(candles, 21)
-        ema21_prev = TechnicalAnalysis.calculate_ema(candles[:-1], 21)
-
-        avg_body = sum(abs(c['close'] - c['open']) for c in candles[-20:]) / 20
+        ema9 = TechnicalAnalysis.calculate_ema(candles[:-1], 9)
+        ema21 = TechnicalAnalysis.calculate_ema(candles[:-1], 21)
+        ema21_prev = TechnicalAnalysis.calculate_ema(candles[:-2], 21)
+        
+        avg_body = sum(abs(c['close'] - c['open']) for c in candles[-21:-1]) / 20
         spread = abs(ema9 - ema21)
         slope = abs(ema21 - ema21_prev)
-
-        if spread > avg_body * 0.25 and slope > avg_body * 0.05:
-            return "STRONG"
+        if spread > avg_body * 0.25 and slope > avg_body * 0.05: return "STRONG"
         return "WEAK"
 
 class MicroPullbackStrategy:
@@ -297,16 +338,15 @@ class MicroPullbackStrategy:
         if len(candles) < 50:
             return None, "Dados insuficientes"
 
-        ema9 = TechnicalAnalysis.calculate_ema(candles, 9)
-        ema21 = TechnicalAnalysis.calculate_ema(candles, 21)
+        ema9 = TechnicalAnalysis.calculate_ema(candles[:-1], 9)
+        ema21 = TechnicalAnalysis.calculate_ema(candles[:-1], 21)
 
-        last = TechnicalAnalysis.analyze_candle(candles[-1])
-        prev = TechnicalAnalysis.analyze_candle(candles[-2])
+        last = TechnicalAnalysis.analyze_candle(candles[-2])
+        prev = TechnicalAnalysis.analyze_candle(candles[-3])
 
-        bodies = [abs(c['close'] - c['open']) for c in candles[-20:]]
+        bodies = [abs(c['close'] - c['open']) for c in candles[-22:-2]]
         avg_body = sum(bodies) / len(bodies)
 
-        # FILTRO CRÍTICO: mercado morto
         if avg_body <= 0:
             return None, "Sem volatilidade"
 
@@ -358,14 +398,13 @@ class SimpleBot:
         self.consecutive_losses = {} 
         self.range_loss_by_hour = {} 
         
-        # --- CONTROLE DE SESSÃO & MEMÓRIA DE ESTRATÉGIA ---
+        # --- CONTROLE DE SESSÃO ---
         self.session_blocked = False
         self.session_start_time = None
         self.session_initial_balance = 0.0
         self.last_blocked_log = 0 
         
         # MEMÓRIA DE PERFORMANCE POR ESTRATÉGIA
-        # Reseta a cada nova sessão
         self.strategy_performance = {
             "TREND_STRONG": {'wins': 0, 'losses': 0, 'consecutive_losses': 0, 'active': True},
             "TREND_WEAK": {'wins': 0, 'losses': 0, 'consecutive_losses': 0, 'active': True},
@@ -433,18 +472,12 @@ class SimpleBot:
         self.log_to_db(f"🚀 NOVA SESSÃO INICIADA. Saldo ref: ${self.session_initial_balance:.2f}", "SYSTEM")
 
     def update_strategy_stats(self, strategy_key, result):
-        """Atualiza a performance da estratégia e desativa se necessário"""
-        # Se a chave não existir, tenta mapear (fallback), mas o ideal é usar a chave direta
         key = strategy_key
-        
         if key not in self.strategy_performance:
-             # Fallback para tentar mapear strings antigas (caso necessário)
-            if "RANGE" in strategy_key: key = "RANGE"
-            elif "MICRO_PULLBACK" in strategy_key: key = "TREND_WEAK"
-            elif "V2" in strategy_key or "Trend" in strategy_key: key = "TREND_STRONG"
-            else: key = "UNKNOWN"
-
-        if key not in self.strategy_performance: return
+            if "RANGE" in str(strategy_key): key = "RANGE"
+            elif "MICRO" in str(strategy_key) or "WEAK" in str(strategy_key): key = "TREND_WEAK"
+            elif "V2" in str(strategy_key) or "STRONG" in str(strategy_key): key = "TREND_STRONG"
+            else: return
 
         stats = self.strategy_performance[key]
         
@@ -455,7 +488,6 @@ class SimpleBot:
             stats['losses'] += 1
             stats['consecutive_losses'] += 1
             
-            # --- LÓGICA DE SELF-DISABLE ---
             if key == "RANGE" and stats['losses'] >= 1:
                  stats['active'] = False
                  self.log_to_db(f"🚫 Estratégia RANGE DESATIVADA (Limite: 1 Loss)", "WARNING")
@@ -465,7 +497,6 @@ class SimpleBot:
                  self.log_to_db(f"🚫 Estratégia MICRO-TREND DESATIVADA (Limite: 2 Losses)", "WARNING")
 
             elif key == "TREND_STRONG":
-                 # Mais tolerante, mas corta se ficar muito ruim
                  if stats['consecutive_losses'] >= 3 or stats['losses'] >= 4:
                      stats['active'] = False
                      self.log_to_db(f"🚫 Estratégia TREND STRONG DESATIVADA (Performance Ruim)", "WARNING")
@@ -638,7 +669,8 @@ class SimpleBot:
                                  (sig == 'put' and nxt['close'] < nxt['open'])
                         if is_win: wins += 1
                 
-                if total >= 2: 
+                # ⚠️ CORREÇÃO #4: Mínimo de 5 trades para validar
+                if total >= 5: 
                     wr = (wins / total) * 100
                     score = (wr * 0.7) + (total * 5)
                     results.append({"pair": asset, "win_rate": wr, "wins": wins, "losses": total-wins, "best_strategy": "Adaptativa", "score": score})
@@ -692,7 +724,6 @@ class SimpleBot:
         t.join(timeout=10.0)
         return result[0] if result[0] else (False, None)
 
-    # 1. ASSINATURA CORRIGIDA
     def execute_trade(self, asset, direction, strategy_key, strategy_name="Unknown"):
         last = self.last_trade_time.get(asset)
         if last and time.time() - last < 70:
@@ -709,13 +740,16 @@ class SimpleBot:
             if asset in self.active_trades: return
             self.active_trades.add(asset)
 
+        # 4. GESTÃO DE RISCO DINÂMICA
         amount = self.config["entry_value"]
+        if strategy_key == "TREND_WEAK":
+            amount = round(amount * 0.7, 2) # Reduz mão em micro-tendência
+            
         self.log_to_db(f"➡️ ABRINDO ({strategy_name}): {asset} | {direction.upper()} | ${amount}", "INFO")
         
         sig_id = None
         try:
             if self.supabase:
-                # 2. USA NOME HUMANO PARA O BANCO
                 res = self.supabase.table("trade_signals").insert({
                     "pair": asset, "direction": direction, "strategy": strategy_name,
                     "status": "PENDING", "result": "PENDING", 
@@ -742,7 +776,6 @@ class SimpleBot:
                     profit = None
             except: res_str = 'UNKNOWN'
 
-            # 3. USA CHAVE TÉCNICA PARA PERFORMANCE
             self.update_strategy_stats(strategy_key, res_str)
 
             if res_str == 'DOJI':
@@ -757,8 +790,7 @@ class SimpleBot:
                  self.consecutive_losses[asset] = 0
 
             if res_str == 'LOSS': 
-                # Usa a chave correta para identificar RANGE
-                if strategy_key == "RANGE":
+                if "RANGE" in strategy_key:
                     hour = datetime.now(BR_TIMEZONE).hour
                     self.range_loss_by_hour[hour] = True
                     self.log_to_db(f"⚠️ RANGE bloqueado para a hora {hour}h devido a LOSS.", "WARNING")
@@ -767,8 +799,8 @@ class SimpleBot:
                 self.consecutive_losses[asset] = current_cons
                 
                 if current_cons == 1: cd = 60
-                elif current_cons == 2: cd = 120
-                else: cd = 300
+                elif current_cons >= 2: cd = 1800 
+                else: cd = 60
                 
                 self.asset_cooldowns[asset] = time.time() + cd
                 self.log_to_db(f"🛑 Cooldown {asset}: {cd}s (Loss #{current_cons})", "WARNING")
@@ -846,6 +878,12 @@ class SimpleBot:
                                 try:
                                     candles = self.api.get_candles(asset, 60, 100, int(time.time()))
                                     if candles:
+                                        # FILTRO DE QUALIDADE DO CANDLE
+                                        quality_ok, q_reason = TechnicalAnalysis.check_candle_quality(candles)
+                                        if not quality_ok:
+                                            self.log_to_db(f"⛔ {asset} Ignorado: {q_reason}", "DEBUG")
+                                            continue
+                                            
                                         price = candles[-1]['close']
                                         cd_msg = ""
                                         if asset in self.asset_cooldowns:
@@ -882,28 +920,66 @@ class SimpleBot:
                             try:
                                 candles = self.api.get_candles(asset, 60, 100, int(time.time()))
                                 
+                                # --- NOVO: FILTRO DE QUALIDADE ANTES ---
+                                quality_ok, q_reason = TechnicalAnalysis.check_candle_quality(candles)
+                                if not quality_ok:
+                                    self.log_to_db(f"⛔ {asset} Filtro Volatilidade: {q_reason}", "DEBUG")
+                                    continue
+                                
+                                # --- 5. FILTRO DE SPIKE OTC (RABISCO GIGANTE) ---
+                                bodies = [abs(c['close'] - c['open']) for c in candles[-22:-2]]
+                                avg_body_spike = sum(bodies) / len(bodies) if bodies else 0.001
+                                ranges = [c['max'] - c['min'] for c in candles[-22:-2]]
+                                avg_range_spike = sum(ranges) / len(ranges) if ranges else 0
+                                
+                                if avg_range_spike > (avg_body_spike * 4):
+                                    self.log_to_db(f"⛔ {asset} Spike OTC detectado (Muito pavio).", "DEBUG")
+                                    continue
+
                                 # --- LÓGICA DE REGIME ADAPTATIVO ---
                                 regime = MarketRegimeClassifier.classify(candles)
                                 sig = None
                                 reason = ""
                                 strategy_key = "UNKNOWN"
                                 
+                                if regime == "NO_TRADE":
+                                    self.log_to_db(f"⛔ {asset} Compressão — NO TRADE", "DEBUG")
+                                    continue
+                                
                                 if regime == "TREND":
+                                    # Anti-Churn
+                                    if TechnicalAnalysis.check_compression(candles):
+                                         self.log_to_db(f"⛔ {asset} TREND sem aceleração. Ignorado.", "DEBUG")
+                                         continue
+                                    
+                                    # 3. FILTRO DE ACELERAÇÃO (LAST 3 CANDLES)
+                                    last3 = candles[-5:-2]
+                                    bodies_last3 = [abs(c['close'] - c['open']) for c in last3]
+                                    
+                                    # Calcula média local para comparar
+                                    local_avg = sum(bodies_last3) / 3 if bodies_last3 else 0.001
+                                    
+                                    if len(bodies_last3) >= 3:
+                                        # Se desacelerou (3 < 2 < 1) E o último é pequeno (< 80% da média) -> Exaustão
+                                        if (bodies_last3[2] < bodies_last3[1] < bodies_last3[0]) and (bodies_last3[2] < local_avg * 0.8):
+                                            self.log_to_db(f"⛔ {asset} Perda de aceleração (Exaustão).", "DEBUG")
+                                            continue
+
                                     strength = TrendStrength.classify(candles)
                                     if strength == "STRONG":
                                         strategy_key = "TREND_STRONG"
-                                        # FILTRO DE SELF-DISABLE
+                                        # FILTRO DE SELF-DISABLE AQUI
                                         if self.is_strategy_active("TREND_STRONG"):
                                             sig, reason = TechnicalAnalysis.get_signal(candles)
                                     else:
                                         strategy_key = "TREND_WEAK"
-                                        # FILTRO DE SELF-DISABLE
+                                        # FILTRO DE SELF-DISABLE AQUI
                                         if self.is_strategy_active("TREND_WEAK"):
                                             sig, reason = MicroPullbackStrategy.get_signal(candles)
                                         
                                 elif regime == "RANGE":
                                     strategy_key = "RANGE"
-                                    # FILTRO DE SELF-DISABLE
+                                    # FILTRO DE SELF-DISABLE AQUI
                                     if self.is_strategy_active("RANGE"):
                                         current_hour = datetime.now(BR_TIMEZONE).hour
                                         if self.range_loss_by_hour.get(current_hour):
@@ -916,8 +992,14 @@ class SimpleBot:
                                         sig, reason = RangeStrategy.get_signal(candles)
                                 
                                 if sig: 
+                                    # --- 4. FILTRO DE HORÁRIO OTC MORTO ---
+                                    hr = datetime.now(BR_TIMEZONE).hour
+                                    if hr in [0, 1, 2, 3, 4]:
+                                        self.log_to_db(f"⛔ Horário Morto OTC ({hr}h). Entrada cancelada.", "DEBUG")
+                                        continue
+
                                     self.log_to_db(f"🔔 SINAL EM {asset}: {sig.upper()} ({reason})", "INFO")
-                                    # 4. CHAMA EXECUTE_TRADE CORRETAMENTE COM AMBOS OS PARÂMETROS
+                                    # 2. PASSAGEM CORRETA DE STRATEGY_KEY
                                     self.execute_trade(asset, sig, strategy_key, reason)
                                     trade_executed = True
                                     break 
