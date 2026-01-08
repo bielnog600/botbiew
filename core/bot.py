@@ -78,6 +78,18 @@ class TechnicalAnalysis:
         return ema
 
     @staticmethod
+    def calculate_ema_series(values, period):
+        if len(values) < period: return []
+        ema_values = []
+        sma = sum(values[:period]) / period
+        ema_values.append(sma)
+        k = 2 / (period + 1)
+        for price in values[period:]:
+            ema = price * k + ema_values[-1] * (1 - k)
+            ema_values.append(ema)
+        return ema_values
+
+    @staticmethod
     def analyze_candle(candle):
         open_p = candle['open']
         close_p = candle['close']
@@ -90,7 +102,7 @@ class TechnicalAnalysis:
         return { 'color': color, 'body': body, 'upper_wick': upper_wick, 'lower_wick': lower_wick, 'close': close_p, 'open': open_p, 'max': high_p, 'min': low_p }
     
     # ---------------------------------------------------------
-    # 🔥 AJUSTE 1: VOLATILIDADE MÍNIMA POR TIPO DE ATIVO
+    # 🔥 FILTROS DE QUALIDADE E VOLATILIDADE
     # ---------------------------------------------------------
     @staticmethod
     def check_candle_quality(candles, asset_name):
@@ -136,7 +148,7 @@ class TechnicalAnalysis:
         return True, "OK"
 
     # ---------------------------------------------------------
-    # 🔥 AJUSTE 2: SCORE DE ENTRADA (NÍVEL PROFISSIONAL)
+    # 🔥 SCORE DE ENTRADA (NÍVEL PROFISSIONAL)
     # ---------------------------------------------------------
     @staticmethod
     def calculate_entry_score(candles, regime, strength, sig, asset_name):
@@ -151,7 +163,6 @@ class TechnicalAnalysis:
         avg_body = sum(bodies) / len(bodies) if bodies else 0.00001
 
         # 1. Contexto Geral (+30)
-        # Se passou pelos filtros básicos de qualidade, já ganha pontos
         score += 30
         details.append("Contexto OK")
 
@@ -162,10 +173,8 @@ class TechnicalAnalysis:
         elif regime == "TREND" and strength == "WEAK":
             score += 15 # Micro pullback é bom, mas menos forte que trend pura
             details.append("Micro Pullback")
-        # Range não ganha pontos de regime por enquanto (desativado/arriscado)
 
         # 3. Expansão de Volatilidade (+20)
-        # Se candle atual for > 1.3x a média (impulso forte)
         if body > (avg_body * 1.3):
             score += 20
             details.append("Expansão Forte")
@@ -174,14 +183,12 @@ class TechnicalAnalysis:
             details.append("Expansão Moderada")
 
         # 4. Padrão Técnico Limpo (+15)
-        # Ex: Engolfo claro ou Marubozu
         is_engulf = TechnicalAnalysis.engulf_filter(candles, sig)
         if is_engulf:
             score += 15
             details.append("Engolfo Limpo")
         
         # 5. Horário "Nobre" (+10)
-        # Evita horários de transição ou almoço fraco
         hr = datetime.now(BR_TIMEZONE).hour
         if 8 <= hr <= 11 or 15 <= hr <= 17:
             score += 10
@@ -359,6 +366,9 @@ class SimpleBot:
         self.session_initial_balance = 0.0
         self.last_blocked_log = 0 
         
+        # 🔥 ACUMULADOR REAL DE LUCRO DA SESSÃO
+        self.session_profit = 0.0
+
         # GESTÃO DE QUANTIDADE DIÁRIA (SNIPER)
         self.MAX_DAILY_TRADES = 6  # Limite máximo de entradas no dia
         self.daily_wins = 0
@@ -412,11 +422,9 @@ class SimpleBot:
     def start_new_session(self):
         self.session_blocked = False 
         self.session_start_time = datetime.now(timezone.utc)
+        self.session_profit = 0.0 # 🔥 RESETE AO INICIAR NOVA SESSÃO
         self.consecutive_losses.clear() 
         self.range_loss_by_hour.clear() 
-        
-        # Reset Métricas Diárias na nova sessão se o dia mudou
-        # (Lógica simplificada: nova sessão = reset de contagem de trades para segurança)
         self.daily_wins = 0
         self.daily_total = 0
         self.daily_consecutive_loss = 0
@@ -443,13 +451,12 @@ class SimpleBot:
         elif result == 'LOSS':
             self.daily_consecutive_loss += 1
 
-        # --- AJUSTE 3: GESTÃO DE QUANTIDADE DIÁRIA (SNIPER) ---
         if self.daily_wins >= 3:
             self.log_to_db("🎯 META BATIDA (3 WINS). Encerrando por hoje.", "SUCCESS")
             self.session_blocked = True
             self.pause_bot_by_management()
         
-        if self.daily_consecutive_loss >= 2: # Stop curto de 2 losses
+        if self.daily_consecutive_loss >= 2: 
              self.log_to_db("🛑 2 Losses seguidos. Bloqueando sessão.", "ERROR")
              self.session_blocked = True
              self.pause_bot_by_management()
@@ -531,27 +538,18 @@ class SimpleBot:
             self.log_to_db(f"⏰ Agendador: Pausando operações (Fim do horário)", "SYSTEM")
             if self.supabase: self.supabase.table("bot_config").update({"status": "PAUSED"}).eq("id", 1).execute()
 
-    def calculate_session_profit(self):
-        if not self.session_start_time: return 0.0
-        try:
-            start_iso = self.session_start_time.isoformat()
-            res = self.supabase.table("trade_signals").select("profit").gte("created_at", start_iso).execute()
-            if res.data:
-                total = sum([float(x['profit']) for x in res.data if x['profit'] is not None])
-                return total
-            return 0.0
-        except Exception as e:
-            print(f"[CALC ERROR] {e}")
-            return 0.0
-
     def check_management(self):
         if not self.supabase or not self.api: return True
         if not self.session_start_time: return True 
         try:
-            res_exists = self.supabase.table("trade_signals").select("id").gte("created_at", self.session_start_time.isoformat()).limit(1).execute()
-            if not res_exists.data: return True 
-            profit = self.calculate_session_profit()
-            if profit == 0: return True 
+            # 🔥 CORREÇÃO: Usar acumulador em memória para precisão e velocidade
+            profit = self.session_profit
+            
+            # Se lucro for zero E nenhum trade foi feito na sessão, não avalia stop
+            # Usa self.daily_total para saber se trades ocorreram (reseta a cada sessão)
+            if profit == 0 and self.daily_total == 0: 
+                return True 
+            
             stop_mode = self.config.get("stop_mode")
             stop_win = abs(float(self.config.get("stop_win", 0)))
             stop_loss = abs(float(self.config.get("stop_loss", 0)))
@@ -727,6 +725,10 @@ class SimpleBot:
                     profit = None
             except: res_str = 'UNKNOWN'
 
+            # 🔥 ACUMULADOR REAL DE LUCRO DA SESSÃO
+            if res_str in ['WIN', 'LOSS'] and profit is not None:
+                self.session_profit += profit
+
             self.update_strategy_stats(strategy_key, res_str)
 
             if res_str == 'DOJI':
@@ -898,6 +900,7 @@ class SimpleBot:
                                     continue
                                 
                                 if regime == "TREND":
+                                    # Anti-Churn
                                     if TechnicalAnalysis.check_compression(candles):
                                          self.log_to_db(f"⛔ {asset} TREND sem aceleração. Ignorado.", "DEBUG")
                                          continue
@@ -905,17 +908,27 @@ class SimpleBot:
                                     strength = TrendStrength.classify(candles)
                                     if strength == "STRONG":
                                         strategy_key = "TREND_STRONG"
+                                        # FILTRO DE SELF-DISABLE AQUI
                                         if self.is_strategy_active("TREND_STRONG"):
                                             sig, reason = TechnicalAnalysis.get_signal(candles)
                                     else:
                                         strategy_key = "TREND_WEAK"
+                                        # FILTRO DE SELF-DISABLE AQUI
                                         if self.is_strategy_active("TREND_WEAK"):
                                             sig, reason = MicroPullbackStrategy.get_signal(candles)
                                         
                                 elif regime == "RANGE":
                                     strategy_key = "RANGE"
-                                    # RANGE DESATIVADO POR SEGURANÇA
+                                    # FILTRO DE SELF-DISABLE AQUI
                                     if self.is_strategy_active("RANGE"):
+                                        current_hour = datetime.now(BR_TIMEZONE).hour
+                                        if self.range_loss_by_hour.get(current_hour):
+                                            self.log_to_db(f"⛔ RANGE bloqueado neste horário ({current_hour}h)", "DEBUG")
+                                            continue
+
+                                        if self.consecutive_losses.get(asset, 0) >= 1:
+                                            self.log_to_db(f"⏸ {asset} RANGE + Loss recente. Ignorado.", "DEBUG")
+                                            continue
                                         sig, reason = RangeStrategy.get_signal(candles)
                                 
                                 if sig: 
