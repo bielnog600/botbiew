@@ -7,7 +7,6 @@ import os
 import random
 import requests
 from datetime import datetime, timedelta, timezone
-# Certifique-se de instalar: pip install supabase exnovaapi requests
 from supabase import create_client, Client
 
 # --- IMPORTAÇÃO DA EXNOVA ---
@@ -21,16 +20,6 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://ioduahwknfsktujthfyc.supa
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlvZHVhaHdrbmZza3R1anRoZnljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEzMDc0NDcsImV4cCI6MjA2Njg4MzQ0N30.96f8wZO6SvABKFMWjIiw1pSugAB4Isldj7yxLcLJRSE")
 EXNOVA_EMAIL = os.environ.get("EXNOVA_EMAIL", "seu_email@exemplo.com")
 EXNOVA_PASSWORD = os.environ.get("EXNOVA_PASSWORD", "sua_senha")
-
-# --- CONFIGURAÇÃO AVANÇADA ---
-WATCHDOG_CHECK_EVERY = 60
-WATCHDOG_MAX_SILENCE = 180
-COOLIFY_RESTART_URL = "https://biewdev.se/api/v1/applications/ig80skg8ssog04g4oo88wswg/restart"
-COOLIFY_API_TOKEN = os.environ.get("COOLIFY_API_TOKEN")
-GLOBAL_TIME_OFFSET = 0
-LAST_LOG_TIME = time.time()
-
-# --- FUSO HORÁRIO BRASIL (UTC-3) ---
 BR_TIMEZONE = timezone(timedelta(hours=-3))
 
 # --- SUPRESSÃO DE LOGS ---
@@ -38,29 +27,29 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
 for logger_name in ["websocket", "exnovaapi", "iqoptionapi", "urllib3", "iqoptionapi.websocket.client"]:
     logging.getLogger(logger_name).setLevel(logging.CRITICAL)
 
-# --- FUNÇÃO WATCHDOG ---
+# --- WATCHDOG ---
+WATCHDOG_CHECK_EVERY = 60
+WATCHDOG_MAX_SILENCE = 180
+COOLIFY_RESTART_URL = "https://biewdev.se/api/v1/applications/ig80skg8ssog04g4oo88wswg/restart"
+COOLIFY_API_TOKEN = os.environ.get("COOLIFY_API_TOKEN")
+LAST_LOG_TIME = time.time()
+
 def watchdog():
     global LAST_LOG_TIME
-    print("[WATCHDOG] Monitoramento de saúde iniciado.")
-    
+    print("[WATCHDOG] Monitoramento iniciado.")
     while True:
         time.sleep(WATCHDOG_CHECK_EVERY)
-        silence_duration = time.time() - LAST_LOG_TIME
-        
-        if silence_duration > WATCHDOG_MAX_SILENCE:
-            print(f"[WATCHDOG] ⚠️ ALERTA: Bot travado por {int(silence_duration)}s. Reiniciando via Coolify...")
+        if time.time() - LAST_LOG_TIME > WATCHDOG_MAX_SILENCE:
+            print(f"[WATCHDOG] ⚠️ Bot travado. Tentando reiniciar...")
             if COOLIFY_API_TOKEN:
-                try:
-                    requests.post(
-                        COOLIFY_RESTART_URL,
-                        headers={"Authorization": f"Bearer {COOLIFY_API_TOKEN}", "Content-Type": "application/json"},
-                        timeout=15
-                    )
-                except Exception as e: 
-                    print(f"[WATCHDOG ERROR] Falha ao reiniciar: {e}")
+                try: requests.post(COOLIFY_RESTART_URL, headers={"Authorization": f"Bearer {COOLIFY_API_TOKEN}"}, timeout=10)
+                except: pass
             os._exit(1)
 
-# --- ANÁLISE TÉCNICA (V2 ENGINE) ---
+# ==============================================================================
+#                               MOTORES DE ANÁLISE
+# ==============================================================================
+
 class TechnicalAnalysis:
     @staticmethod
     def calculate_sma(candles, period):
@@ -78,6 +67,18 @@ class TechnicalAnalysis:
         return ema
 
     @staticmethod
+    def calculate_ema_series(values, period):
+        if len(values) < period: return []
+        ema_values = []
+        sma = sum(values[:period]) / period
+        ema_values.append(sma)
+        k = 2 / (period + 1)
+        for price in values[period:]:
+            ema = price * k + ema_values[-1] * (1 - k)
+            ema_values.append(ema)
+        return ema_values
+
+    @staticmethod
     def analyze_candle(candle):
         open_p = candle['open']
         close_p = candle['close']
@@ -88,60 +89,81 @@ class TechnicalAnalysis:
         lower_wick = min(open_p, close_p) - low_p
         color = 'green' if close_p > open_p else 'red' if close_p < open_p else 'doji'
         return { 'color': color, 'body': body, 'upper_wick': upper_wick, 'lower_wick': lower_wick, 'close': close_p, 'open': open_p, 'max': high_p, 'min': low_p }
-    
+
     @staticmethod
     def check_candle_quality(candles, asset_name):
-        """Valida se o candle atual tem corpo e range decentes"""
+        """Valida se o candle DE SINAL (fechado, -2) tem qualidade"""
         if len(candles) < 20: return False, "Dados insuficientes"
         last_closed = candles[-2] 
         current_body = abs(last_closed['close'] - last_closed['open'])
         
-        if "JPY" in asset_name: MIN_BODY_THRESHOLD = 0.015
-        else: MIN_BODY_THRESHOLD = 0.00015
-
-        if current_body < MIN_BODY_THRESHOLD:
-            return False, f"Mercado Morto ({asset_name})"
+        # Threshold por tipo de ativo
+        MIN_BODY = 0.015 if "JPY" in asset_name else 0.00015
+        if current_body < MIN_BODY: return False, "Mercado Morto"
 
         bodies = [abs(c['close'] - c['open']) for c in candles[-12:-2]]
         avg_body = sum(bodies) / len(bodies) if bodies else 0.00001
         
-        if current_body < (avg_body * 0.6):
-            return False, f"Candle fraco (60% da média)"
+        if current_body < (avg_body * 0.6): return False, "Candle fraco (<60% média)"
             
-        current_range = last_closed['max'] - last_closed['min']
-        ranges = [c['max'] - c['min'] for c in candles[-12:-2]]
-        avg_range = sum(ranges) / len(ranges) if ranges else 0
-        
-        if current_range < (avg_range * 0.6):
-            return False, "Candle comprimido (Range baixo)"
-
+        # Filtro de Deslocamento (Preço vs EMA)
         ema21 = TechnicalAnalysis.calculate_ema(candles[:-1], 21) 
         distance = abs(last_closed['close'] - ema21)
+        if distance < (avg_body * 0.5): return False, "Sem deslocamento real"
+
+        # 5. FILTRO DE VOLATILIDADE ABSOLUTA (SPIKE)
+        ranges = [(c['max'] - c['min']) for c in candles[-15:-2]]
+        avg_range = sum(ranges) / len(ranges) if ranges else 0.0001
+        last_range = last_closed['max'] - last_closed['min']
         
-        if distance < (avg_body * 0.5):
-            return False, "Sem deslocamento real"
+        if last_range > (avg_range * 2.5):
+            return False, "Spike de volatilidade (Exaustão)"
+            
         return True, "OK"
 
     @staticmethod
     def calculate_entry_score(candles, regime, strength, sig, asset_name):
+        """Calcula score de 0 a 100 para a entrada. Requer >= 75 para aprovar."""
         score = 0
         details = []
+
         last_closed = candles[-2]
         body = abs(last_closed['close'] - last_closed['open'])
+        
         bodies = [abs(c['close'] - c['open']) for c in candles[-12:-2]]
         avg_body = sum(bodies) / len(bodies) if bodies else 0.00001
 
-        score += 30 # Contexto OK
-        if regime == "TREND" and strength == "STRONG": score += 25
-        elif regime == "TREND" and strength == "WEAK": score += 15
+        # 1. Contexto Geral (+30)
+        score += 30
+        details.append("Contexto OK")
 
-        if body > (avg_body * 1.3): score += 20
-        elif body > (avg_body * 1.1): score += 10
+        # 2. Regime de Mercado (+25)
+        if regime == "TREND" and strength == "STRONG":
+            score += 25
+            details.append("Trend Strong")
+        elif regime == "TREND" and strength == "WEAK":
+            score += 15 
+            details.append("Micro Pullback")
 
-        if TechnicalAnalysis.engulf_filter(candles, sig): score += 15
+        # 3. Expansão de Volatilidade (+20)
+        if body > (avg_body * 1.3):
+            score += 20
+            details.append("Expansão Forte")
+        elif body > (avg_body * 1.1):
+            score += 10
+            details.append("Expansão Moderada")
+
+        # 4. Padrão Técnico Limpo (+15)
+        is_engulf = TechnicalAnalysis.engulf_filter(candles, sig)
+        if is_engulf:
+            score += 15
+            details.append("Engolfo Limpo")
         
+        # 5. Horário "Nobre" (+10)
         hr = datetime.now(BR_TIMEZONE).hour
-        if 8 <= hr <= 11 or 15 <= hr <= 17: score += 10
+        if 8 <= hr <= 11 or 15 <= hr <= 17:
+            score += 10
+            details.append("Horário Nobre")
 
         return score, ", ".join(details)
 
@@ -158,7 +180,9 @@ class TechnicalAnalysis:
 
     @staticmethod
     def get_signal(candles):
+        """Estratégia EMA V2 (Tendência Forte)"""
         if len(candles) < 60: return None, "Dados insuficientes"
+        
         current_hour = datetime.now(BR_TIMEZONE).hour
         engulf_required = True
         if current_hour >= 14: engulf_required = False
@@ -166,40 +190,31 @@ class TechnicalAnalysis:
         ema9 = TechnicalAnalysis.calculate_ema(candles[:-1], 9)
         ema21 = TechnicalAnalysis.calculate_ema(candles[:-1], 21)
         ema21_prev = TechnicalAnalysis.calculate_ema(candles[:-2], 21)
+        
         confirm_candle = TechnicalAnalysis.analyze_candle(candles[-2])
         reject_candle = TechnicalAnalysis.analyze_candle(candles[-3])
-        avg_body = sum([abs(c['close']-c['open']) for c in candles[-8:-3]]) / 5
-        spread = abs(ema9 - ema21)
-        min_spread = avg_body * 0.1
-        if spread < min_spread: return None, f"Filtro: EMAs coladas"
-        ema21_slope = ema21 - ema21_prev
-        min_slope = avg_body * 0.02 
         
+        avg_body = sum([abs(c['close']-c['open']) for c in candles[-8:-3]]) / 5
+        min_slope = avg_body * 0.02
+        ema21_slope = ema21 - ema21_prev
+        
+        # TENDÊNCIA DE ALTA
         if ema9 > ema21 and ema21_slope > min_slope:
             touched_ema = reject_candle['min'] <= (ema21 + (avg_body * 0.1))
             held_support = reject_candle['close'] >= (ema21 - (avg_body * 0.3))
             if touched_ema and held_support:
-                if reject_candle['lower_wick'] < (reject_candle['body'] * 0.4): return None, "Rejeição fraca (Pavio)"
-                if confirm_candle['color'] == 'green':
-                    has_strength = (confirm_candle['body'] >= (reject_candle['body'] * 0.6) and confirm_candle['body'] >= (avg_body * 0.8))
-                    clean_top = confirm_candle['upper_wick'] < (confirm_candle['body'] * 0.5)
-                    if has_strength and clean_top:
-                        if engulf_required:
-                            if not TechnicalAnalysis.engulf_filter(candles, "call"): return None, "Sem força (Engolfo)"
-                        return 'call', "V2 CALL"
+                if confirm_candle['color'] == 'green' and confirm_candle['close'] > confirm_candle['open']:
+                     return 'call', "V2 CALL"
+
+        # TENDÊNCIA DE BAIXA
         elif ema9 < ema21 and ema21_slope < -min_slope:
             touched_ema = reject_candle['max'] >= (ema21 - (avg_body * 0.1))
             held_resistance = reject_candle['close'] <= (ema21 + (avg_body * 0.3))
             if touched_ema and held_resistance:
-                if reject_candle['upper_wick'] < (reject_candle['body'] * 0.4): return None, "Rejeição fraca (Pavio)"
-                if confirm_candle['color'] == 'red':
-                    has_strength = (confirm_candle['body'] >= (reject_candle['body'] * 0.6) and confirm_candle['body'] >= (avg_body * 0.8))
-                    clean_bottom = confirm_candle['lower_wick'] < (confirm_candle['body'] * 0.5)
-                    if has_strength and clean_bottom:
-                        if engulf_required:
-                            if not TechnicalAnalysis.engulf_filter(candles, "put"): return None, "Sem força (Engolfo)"
-                        return 'put', "V2 PUT"
-        return None, "Sem configuração V2"
+                if confirm_candle['color'] == 'red' and confirm_candle['close'] < confirm_candle['open']:
+                     return 'put', "V2 PUT"
+                     
+        return None, "Sem configuração"
 
     @staticmethod
     def engulf_filter(candles, direction):
@@ -213,30 +228,21 @@ class MarketRegimeClassifier:
     @staticmethod
     def classify(candles):
         if not candles or len(candles) < 50: return "RANGE"
-        if TechnicalAnalysis.check_compression(candles): return "NO_TRADE" 
+        if TechnicalAnalysis.check_compression(candles): return "NO_TRADE"
 
         bodies = [abs(c['close'] - c['open']) for c in candles[-21:-1]]
         avg_body = sum(bodies) / len(bodies) if bodies else 0.00001
+        
         ema9_now = TechnicalAnalysis.calculate_ema(candles[:-1], 9)
         ema21_now = TechnicalAnalysis.calculate_ema(candles[:-1], 21)
         ema21_prev = TechnicalAnalysis.calculate_ema(candles[:-2], 21)
+
         ema_slope = abs(ema21_now - ema21_prev)
         slope_ok = ema_slope >= (avg_body * 0.15)
         spread = abs(ema9_now - ema21_now)
         spread_ok = spread >= (avg_body * 0.25)
-        strong_candles = 0
-        for c in candles[-21:-1]:
-            body = abs(c['close'] - c['open'])
-            rng = c['max'] - c['min']
-            if rng > 0 and body / rng >= 0.55: strong_candles += 1
-        direction_ok = (strong_candles / 20) >= 0.55
-        trend_score = sum([slope_ok, spread_ok, direction_ok])
-        return "TREND" if trend_score >= 2 else "RANGE"
 
-class RangeStrategy:
-    @staticmethod
-    def get_signal(candles):
-        return None, "RANGE_DISABLED"
+        return "TREND" if (slope_ok and spread_ok) else "RANGE"
 
 class TrendStrength:
     @staticmethod
@@ -261,17 +267,23 @@ class MicroPullbackStrategy:
         prev = TechnicalAnalysis.analyze_candle(candles[-3])
         bodies = [abs(c['close'] - c['open']) for c in candles[-22:-2]]
         avg_body = sum(bodies) / len(bodies)
+
         if avg_body <= 0: return None, "Sem volatilidade"
 
         if ema9 > ema21:
             if prev['color'] == 'red' and prev['body'] < avg_body * 0.6:
                 if (last['color'] == 'green' and last['body'] >= avg_body * 0.9 and last['close'] > ema9 and last['upper_wick'] < last['body'] * 0.4):
-                    return "call", "MICRO_PULLBACK_CALL_STRONG"
+                    return "call", "MICRO_PULLBACK_CALL"
         if ema9 < ema21:
             if prev['color'] == 'green' and prev['body'] < avg_body * 0.6:
                 if (last['color'] == 'red' and last['body'] >= avg_body * 0.9 and last['close'] < ema9 and last['lower_wick'] < last['body'] * 0.4):
-                    return "put", "MICRO_PULLBACK_PUT_STRONG"
-        return None, "Micro pullback fraco"
+                    return "put", "MICRO_PULLBACK_PUT"
+        return None, "Sem padrão"
+
+class RangeStrategy:
+    @staticmethod
+    def get_signal(candles):
+        return None, "RANGE_DISABLED"
 
 # ==============================================================================
 #                               BOT PRINCIPAL
@@ -299,18 +311,20 @@ class SimpleBot:
         
         # --- CONTADORES DIÁRIOS/SESSÃO ---
         self.session_blocked = False
+        self.session_start_time = None
+        self.session_initial_balance = 0.0
+        self.last_blocked_log = 0 
+        
         self.daily_wins = 0
         self.daily_losses = 0
         self.daily_total = 0
         self.current_date = datetime.now(BR_TIMEZONE).date()
-        self.last_blocked_log = 0 
-        
+
         self.strategy_performance = {
             "TREND_STRONG": {'wins': 0, 'losses': 0, 'consecutive_losses': 0, 'active': True},
             "TREND_WEAK": {'wins': 0, 'losses': 0, 'consecutive_losses': 0, 'active': True},
             "RANGE": {'wins': 0, 'losses': 0, 'consecutive_losses': 0, 'active': False} 
         }
-        
         self.init_supabase()
 
     def init_supabase(self):
@@ -349,7 +363,9 @@ class SimpleBot:
         except: pass
 
     def start_new_session(self):
+        """Inicia uma nova sessão de trading, zerando contadores"""
         self.session_blocked = False 
+        self.session_start_time = datetime.now(timezone.utc)
         self.consecutive_losses.clear() 
         self.range_loss_by_hour.clear() 
         self.daily_wins = 0
@@ -405,12 +421,9 @@ class SimpleBot:
                 self.config["status"] = new_status
                 self.config["account_type"] = data.get("account_type", "PRACTICE").strip().upper()
                 self.config["entry_value"] = float(data.get("entry_value", 1.0))
-                
-                # PROTEÇÃO CONTRA VALORES NULL NO BANCO
                 self.config["max_trades_per_day"] = int(data.get("max_trades_per_day") or 0)
                 self.config["max_wins_per_day"] = int(data.get("max_wins_per_day") or 0)
                 self.config["max_losses_per_day"] = int(data.get("max_losses_per_day") or 0)
-                
                 self.config["timer_enabled"] = data.get("timer_enabled", False)
                 self.config["timer_start"] = data.get("timer_start", "00:00")
                 self.config["timer_end"] = data.get("timer_end", "00:00")
@@ -442,30 +455,25 @@ class SimpleBot:
             if self.supabase: self.supabase.table("bot_config").update({"status": "PAUSED"}).eq("id", 1).execute()
 
     def check_daily_limits(self):
-        # 1. Reset Automático (Virada de dia BR)
         today = datetime.now(BR_TIMEZONE).date()
         if today != self.current_date:
             self.current_date = today
             self.start_new_session()
             return True
 
-        max_trades = self.config.get("max_trades_per_day", 0)
-        max_wins = self.config.get("max_wins_per_day", 0)
-        max_losses = self.config.get("max_losses_per_day", 0)
+        max_trades = self.config["max_trades_per_day"]
+        max_wins = self.config["max_wins_per_day"]
+        max_losses = self.config["max_losses_per_day"]
 
-        # 2. Verificação de Limites
         if max_trades > 0 and self.daily_total >= max_trades:
-            self.log_to_db(f"🛑 Limite de Trades atingido ({self.daily_total}/{max_trades}). Parando.", "WARNING")
+            self.log_to_db(f"🛑 Limite de Trades ({self.daily_total}/{max_trades})", "WARNING")
             return False
-
         if max_wins > 0 and self.daily_wins >= max_wins:
-            self.log_to_db(f"🏆 Meta de Wins atingida ({self.daily_wins}/{max_wins}). Parabéns!", "SUCCESS")
+            self.log_to_db(f"🏆 Meta de Wins ({self.daily_wins}/{max_wins})", "SUCCESS")
             return False
-
         if max_losses > 0 and self.daily_losses >= max_losses:
-            self.log_to_db(f"❌ Limite de Losses atingido ({self.daily_losses}/{max_losses}). Stop por hoje.", "ERROR")
+            self.log_to_db(f"❌ Limite de Losses ({self.daily_losses}/{max_losses})", "ERROR")
             return False
-
         return True
 
     def pause_bot_by_management(self):
@@ -486,8 +494,7 @@ class SimpleBot:
                 self.active_account_type = self.config["account_type"]
                 self.api.change_balance(self.active_account_type)
                 self.update_balance_remote()
-                if self.config.get("status") == "RUNNING":
-                    self.start_new_session()
+                # 🔧 AJUSTE 1: Sessão apenas em fetch_config, não aqui
                 return True
             else:
                 self.log_to_db(f"Falha conexão: {reason}", "ERROR")
@@ -495,22 +502,20 @@ class SimpleBot:
             self.log_to_db(f"Erro critico conexão: {e}", "ERROR")
         return False
 
-    def catalog_assets(self, assets_list):
-        self.log_to_db(f"📊 Catalogando Top 3 (Win Rate >= 70%)...", "SYSTEM")
+    def catalog_assets(self, assets_pool):
+        self.log_to_db(f"📊 Catalogando Top 3 (Win Rate >= 60%)...", "SYSTEM")
         results = []
-        for asset in assets_list:
+        for asset in assets_pool:
             try:
-                candles = self.api.get_candles(asset, 60, 200, int(time.time()))
-                if not candles or len(candles) < 100: continue
+                candles = self.api.get_candles(asset, 60, 100, int(time.time()))
+                if not candles: continue
                 wins, total = 0, 0
-                for i in range(60, len(candles)-1):
-                    subset = candles[i-60:i+1]
-                    regime = MarketRegimeClassifier.classify(subset)
-                    sig = None
-                    if regime == "TREND":
-                        strength = TrendStrength.classify(subset)
-                        if strength == "STRONG": sig, _ = TechnicalAnalysis.get_signal(subset)
-                        else: sig, _ = MicroPullbackStrategy.get_signal(subset)
+                for i in range(50, len(candles)-1):
+                    sub = candles[i-50:i+1]
+                    regime = MarketRegimeClassifier.classify(sub)
+                    if regime != "TREND": continue 
+                    
+                    sig, _ = TechnicalAnalysis.get_signal(sub)
                     if sig:
                         total += 1
                         nxt = candles[i+1]
@@ -520,35 +525,19 @@ class SimpleBot:
                 
                 if total >= 5: 
                     wr = (wins / total) * 100
-                    score = (wr * 0.7) + (total * 5)
-                    results.append({"pair": asset, "win_rate": wr, "wins": wins, "losses": total-wins, "best_strategy": "Adaptativa", "score": score})
+                    if wr >= 60:
+                       results.append({'pair': asset, 'win_rate': wr, 'best_strategy': 'V2'})
             except: pass
             time.sleep(0.05)
-        results.sort(key=lambda x: x['score'], reverse=True)
-        valid_results = [r for r in results if r['win_rate'] >= 70] 
-        top_list = []
-        if valid_results:
-            top_3 = valid_results[:3]
-            pairs_str = ", ".join([f"{r['pair']} ({r['win_rate']:.0f}%)" for r in top_3])
-            self.log_to_db(f"💎 Melhores: {pairs_str}", "SUCCESS")
-            top_list = top_3
-        else:
-            self.log_to_db("⚠️ Nenhum ativo >= 70% WR. Aguardando mercado melhorar.", "WARNING")
         
-        if top_list:
-            for r in top_list: self.asset_stats[r['pair']] = r
-            try:
-                if self.supabase:
-                    self.supabase.table("cataloged_assets").delete().neq("pair", "XYZ").execute() 
-                    self.supabase.table("cataloged_assets").insert(top_list).execute()
-            except: pass
-            return [r['pair'] for r in top_list]
-        else:
-            try:
-                if self.supabase:
-                    self.supabase.table("cataloged_assets").delete().neq("pair", "XYZ").execute() 
-            except: pass
-            return []
+        results.sort(key=lambda x: x['win_rate'], reverse=True)
+        final_list = results[:3]
+        if self.supabase:
+             try:
+                 self.supabase.table("cataloged_assets").delete().neq("pair", "XYZ").execute()
+                 if final_list: self.supabase.table("cataloged_assets").insert(final_list).execute()
+             except: pass
+        return [x['pair'] for x in final_list]
 
     def safe_buy(self, asset, amount, direction, type="digital"):
         result = [None]
@@ -562,101 +551,104 @@ class SimpleBot:
         return result[0] if result[0] else (False, None)
 
     def execute_trade(self, asset, direction, strategy_key, strategy_name="Unknown"):
-        last = self.last_trade_time.get(asset)
-        if last and time.time() - last < 70:
-            return
-        self.last_trade_time[asset] = time.time()
-
-        # 🔥 VERIFICA LIMITES ANTES DE ABRIR
-        if not self.check_daily_limits():
-            self.session_blocked = True
-            self.pause_bot_by_management()
-            return
-
-        if not self.api: return
-        try: balance_before = self.api.get_balance()
-        except: return
-
         with self.trade_lock:
             if asset in self.active_trades: return
             self.active_trades.add(asset)
 
-        amount = self.config["entry_value"]
-        self.log_to_db(f"➡️ ABRINDO ({strategy_name}): {asset} | {direction.upper()} | ${amount}", "INFO")
-        
-        sig_id = None
         try:
-            if self.supabase:
-                res = self.supabase.table("trade_signals").insert({
-                    "pair": asset, "direction": direction, "strategy": strategy_name,
-                    "status": "PENDING", "result": "PENDING", 
-                    "created_at": datetime.now(timezone.utc).isoformat(), 
-                    "profit": 0
-                }).execute()
-                if res.data: sig_id = res.data[0]['id']
-        except: pass
+            if asset in self.asset_cooldowns:
+                 if time.time() < self.asset_cooldowns[asset]: return
 
-        status, id = self.safe_buy(asset, amount, direction, "digital")
-        if not status: status, id = self.safe_buy(asset, amount, direction, "binary")
-
-        if status:
-            self.log_to_db(f"✅ Ordem {id} aceita. Aguardando (64s)...", "INFO")
-            time.sleep(64)
-            profit = 0.0; res_str = "PENDING"
-            try:
-                balance_after = self.api.get_balance()
-                delta = balance_after - balance_before
-                if delta > 0: res_str, profit = 'WIN', delta
-                elif delta < 0: res_str, profit = 'LOSS', delta
-                else: 
-                    res_str = 'DOJI'
-                    profit = None
-            except: res_str = 'UNKNOWN'
-
-            # 🔥 ATUALIZAÇÃO DE CONTADORES
-            if res_str in ["WIN", "LOSS"]:
-                self.daily_total += 1
-                if res_str == "WIN":
-                     self.daily_wins += 1
-                     self.consecutive_losses[asset] = 0
-                elif res_str == "LOSS":
-                     self.daily_losses += 1
-                     self.consecutive_losses[asset] = self.consecutive_losses.get(asset, 0) + 1
-                     # Cooldown
-                     self.asset_cooldowns[asset] = time.time() + 60
-                     self.log_to_db(f"🛑 Cooldown {asset}: 60s", "WARNING")
-
-            self.update_strategy_stats(strategy_key, res_str)
-
-            if res_str == 'DOJI':
-                self.log_to_db("⚠️ DOJI ignorado (neutro)", "WARNING")
-                with self.trade_lock: self.active_trades.discard(asset)
-                if sig_id and self.supabase:
-                    try: self.supabase.table("trade_signals").delete().eq("id", sig_id).execute()
-                    except: pass
-                return
-
-            log_type = "SUCCESS" if res_str == 'WIN' else "ERROR" if res_str == 'LOSS' else "WARNING"
-            self.log_to_db(f"{'🏆' if res_str == 'WIN' else '🔻'} {res_str}: ${profit:.2f} (Dia: {self.daily_wins}W/{self.daily_losses}L)", log_type)
-
-            if sig_id and self.supabase:
-                try: self.supabase.table("trade_signals").update({"status": res_str, "result": res_str, "profit": profit}).eq("id", sig_id).execute()
-                except: pass
-            
-            self.update_balance_remote()
-            
-            # 🔥 VERIFICA LIMITES APÓS TRADE
             if not self.check_daily_limits():
                 self.session_blocked = True
-                self.pause_bot_by_management()
+                if self.config["status"] == "RUNNING":
+                    self.supabase.table("bot_config").update({"status": "PAUSED"}).eq("id", 1).execute()
+                return
 
-            with self.trade_lock: self.active_trades.discard(asset)
-        else:
-            self.log_to_db("❌ Falha ordem na corretora.", "ERROR")
-            with self.trade_lock: self.active_trades.discard(asset)
-            if sig_id and self.supabase: 
-                try: self.supabase.table("trade_signals").delete().eq("id", sig_id).execute()
-                except: pass
+            if not self.strategy_performance.get(strategy_key, {}).get("active", True):
+                return
+
+            amount = self.config["entry_value"]
+            self.log_to_db(f"➡️ ENTRADA ({strategy_name}): {asset} | {direction.upper()} | ${amount}", "INFO")
+
+            # 1. PEGA SALDO ANTES (VERDADE ABSOLUTA)
+            balance_before = 0.0
+            try: 
+                 balance_before = self.api.get_balance()
+                 if balance_before <= 0:
+                     self.log_to_db("❌ Saldo zerado. Bot pausado.", "ERROR") # AJUSTE 5
+                     self.pause_bot_by_management()
+                     return
+            except: 
+                self.log_to_db("❌ Erro saldo inicial. Abortando.", "ERROR")
+                return
+
+            status, id = self.safe_buy(asset, amount, direction, "digital")
+            if not status: status, id = self.safe_buy(asset, amount, direction, "binary")
+
+            if status:
+                self.log_to_db(f"✅ Ordem {id} aceita. Aguardando...", "INFO")
+                self.log_to_db("⏳ Aguardando fechamento da vela...", "DEBUG") # AJUSTE 4 (Watchdog)
+                time.sleep(62) 
+                
+                # 2. PEGA SALDO DEPOIS E CALCULA
+                try:
+                    balance_after = self.api.get_balance()
+                    delta = balance_after - balance_before
+                    
+                    res_str = "DOJI"
+                    profit = 0.0
+                    
+                    if delta > 0.01: 
+                        res_str = "WIN"
+                        profit = delta
+                    elif delta < -0.01: 
+                        res_str = "LOSS"
+                        profit = delta
+                        
+                    if res_str == 'DOJI':
+                        self.log_to_db("DOJI neutro (sem impacto)", "DEBUG")
+                        return
+
+                    # 4. ATUALIZAÇÃO CONTADORES
+                    self.daily_total += 1
+                    if res_str == "WIN":
+                         self.daily_wins += 1
+                         self.consecutive_losses[asset] = 0
+                         self.asset_cooldowns.pop(asset, None)
+                    elif res_str == "LOSS":
+                         self.daily_losses += 1
+                         current_cons = self.consecutive_losses.get(asset, 0) + 1
+                         self.consecutive_losses[asset] = current_cons
+                         cd = 120 if current_cons == 1 else 300
+                         self.asset_cooldowns[asset] = time.time() + cd
+                         self.log_to_db(f"🛑 Cooldown {asset}: {cd}s", "WARNING")
+
+                    self.update_strategy_stats(strategy_key, res_str)
+                    
+                    log_type = "SUCCESS" if res_str == 'WIN' else "ERROR"
+                    self.log_to_db(f"{'🏆' if res_str == 'WIN' else '🔻'} {res_str}: ${profit:.2f} ({self.daily_wins}W/{self.daily_losses}L)", log_type)
+                    
+                    if self.supabase:
+                         try: self.supabase.table("trade_signals").insert({
+                             "pair": asset, "direction": direction, "result": res_str, 
+                             "profit": profit, "created_at": datetime.now(timezone.utc).isoformat()
+                         }).execute()
+                         except: pass
+                         self.update_balance_remote()
+
+                    if not self.check_daily_limits():
+                        self.session_blocked = True
+                        self.pause_bot_by_management()
+
+                except Exception as e:
+                    self.log_to_db(f"Erro processando resultado: {e}", "ERROR")
+            else:
+                self.log_to_db("❌ Falha ordem na corretora.", "ERROR")
+
+        finally:
+            with self.trade_lock:
+                self.active_trades.discard(asset)
 
     def start(self):
         t_watchdog = threading.Thread(target=watchdog, daemon=True)
@@ -666,128 +658,67 @@ class SimpleBot:
         while True:
             try:
                 self.fetch_config()
-                if not self.connect(): time.sleep(10); continue
+                self.check_schedule()
                 
-                ASSETS_POOL = [
-                    "EURUSD-OTC", "EURGBP-OTC", "USDCHF-OTC", "EURJPY-OTC", "NZDUSD-OTC", "GBPUSD-OTC", 
-                    "GBPJPY-OTC", "USDJPY-OTC", "AUDCAD-OTC", "AUDUSD-OTC", "USDCAD-OTC", "AUDJPY-OTC"
-                ]
+                if self.config["status"] == "PAUSED":
+                    time.sleep(5)
+                    continue
+
+                if self.session_blocked:
+                    # AJUSTE 2: Log Throttle
+                    if time.time() - self.last_blocked_log > 300:
+                        self.log_to_db("⛔ STOP DIÁRIO ATIVO — aguardando novo dia ou reset manual", "WARNING")
+                        self.last_blocked_log = time.time()
+                    time.sleep(30) # AJUSTE 2: Sleep Longo
+                    continue
                 
-                self.best_assets = self.catalog_assets(ASSETS_POOL)
-                last_scan = 0
-                last_bal = 0
-                last_catalog = time.time()
-                last_blocked_log = 0
+                if not self.api.check_connect(): 
+                    self.connect()
+                    continue
 
-                while True:
-                    self.fetch_config()
-                    
-                    if self.session_blocked:
-                        if self.config["status"] == "RUNNING":
-                            if time.time() - last_blocked_log > 60:
-                                self.log_to_db("⛔ Sessão bloqueada por limite diário. Aguardando reset manual (Pause/Play)", "WARNING")
-                                last_blocked_log = time.time()
-                            self.pause_bot_by_management()
-                        time.sleep(5)
-                        continue 
+                if not self.best_assets or int(time.time()) % 900 < 5:
+                    self.best_assets = self.catalog_assets(["EURUSD-OTC", "EURGBP-OTC", "USDCHF-OTC", "EURJPY-OTC", "NZDUSD-OTC", "GBPUSD-OTC", "GBPJPY-OTC", "USDJPY-OTC", "AUDCAD-OTC", "AUDUSD-OTC", "USDCAD-OTC", "AUDJPY-OTC"])
 
-                    if self.config["status"] == "RESTARTING":
-                        if self.supabase: self.supabase.table("bot_config").update({"status": "RUNNING"}).eq("id", 1).execute()
-                        break
-                    
-                    if not self.api.check_connect(): break
-                    
-                    catalog_interval = 900 if self.best_assets else 60
-                    if time.time() - last_catalog > catalog_interval:
-                        self.best_assets = self.catalog_assets(ASSETS_POOL)
-                        last_catalog = time.time()
+                now_sec = datetime.now().second
+                if 55 <= now_sec <= 59:
+                     for asset in self.best_assets:
+                         with self.trade_lock:
+                             if asset in self.active_trades: continue
+                         try:
+                             candles = self.api.get_candles(asset, 60, 100, int(time.time()))
+                             if candles:
+                                 qual, q_reason = TechnicalAnalysis.check_candle_quality(candles, asset)
+                                 if not qual: 
+                                     self.log_to_db(f"Ignorado {asset}: {q_reason}", "DEBUG")
+                                     continue
+                                 if TechnicalAnalysis.check_compression(candles): continue
 
-                    self.check_schedule()
-
-                    if time.time() - last_scan > 10:
-                        try:
-                            self.update_balance_remote()
-                            targets = self.best_assets[:3] if self.best_assets else ["EURUSD-OTC"]
-                            self.log_to_db(f"MODE_ATIVO::ADAPTATIVE_REGIME_FLOW", "SYSTEM")
-
-                            for asset in targets:
-                                try:
-                                    candles = self.api.get_candles(asset, 60, 100, int(time.time()))
-                                    if candles:
-                                        quality_ok, q_reason = TechnicalAnalysis.check_candle_quality(candles, asset)
-                                        if not quality_ok:
-                                            self.log_to_db(f"⛔ {asset} Filtro Volatilidade: {q_reason}", "DEBUG")
-                                            continue
-                                        if TechnicalAnalysis.check_compression(candles):
-                                             self.log_to_db(f"⛔ {asset} Compressão Detectada", "DEBUG")
-                                             continue
-
-                                        regime = MarketRegimeClassifier.classify(candles)
-                                        sig = None
-                                        reason = ""
-                                        strategy_key = "UNKNOWN"
-                                        
-                                        if regime == "NO_TRADE":
-                                            self.log_to_db(f"⛔ {asset} Compressão — NO TRADE", "DEBUG")
-                                            continue
-                                        
-                                        if regime == "TREND":
-                                            if TechnicalAnalysis.check_compression(candles):
-                                                 self.log_to_db(f"⛔ {asset} TREND sem aceleração. Ignorado.", "DEBUG")
-                                                 continue
-
-                                            strength = TrendStrength.classify(candles)
-                                            if strength == "STRONG":
-                                                strategy_key = "TREND_STRONG"
-                                                if self.is_strategy_active("TREND_STRONG"):
-                                                    sig, reason = TechnicalAnalysis.get_signal(candles)
-                                            else:
-                                                strategy_key = "TREND_WEAK"
-                                                if self.is_strategy_active("TREND_WEAK"):
-                                                    sig, reason = MicroPullbackStrategy.get_signal(candles)
-                                                
-                                        elif regime == "RANGE":
-                                            strategy_key = "RANGE"
-                                            if self.is_strategy_active("RANGE"):
-                                                current_hour = datetime.now(BR_TIMEZONE).hour
-                                                if self.range_loss_by_hour.get(current_hour):
-                                                    self.log_to_db(f"⛔ RANGE bloqueado neste horário ({current_hour}h)", "DEBUG")
-                                                    continue
-
-                                                if self.consecutive_losses.get(asset, 0) >= 1:
-                                                    self.log_to_db(f"⏸ {asset} RANGE + Loss recente. Ignorado.", "DEBUG")
-                                                    continue
-                                                sig, reason = RangeStrategy.get_signal(candles)
-                                        
-                                        if sig: 
-                                            entry_score, score_details = TechnicalAnalysis.calculate_entry_score(candles, regime, "STRONG" if strategy_key == "TREND_STRONG" else "WEAK", sig, asset)
-                                            if entry_score < 75:
-                                                 self.log_to_db(f"⚠️ {asset} Score Baixo ({entry_score}): {score_details}", "DEBUG")
-                                                 continue
-
-                                            hr = datetime.now(BR_TIMEZONE).hour
-                                            if hr in [0, 1, 2, 3, 4]:
-                                                self.log_to_db(f"⛔ Horário Morto OTC ({hr}h). Entrada cancelada.", "DEBUG")
-                                                continue
-                                            
-                                            if (hr == 13 and datetime.now(BR_TIMEZONE).minute >= 30) or (hr == 14 and datetime.now(BR_TIMEZONE).minute <= 30):
-                                                 self.log_to_db(f"⛔ Troca de Sessão OTC. Entrada cancelada.", "DEBUG")
-                                                 continue
-
-                                            self.log_to_db(f"🔔 SINAL EM {asset} (Score {entry_score}): {sig.upper()} ({reason})", "INFO")
-                                            self.execute_trade(asset, sig, strategy_key, reason)
-                                            trade_executed = True
-                                            break 
-                                        else:
-                                             self.log_to_db(f"SCAN_ENTRADA::{asset}::{regime}::Sem Sinal", "DEBUG")
-
-                            except: pass
-                        
-                        if trade_executed: time.sleep(50) 
-                        else: time.sleep(4) 
-                    time.sleep(0.5)
+                                 regime = MarketRegimeClassifier.classify(candles)
+                                 sig, reason, strat_key = None, "", "UNKNOWN"
+                                 
+                                 if regime == "NO_TRADE": continue
+                                 
+                                 if regime == "TREND":
+                                     if TechnicalAnalysis.check_compression(candles): continue
+                                     strength = TrendStrength.classify(candles)
+                                     if strength == "STRONG": 
+                                         sig, reason = TechnicalAnalysis.get_signal(candles)
+                                         strat_key = "TREND_STRONG"
+                                     else: 
+                                         sig, reason = MicroPullbackStrategy.get_signal(candles)
+                                         strat_key = "TREND_WEAK"
+                                 
+                                 if sig:
+                                     # AJUSTE 1: Uso correto de 'strength'
+                                     score, _ = TechnicalAnalysis.calculate_entry_score(candles, regime, strength, sig, asset)
+                                     if score >= 75:
+                                         self.execute_trade(asset, sig, strat_key, reason)
+                                         break 
+                         except: pass
+                     time.sleep(1)
+                time.sleep(0.5)
             except Exception as e:
-                self.log_to_db(f"Erro loop principal: {e}", "ERROR")
+                print(f"Erro Loop: {e}")
                 time.sleep(5)
 
 if __name__ == "__main__":
