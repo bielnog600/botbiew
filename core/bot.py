@@ -133,7 +133,7 @@ class TechnicalAnalysis:
         bodies = [abs(c['close'] - c['open']) for c in candles[-12:-2]]
         avg_body = sum(bodies) / len(bodies) if bodies else 0.00001
 
-        # 1. Contexto Geral
+        # 1. Contexto Geral (+20)
         score += 20 
         details.append("Contexto OK")
         
@@ -145,7 +145,7 @@ class TechnicalAnalysis:
             score += 10
             details.append("Spread Forte")
 
-        # 2. Regime de Mercado
+        # 2. Regime de Mercado (+25)
         if regime == "TREND" and strength == "STRONG":
             score += 25
             details.append("Trend Strong")
@@ -153,7 +153,7 @@ class TechnicalAnalysis:
             score += 15 
             details.append("Micro Pullback")
 
-        # 3. Expansão de Volatilidade
+        # 3. Expansão de Volatilidade (+20)
         if body > (avg_body * 1.3):
             score += 20
             details.append("Expansão Forte")
@@ -161,13 +161,13 @@ class TechnicalAnalysis:
             score += 10
             details.append("Expansão Moderada")
 
-        # 4. Padrão Técnico Limpo
+        # 4. Padrão Técnico Limpo (+15)
         is_engulf = TechnicalAnalysis.engulf_filter(candles, sig)
         if is_engulf:
             score += 15
             details.append("Engolfo Limpo")
         
-        # 5. Horário "Nobre"
+        # 5. Horário "Nobre" (+10)
         hr = datetime.now(BR_TIMEZONE).hour
         if 8 <= hr <= 11 or 15 <= hr <= 17:
             score += 10
@@ -318,8 +318,7 @@ class SimpleBot:
         self.consecutive_losses = {} 
         self.range_loss_by_hour = {} 
         self.hourly_loss_count = {}
-        self.last_catalog_time = 0
-        self.market_cooldown_until = 0 # 🔥 AJUSTE: Pausa global de mercado
+        self.last_catalog_time = 0 
         
         # --- CONTADORES DIÁRIOS/SESSÃO ---
         self.session_blocked = False
@@ -393,7 +392,6 @@ class SimpleBot:
         self.daily_wins = 0
         self.daily_losses = 0
         self.daily_total = 0
-        self.market_cooldown_until = 0 # Reset cooldown
         self.strategy_performance = {
             "TREND_STRONG": {'wins': 0, 'losses': 0, 'consecutive_losses': 0, 'active': True},
             "TREND_WEAK": {'wins': 0, 'losses': 0, 'consecutive_losses': 0, 'active': True},
@@ -422,6 +420,7 @@ class SimpleBot:
 
     def update_strategy_stats(self, strategy_key, result, asset):
         current_hour = datetime.now(BR_TIMEZONE).hour
+        # AQUI FOI REMOVIDO O INCREMENTO DUPLICADO. AGORA É CENTRALIZADO.
         self.daily_total += 1
         
         if result == 'WIN':
@@ -432,10 +431,8 @@ class SimpleBot:
             self.daily_losses += 1
             self.hourly_loss_count[current_hour] = self.hourly_loss_count.get(current_hour, 0) + 1
             
-            # 🔥 AJUSTE: Bloqueio temporário de 90 min para hora ruim
             if self.hourly_loss_count[current_hour] >= 2:
-                 self.market_cooldown_until = time.time() + 5400 # 90 min
-                 self.log_to_db(f"⛔ Mercado difícil ({current_hour}h). Pausa de 90 min.", "WARNING")
+                 self.log_to_db(f"⛔ Horário {current_hour}h bloqueado hoje (2 Losses)", "WARNING")
 
             current_cons = self.consecutive_losses.get(asset, 0) + 1
             self.consecutive_losses[asset] = current_cons
@@ -570,7 +567,7 @@ class SimpleBot:
                 self.active_account_type = self.config["account_type"]
                 self.api.change_balance(self.active_account_type)
                 self.update_balance_remote()
-                # Sessão inicia apenas quando muda para RUNNING
+                # 🔧 AJUSTE: Não inicia sessão aqui, apenas em fetch_config
                 return True
             else:
                 self.log_to_db(f"Falha conexão: {reason}", "ERROR")
@@ -582,7 +579,7 @@ class SimpleBot:
         if time.time() - self.last_catalog_time < 1800 and self.best_assets:
              return self.best_assets
 
-        self.log_to_db(f"📊 Catalogando Top 3 (Win Rate >= 70%)...", "SYSTEM")
+        self.log_to_db(f"📊 Catalogando Top 3 (Win Rate >= 60%)...", "SYSTEM")
         results = []
         for asset in assets_pool:
             try:
@@ -601,7 +598,7 @@ class SimpleBot:
                         if is_win: wins += 1
                 if total >= 5: 
                     wr = (wins / total) * 100
-                    if wr >= 70:
+                    if wr >= 60:
                        results.append({'pair': asset, 'win_rate': wr, 'best_strategy': 'V2'})
             except: pass
             time.sleep(0.05)
@@ -615,7 +612,7 @@ class SimpleBot:
              except: pass
         
         self.last_catalog_time = time.time()
-        if not final_list: self.log_to_db("⚠️ Nenhum ativo >= 70% WR. Aguardando.", "WARNING")
+        if not final_list: self.log_to_db("⚠️ Nenhum ativo >= 60% WR. Aguardando.", "WARNING")
         else: 
             pairs_str = ", ".join([f"{r['pair']} ({r['win_rate']:.0f}%)" for r in final_list])
             self.log_to_db(f"💎 Melhores: {pairs_str}", "SUCCESS")
@@ -632,21 +629,22 @@ class SimpleBot:
         except: return False, None
 
     def execute_trade(self, asset, direction, strategy_key, strategy_name="Unknown"):
-        # 🔥 AJUSTE 2: Uso de last_trade_time
+        # 🔥 AJUSTE: uso de last_trade_time
         now = time.time()
         if asset in self.last_trade_time and now - self.last_trade_time[asset] < 120:
              return
         self.last_trade_time[asset] = now
-        
-        # 🔥 AJUSTE 4: Verificação de Cooldown Global de Mercado
-        if time.time() < self.market_cooldown_until:
-             return
 
         with self.trade_lock:
             if asset in self.active_trades: return
             self.active_trades.add(asset)
 
         try:
+            current_hour = datetime.now(BR_TIMEZONE).hour
+            if self.hourly_loss_count.get(current_hour, 0) >= 2:
+                 self.log_rejection(asset, f"Horário {current_hour}h bloqueado", "ALL")
+                 return
+
             if asset in self.asset_cooldowns:
                  if time.time() < self.asset_cooldowns[asset]: return
 
@@ -715,10 +713,12 @@ class SimpleBot:
                         elif delta < -0.01: res_str = "LOSS"; profit = delta
                     except: res_str = "UNKNOWN"
 
+                # 2. DOJI NEUTRO
                 if res_str == 'DOJI':
                     self.log_to_db("DOJI neutro", "DEBUG")
                     return
 
+                # 4. ATUALIZAÇÃO CENTRALIZADA
                 self.update_strategy_stats(strategy_key, res_str, asset)
 
                 log_type = "SUCCESS" if res_str == 'WIN' else "ERROR"
@@ -733,9 +733,12 @@ class SimpleBot:
                      except: pass
                      if self.config["mode"] == "LIVE": self.update_balance_remote()
 
+                # 🔥 BLOQUEIO IMEDIATO AO ATINGIR LIMITE
                 if not self.check_daily_limits():
-                    self.session_blocked = True
-                    self.pause_bot_by_management()
+                     self.log_to_db("🛑 LIMITE DIÁRIO ATINGIDO — PAUSANDO BOT IMEDIATAMENTE", "WARNING")
+                     self.session_blocked = True
+                     self.pause_bot_by_management()
+                     return
 
             else:
                 self.log_to_db("❌ Falha na ordem", "ERROR")
@@ -754,22 +757,22 @@ class SimpleBot:
                 self.fetch_config()
                 self.check_schedule()
                 
+                # 🔥 BLOQUEIO ABSOLUTO POR LIMITE DIÁRIO
+                if self.session_blocked:
+                    if time.time() - self.last_blocked_log > 300:
+                        self.log_to_db("⛔ STOP DIÁRIO ATIVO — BOT TOTALMENTE PAUSADO", "WARNING")
+                        self.last_blocked_log = time.time()
+                    time.sleep(30) # Economia de recursos
+                    continue
+                
                 if self.config["status"] == "PAUSED":
                     time.sleep(5)
                     continue
 
-                if self.session_blocked:
-                    if time.time() - self.last_blocked_log > 300:
-                        self.log_to_db("⛔ STOP DIÁRIO ATIVO — aguardando novo dia ou reset manual", "WARNING")
-                        self.last_blocked_log = time.time()
-                    time.sleep(30)
-                    continue
+                if self.config["status"] == "RESTARTING":
+                    if self.supabase: self.supabase.table("bot_config").update({"status": "RUNNING"}).eq("id", 1).execute()
+                    break
                 
-                # 🔥 AJUSTE: Verifica pausa global de mercado
-                if time.time() < self.market_cooldown_until:
-                    time.sleep(30)
-                    continue
-
                 if not self.api.check_connect(): 
                     self.connect()
                     continue
