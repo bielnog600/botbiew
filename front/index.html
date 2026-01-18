@@ -25,6 +25,7 @@
         .active-nav { color: var(--gold) !important; background-color: rgba(245, 158, 11, 0.1); }
         input, select, button { -webkit-appearance: none; border-radius: 0.75rem; }
         
+        /* Splash Screen */
         #splash-screen { position: fixed; inset: 0; background-color: #020617; z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center; transition: opacity 0.6s ease-out, visibility 0.6s; }
         #splash-screen.fade-out { opacity: 0; visibility: hidden; pointer-events: none; }
         .pulse-logo { animation: pulse-gold 2s infinite; }
@@ -32,9 +33,11 @@
         
         .scrollbar-hide::-webkit-scrollbar { display: none; }
         .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+        
+        .stat-value { font-variant-numeric: tabular-nums; }
     </style>
 </head>
-<body class="flex flex-col h-screen">
+<body class="flex flex-col h-screen text-slate-200">
 
     <!-- SPLASH SCREEN -->
     <div id="splash-screen">
@@ -49,58 +52,75 @@
     <div id="login-screen" class="fixed inset-0 z-50 flex items-center justify-center bg-[#020617] p-4 hidden">
         <div class="glass-card w-full max-w-md p-8 rounded-2xl border-t border-slate-700">
             <div class="text-center mb-8">
-                <div class="w-16 h-16 bg-amber-500/10 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-amber-500/20">
+                <div class="w-16 h-16 bg-amber-500/10 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-amber-500/20 shadow-lg shadow-amber-500/10">
                     <i data-lucide="dumbbell" class="text-amber-500 w-8 h-8"></i>
                 </div>
-                <h1 class="text-2xl font-bold text-white">Marombiew Bot</h1>
+                <h1 class="text-2xl font-bold text-white">Login</h1>
             </div>
             <form id="login-form" class="space-y-4" onsubmit="return false;">
-                <input type="email" id="email" class="w-full bg-slate-900/50 border border-slate-700 text-white p-3 rounded-xl focus:border-amber-500 outline-none transition-colors" placeholder="Email" required>
-                <input type="password" id="password" class="w-full bg-slate-900/50 border border-slate-700 text-white p-3 rounded-xl focus:border-amber-500 outline-none transition-colors" placeholder="Senha" required>
-                <button type="submit" id="login-btn" class="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-3.5 rounded-xl transition-all">Entrar</button>
+                <input type="email" id="email" class="w-full bg-slate-900/50 border border-slate-700 text-white p-3.5 rounded-xl focus:border-amber-500 outline-none transition-colors" placeholder="Email" required>
+                <input type="password" id="password" class="w-full bg-slate-900/50 border border-slate-700 text-white p-3.5 rounded-xl focus:border-amber-500 outline-none transition-colors" placeholder="Senha" required>
+                <button type="submit" id="login-btn" class="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-amber-500/20">Entrar</button>
+                <div id="login-error" class="text-red-400 text-xs text-center hidden p-3 bg-red-500/10 rounded-lg border border-red-500/20"></div>
             </form>
         </div>
     </div>
 
-    <!-- APP -->
+    <!-- APP CONTAINER -->
     <div id="app" class="flex-1 flex flex-col md:flex-row overflow-hidden hidden opacity-0 transition-opacity duration-500">
+        
+        <!-- SIDEBAR -->
         <aside class="hidden md:flex flex-col w-64 glass-card border-r border-slate-800 z-20">
             <div class="h-20 flex items-center px-6 border-b border-slate-800/50 gap-3">
-                <i data-lucide="dumbbell" class="text-amber-500 w-6 h-6 mr-3"></i><span class="font-bold text-lg text-white">MAROMBIEW</span>
+                <i data-lucide="dumbbell" class="text-amber-500 w-6 h-6"></i>
+                <span class="font-bold text-lg text-white tracking-wide">MAROMBIEW</span>
             </div>
             <nav class="flex-1 p-4 space-y-2">
-                <button onclick="router.navigate('home')" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800/50 hover:text-white active-nav" data-target="home"><i data-lucide="layout-dashboard" class="w-5 h-5"></i> Dashboard</button>
-                <button onclick="router.navigate('reports')" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800/50 hover:text-white" data-target="reports"><i data-lucide="bar-chart-2" class="w-5 h-5"></i> Relatórios</button>
-                <button onclick="router.navigate('settings')" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800/50 hover:text-white" data-target="settings"><i data-lucide="settings" class="w-5 h-5"></i> Configurações</button>
-                <button onclick="router.navigate('logs')" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800/50 hover:text-white" data-target="logs"><i data-lucide="terminal" class="w-5 h-5"></i> Terminal</button>
+                <button onclick="router.navigate('home')" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800/50 hover:text-white active-nav transition-all" data-target="home">
+                    <i data-lucide="layout-dashboard" class="w-5 h-5"></i> Dashboard
+                </button>
+                <button onclick="router.navigate('reports')" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800/50 hover:text-white transition-all" data-target="reports">
+                    <i data-lucide="bar-chart-2" class="w-5 h-5"></i> Relatórios
+                </button>
+                <button onclick="router.navigate('settings')" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800/50 hover:text-white transition-all" data-target="settings">
+                    <i data-lucide="settings" class="w-5 h-5"></i> Configurações
+                </button>
+                <button onclick="router.navigate('logs')" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800/50 hover:text-white transition-all" data-target="logs">
+                    <i data-lucide="terminal" class="w-5 h-5"></i> Terminal
+                </button>
             </nav>
-            <div class="p-4 border-t border-slate-800/50"><button id="logout-btn" class="flex items-center gap-3 px-4 py-3 text-sm text-red-400 hover:bg-red-500/10 rounded-xl w-full"><i data-lucide="log-out" class="w-5 h-5"></i> Sair</button></div>
+            <div class="p-4 border-t border-slate-800/50">
+                <button id="logout-btn" class="flex items-center gap-3 px-4 py-3 text-sm text-red-400 hover:bg-red-500/10 rounded-xl w-full transition-all">
+                    <i data-lucide="log-out" class="w-5 h-5"></i> Sair
+                </button>
+            </div>
         </aside>
 
+        <!-- MAIN -->
         <main class="flex-1 overflow-y-auto p-4 md:p-8 pb-24 md:pb-8 relative">
-            <div id="connection-warning" class="hidden mb-4 bg-red-500/10 border border-red-500/20 text-red-400 p-3 rounded-xl flex items-center gap-2 text-sm animate-pulse">
+            <div id="connection-warning" class="hidden mb-6 bg-red-500/10 border border-red-500/20 text-red-400 p-3 rounded-xl flex items-center gap-2 text-sm animate-pulse">
                 <i data-lucide="wifi-off" class="w-4 h-4"></i> Bot Offline: Sem sinal há mais de 3 minutos.
             </div>
 
-            <!-- VIEW: HOME -->
+            <!-- HOME VIEW -->
             <div id="view-home" class="view-section space-y-6 max-w-5xl mx-auto">
                 <!-- Header -->
-                <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-2">
+                <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                     <div>
-                        <h1 class="text-2xl font-bold text-white">Dashboard</h1>
+                        <h1 class="text-2xl md:text-3xl font-bold text-white">Dashboard</h1>
                         <div class="flex items-center gap-2 mt-1">
-                            <span id="mode-badge" class="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-400">CARREGANDO...</span>
+                             <span id="mode-badge" class="px-2.5 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-400 border border-slate-700">CARREGANDO...</span>
                         </div>
                     </div>
                     <div class="flex items-center gap-2 w-full md:w-auto">
-                         <button id="restart-bot-btn" class="p-3 rounded-xl bg-slate-800 text-slate-400 border border-slate-700 hover:text-white transition-all"><i data-lucide="power" class="w-4 h-4"></i></button>
-                         <button id="toggle-bot-btn" class="flex-1 md:flex-none px-4 py-3 rounded-xl text-xs font-bold bg-slate-800 text-white min-w-[120px] shadow-lg flex items-center gap-2 justify-center border border-slate-700"><i data-lucide="loader-2" class="animate-spin w-3 h-3"></i> ...</button>
+                         <button id="restart-bot-btn" class="p-3 rounded-xl bg-slate-800 text-slate-400 border border-slate-700 hover:text-white hover:bg-slate-700 transition-all" title="Reiniciar Conexão"><i data-lucide="power" class="w-5 h-5"></i></button>
+                         <button id="toggle-bot-btn" class="flex-1 md:flex-none px-6 py-3 rounded-xl text-sm font-bold bg-slate-800 text-white min-w-[140px] shadow-lg flex items-center gap-2 justify-center border border-slate-700 transition-all active:scale-95"><i data-lucide="loader-2" class="animate-spin w-4 h-4"></i> ...</button>
                     </div>
                 </div>
 
-                <!-- Best Assets Scroll -->
+                <!-- Best Assets -->
                 <div>
-                     <div class="flex items-center gap-2 mb-3">
+                     <div class="flex items-center gap-2 mb-3 px-1">
                         <i data-lucide="trending-up" class="w-4 h-4 text-amber-500"></i>
                         <h3 class="text-xs font-bold text-slate-400 uppercase tracking-widest">Melhores Oportunidades</h3>
                     </div>
@@ -112,40 +132,43 @@
                 </div>
 
                 <!-- Stats Grid -->
-                <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-                    <div class="glass-card p-4 rounded-xl relative overflow-hidden group border-t-2 border-slate-600">
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div class="glass-card p-5 rounded-2xl border-t-2 border-slate-600 relative overflow-hidden group hover:bg-slate-800/80 transition-colors">
                         <p class="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">Saldo Atual</p>
-                        <p id="stat-balance" class="text-xl font-bold text-white tracking-tight">$---</p>
+                        <p id="stat-balance" class="text-2xl font-bold text-white stat-value tracking-tight">$---</p>
                     </div>
-                    <div class="glass-card p-4 rounded-xl border-t-2 border-green-500 relative overflow-hidden group">
-                        <div class="flex justify-between items-center">
+                    
+                    <div class="glass-card p-5 rounded-2xl border-t-2 border-green-500 relative overflow-hidden group hover:bg-slate-800/80 transition-colors">
+                        <div class="flex justify-between items-end">
                             <div>
                                 <p class="text-[10px] text-green-500 font-bold uppercase tracking-wider mb-1">Wins (Dia)</p>
-                                <p id="score-wins" class="text-3xl font-black text-white">0</p>
+                                <p id="score-wins" class="text-3xl font-black text-white stat-value">0</p>
                             </div>
                             <div class="text-right">
-                                <p class="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">Lucro (Dia)</p>
-                                <p id="stat-profit" class="text-lg font-bold text-slate-300">$0.00</p>
+                                <p class="text-[9px] text-slate-500 font-bold uppercase mb-0.5">Lucro</p>
+                                <p id="stat-profit" class="text-sm font-bold text-slate-300 stat-value">$0.00</p>
                             </div>
                         </div>
                     </div>
-                    <div class="glass-card p-4 rounded-xl border-t-2 border-red-500 relative overflow-hidden group">
-                        <p class="text-[10px] text-red-500 font-bold uppercase tracking-wider mb-1">Losses (Dia)</p>
-                        <p id="score-losses" class="text-3xl font-black text-white">0</p>
+
+                    <div class="glass-card p-5 rounded-2xl border-t-2 border-red-500 relative overflow-hidden group hover:bg-slate-800/80 transition-colors">
+                         <p class="text-[10px] text-red-500 font-bold uppercase tracking-wider mb-1">Losses (Dia)</p>
+                         <p id="score-losses" class="text-3xl font-black text-white stat-value">0</p>
                     </div>
-                     <div class="glass-card p-4 rounded-xl border-t-2 border-blue-500 relative overflow-hidden group">
+
+                     <div class="glass-card p-5 rounded-2xl border-t-2 border-blue-500 relative overflow-hidden group hover:bg-slate-800/80 transition-colors">
                         <p class="text-[10px] text-blue-500 font-bold uppercase tracking-wider mb-1">Total Trades</p>
-                        <p id="score-total" class="text-3xl font-black text-white">0</p>
+                        <p id="score-total" class="text-3xl font-black text-white stat-value">0</p>
                     </div>
                 </div>
 
                 <!-- Recent History (Today) -->
                 <div>
-                    <div class="flex justify-between items-center mb-3">
-                        <h3 class="text-xs font-bold text-slate-400 flex items-center gap-2"><i data-lucide="history" class="w-3 h-3"></i> Histórico Recente (Hoje)</h3>
+                    <div class="flex justify-between items-center mb-3 px-1">
+                        <h3 class="text-xs font-bold text-slate-400 flex items-center gap-2"><i data-lucide="history" class="w-4 h-4"></i> Histórico Recente (Hoje)</h3>
                     </div>
                     <div id="signals-list-home" class="space-y-2 pb-4 min-h-[100px]">
-                        <div class="text-center text-slate-600 text-xs py-4">Carregando histórico...</div>
+                        <div class="text-center text-slate-600 text-xs py-8 border border-dashed border-slate-800 rounded-xl">Carregando histórico...</div>
                     </div>
                 </div>
             </div>
@@ -153,13 +176,14 @@
             <!-- VIEW: SETTINGS -->
             <div id="view-settings" class="view-section hidden space-y-6 max-w-2xl mx-auto">
                 <h1 class="text-2xl font-bold text-white mb-2">Configurações</h1>
+                <p class="text-xs text-slate-500 mb-6">Ajuste os parâmetros de risco e modo de operação.</p>
                 
                 <!-- Mode Selector -->
                 <div class="glass-card p-1 rounded-xl border border-slate-700 bg-slate-900/50 flex mb-6">
-                    <button onclick="setMode('LIVE')" id="btn-mode-live" class="flex-1 p-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2">
+                    <button onclick="setMode('LIVE')" id="btn-mode-live" class="flex-1 p-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 text-slate-400 hover:text-white">
                         <i data-lucide="zap" class="w-4 h-4"></i> CONTA REAL
                     </button>
-                    <button onclick="setMode('OBSERVE')" id="btn-mode-observe" class="flex-1 p-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2">
+                    <button onclick="setMode('OBSERVE')" id="btn-mode-observe" class="flex-1 p-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 text-slate-400 hover:text-white">
                         <i data-lucide="eye" class="w-4 h-4"></i> OBSERVAÇÃO
                     </button>
                 </div>
@@ -204,35 +228,40 @@
                         
                         <div class="bg-slate-900/30 p-4 rounded-lg border border-slate-700/50">
                              <div class="flex items-center justify-between mb-3">
-                                <label class="text-sm font-bold text-white flex items-center gap-2"><i data-lucide="clock" class="w-4 h-4 text-slate-400"></i> Agendamento</label>
+                                <label class="text-sm font-bold text-white flex items-center gap-2"><i data-lucide="clock" class="w-4 h-4 text-amber-500"></i> Agendamento Automático</label>
                                 <label class="relative inline-flex items-center cursor-pointer"><input type="checkbox" id="conf-timer-enabled" class="sr-only peer"><div class="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600"></div></label>
                             </div>
                             <div class="grid grid-cols-2 gap-3" id="timer-inputs">
-                                <input type="time" id="conf-timer-start" class="bg-slate-900 border border-slate-700 text-white p-2 rounded-lg text-sm">
-                                <input type="time" id="conf-timer-end" class="bg-slate-900 border border-slate-700 text-white p-2 rounded-lg text-sm">
+                                <input type="time" id="conf-timer-start" class="bg-slate-900 border border-slate-700 text-white p-2.5 rounded-lg text-sm">
+                                <input type="time" id="conf-timer-end" class="bg-slate-900 border border-slate-700 text-white p-2.5 rounded-lg text-sm">
                             </div>
                         </div>
                     </div>
-                    <button type="submit" class="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-4 rounded-xl shadow-lg flex items-center justify-center gap-2"><i data-lucide="save" class="w-5 h-5"></i> Salvar</button>
+                    <button type="submit" class="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-4 rounded-xl shadow-lg shadow-amber-500/20 active:scale-95 transition-transform flex items-center justify-center gap-2"><i data-lucide="save" class="w-5 h-5"></i> Salvar Configurações</button>
                 </form>
             </div>
             
              <!-- VIEW: REPORTS (Full History) -->
             <div id="view-reports" class="view-section hidden space-y-6 max-w-5xl mx-auto">
-                <h1 class="text-2xl font-bold text-white">Relatório Completo</h1>
-                <div id="signals-list-full" class="space-y-3 pb-8"></div>
+                <h1 class="text-2xl font-bold text-white mb-4">Relatório Completo</h1>
+                <div class="glass-card p-1 rounded-xl border border-slate-800 bg-slate-900/50">
+                     <div id="signals-list-full" class="divide-y divide-slate-800">
+                         <div class="text-center text-slate-600 text-xs py-8">Carregando dados...</div>
+                     </div>
+                </div>
             </div>
 
              <!-- VIEW: LOGS -->
             <div id="view-logs" class="view-section hidden h-full flex flex-col max-w-5xl mx-auto">
                 <div class="flex justify-between items-center mb-4">
                     <h1 class="text-2xl font-bold text-white">Terminal</h1>
-                    <button class="text-xs text-slate-500 hover:text-white px-3 py-1 bg-slate-800 rounded-lg" onclick="document.getElementById('terminal-output').innerHTML = ''">Limpar</button>
+                    <button class="text-xs text-slate-500 hover:text-white px-3 py-1.5 bg-slate-800 rounded-lg border border-slate-700 transition-colors" onclick="document.getElementById('terminal-output').innerHTML = ''">Limpar Tela</button>
                 </div>
                 <div id="terminal-output" class="flex-1 glass-card rounded-xl p-4 overflow-y-auto font-mono text-xs space-y-2 bg-black/60 border border-slate-800 min-h-[500px]"></div>
             </div>
         </main>
 
+        <!-- MOBILE NAV -->
         <nav class="md:hidden fixed bottom-0 left-0 right-0 bg-[#0f172a]/95 backdrop-blur-xl border-t border-slate-800 flex justify-around px-2 pb-safe z-40 h-16 items-center">
             <button onclick="router.navigate('home')" class="flex flex-col items-center p-2 text-slate-500 active-nav rounded-lg" data-target="home"><i data-lucide="layout-dashboard" class="w-5 h-5"></i></button>
             <button onclick="router.navigate('reports')" class="flex flex-col items-center p-2 text-slate-500 rounded-lg" data-target="reports"><i data-lucide="bar-chart-2" class="w-5 h-5"></i></button>
@@ -382,7 +411,7 @@
         function updateButtonState(isRunning) {
             const btn = document.getElementById('toggle-bot-btn');
             btn.innerHTML = isRunning ? '<i data-lucide="pause" class="w-3 h-3"></i> PAUSAR' : '<i data-lucide="play" class="w-3 h-3"></i> INICIAR';
-            btn.className = `px-4 py-3 rounded-lg text-xs font-bold min-w-[120px] shadow-lg flex items-center gap-2 justify-center transition-all ${isRunning ? 'bg-amber-500/10 text-amber-500 border border-amber-500/20' : 'bg-green-500 text-white'}`;
+            btn.className = `px-4 py-3 rounded-xl text-xs font-bold min-w-[120px] shadow-lg flex items-center gap-2 justify-center transition-all ${isRunning ? 'bg-amber-500/10 text-amber-500 border border-amber-500/20' : 'bg-green-600 text-white border border-green-500/30'}`;
             lucide.createIcons();
         }
         
@@ -449,24 +478,29 @@
                      }
                 }
                 
-                // Fetch Daily Stats & History (Today)
-                const today = new Date().toISOString().split('T')[0];
-                const signals = await supabaseClient.from('trade_signals').select('*').gte('created_at', today + 'T00:00:00').order('created_at', {ascending: false});
+                // Fetch Daily Stats & History (Today - LOCAL TIME)
+                const today = new Date().toLocaleDateString('pt-BR'); // Usa data local do browser
+                const signals = await supabaseClient.from('trade_signals').select('*').order('created_at', {ascending: false}).limit(100);
                  
                 if(signals.data) {
                      let wins = 0, losses = 0, profit = 0;
-                     signals.data.forEach(s => {
+                     // Filter locally to match user timezone
+                     const todaysSignals = signals.data.filter(s => new Date(s.created_at).toLocaleDateString('pt-BR') === today);
+
+                     todaysSignals.forEach(s => {
                          if(s.result === 'WIN') { wins++; profit += parseFloat(s.profit || 0); }
                          if(s.result === 'LOSS') { losses++; profit += parseFloat(s.profit || 0); }
                      });
+                     
                      document.getElementById('score-wins').textContent = wins;
                      document.getElementById('score-losses').textContent = losses;
                      document.getElementById('score-total').textContent = wins + losses;
                      document.getElementById('stat-profit').textContent = `${profit >= 0 ? '+' : ''}$${profit.toFixed(2)}`;
-                     document.getElementById('stat-profit').className = `text-2xl font-bold tracking-tight ${profit >= 0 ? 'text-green-500' : 'text-red-500'}`;
+                     document.getElementById('stat-profit').className = `text-lg font-bold ${profit >= 0 ? 'text-green-500' : 'text-red-500'}`;
                      
-                     // Update Home List
-                     renderSignalsList('signals-list-home', signals.data);
+                     // Update Lists
+                     renderSignalsList('signals-list-home', todaysSignals.slice(0, 10));
+                     renderSignalsList('signals-list-full', signals.data); // Relatório mostra tudo
                  }
                  
                  // Fetch Best Assets
@@ -505,18 +539,12 @@
              }
         }
         
-        async function fetchReports(targetId) {
-             const today = new Date().toISOString().split('T')[0];
-             const { data } = await supabaseClient.from('trade_signals').select('*').order('created_at', {ascending: false}).limit(100); // Show all history in Reports tab
-             renderSignalsList(targetId, data);
-        }
-
         function renderSignalsList(targetId, data) {
             const container = document.getElementById(targetId);
             if(!container) return;
             
             if(!data || data.length === 0) {
-                 container.innerHTML = '<div class="text-center text-slate-600 py-8 text-xs font-mono">Nenhum trade realizado.</div>';
+                 container.innerHTML = '<div class="text-center text-slate-600 py-8 text-xs font-mono border border-dashed border-slate-800 rounded-xl">Nenhum trade realizado.</div>';
                  return;
             }
              
@@ -526,10 +554,10 @@
                  const border = isWin ? 'border-l-green-500' : (s.result === 'LOSS' ? 'border-l-red-500' : 'border-l-slate-600');
                  
                  return `
-                 <div class="glass-card p-3 rounded-xl border-l-4 ${border} flex justify-between items-center">
+                 <div class="glass-card p-3 rounded-xl border-l-4 ${border} flex justify-between items-center hover:bg-white/5 transition-colors">
                     <div class="flex items-center gap-3">
-                        <div class="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center border border-slate-700">
-                             <i data-lucide="${s.direction === 'call' ? 'arrow-up' : 'arrow-down'}" class="w-4 h-4 ${s.direction === 'call' ? 'text-green-400' : 'text-red-400'}"></i>
+                        <div class="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center border border-slate-700">
+                             <i data-lucide="${s.direction === 'call' ? 'arrow-up' : 'arrow-down'}" class="w-5 h-5 ${s.direction === 'call' ? 'text-green-400' : 'text-red-400'}"></i>
                         </div>
                         <div>
                             <p class="text-xs font-bold text-white">${s.pair}</p>
@@ -537,7 +565,7 @@
                         </div>
                     </div>
                     <div class="text-right">
-                        <span class="text-[10px] font-bold ${color}">${s.result}</span>
+                        <span class="text-xs font-bold ${color} tracking-wider">${s.result}</span>
                         <p class="text-[10px] text-slate-400 font-mono mt-0.5">${parseFloat(s.profit).toFixed(2)}</p>
                     </div>
                  </div>`;
@@ -558,11 +586,13 @@
                 setMode('OBSERVE');
             } else {
                 currentMode = 'LIVE';
-                badge.innerText = "MODO REAL";
+                badge.innerText = "CONTA REAL";
                 badge.className = "px-2 py-0.5 rounded text-[10px] font-bold bg-green-500/10 text-green-400 border border-green-500/30";
                 setMode('LIVE');
             }
             
+            document.getElementById('stat-balance').textContent = `$${config.current_balance?.toFixed(2) || '---'}`;
+
             if(document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'SELECT') {
                 document.getElementById('conf-entry').value = config.entry_value;
                 document.getElementById('conf-account').value = config.account_type;
