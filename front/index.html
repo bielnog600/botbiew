@@ -15,64 +15,24 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 
     <style>
         :root { --bg-dark: #0f172a; --glass: rgba(30, 41, 59, 0.95); --gold: #f59e0b; }
         body { font-family: 'Inter', sans-serif; background-color: #020617; color: #e2e8f0; overflow: hidden; user-select: none; }
         .font-mono { font-family: 'JetBrains Mono', monospace; }
         .glass-card { background: var(--glass); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.08); }
-        
-        .price-up { color: #4ade80; animation: flashGreen 0.5s; }
-        .price-down { color: #f87171; animation: flashRed 0.5s; }
-        
-        @keyframes flashGreen { 0% { color: #fff; } 100% { color: #4ade80; } }
-        @keyframes flashRed { 0% { color: #fff; } 100% { color: #f87171; } }
-
-        ::-webkit-scrollbar { width: 4px; background: #0f172a; }
-        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
-        .hidden { display: none !important; }
-        
-        /* Active Navigation State */
         .active-nav { color: var(--gold) !important; background-color: rgba(245, 158, 11, 0.1); }
-        .active-nav i { color: var(--gold); }
+        input, select, button { -webkit-appearance: none; border-radius: 0.75rem; }
         
-        /* Fix iOS inputs */
-        input, select, textarea, button { -webkit-appearance: none; border-radius: 0.75rem; }
+        /* Splash Screen Animation */
+        #splash-screen { position: fixed; inset: 0; background-color: #020617; z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center; transition: opacity 0.6s ease-out, visibility 0.6s; }
+        #splash-screen.fade-out { opacity: 0; visibility: hidden; pointer-events: none; }
+        .pulse-logo { animation: pulse-gold 2s infinite; }
+        @keyframes pulse-gold { 0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4); } 70% { box-shadow: 0 0 0 20px rgba(245, 158, 11, 0); } 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); } }
+        
         .scrollbar-hide::-webkit-scrollbar { display: none; }
         .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
-
-        /* Animation for details expansion */
-        .details-content { transition: max-height 0.3s ease-in-out, opacity 0.3s ease-in-out; max-height: 0; opacity: 0; overflow: hidden; }
-        .details-content.open { max-height: 500px; opacity: 1; }
-        .rotate-icon { transition: transform 0.3s ease; }
-        .rotate-icon.open { transform: rotate(180deg); }
-
-        /* Splash Screen Styles */
-        #splash-screen {
-            position: fixed;
-            inset: 0;
-            background-color: #020617;
-            z-index: 9999;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            transition: opacity 0.5s ease-out, visibility 0.5s;
-        }
-        #splash-screen.fade-out {
-            opacity: 0;
-            visibility: hidden;
-            pointer-events: none;
-        }
-        .pulse-logo {
-            animation: pulse-gold 2s infinite;
-        }
-        @keyframes pulse-gold {
-            0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4); }
-            70% { box-shadow: 0 0 0 20px rgba(245, 158, 11, 0); }
-            100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
-        }
     </style>
 </head>
 <body class="flex flex-col h-screen">
@@ -84,9 +44,8 @@
         </div>
         <h1 class="text-3xl font-bold text-white tracking-wider">MAROMBIEW</h1>
         <p class="text-amber-500/60 text-xs font-mono mt-2 tracking-widest">TRADING INTELLIGENCE</p>
-        <div class="mt-8 flex items-center gap-2 text-slate-500 text-xs">
-            <i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i>
-            <span>Carregando sistema...</span>
+        <div class="mt-8 flex items-center gap-2 text-slate-500 text-xs font-mono">
+            <i data-lucide="loader-2" class="w-3 h-3 animate-spin"></i> Inicializando sistemas...
         </div>
     </div>
 
@@ -94,15 +53,15 @@
     <div id="login-screen" class="fixed inset-0 z-50 flex items-center justify-center bg-[#020617] p-4 hidden">
         <div class="glass-card w-full max-w-md p-8 rounded-2xl border-t border-slate-700">
             <div class="text-center mb-8">
-                <div class="w-16 h-16 bg-amber-500/10 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-amber-500/20 shadow-[0_0_30px_rgba(245,158,11,0.2)]">
+                <div class="w-16 h-16 bg-amber-500/10 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-amber-500/20">
                     <i data-lucide="dumbbell" class="text-amber-500 w-8 h-8"></i>
                 </div>
-                <h1 class="text-2xl font-bold text-white">Marombiew Bot</h1>
+                <h1 class="text-2xl font-bold text-white">Login</h1>
             </div>
             <form id="login-form" class="space-y-4" onsubmit="return false;">
-                <input type="email" id="email" class="w-full bg-slate-900/50 border border-slate-700 text-white text-sm rounded-xl pl-4 py-3 focus:outline-none focus:border-amber-500 transition-colors" placeholder="Email" required>
-                <input type="password" id="password" class="w-full bg-slate-900/50 border border-slate-700 text-white text-sm rounded-xl pl-4 py-3 focus:outline-none focus:border-amber-500 transition-colors" placeholder="Senha" required>
-                <button type="submit" id="login-btn" class="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-3.5 rounded-xl transition-all flex items-center justify-center">Entrar</button>
+                <input type="email" id="email" class="w-full bg-slate-900/50 border border-slate-700 text-white p-3 rounded-xl focus:border-amber-500 outline-none transition-colors" placeholder="Email" required>
+                <input type="password" id="password" class="w-full bg-slate-900/50 border border-slate-700 text-white p-3 rounded-xl focus:border-amber-500 outline-none transition-colors" placeholder="Senha" required>
+                <button type="submit" id="login-btn" class="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-3.5 rounded-xl transition-all">Entrar</button>
                 <div id="login-error" class="text-red-400 text-xs text-center hidden p-2 bg-red-500/10 rounded-lg border border-red-500/20"></div>
             </form>
         </div>
@@ -110,149 +69,167 @@
 
     <!-- APP -->
     <div id="app" class="flex-1 flex flex-col md:flex-row overflow-hidden hidden opacity-0 transition-opacity duration-500">
+        <!-- SIDEBAR (Desktop) -->
         <aside class="hidden md:flex flex-col w-64 glass-card border-r border-slate-800 z-20">
-            <div class="h-20 flex items-center px-6 border-b border-slate-800/50">
-                <i data-lucide="dumbbell" class="text-amber-500 w-6 h-6 mr-3"></i><span class="font-bold text-lg text-white">MAROMBIEW</span>
+            <div class="h-20 flex items-center px-6 border-b border-slate-800/50 gap-3">
+                <i data-lucide="dumbbell" class="text-amber-500 w-6 h-6"></i>
+                <span class="font-bold text-lg text-white tracking-wide">MAROMBIEW</span>
             </div>
             <nav class="flex-1 p-4 space-y-2">
-                <button onclick="router.navigate('home')" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800/50 hover:text-white active-nav" data-target="home"><i data-lucide="layout-dashboard" class="w-5 h-5"></i> Dashboard</button>
-                <button onclick="router.navigate('reports')" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800/50 hover:text-white" data-target="reports"><i data-lucide="bar-chart-2" class="w-5 h-5"></i> Relatórios</button>
-                <button onclick="router.navigate('settings')" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800/50 hover:text-white" data-target="settings"><i data-lucide="settings" class="w-5 h-5"></i> Configurações</button>
-                <button onclick="router.navigate('logs')" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800/50 hover:text-white" data-target="logs"><i data-lucide="terminal" class="w-5 h-5"></i> Terminal</button>
+                <button onclick="router.navigate('home')" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800/50 hover:text-white active-nav transition-all" data-target="home">
+                    <i data-lucide="layout-dashboard" class="w-5 h-5"></i> Dashboard
+                </button>
+                <button onclick="router.navigate('reports')" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800/50 hover:text-white transition-all" data-target="reports">
+                    <i data-lucide="bar-chart-2" class="w-5 h-5"></i> Relatórios
+                </button>
+                <button onclick="router.navigate('settings')" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800/50 hover:text-white transition-all" data-target="settings">
+                    <i data-lucide="settings" class="w-5 h-5"></i> Configurações
+                </button>
+                <button onclick="router.navigate('logs')" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800/50 hover:text-white transition-all" data-target="logs">
+                    <i data-lucide="terminal" class="w-5 h-5"></i> Terminal
+                </button>
             </nav>
-            <div class="p-4 border-t border-slate-800/50"><button id="logout-btn" class="flex items-center gap-3 px-4 py-3 text-sm text-red-400 hover:bg-red-500/10 rounded-xl w-full"><i data-lucide="log-out" class="w-5 h-5"></i> Sair</button></div>
+            <div class="p-4 border-t border-slate-800/50">
+                <button id="logout-btn" class="flex items-center gap-3 px-4 py-3 text-sm text-red-400 hover:bg-red-500/10 rounded-xl w-full transition-all">
+                    <i data-lucide="log-out" class="w-5 h-5"></i> Sair
+                </button>
+            </div>
         </aside>
 
-        <main class="flex-1 overflow-y-auto p-4 md:p-8 scroll-smooth pb-24 md:pb-8">
-            <div id="connection-warning" class="hidden mb-4 bg-red-500/10 border border-red-500/20 text-red-400 p-3 rounded-xl flex items-center gap-2 text-sm animate-pulse"><i data-lucide="wifi-off" class="w-4 h-4"></i> Bot Offline: Sem sinal há mais de 3 minutos.</div>
+        <!-- MAIN CONTENT -->
+        <main class="flex-1 overflow-y-auto p-4 md:p-8 pb-24 md:pb-8 relative">
+            <div id="connection-warning" class="hidden mb-4 bg-red-500/10 border border-red-500/20 text-red-400 p-3 rounded-xl flex items-center gap-2 text-sm animate-pulse">
+                <i data-lucide="wifi-off" class="w-4 h-4"></i> Bot Offline: Sem sinal há mais de 3 minutos.
+            </div>
 
-            <!-- HOME -->
-            <div id="view-home" class="view-section space-y-6 max-w-6xl mx-auto">
-                <div class="flex flex-row justify-between items-center gap-2 mb-4">
-                    <div class="flex-1 min-w-0">
-                        <h1 class="text-xl md:text-2xl font-bold text-white truncate">Dashboard</h1>
-                        <div class="flex items-center gap-2 mt-1 flex-wrap">
-                            <span id="bot-status-indicator" class="text-[10px] md:text-xs font-bold text-slate-500 whitespace-nowrap">CARREGANDO...</span>
-                            <span id="mode-badge" class="px-2 py-0.5 rounded text-[10px] font-bold tracking-wider border border-slate-700 bg-slate-800 text-slate-400 transition-colors duration-300 hidden">MODO: ...</span>
+            <!-- VIEW: HOME -->
+            <div id="view-home" class="view-section space-y-6 max-w-5xl mx-auto">
+                <!-- Header & Controls -->
+                <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-2">
+                    <div>
+                        <h1 class="text-2xl font-bold text-white">Dashboard</h1>
+                        <div class="flex items-center gap-2 mt-1">
+                            <span id="mode-badge" class="px-2 py-0.5 rounded text-[10px] font-bold tracking-wider border border-slate-700 bg-slate-800 text-slate-400">CARREGANDO...</span>
+                            <span id="strategy-badge" class="px-2 py-0.5 rounded text-[10px] font-bold tracking-wider border border-blue-500/30 bg-blue-500/10 text-blue-400 hidden">ADAPTATIVE AI</span>
                         </div>
                     </div>
-                    <div class="flex items-center gap-2 shrink-0">
-                        <button id="restart-bot-btn" class="p-2 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20 transition-colors" title="Reiniciar Conexão">
-                            <i data-lucide="power" class="w-4 h-4"></i>
-                        </button>
-                        <button id="toggle-bot-btn" class="flex items-center gap-2 px-3 py-2 rounded-lg text-xs md:text-sm font-bold bg-slate-700 text-white shadow-lg transition-all hover:brightness-110 min-w-[90px] justify-center">
-                            <i data-lucide="loader-2" class="w-3 h-3 md:w-4 md:h-4 animate-spin"></i> ...
-                        </button>
+                    <div class="flex items-center gap-2 w-full md:w-auto">
+                         <button id="restart-bot-btn" class="p-3 rounded-xl bg-slate-800 text-slate-400 border border-slate-700 hover:text-white hover:bg-slate-700 transition-all" title="Reiniciar Conexão">
+                             <i data-lucide="power" class="w-4 h-4"></i>
+                         </button>
+                         <button id="toggle-bot-btn" class="flex-1 md:flex-none px-4 py-3 rounded-xl text-xs font-bold bg-slate-800 text-white min-w-[120px] shadow-lg flex items-center gap-2 justify-center border border-slate-700">
+                             <i data-lucide="loader-2" class="animate-spin w-3 h-3"></i> ...
+                         </button>
                     </div>
                 </div>
 
-                <!-- CARDS DE ATIVOS -->
-                <div class="flex items-center justify-between mb-2">
-                    <div class="flex items-center gap-2"><i data-lucide="trending-up" class="w-4 h-4 text-amber-500"></i><h3 class="text-sm font-bold text-slate-400 uppercase tracking-widest">Melhores Oportunidades</h3></div>
+                <!-- Stats Grid -->
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div class="glass-card p-4 rounded-xl relative overflow-hidden group">
+                        <div class="absolute right-2 top-2 opacity-10 group-hover:opacity-20 transition-opacity"><i data-lucide="wallet" class="w-8 h-8 text-slate-400"></i></div>
+                        <p class="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">Saldo Atual</p>
+                        <p id="stat-balance" class="text-xl font-bold text-white tracking-tight">$---</p>
+                    </div>
+                    <div class="glass-card p-4 rounded-xl border-b-2 border-green-500 relative overflow-hidden group">
+                        <div class="absolute right-2 top-2 opacity-10 group-hover:opacity-20 transition-opacity"><i data-lucide="trending-up" class="w-8 h-8 text-green-500"></i></div>
+                        <p class="text-[10px] text-green-500 font-bold uppercase tracking-wider mb-1">Wins (Dia)</p>
+                        <p id="score-wins" class="text-3xl font-black text-white">0</p>
+                    </div>
+                    <div class="glass-card p-4 rounded-xl border-b-2 border-red-500 relative overflow-hidden group">
+                        <div class="absolute right-2 top-2 opacity-10 group-hover:opacity-20 transition-opacity"><i data-lucide="trending-down" class="w-8 h-8 text-red-500"></i></div>
+                        <p class="text-[10px] text-red-500 font-bold uppercase tracking-wider mb-1">Losses (Dia)</p>
+                        <p id="score-losses" class="text-3xl font-black text-white">0</p>
+                    </div>
+                     <div class="glass-card p-4 rounded-xl border-b-2 border-blue-500 relative overflow-hidden group">
+                        <div class="absolute right-2 top-2 opacity-10 group-hover:opacity-20 transition-opacity"><i data-lucide="activity" class="w-8 h-8 text-blue-500"></i></div>
+                        <p class="text-[10px] text-blue-500 font-bold uppercase tracking-wider mb-1">Total Trades</p>
+                        <p id="score-total" class="text-3xl font-black text-white">0</p>
+                    </div>
                 </div>
                 
-                <div id="top-assets-container" class="flex overflow-x-auto pb-4 gap-3 snap-x md:grid md:grid-cols-3 md:pb-0 md:overflow-visible mb-6 scrollbar-hide min-h-[120px]">
-                     <div class="glass-card p-4 rounded-xl border-t-4 border-slate-700 animate-pulse h-24 flex items-center justify-center text-slate-600 text-xs w-full flex-shrink-0 md:w-auto md:col-span-3">Aguardando dados...</div>
-                </div>
-
-                <!-- STATS PRINCIPAIS -->
-                <div class="grid grid-cols-2 gap-4">
-                    <div class="glass-card p-5 rounded-xl"><p class="text-xs text-slate-500 font-bold mb-1">SALDO ATUAL</p><p id="stat-balance" class="text-2xl font-bold text-white">$---</p></div>
-                    <div class="glass-card p-5 rounded-xl"><p class="text-xs text-slate-500 font-bold mb-1">LUCRO DO DIA</p><p id="stat-profit" class="text-2xl font-bold text-slate-200">$0.00</p></div>
-                </div>
-
-                <!-- PLACAR DE WINS/LOSS -->
-                <div class="glass-card p-4 rounded-xl border-t-4 border-amber-500">
-                    <div class="flex divide-x divide-slate-700">
-                        <div class="flex-1 px-2 text-center"><p class="text-[10px] text-green-500 font-bold mb-1">WINS (DIA)</p><span id="score-wins" class="text-2xl font-bold text-white">0</span></div>
-                        <div class="flex-1 px-2 text-center"><p class="text-[10px] text-red-500 font-bold mb-1">LOSS (DIA)</p><span id="score-losses" class="text-2xl font-bold text-white">0</span></div>
-                        <div class="flex-1 px-2 text-center"><p class="text-[10px] text-blue-400 font-bold mb-1">TOTAL TRADES</p><span id="score-total" class="text-2xl font-bold text-white">0</span></div>
+                <!-- Best Assets -->
+                <div>
+                     <div class="flex items-center gap-2 mb-3">
+                        <i data-lucide="search" class="w-4 h-4 text-amber-500"></i>
+                        <h3 class="text-xs font-bold text-slate-400 uppercase tracking-widest">Oportunidades (≥ 70% WR)</h3>
+                    </div>
+                    <div id="top-assets-container" class="flex overflow-x-auto gap-3 pb-2 scrollbar-hide min-h-[90px]">
+                         <div id="empty-assets-msg" class="glass-card p-4 rounded-xl border border-dashed border-slate-700 flex items-center justify-center text-slate-500 text-xs w-full">
+                             <i data-lucide="loader" class="w-4 h-4 animate-spin mr-2"></i> Analisando mercado...
+                         </div>
                     </div>
                 </div>
 
-                <!-- HISTÓRICO -->
-                <div>
-                    <div class="flex justify-between items-center mb-3"><h3 class="text-sm font-bold text-slate-400 flex items-center gap-2"><i data-lucide="history" class="w-4 h-4"></i> Histórico Recente (Hoje)</h3></div>
-                    <div id="signals-list" class="space-y-3 pb-8"><div class="text-center text-slate-600 text-xs">A carregar...</div></div>
+                <!-- Recent Activity -->
+                <div class="glass-card rounded-xl border border-slate-800 overflow-hidden flex flex-col h-64">
+                    <div class="bg-slate-900/50 p-3 border-b border-slate-800 flex justify-between items-center">
+                         <h3 class="text-xs font-bold text-slate-300 flex items-center gap-2">
+                             <i data-lucide="terminal" class="w-3 h-3 text-amber-500"></i> LOG DE EXECUÇÃO
+                         </h3>
+                         <span class="text-[9px] text-slate-600 font-mono">LIVE FEED</span>
+                    </div>
+                    <div id="terminal-output-mini" class="font-mono text-[10px] text-slate-400 p-3 space-y-1.5 overflow-y-auto flex-1 bg-black/20">
+                        <div class="text-slate-600 italic">Iniciando feed...</div>
+                    </div>
                 </div>
             </div>
 
-            <!-- RELATÓRIOS -->
-            <div id="view-reports" class="view-section hidden space-y-6 max-w-6xl mx-auto">
-                <h1 class="text-2xl font-bold text-white mb-4">Relatório de Performance</h1>
-                <div class="glass-card p-6 rounded-xl border border-slate-700 relative overflow-hidden bg-gradient-to-br from-slate-900 to-slate-800">
-                    <div class="absolute -right-10 -top-10 w-32 h-32 bg-blue-500/10 rounded-full blur-2xl"></div>
-                    <div class="relative z-10 flex flex-wrap justify-between items-center gap-4">
-                        <div>
-                            <p class="text-xs text-slate-400 font-bold uppercase tracking-wider mb-1">LUCRO MENSAL</p>
-                            <h2 id="report-month-profit" class="text-3xl md:text-4xl font-black text-white">---</h2>
-                            <p class="text-[10px] text-slate-500 mt-2 flex items-center gap-1"><i data-lucide="calendar" class="w-3 h-3"></i> Mês atual</p>
-                        </div>
-                        <div class="text-right">
-                             <p class="text-xs text-slate-400 font-bold uppercase tracking-wider mb-1">WIN RATE (MÊS)</p>
-                             <h2 id="report-month-rate" class="text-3xl md:text-4xl font-black text-blue-400">---</h2>
-                        </div>
-                    </div>
-                </div>
-                <div>
-                    <h3 class="text-sm font-bold text-slate-400 flex items-center gap-2 mb-4"><i data-lucide="list" class="w-4 h-4"></i> Histórico Diário <span class="text-[10px] text-slate-500 font-normal ml-2">(Clique para expandir)</span></h3>
-                    <div id="reports-daily-list" class="space-y-3 pb-24">
-                        <div class="text-center text-slate-600 text-xs py-8">Carregando dados...</div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- SETTINGS -->
-            <div id="view-settings" class="view-section hidden space-y-6 max-w-3xl mx-auto">
-                <h1 class="text-2xl font-bold text-white">Configurações de Risco</h1>
+            <!-- VIEW: SETTINGS -->
+            <div id="view-settings" class="view-section hidden space-y-6 max-w-2xl mx-auto">
+                <h1 class="text-2xl font-bold text-white mb-2">Configurações</h1>
+                <p class="text-xs text-slate-500 mb-6">Ajuste os parâmetros de risco e modo de operação.</p>
                 
-                 <!-- Quick Modes Buttons -->
+                <!-- Mode Selector -->
+                <div class="glass-card p-1 rounded-xl border border-slate-700 bg-slate-900/50 flex mb-6">
+                    <button onclick="setMode('LIVE')" id="btn-mode-live" class="flex-1 p-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2">
+                        <i data-lucide="zap" class="w-4 h-4"></i> CONTA REAL (LIVE)
+                    </button>
+                    <button onclick="setMode('OBSERVE')" id="btn-mode-observe" class="flex-1 p-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2">
+                        <i data-lucide="eye" class="w-4 h-4"></i> OBSERVAÇÃO (SIMULADO)
+                    </button>
+                </div>
+                
+                <!-- Quick Presets -->
                 <div class="grid grid-cols-3 gap-3 mb-6">
-                    <button onclick="applyPreset('conservative')" class="p-4 rounded-xl bg-slate-800/50 hover:bg-slate-700/50 border border-slate-700 hover:border-green-500/50 transition-all text-center group relative overflow-hidden">
-                        <div class="absolute inset-0 bg-green-500/5 opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                        <div class="w-10 h-10 rounded-full bg-green-500/10 text-green-500 flex items-center justify-center mx-auto mb-3 group-hover:scale-110 transition-transform"><i data-lucide="shield" class="w-5 h-5"></i></div>
-                        <p class="text-xs font-bold text-white mb-1">Conservador</p>
-                        <div class="text-[9px] text-slate-400 space-y-0.5">
-                            <p>3 Trades</p>
-                            <p>2 Wins / 1 Loss</p>
-                        </div>
+                    <button onclick="applyPreset('conservative')" class="p-4 rounded-xl bg-slate-800/50 hover:bg-slate-700/50 border border-slate-700 hover:border-green-500/50 transition-all text-center group">
+                        <div class="w-8 h-8 rounded-full bg-green-500/10 text-green-500 flex items-center justify-center mx-auto mb-2 group-hover:scale-110 transition-transform"><i data-lucide="shield" class="w-4 h-4"></i></div>
+                        <p class="text-xs font-bold text-white">Conservador</p>
+                        <p class="text-[9px] text-slate-500 mt-1">3 Trades (2W/1L)</p>
                     </button>
-                    
-                    <button onclick="applyPreset('sniper')" class="p-4 rounded-xl bg-slate-800/50 hover:bg-slate-700/50 border border-slate-700 hover:border-amber-500/50 transition-all text-center group relative overflow-hidden ring-1 ring-amber-500/30">
-                        <div class="absolute inset-0 bg-amber-500/5 opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                        <div class="w-10 h-10 rounded-full bg-amber-500/10 text-amber-500 flex items-center justify-center mx-auto mb-3 group-hover:scale-110 transition-transform"><i data-lucide="crosshair" class="w-5 h-5"></i></div>
-                        <p class="text-xs font-bold text-white mb-1">Sniper OTC</p>
-                         <div class="text-[9px] text-slate-400 space-y-0.5">
-                            <p>2 Trades</p>
-                            <p>1 Win / 1 Loss</p>
-                        </div>
+                    <button onclick="applyPreset('sniper')" class="p-4 rounded-xl bg-slate-800/50 hover:bg-slate-700/50 border border-slate-700 hover:border-amber-500/50 transition-all text-center group ring-1 ring-amber-500/30">
+                        <div class="w-8 h-8 rounded-full bg-amber-500/10 text-amber-500 flex items-center justify-center mx-auto mb-2 group-hover:scale-110 transition-transform"><i data-lucide="crosshair" class="w-4 h-4"></i></div>
+                        <p class="text-xs font-bold text-white">Sniper OTC</p>
+                        <p class="text-[9px] text-slate-500 mt-1">2 Trades (1W/1L)</p>
                     </button>
-                    
-                    <button onclick="applyPreset('aggressive')" class="p-4 rounded-xl bg-slate-800/50 hover:bg-slate-700/50 border border-slate-700 hover:border-red-500/50 transition-all text-center group relative overflow-hidden">
-                        <div class="absolute inset-0 bg-red-500/5 opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                        <div class="w-10 h-10 rounded-full bg-red-500/10 text-red-500 flex items-center justify-center mx-auto mb-3 group-hover:scale-110 transition-transform"><i data-lucide="zap" class="w-5 h-5"></i></div>
-                        <p class="text-xs font-bold text-white mb-1">Agressivo</p>
-                         <div class="text-[9px] text-slate-400 space-y-0.5">
-                            <p>6 Trades</p>
-                            <p>4 Wins / 2 Loss</p>
-                        </div>
+                    <button onclick="applyPreset('aggressive')" class="p-4 rounded-xl bg-slate-800/50 hover:bg-slate-700/50 border border-slate-700 hover:border-red-500/50 transition-all text-center group">
+                        <div class="w-8 h-8 rounded-full bg-red-500/10 text-red-500 flex items-center justify-center mx-auto mb-2 group-hover:scale-110 transition-transform"><i data-lucide="flame" class="w-4 h-4"></i></div>
+                        <p class="text-xs font-bold text-white">Agressivo</p>
+                        <p class="text-[9px] text-slate-500 mt-1">6 Trades (4W/2L)</p>
                     </button>
                 </div>
 
                 <form id="settings-form" class="space-y-6">
-                    <div class="glass-card p-6 rounded-xl space-y-6">
-                        <div class="flex items-center justify-between border-b border-slate-700 pb-4">
-                            <label class="text-sm font-bold text-white flex items-center gap-2"><i data-lucide="bell" class="w-4 h-4 text-amber-500"></i> Notificações</label>
-                            <button type="button" onclick="requestNotificationPermission(true)" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded-lg border border-slate-700 transition-colors">Testar / Ativar</button>
-                        </div>
-
+                    <div class="glass-card p-6 rounded-xl space-y-6 border border-slate-800">
+                        <!-- Operational -->
                         <div class="grid grid-cols-2 gap-4">
-                            <div><label class="text-xs text-slate-400 block mb-1">Entrada ($)</label><input type="number" id="conf-entry" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white outline-none font-mono"></div>
-                            <div><label class="text-xs text-slate-400 block mb-1">Conta</label><select id="conf-account" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white outline-none"><option value="PRACTICE">DEMO</option><option value="REAL">REAL</option></select></div>
+                            <div>
+                                <label class="text-[10px] text-slate-400 font-bold uppercase tracking-wider block mb-1.5">Valor Entrada ($)</label>
+                                <input type="number" id="conf-entry" class="w-full bg-slate-900 border border-slate-700 text-white p-3 rounded-lg focus:border-amber-500 outline-none transition-colors font-mono" placeholder="10.0">
+                            </div>
+                            <div>
+                                <label class="text-[10px] text-slate-400 font-bold uppercase tracking-wider block mb-1.5">Tipo Conta</label>
+                                <select id="conf-account" class="w-full bg-slate-900 border border-slate-700 text-white p-3 rounded-lg focus:border-amber-500 outline-none transition-colors">
+                                    <option value="PRACTICE">DEMO</option>
+                                    <option value="REAL">REAL</option>
+                                </select>
+                            </div>
                         </div>
 
-                        <div class="border-t border-slate-700 pt-4">
-                            <h3 class="text-sm font-bold text-white mb-4 flex items-center gap-2"><i data-lucide="lock" class="w-4 h-4 text-amber-500"></i> Metas Diárias (Stop)</h3>
+                        <div class="h-px bg-slate-700/50"></div>
+
+                        <!-- Daily Limits -->
+                        <div>
+                            <h3 class="text-sm font-bold text-white mb-4 flex items-center gap-2"><i data-lucide="lock" class="w-4 h-4 text-amber-500"></i> Limites Diários (Quantidade)</h3>
                             <div class="grid grid-cols-3 gap-3">
                                 <div>
                                     <label class="text-[9px] text-blue-400 font-bold uppercase tracking-wider block mb-1.5 text-center">Max Trades</label>
@@ -267,34 +244,51 @@
                                     <input type="number" id="conf-max-losses" class="w-full bg-slate-900 border border-slate-700 text-white p-3 rounded-lg focus:border-red-500 outline-none font-mono text-center text-lg">
                                 </div>
                             </div>
-                            <p class="text-[10px] text-slate-500 mt-2 text-center">* O bot irá parar quando atingir QUALQUER um destes limites.</p>
                         </div>
 
-                        <div class="border-t border-slate-700 pt-4">
-                            <div class="flex items-center justify-between mb-4">
-                                <label class="text-sm font-bold text-white flex items-center gap-2"><i data-lucide="clock" class="w-4 h-4 text-amber-500"></i> Agendamento Automático</label>
+                        <!-- Scheduler -->
+                        <div class="bg-slate-900/30 p-4 rounded-lg border border-slate-700/50">
+                             <div class="flex items-center justify-between mb-3">
+                                <label class="text-sm font-bold text-white flex items-center gap-2"><i data-lucide="clock" class="w-4 h-4 text-slate-400"></i> Agendamento Automático</label>
                                 <label class="relative inline-flex items-center cursor-pointer">
                                     <input type="checkbox" id="conf-timer-enabled" class="sr-only peer">
                                     <div class="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600"></div>
                                 </label>
                             </div>
-                            <div class="grid grid-cols-2 gap-4">
-                                <div><label class="text-xs text-slate-400 block mb-1">Início (HH:MM)</label><input type="time" id="conf-timer-start" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white outline-none"></div>
-                                <div><label class="text-xs text-slate-400 block mb-1">Fim (HH:MM)</label><input type="time" id="conf-timer-end" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white outline-none"></div>
+                            <div class="grid grid-cols-2 gap-3 opacity-50 transition-opacity" id="timer-inputs">
+                                <input type="time" id="conf-timer-start" class="bg-slate-900 border border-slate-700 text-white p-2 rounded-lg text-sm w-full">
+                                <input type="time" id="conf-timer-end" class="bg-slate-900 border border-slate-700 text-white p-2 rounded-lg text-sm w-full">
                             </div>
                         </div>
                     </div>
-                    <button type="submit" class="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-4 rounded-xl flex items-center justify-center gap-2 shadow-lg"><i data-lucide="save" class="w-5 h-5"></i> Salvar</button>
+                    
+                    <button type="submit" class="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-4 rounded-xl shadow-lg shadow-amber-500/20 active:scale-95 transition-transform flex items-center justify-center gap-2">
+                        <i data-lucide="save" class="w-5 h-5"></i> Salvar Configurações
+                    </button>
                 </form>
             </div>
 
-            <!-- LOGS -->
-            <div id="view-logs" class="view-section hidden h-full flex flex-col">
-                <h1 class="text-2xl font-bold text-white mb-4">Terminal</h1>
-                <div id="terminal-output" class="flex-1 glass-card rounded-xl p-4 overflow-y-auto font-mono text-xs space-y-2 bg-black/60 h-[500px]"></div>
+             <!-- VIEW: LOGS -->
+            <div id="view-logs" class="view-section hidden h-full flex flex-col max-w-5xl mx-auto">
+                <div class="flex justify-between items-center mb-4">
+                    <h1 class="text-2xl font-bold text-white">Terminal do Sistema</h1>
+                    <button class="text-xs text-slate-500 hover:text-white px-3 py-1.5 bg-slate-800 rounded-lg border border-slate-700 transition-colors" onclick="document.getElementById('terminal-output').innerHTML = ''">Limpar Tela</button>
+                </div>
+                <div id="terminal-output" class="flex-1 glass-card rounded-xl p-4 overflow-y-auto font-mono text-xs space-y-2 bg-black/60 border border-slate-800 min-h-[500px]">
+                    <div class="text-slate-600 italic">Conectando ao feed de logs...</div>
+                </div>
+            </div>
+            
+            <!-- VIEW: REPORTS -->
+            <div id="view-reports" class="view-section hidden space-y-6 max-w-5xl mx-auto">
+                <h1 class="text-2xl font-bold text-white mb-4">Histórico Detalhado</h1>
+                <div id="signals-list" class="space-y-3 pb-8">
+                     <!-- Filled by JS -->
+                </div>
             </div>
         </main>
 
+        <!-- MOBILE NAV -->
         <nav class="md:hidden fixed bottom-0 left-0 right-0 bg-[#0f172a]/95 backdrop-blur-xl border-t border-slate-800 flex justify-around px-2 pb-safe z-40 h-16 items-center">
             <button onclick="router.navigate('home')" class="flex flex-col items-center p-2 text-slate-500 active-nav rounded-lg" data-target="home"><i data-lucide="layout-dashboard" class="w-5 h-5"></i></button>
             <button onclick="router.navigate('reports')" class="flex flex-col items-center p-2 text-slate-500 rounded-lg" data-target="reports"><i data-lucide="bar-chart-2" class="w-5 h-5"></i></button>
@@ -305,21 +299,25 @@
 
     <script>
         const SUPABASE_URL = 'https://ioduahwknfsktujthfyc.supabase.co';
+        // Note: It's generally not safe to expose API keys in frontend code. 
+        // Ensure RLS (Row Level Security) is enabled on your Supabase tables.
         const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlvZHVhaHdrbmZza3R1anRoZnljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEzMDc0NDcsImV4cCI6MjA2Njg4MzQ0N30.96f8wZO6SvABKFMWjIiw1pSugAB4Isldj7yxLcLJRSE';
         let supabaseClient;
         const appStartTime = Date.now();
-        const state = { user: null, config: {}, lastLogTime: null, lastLogId: null, pairTimestamps: {}, appStartTime: new Date() };
+        let loopInterval;
+        let currentMode = 'LIVE';
+        let lastLogId = null;
 
-        // ---------------- ROUTER ----------------
+        // ROUTER
         const router = {
             navigate: (viewName) => {
                 document.querySelectorAll('.view-section').forEach(el => el.classList.add('hidden'));
-                const targetEl = document.getElementById(`view-${viewName}`);
-                if (targetEl) targetEl.classList.remove('hidden');
+                const target = document.getElementById(`view-${viewName}`);
+                if(target) target.classList.remove('hidden');
                 document.querySelectorAll('.nav-item, nav button').forEach(btn => {
                     btn.classList.remove('active-nav', 'text-amber-500');
                     btn.classList.add('text-slate-500');
-                    if (btn.dataset.target === viewName) {
+                    if(btn.dataset.target === viewName) {
                         btn.classList.add('active-nav', 'text-amber-500');
                         btn.classList.remove('text-slate-500');
                     }
@@ -328,7 +326,6 @@
             }
         };
 
-        // ---------------- INICIALIZAÇÃO ----------------
         function initApp() {
             try {
                 supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -338,19 +335,24 @@
                 document.getElementById('toggle-bot-btn').addEventListener('click', handleToggle);
                 document.getElementById('restart-bot-btn').addEventListener('click', handleRestart);
                 document.getElementById('logout-btn').addEventListener('click', handleLogout);
+                
+                // Toggle Timer UI opacity
+                document.getElementById('conf-timer-enabled').addEventListener('change', (e) => {
+                     document.getElementById('timer-inputs').style.opacity = e.target.checked ? '1' : '0.5';
+                });
+                
                 checkSession();
             } catch(e) { console.error(e); hideSplash(); }
         }
 
-        // ---------------- FUNÇÕES DE LÓGICA PRINCIPAL ----------------
         function hideSplash() {
             const splash = document.getElementById('splash-screen');
-            if (splash && !splash.classList.contains('fade-out')) {
+            if(splash && !splash.classList.contains('fade-out')) {
                 const elapsed = Date.now() - appStartTime;
                 setTimeout(() => { 
                     splash.classList.add('fade-out'); 
                     setTimeout(() => splash.remove(), 600); 
-                }, Math.max(0, 3000 - elapsed));
+                }, Math.max(0, 4000 - elapsed)); // Force 4s splash
             }
         }
 
@@ -358,207 +360,116 @@
             try {
                 const { data } = await supabaseClient.auth.getSession();
                 if (data.session) { 
-                    state.user = data.session.user; 
-                    showApp(); 
-                    startDataLoop(); 
+                    document.getElementById('app').classList.remove('hidden');
+                    setTimeout(() => document.getElementById('app').classList.remove('opacity-0'), 50);
+                    hideSplash();
+                    startLoop();
                 } else {
                     document.getElementById('login-screen').classList.remove('hidden');
                     hideSplash();
                 }
-            } catch (err) {
+            } catch {
                 document.getElementById('login-screen').classList.remove('hidden');
                 hideSplash();
             }
         }
 
-        function showApp() {
-            document.getElementById('login-screen').classList.add('hidden');
-            document.getElementById('app').classList.remove('hidden');
-            setTimeout(() => document.getElementById('app').classList.remove('opacity-0'), 50);
-            hideSplash();
-            fetchInitialLogs();
-            fetchTopAssets(); 
-        }
-
-        function startDataLoop() {
-            fetchData();
-            supabaseClient.channel('dash')
-                .on('postgres_changes', { event: '*', schema: 'public', table: 'bot_config' }, p => updateConfigUI(p.new))
-                .on('postgres_changes', { event: '*', schema: 'public', table: 'trade_signals' }, () => refreshSignals())
-                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'logs' }, p => { 
-                    appendLog(p.new); 
-                    processScannerLog(p.new);
-                })
-                .on('postgres_changes', { event: '*', schema: 'public', table: 'cataloged_assets' }, () => fetchTopAssets()) 
-                .subscribe();
-            
-            setInterval(fetchData, 3000);
-            setInterval(updateBotStatus, 5000);
-            setInterval(checkInactivePairs, 30000); 
-            setInterval(fetchTopAssets, 5000);
-        }
-
-        async function refreshSignals() {
-            try {
-                const { data: signals } = await supabaseClient.from('trade_signals').select('*').order('created_at', { ascending: false }).limit(200);
-                if(signals) { syncSignalsList(signals); updateStats(signals); }
-            } catch(e) { console.error(e); }
-        }
-
-        async function fetchData() {
-            try {
-                let { data: config } = await supabaseClient.from('bot_config').select('*').eq('id', 1).single();
-                if (!config) config = { id: 1, status: 'PAUSED', account_type: 'PRACTICE', entry_value: 10, max_trades_per_day: 0 };
-                updateConfigUI(config);
-            } catch(e) { }
-            refreshSignals();
-            try {
-                const { data: logs } = await supabaseClient.from('logs').select('*').order('created_at', { ascending: false }).limit(10);
-                if(logs && logs.length > 0) {
-                     if (state.lastLogId !== logs[0].id) {
-                        state.lastLogId = logs[0].id;
-                        state.lastLogTime = new Date(logs[0].created_at);
-                        [...logs].reverse().forEach(l => { appendLog(l); processScannerLog(l); });
-                     }
-                }
-            } catch(e) { }
-        }
-
-        async function fetchTopAssets() {
-            try {
-                let { data: assets } = await supabaseClient.from('cataloged_assets').select('*').order('win_rate', { ascending: false }).limit(3);
-                if (assets) assets = assets.filter(a => a.win_rate >= 70); // Match bot logic
-                renderAssetCards(assets || []);
-            } catch (e) { renderAssetCards([]); }
-        }
-
-        async function fetchReports() {
-            const list = document.getElementById('reports-daily-list');
-            if(!list) return;
-            list.innerHTML = '<div class="text-center text-slate-500 py-8 text-xs"><i data-lucide="loader-2" class="w-6 h-6 animate-spin mx-auto mb-2"></i> Calculando...</div>';
+        async function handleLogin(e) {
+            e.preventDefault();
+            const btn = document.getElementById('login-btn');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '<i data-lucide="loader-2" class="animate-spin w-5 h-5 mx-auto"></i>';
             lucide.createIcons();
-
+            
             try {
-                const { data: trades } = await supabaseClient.from('trade_signals').select('*').order('created_at', { ascending: false }).limit(2000);
+                const email = document.getElementById('email').value;
+                const password = document.getElementById('password').value;
+                const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+                if(error) throw error;
+                checkSession();
+            } catch(err) {
+                document.getElementById('login-error').textContent = "Erro: " + err.message;
+                document.getElementById('login-error').classList.remove('hidden');
+                btn.innerHTML = originalText;
+            }
+        }
 
-                if (!trades || trades.length === 0) {
-                    list.innerHTML = '<div class="text-center text-slate-600 py-8 text-xs">Sem dados históricos.</div>';
-                    return;
-                }
+        async function handleLogout() {
+             await supabaseClient.auth.signOut();
+             location.reload();
+        }
 
-                const dailyStats = {};
-                let monthProfit = 0, monthWins = 0, monthTotal = 0;
-                const currentMonth = new Date().getMonth();
-
-                trades.forEach(t => {
-                    const d = new Date(t.created_at);
-                    const dateKey = d.toLocaleDateString('pt-BR');
-                    const profit = parseFloat(t.profit);
-                    const result = (t.result || t.status || '').toUpperCase();
-                    
-                    if (!dailyStats[dateKey]) dailyStats[dateKey] = { wins: 0, losses: 0, profit: 0, date: t.created_at, trades: [] };
-
-                    let isWin = result.includes('WIN') || (!isNaN(profit) && profit > 0);
-                    if (result.includes('WIN') || result.includes('LOSS') || (profit !== 0 && !isNaN(profit))) {
-                        if (isWin) {
-                            dailyStats[dateKey].wins++;
-                            if (!isNaN(profit)) { dailyStats[dateKey].profit += profit; if (d.getMonth() === currentMonth) monthProfit += profit; }
-                            if (d.getMonth() === currentMonth) monthWins++;
-                        } else {
-                            dailyStats[dateKey].losses++;
-                            if (!isNaN(profit)) { dailyStats[dateKey].profit += profit; if (d.getMonth() === currentMonth) monthProfit += profit; }
-                        }
-                        if (d.getMonth() === currentMonth) monthTotal++;
-                    }
-                    dailyStats[dateKey].trades.push(t);
-                });
-
-                const monthRate = monthTotal > 0 ? Math.round((monthWins / monthTotal) * 100) : 0;
-                const mpEl = document.getElementById('report-month-profit');
-                if(mpEl) {
-                    mpEl.innerText = `${monthProfit >= 0 ? '+' : ''}$${monthProfit.toFixed(2)}`;
-                    mpEl.className = `text-3xl md:text-4xl font-black ${monthProfit >= 0 ? 'text-green-400' : 'text-red-400'}`;
-                }
-                const mrEl = document.getElementById('report-month-rate');
-                if(mrEl) mrEl.innerText = `${monthRate}%`;
-
-                list.innerHTML = '';
-                Object.values(dailyStats).sort((a,b) => new Date(b.date) - new Date(a.date)).forEach(day => {
-                    const item = document.createElement('div');
-                    item.className = "glass-card rounded-xl overflow-hidden border-l-4 " + (day.profit >= 0 ? "border-l-green-500" : "border-l-red-500");
-                    const safeDate = new Date(day.date).getTime();
-                    
-                    const tradesHtml = day.trades.map(t => {
-                        const tProfit = parseFloat(t.profit);
-                        const tResult = (t.result || t.status || '').toUpperCase();
-                        const isWin = tResult.includes('WIN') || (!isNaN(tProfit) && tProfit > 0);
-                        const isLoss = tResult.includes('LOSS') || (!isNaN(tProfit) && tProfit < 0);
-                        const colorClass = isWin ? 'text-green-400' : (isLoss ? 'text-red-400' : 'text-slate-400');
-                        const icon = t.direction === 'call' ? 'arrow-up' : 'arrow-down';
-                        return `
-                            <div class="flex justify-between items-center py-2 border-b border-white/5 last:border-0 hover:bg-white/5 px-2 rounded">
-                                <div class="flex items-center gap-2">
-                                    <span class="text-[10px] text-slate-500 font-mono">${new Date(t.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
-                                    <span class="text-xs font-bold text-white">${t.pair}</span>
-                                    <i data-lucide="${icon}" class="w-3 h-3 ${t.direction === 'call' ? 'text-green-500' : 'text-red-500'}"></i>
-                                </div>
-                                <div class="text-right">
-                                    <span class="text-[10px] font-bold ${colorClass}">${isWin ? 'WIN' : (isLoss ? 'LOSS' : 'PEND')}</span>
-                                    <span class="text-[10px] font-mono block ${colorClass}">${!isNaN(tProfit) ? (tProfit>=0?'+':'') + '$'+tProfit.toFixed(2) : '-'}</span>
-                                </div>
-                            </div>
-                        `;
-                    }).join('');
-
-                    item.innerHTML = `
-                        <div class="p-4 cursor-pointer hover:bg-white/5 transition-colors" onclick="toggleDetails('${safeDate}')">
-                            <div class="flex justify-between items-center">
-                                <div>
-                                    <p class="text-sm font-bold text-white capitalize flex items-center gap-2">
-                                        ${new Date(day.date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long' })}
-                                        <i data-lucide="chevron-down" id="icon-${safeDate}" class="w-4 h-4 text-slate-500 rotate-icon"></i>
-                                    </p>
-                                    <p class="text-[10px] text-slate-400 font-mono mt-1">${day.wins} Wins / ${day.losses} Loss</p>
-                                </div>
-                                <div class="text-right">
-                                    <p class="text-lg font-bold font-mono ${day.profit >= 0 ? 'text-green-400' : 'text-red-400'}">${day.profit >= 0 ? '+' : ''}$${day.profit.toFixed(2)}</p>
-                                </div>
-                            </div>
-                        </div>
-                        <div id="details-${safeDate}" class="details-content bg-black/20 px-4">
-                            <div class="py-2 space-y-1">
-                                ${tradesHtml}
-                            </div>
-                        </div>
-                    `;
-                    list.appendChild(item);
-                });
+        async function handleSettings(e) {
+            e.preventDefault();
+            const btn = e.target.querySelector('button[type="submit"]');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '<i data-lucide="loader-2" class="animate-spin w-4 h-4 inline"></i> Salvando...';
+            lucide.createIcons();
+            
+            try {
+                await supabaseClient.from('bot_config').update({
+                    entry_value: Number(document.getElementById('conf-entry').value),
+                    account_type: document.getElementById('conf-account').value,
+                    max_trades_per_day: Number(document.getElementById('conf-max-trades').value),
+                    max_wins_per_day: Number(document.getElementById('conf-max-wins').value),
+                    max_losses_per_day: Number(document.getElementById('conf-max-losses').value),
+                    timer_enabled: document.getElementById('conf-timer-enabled').checked,
+                    timer_start: document.getElementById('conf-timer-start').value,
+                    timer_end: document.getElementById('conf-timer-end').value,
+                    mode: currentMode
+                }).eq('id', 1);
+                
+                btn.innerHTML = '<i data-lucide="check" class="w-4 h-4 inline"></i> Salvo!';
+                btn.classList.add('bg-green-600');
                 lucide.createIcons();
-            } catch (e) { console.error("Erro reports", e); }
+                setTimeout(() => {
+                    btn.innerHTML = originalText;
+                    btn.classList.remove('bg-green-600');
+                    lucide.createIcons();
+                }, 2000);
+            } catch(err) { 
+                console.error(err); 
+                btn.innerHTML = originalText;
+                alert("Erro ao salvar.");
+            }
         }
 
-        function toggleDetails(id) {
-            const content = document.getElementById(`details-${id}`);
-            const icon = document.getElementById(`icon-${id}`);
-            if (content) content.classList.toggle('open');
-            if (icon) icon.classList.toggle('open');
-        }
-
-        async function fetchInitialLogs() {
+        async function handleToggle() {
+            const btn = document.getElementById('toggle-bot-btn');
+            const isRun = btn.innerText.includes('PAUSAR');
+            updateButtonState(!isRun);
             try {
-                const { data: logs } = await supabaseClient.from('logs').select('*').order('created_at', { ascending: false }).limit(50);
-                if(logs && logs.length > 0) {
-                    const term = document.getElementById('terminal-output');
-                    if(term) {
-                        term.innerHTML = '<div class="text-slate-500 mb-2 border-b border-slate-800 pb-2">Marombiew Bot Terminal v2.0 <br> Carregando histórico...</div>';
-                        [...logs].reverse().forEach(l => appendLog(l));
-                    }
-                    state.lastLogTime = new Date(logs[0].created_at);
-                    state.lastLogId = logs[0].id;
-                    logs.slice(0, 10).forEach(l => processScannerLog(l)); 
-                    updateBotStatus();
-                }
-            } catch (e) { }
+                await supabaseClient.from('bot_config').update({ status: isRun ? 'PAUSED' : 'RUNNING' }).eq('id', 1);
+            } catch(e) { updateButtonState(isRun); }
+        }
+        
+        async function handleRestart() {
+            if (!confirm("Reiniciar conexão do bot?")) return;
+            try {
+                await supabaseClient.from('bot_config').update({ status: 'RESTARTING' }).eq('id', 1);
+                alert("Comando de reinício enviado.");
+            } catch(err) { alert("Erro ao enviar comando."); }
+        }
+
+        function updateButtonState(isRunning) {
+            const btn = document.getElementById('toggle-bot-btn');
+            btn.innerHTML = isRunning ? '<i data-lucide="pause" class="w-3 h-3"></i> PAUSAR' : '<i data-lucide="play" class="w-3 h-3"></i> INICIAR';
+            btn.className = `px-4 py-2 rounded-lg text-xs font-bold min-w-[100px] shadow-lg flex items-center gap-2 justify-center transition-all ${isRunning ? 'bg-amber-500/10 text-amber-500 border border-amber-500/20' : 'bg-green-500 text-white'}`;
+            lucide.createIcons();
+        }
+        
+        function setMode(mode) {
+            currentMode = mode;
+            const btnLive = document.getElementById('btn-mode-live');
+            const btnObs = document.getElementById('btn-mode-observe');
+            
+            if(mode === 'LIVE') {
+                btnLive.className = "p-3 rounded-lg border border-green-500 bg-green-500/10 text-green-400 text-xs font-bold transition-all shadow-[0_0_15px_rgba(34,197,94,0.3)]";
+                btnObs.className = "p-3 rounded-lg border border-transparent bg-slate-900 text-slate-400 text-xs font-bold transition-all hover:bg-slate-800";
+            } else {
+                btnLive.className = "p-3 rounded-lg border border-transparent bg-slate-900 text-slate-400 text-xs font-bold transition-all hover:bg-slate-800";
+                btnObs.className = "p-3 rounded-lg border border-blue-500 bg-blue-500/10 text-blue-400 text-xs font-bold transition-all shadow-[0_0_15px_rgba(59,130,246,0.3)]";
+            }
         }
 
         function applyPreset(mode) {
@@ -577,286 +488,163 @@
             }
         }
 
-        // ---------------- HANDLERS ----------------
-        async function handleLogin(e) {
-            e.preventDefault();
-            const btn = document.getElementById('login-btn');
-            const originalText = btn.innerHTML;
-            btn.innerHTML = '<i data-lucide="loader-2" class="w-5 h-5 animate-spin mx-auto"></i>';
-            try {
-                const email = document.getElementById('email').value;
-                const password = document.getElementById('password').value;
-                const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
-                if (error) throw error;
-                checkSession();
-            } catch (err) {
-                document.getElementById('login-error').textContent = err.message;
-                document.getElementById('login-error').classList.remove('hidden');
-                btn.innerHTML = originalText;
-            }
+        function startLoop() {
+            if(loopInterval) clearInterval(loopInterval);
+            fetchData();
+            loopInterval = setInterval(fetchData, 3000);
         }
         
-        async function handleRestart() {
-            if (!confirm("Reiniciar o bot agora?")) return;
-            const btn = document.getElementById('restart-bot-btn');
-            const originalIcon = btn.innerHTML;
-            btn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i>';
-            try {
-                const { data: { session } } = await supabaseClient.auth.getSession();
-                if (!session) throw new Error("Sessão inválida");
-                await fetch("https://ioduahwknfsktujthfyc.supabase.co/functions/v1/restart-bot", {
-                    method: "POST", headers: { "Authorization": `Bearer ${session.access_token}`, "Content-Type": "application/json" }
-                });
-                btn.innerHTML = '<i data-lucide="check" class="w-4 h-4 text-green-500"></i>';
-                setTimeout(() => { btn.innerHTML = originalIcon; lucide.createIcons(); }, 2000);
-            } catch (err) {
-                btn.innerHTML = '<i data-lucide="x" class="w-4 h-4 text-red-500"></i>';
-                setTimeout(() => { btn.innerHTML = originalIcon; lucide.createIcons(); }, 2000);
-            }
-        }
-
-        async function handleSettings(e) {
-            e.preventDefault();
-            const btn = e.target.querySelector('button');
-            const originalText = btn.innerHTML;
-            btn.innerHTML = 'Salvando...';
-            try {
-                 await supabaseClient.from('bot_config').update({
-                    entry_value: Number(document.getElementById('conf-entry').value),
-                    account_type: document.getElementById('conf-account').value,
-                    max_trades_per_day: Number(document.getElementById('conf-max-trades').value),
-                    max_wins_per_day: Number(document.getElementById('conf-max-wins').value),
-                    max_losses_per_day: Number(document.getElementById('conf-max-losses').value),
-                    timer_enabled: document.getElementById('conf-timer-enabled').checked,
-                    timer_start: document.getElementById('conf-timer-start').value,
-                    timer_end: document.getElementById('conf-timer-end').value
-                 }).eq('id', 1);
-                 alert('Configurações salvas!');
-            } catch(e) { alert("Erro ao salvar."); }
-            btn.innerHTML = originalText;
-        }
-
-        async function handleToggle() {
-            const newStatus = state.config.status === 'RUNNING' ? 'PAUSED' : 'RUNNING';
-            await supabaseClient.from('bot_config').update({ status: newStatus }).eq('id', 1);
-        }
-        
-        async function handleLogout() {
-            await supabaseClient.auth.signOut(); 
-            window.location.reload();
-        }
-        
-        async function handleClearHistory() {
-             if(!confirm("Limpar histórico?")) return;
-            try {
-                await supabaseClient.from('trade_signals').delete().gt('id', 0);
-                document.getElementById('signals-list').innerHTML = '<div class="text-center text-slate-600 py-8 text-xs">Limpo.</div>';
-                updateStats([]);
-            } catch (err) { alert(err.message); }
-        }
-
-        // ---------------- UI UPDATES ----------------
-        function appendLog(log) {
-            const term = document.getElementById('terminal-output');
-            const mini = document.getElementById('terminal-output-mini');
-            const line = `<div class="text-xs font-mono mb-1"><span class="text-slate-600">[${new Date(log.created_at).toLocaleTimeString()}]</span> <span class="text-slate-300">${log.message}</span></div>`;
-            term.insertAdjacentHTML('beforeend', line);
-            mini.insertAdjacentHTML('afterbegin', line); // Mini log shows newest first
-            term.scrollTop = term.scrollHeight;
-        }
-
-        function processScannerLog(log) {
-            const msg = log.message || "";
-            if (msg.startsWith('MODE_ATIVO::')) {
-                const mode = msg.split('::')[1];
-                const badge = document.getElementById('mode-badge');
-                badge.innerText = `MODO: ${mode}`;
-                badge.classList.remove('hidden');
-                return;
-            }
-        }
-        
-        function renderAssetCards(assets) {
-            const container = document.getElementById('top-assets-container');
-            const emptyMsg = document.getElementById('empty-assets-msg');
-            
-            if (!assets || assets.length === 0) {
-                if (!emptyMsg) container.innerHTML = `<div id="empty-assets-msg" class="col-span-1 md:col-span-3 text-center text-slate-500 py-8 text-sm bg-slate-900/50 rounded-xl border border-dashed border-slate-800 w-full flex-shrink-0"><i data-lucide="search" class="w-6 h-6 mx-auto mb-2 opacity-50"></i> Nenhum par qualificado (>70%)</div>`;
-                lucide.createIcons();
-                return;
-            }
-            if (emptyMsg) emptyMsg.remove();
-
-            state.pairTimestamps = {}; 
-            const currentAssetIds = new Set();
-            const badges = ['🥇', '🥈', '🥉'];
-
-            assets.forEach((asset, index) => {
-                const badge = badges[index] || '';
-                const safeId = asset.pair.replace(/[^a-zA-Z0-9]/g, '');
-                createOrUpdateCard(asset.pair, asset.best_strategy || 'SMA14', asset.win_rate, badge);
+        async function fetchData() {
+             try {
+                const { data } = await supabaseClient.from('bot_config').select('*').eq('id', 1).single();
+                if(data) updateUI(data);
                 
-                // Reorder
-                const card = document.getElementById(`card-${safeId}`);
-                if (card && container.children[index] !== card) {
-                    if (index < container.children.length) container.insertBefore(card, container.children[index]);
-                    else container.appendChild(card);
+                const logs = await supabaseClient.from('logs').select('*').order('created_at', { ascending: false }).limit(20);
+                if(logs.data && logs.data.length > 0) {
+                     const newest = logs.data[0];
+                     if(newest.id !== lastLogId) {
+                         lastLogId = newest.id;
+                         const term = document.getElementById('terminal-output');
+                         const mini = document.getElementById('terminal-output-mini');
+                         
+                         // Clear loading message
+                         if(term.innerHTML.includes('Conectando') || term.innerHTML.includes('Aguardando')) {
+                             term.innerHTML = '';
+                             mini.innerHTML = '';
+                         }
+
+                         const html = logs.data.map(l => {
+                            let colorClass = "text-slate-400";
+                            let icon = "info";
+                            if(l.message.includes('WIN') || l.message.includes('SUCCESS')) { colorClass = "text-green-400"; icon = "check"; }
+                            if(l.message.includes('LOSS') || l.message.includes('ERROR') || l.message.includes('🛑')) { colorClass = "text-red-400"; icon = "alert-circle"; }
+                            if(l.message.includes('WARNING') || l.message.includes('⚠️')) { colorClass = "text-amber-400"; icon = "alert-triangle"; }
+                            if(l.message.includes('DEBUG')) colorClass = "text-slate-500";
+                            
+                            // Parse message for cleaner display
+                            let displayMsg = l.message.replace('ANALISE_DETALHADA::', '').replace('SCAN_ENTRADA::', 'SCAN: ');
+                            
+                            return `<div class="text-xs font-mono mb-1.5 border-b border-white/5 pb-1 flex items-start gap-2">
+                                <span class="text-slate-600 whitespace-nowrap pt-0.5">[${new Date(l.created_at).toLocaleTimeString()}]</span> 
+                                <span class="${colorClass} break-all">${displayMsg}</span>
+                            </div>`;
+                        }).join('');
+                        
+                        term.innerHTML = html;
+                        mini.innerHTML = html;
+                     }
                 }
-                state.pairTimestamps[safeId] = Date.now();
-                currentAssetIds.add(`card-${safeId}`);
-            });
-            
-            Array.from(container.children).forEach(child => {
-                if (child.id && child.id.startsWith('card-') && !currentAssetIds.has(child.id)) child.remove();
-            });
+                
+                // Real-time stats from DB history
+                 const today = new Date().toISOString().split('T')[0];
+                 const signals = await supabaseClient.from('trade_signals').select('*').gte('created_at', today + 'T00:00:00').order('created_at', {ascending: false});
+                 
+                 if(signals.data) {
+                     let wins = 0, losses = 0, profit = 0;
+                     signals.data.forEach(s => {
+                         if(s.result === 'WIN') { wins++; profit += parseFloat(s.profit || 0); }
+                         if(s.result === 'LOSS') { losses++; profit += parseFloat(s.profit || 0); }
+                     });
+                     document.getElementById('score-wins').textContent = wins;
+                     document.getElementById('score-losses').textContent = losses;
+                     document.getElementById('score-total').textContent = wins + losses;
+                     document.getElementById('stat-profit').textContent = `${profit >= 0 ? '+' : ''}$${profit.toFixed(2)}`;
+                     document.getElementById('stat-profit').className = `text-2xl font-bold tracking-tight ${profit >= 0 ? 'text-green-500' : 'text-red-500'}`;
+                 }
+                 
+                 // Fetch Best Assets
+                 const assets = await supabaseClient.from('cataloged_assets').select('*').order('win_rate', { ascending: false }).limit(3);
+                 if(assets.data) renderAssetCards(assets.data);
+
+            } catch(e) { console.error("Loop error", e); }
+        }
+
+        function renderAssetCards(assets) {
+             const container = document.getElementById('top-assets-container');
+             if(!assets || assets.length === 0) {
+                 if(!container.innerHTML.includes('Aguardando'))
+                    container.innerHTML = `<div id="empty-assets-msg" class="glass-card p-4 rounded-xl border border-dashed border-slate-700 flex items-center justify-center text-slate-500 text-xs w-full"><i data-lucide="search" class="w-4 h-4 animate-spin mr-2"></i> Buscando oportunidades...</div>`;
+                 lucide.createIcons();
+                 return;
+             }
+
+             const cards = assets.map(a => `
+                <div class="glass-card p-3 rounded-lg min-w-[150px] border-t-2 border-slate-600 flex-shrink-0 relative overflow-hidden group hover:bg-white/5 transition-colors">
+                    <div class="absolute inset-0 bg-gradient-to-br from-green-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                    <div class="flex justify-between items-start mb-2 relative z-10">
+                        <span class="font-bold text-white text-xs flex items-center gap-1">${a.pair}</span>
+                        <span class="text-[10px] font-bold text-green-400 bg-green-900/40 px-1.5 py-0.5 rounded border border-green-500/20">${Math.round(a.win_rate)}%</span>
+                    </div>
+                    <div class="flex items-center gap-1.5 mt-2 relative z-10">
+                        <span class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
+                        <div class="text-[9px] text-slate-400 font-mono uppercase tracking-wide">EMA V2 FLOW</div>
+                    </div>
+                </div>
+             `).join('');
+             
+             // Simple diff to avoid redraw
+             if(container.innerHTML !== cards) {
+                 container.innerHTML = cards;
+                 lucide.createIcons();
+             }
         }
         
-        function createOrUpdateCard(pair, strategy = 'EMA', winRate = null, badge = '') {
-            const safePairId = pair.replace(/[^a-zA-Z0-9]/g, '');
-            const container = document.getElementById('top-assets-container');
-            let card = document.getElementById(`card-${safePairId}`);
-            const emptyMsg = document.getElementById('empty-assets-msg');
-            if(emptyMsg) emptyMsg.remove();
-
-            let winRateDisplay = '--';
-            if (winRate !== null && !isNaN(parseFloat(winRate))) winRateDisplay = `${Math.round(parseFloat(winRate))}%`;
-
-            if (!card) {
-                card = document.createElement('div');
-                card.id = `card-${safePairId}`;
-                card.className = "glass-card p-3 rounded-xl border-t-4 border-slate-700 relative overflow-hidden transition-all duration-300 min-w-[160px] w-[45%] md:w-auto flex-shrink-0 snap-center";
-                card.innerHTML = `
-                    <div class="flex justify-between items-start mb-2">
-                        <div>
-                            <h3 class="font-bold text-sm text-white tracking-tight flex items-center gap-2">${pair} <span class="text-sm">${badge}</span></h3>
-                            <p class="text-[9px] text-slate-400 font-mono flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-slate-500"></span> <span>${strategy}</span></p>
+        // Reports Section Fetch
+        async function fetchReports() {
+             const today = new Date().toISOString().split('T')[0];
+             const { data } = await supabaseClient.from('trade_signals')
+                .select('*')
+                .gte('created_at', today + 'T00:00:00')
+                .order('created_at', {ascending: false});
+             
+             const container = document.getElementById('signals-list');
+             if(!data || data.length === 0) {
+                 container.innerHTML = '<div class="text-center text-slate-600 py-8 text-xs font-mono">Nenhum trade realizado hoje.</div>';
+                 return;
+             }
+             
+             container.innerHTML = data.map(s => {
+                 const isWin = s.result === 'WIN';
+                 const color = isWin ? 'text-green-500' : (s.result === 'LOSS' ? 'text-red-500' : 'text-slate-400');
+                 const border = isWin ? 'border-l-green-500' : (s.result === 'LOSS' ? 'border-l-red-500' : 'border-l-slate-600');
+                 
+                 return `
+                 <div class="glass-card p-4 rounded-xl border-l-4 ${border} flex justify-between items-center">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center border border-slate-700">
+                             <i data-lucide="${s.direction === 'call' ? 'arrow-up' : 'arrow-down'}" class="w-5 h-5 ${s.direction === 'call' ? 'text-green-400' : 'text-red-400'}"></i>
                         </div>
-                        <div class="text-right"><span class="text-green-400 font-bold text-xs bg-green-500/10 px-1.5 py-0.5 rounded">${winRateDisplay}</span></div>
+                        <div>
+                            <p class="text-xs font-bold text-white">${s.pair}</p>
+                            <p class="text-[10px] text-slate-500 font-mono">${new Date(s.created_at).toLocaleTimeString()}</p>
+                        </div>
                     </div>
-                    <div class="flex justify-between items-end">
-                        <div class="text-right"><p class="text-[8px] text-slate-500 mb-0.5">STATUS</p><p class="text-[9px] font-bold text-slate-400">MONITORANDO</p></div>
+                    <div class="text-right">
+                        <span class="text-xs font-bold ${color}">${s.result}</span>
+                        <p class="text-[10px] text-slate-400 font-mono mt-0.5">${parseFloat(s.profit).toFixed(2)}</p>
                     </div>
-                `;
-                container.appendChild(card);
-            }
-            card.classList.remove('opacity-50');
+                 </div>`;
+             }).join('');
+             lucide.createIcons();
         }
 
-        function checkInactivePairs() {
-            const now = Date.now();
-            for (const [safePairId, ts] of Object.entries(state.pairTimestamps)) {
-                if (now - ts > 300000) { 
-                    const card = document.getElementById(`card-${safePairId}`);
-                    if (card) card.classList.add('opacity-50');
-                }
-            }
-        }
-
-        function updateBotStatus() {
-            if (!state.lastLogTime) return;
-            const diff = Date.now() - state.lastLogTime.getTime();
-            const ind = document.getElementById('bot-status-indicator');
-            const warn = document.getElementById('connection-warning');
-            const isPaused = state.config.status === 'PAUSED';
-            if (diff < (isPaused ? 86400000 : 180000)) { 
-                ind.innerHTML = '<span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span> ONLINE';
-                ind.className = 'text-xs font-bold flex items-center gap-1 text-green-400';
-                if(warn) warn.classList.add('hidden');
-            } else {
-                if(!isPaused) {
-                    ind.innerHTML = '<span class="w-2 h-2 rounded-full bg-red-500"></span> OFFLINE';
-                    ind.className = 'text-xs font-bold flex items-center gap-1 text-red-400';
-                    if(warn) warn.classList.remove('hidden');
-                } else {
-                    ind.innerHTML = '<span class="w-2 h-2 rounded-full bg-amber-500"></span> PAUSADO';
-                    ind.className = 'text-xs font-bold flex items-center gap-1 text-amber-400';
-                    if(warn) warn.classList.add('hidden');
-                }
-            }
-        }
-        
-        function syncSignalsList(signals) {
-            const list = document.getElementById('signals-list');
-            const today = new Date().toLocaleDateString('pt-BR');
-            const visibleSignals = signals.filter(s => new Date(s.created_at).toLocaleDateString('pt-BR') === today).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-
-            if (visibleSignals.length === 0) {
-                if(!list.innerHTML.includes('Sem histórico hoje')) list.innerHTML = '<div class="text-center text-slate-600 py-8 text-xs">Sem histórico hoje.</div>';
-                return;
-            }
-            if (list.firstElementChild && !list.firstElementChild.id.startsWith('signal-')) list.innerHTML = '';
-
-            const validIds = new Set();
-            visibleSignals.forEach((s, index) => {
-                validIds.add(`signal-${s.id}`);
-                let el = document.getElementById(`signal-${s.id}`);
-                if (!el) {
-                    el = createSignalElement(s);
-                    if (index < list.children.length) list.insertBefore(el, list.children[index]);
-                    else list.appendChild(el);
-                } else {
-                    if (el.getAttribute('data-status') !== (s.result || s.status)) {
-                        const newEl = createSignalElement(s);
-                        list.replaceChild(newEl, el);
-                        el = newEl;
-                    }
-                    if (list.children[index] !== el) list.insertBefore(el, list.children[index]);
-                }
-            });
-            Array.from(list.children).forEach(child => { if (child.id.startsWith('signal-') && !validIds.has(child.id)) child.remove(); });
-        }
-
-        function updateStats(signals) {
-            let wins = 0, losses = 0, dayProfit = 0;
-            const today = new Date().toLocaleDateString('pt-BR');
-            signals.forEach(s => {
-                if (new Date(s.created_at).toLocaleDateString('pt-BR') === today) {
-                    const result = (s.result || '').toUpperCase();
-                    const profit = parseFloat(s.profit);
-                    if (result.includes('WIN')) { wins++; if(!isNaN(profit)) dayProfit += profit; }
-                    else if (result.includes('LOSS')) { losses++; if(!isNaN(profit)) dayProfit += profit; }
-                }
-            });
-            document.getElementById('score-wins').textContent = wins;
-            document.getElementById('score-losses').textContent = losses;
-            document.getElementById('score-total').textContent = wins + losses;
-            document.getElementById('stat-profit').textContent = `${dayProfit >= 0 ? '+' : ''}$${dayProfit.toFixed(2)}`;
-            document.getElementById('stat-profit').className = `text-2xl font-bold ${dayProfit >= 0 ? 'text-green-400' : 'text-red-400'}`;
-        }
-
-        function createSignalElement(s) {
-            const el = document.createElement('div');
-            el.id = `signal-${s.id}`;
-            const rawStatus = s.result || s.status || 'PENDING';
-            el.setAttribute('data-status', rawStatus);
-            const status = rawStatus.toUpperCase();
-            const profit = parseFloat(s.profit);
-            let isWin = status.includes('WIN');
-            let isLoss = status.includes('LOSS');
-            const borderClass = s.direction === 'call' ? 'border-green-500' : 'border-red-500';
-            let statusBadge = '<span class="text-amber-400 text-xs font-bold animate-pulse flex items-center gap-1"><i data-lucide="loader" class="w-3 h-3 animate-spin"></i> Pendente</span>';
-            if (isWin) statusBadge = '<span class="text-green-400 font-bold text-sm flex items-center gap-1"><i data-lucide="check" class="w-4 h-4"></i> WIN</span>';
-            else if (isLoss) statusBadge = '<span class="text-red-400 font-bold text-sm flex items-center gap-1"><i data-lucide="x" class="w-4 h-4"></i> LOSS</span>';
+        function updateUI(config) {
+            updateButtonState(config.status === 'RUNNING');
             
-            el.className = `glass-card p-4 rounded-xl flex items-center justify-between border-l-4 ${borderClass}`;
-            el.innerHTML = `<div class="flex items-center gap-4"><div class="w-10 h-10 rounded-full flex items-center justify-center ${s.direction === 'call' ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'}"><i data-lucide="${s.direction === 'call' ? 'arrow-up' : 'arrow-down'}" class="w-5 h-5"></i></div><div><p class="font-bold text-white text-sm">${s.pair || '---'}</p><span class="text-[10px] text-slate-500">${new Date(s.created_at).toLocaleTimeString()}</span></div></div><div class="text-right">${statusBadge}<span class="block text-xs font-bold ${isWin ? 'text-green-400' : (isLoss ? 'text-red-400' : 'text-slate-400')} mt-1">${!isNaN(profit) ? (profit>=0?'+':'')+'$'+Math.abs(profit).toFixed(2) : '-'}</span></div>`;
-            setTimeout(() => lucide.createIcons(), 0);
-            return el;
-        }
-
-        function updateConfigUI(config) {
-            state.config = config;
-            const btn = document.getElementById('toggle-bot-btn');
-            const isRunning = config.status === 'RUNNING';
-            const isRestarting = config.status === 'RESTARTING';
-            if (isRestarting) {
-                btn.className = "flex items-center gap-2 px-3 py-2 rounded-lg text-xs md:text-sm font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20";
-                btn.innerHTML = '<i data-lucide="loader-2" class="w-3 h-3 md:w-4 md:h-4 animate-spin"></i> ...';
+            const modeLabel = document.getElementById('mode-display');
+            if(config.mode === 'OBSERVE') {
+                currentMode = 'OBSERVE';
+                modeLabel.textContent = "MODO OBSERVAÇÃO";
+                modeLabel.className = "text-[9px] font-bold mt-1 text-blue-300 bg-blue-500/20 px-2 py-0.5 rounded border border-blue-500/30 inline-block tracking-widest";
+                setMode('OBSERVE');
             } else {
-                btn.className = `flex items-center gap-2 px-3 py-2 rounded-lg text-xs md:text-sm font-bold shadow-lg transition-all min-w-[90px] justify-center ${isRunning ? 'bg-red-500/10 text-red-400 border border-red-500/20' : 'bg-green-500 text-white'}`;
-                btn.innerHTML = isRunning ? '<i data-lucide="pause" class="w-3 h-3 md:w-4 md:h-4"></i> PAUSAR' : '<i data-lucide="play" class="w-3 h-3 md:w-4 md:h-4"></i> INICIAR';
+                currentMode = 'LIVE';
+                modeLabel.textContent = "MODO CONTA REAL";
+                modeLabel.className = "text-[9px] font-bold mt-1 text-green-400 bg-green-500/20 px-2 py-0.5 rounded border border-green-500/30 inline-block tracking-widest";
+                setMode('LIVE');
             }
-            lucide.createIcons();
+            
+            // Sync inputs only if not focused
             if(document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'SELECT') {
                 document.getElementById('conf-entry').value = config.entry_value;
                 document.getElementById('conf-account').value = config.account_type;
@@ -866,12 +654,11 @@
                 document.getElementById('conf-timer-enabled').checked = config.timer_enabled;
                 document.getElementById('conf-timer-start').value = config.timer_start;
                 document.getElementById('conf-timer-end').value = config.timer_end;
+                document.getElementById('timer-inputs').style.opacity = config.timer_enabled ? '1' : '0.5';
             }
-            document.getElementById('stat-balance').textContent = `$${(config.current_balance || 0).toFixed(2)}`;
         }
-        
-        document.addEventListener('DOMContentLoaded', initApp);
 
+        document.addEventListener('DOMContentLoaded', initApp);
     </script>
 </body>
 </html>
