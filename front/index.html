@@ -25,7 +25,6 @@
         .active-nav { color: var(--gold) !important; background-color: rgba(245, 158, 11, 0.1); }
         input, select, button { -webkit-appearance: none; border-radius: 0.75rem; }
         
-        /* Splash Screen Animation */
         #splash-screen { position: fixed; inset: 0; background-color: #020617; z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center; transition: opacity 0.6s ease-out, visibility 0.6s; }
         #splash-screen.fade-out { opacity: 0; visibility: hidden; pointer-events: none; }
         .pulse-logo { animation: pulse-gold 2s infinite; }
@@ -44,9 +43,6 @@
         </div>
         <h1 class="text-3xl font-bold text-white tracking-wider">MAROMBIEW</h1>
         <p class="text-amber-500/60 text-xs font-mono mt-2 tracking-widest">TRADING INTELLIGENCE</p>
-        <div class="mt-8 flex items-center gap-2 text-slate-500 text-xs font-mono">
-            <i data-lucide="loader-2" class="w-3 h-3 animate-spin"></i> Inicializando sistemas...
-        </div>
     </div>
 
     <!-- LOGIN -->
@@ -56,47 +52,31 @@
                 <div class="w-16 h-16 bg-amber-500/10 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-amber-500/20">
                     <i data-lucide="dumbbell" class="text-amber-500 w-8 h-8"></i>
                 </div>
-                <h1 class="text-2xl font-bold text-white">Login</h1>
+                <h1 class="text-2xl font-bold text-white">Marombiew Bot</h1>
             </div>
             <form id="login-form" class="space-y-4" onsubmit="return false;">
                 <input type="email" id="email" class="w-full bg-slate-900/50 border border-slate-700 text-white p-3 rounded-xl focus:border-amber-500 outline-none transition-colors" placeholder="Email" required>
                 <input type="password" id="password" class="w-full bg-slate-900/50 border border-slate-700 text-white p-3 rounded-xl focus:border-amber-500 outline-none transition-colors" placeholder="Senha" required>
                 <button type="submit" id="login-btn" class="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-3.5 rounded-xl transition-all">Entrar</button>
-                <div id="login-error" class="text-red-400 text-xs text-center hidden p-2 bg-red-500/10 rounded-lg border border-red-500/20"></div>
             </form>
         </div>
     </div>
 
     <!-- APP -->
     <div id="app" class="flex-1 flex flex-col md:flex-row overflow-hidden hidden opacity-0 transition-opacity duration-500">
-        <!-- SIDEBAR (Desktop) -->
         <aside class="hidden md:flex flex-col w-64 glass-card border-r border-slate-800 z-20">
             <div class="h-20 flex items-center px-6 border-b border-slate-800/50 gap-3">
-                <i data-lucide="dumbbell" class="text-amber-500 w-6 h-6"></i>
-                <span class="font-bold text-lg text-white tracking-wide">MAROMBIEW</span>
+                <i data-lucide="dumbbell" class="text-amber-500 w-6 h-6 mr-3"></i><span class="font-bold text-lg text-white">MAROMBIEW</span>
             </div>
             <nav class="flex-1 p-4 space-y-2">
-                <button onclick="router.navigate('home')" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800/50 hover:text-white active-nav transition-all" data-target="home">
-                    <i data-lucide="layout-dashboard" class="w-5 h-5"></i> Dashboard
-                </button>
-                <button onclick="router.navigate('reports')" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800/50 hover:text-white transition-all" data-target="reports">
-                    <i data-lucide="bar-chart-2" class="w-5 h-5"></i> Relatórios
-                </button>
-                <button onclick="router.navigate('settings')" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800/50 hover:text-white transition-all" data-target="settings">
-                    <i data-lucide="settings" class="w-5 h-5"></i> Configurações
-                </button>
-                <button onclick="router.navigate('logs')" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800/50 hover:text-white transition-all" data-target="logs">
-                    <i data-lucide="terminal" class="w-5 h-5"></i> Terminal
-                </button>
+                <button onclick="router.navigate('home')" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800/50 hover:text-white active-nav" data-target="home"><i data-lucide="layout-dashboard" class="w-5 h-5"></i> Dashboard</button>
+                <button onclick="router.navigate('reports')" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800/50 hover:text-white" data-target="reports"><i data-lucide="bar-chart-2" class="w-5 h-5"></i> Relatórios</button>
+                <button onclick="router.navigate('settings')" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800/50 hover:text-white" data-target="settings"><i data-lucide="settings" class="w-5 h-5"></i> Configurações</button>
+                <button onclick="router.navigate('logs')" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800/50 hover:text-white" data-target="logs"><i data-lucide="terminal" class="w-5 h-5"></i> Terminal</button>
             </nav>
-            <div class="p-4 border-t border-slate-800/50">
-                <button id="logout-btn" class="flex items-center gap-3 px-4 py-3 text-sm text-red-400 hover:bg-red-500/10 rounded-xl w-full transition-all">
-                    <i data-lucide="log-out" class="w-5 h-5"></i> Sair
-                </button>
-            </div>
+            <div class="p-4 border-t border-slate-800/50"><button id="logout-btn" class="flex items-center gap-3 px-4 py-3 text-sm text-red-400 hover:bg-red-500/10 rounded-xl w-full"><i data-lucide="log-out" class="w-5 h-5"></i> Sair</button></div>
         </aside>
 
-        <!-- MAIN CONTENT -->
         <main class="flex-1 overflow-y-auto p-4 md:p-8 pb-24 md:pb-8 relative">
             <div id="connection-warning" class="hidden mb-4 bg-red-500/10 border border-red-500/20 text-red-400 p-3 rounded-xl flex items-center gap-2 text-sm animate-pulse">
                 <i data-lucide="wifi-off" class="w-4 h-4"></i> Bot Offline: Sem sinal há mais de 3 minutos.
@@ -104,54 +84,25 @@
 
             <!-- VIEW: HOME -->
             <div id="view-home" class="view-section space-y-6 max-w-5xl mx-auto">
-                <!-- Header & Controls -->
+                <!-- Header -->
                 <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-2">
                     <div>
                         <h1 class="text-2xl font-bold text-white">Dashboard</h1>
                         <div class="flex items-center gap-2 mt-1">
-                            <span id="mode-badge" class="px-2 py-0.5 rounded text-[10px] font-bold tracking-wider border border-slate-700 bg-slate-800 text-slate-400">CARREGANDO...</span>
-                            <span id="strategy-badge" class="px-2 py-0.5 rounded text-[10px] font-bold tracking-wider border border-blue-500/30 bg-blue-500/10 text-blue-400 hidden">ADAPTATIVE AI</span>
+                            <span id="mode-badge" class="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-400">CARREGANDO...</span>
                         </div>
                     </div>
                     <div class="flex items-center gap-2 w-full md:w-auto">
-                         <button id="restart-bot-btn" class="p-3 rounded-xl bg-slate-800 text-slate-400 border border-slate-700 hover:text-white hover:bg-slate-700 transition-all" title="Reiniciar Conexão">
-                             <i data-lucide="power" class="w-4 h-4"></i>
-                         </button>
-                         <button id="toggle-bot-btn" class="flex-1 md:flex-none px-4 py-3 rounded-xl text-xs font-bold bg-slate-800 text-white min-w-[120px] shadow-lg flex items-center gap-2 justify-center border border-slate-700">
-                             <i data-lucide="loader-2" class="animate-spin w-3 h-3"></i> ...
-                         </button>
+                         <button id="restart-bot-btn" class="p-3 rounded-xl bg-slate-800 text-slate-400 border border-slate-700 hover:text-white transition-all"><i data-lucide="power" class="w-4 h-4"></i></button>
+                         <button id="toggle-bot-btn" class="flex-1 md:flex-none px-4 py-3 rounded-xl text-xs font-bold bg-slate-800 text-white min-w-[120px] shadow-lg flex items-center gap-2 justify-center border border-slate-700"><i data-lucide="loader-2" class="animate-spin w-3 h-3"></i> ...</button>
                     </div>
                 </div>
 
-                <!-- Stats Grid -->
-                <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-                    <div class="glass-card p-4 rounded-xl relative overflow-hidden group">
-                        <div class="absolute right-2 top-2 opacity-10 group-hover:opacity-20 transition-opacity"><i data-lucide="wallet" class="w-8 h-8 text-slate-400"></i></div>
-                        <p class="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">Saldo Atual</p>
-                        <p id="stat-balance" class="text-xl font-bold text-white tracking-tight">$---</p>
-                    </div>
-                    <div class="glass-card p-4 rounded-xl border-b-2 border-green-500 relative overflow-hidden group">
-                        <div class="absolute right-2 top-2 opacity-10 group-hover:opacity-20 transition-opacity"><i data-lucide="trending-up" class="w-8 h-8 text-green-500"></i></div>
-                        <p class="text-[10px] text-green-500 font-bold uppercase tracking-wider mb-1">Wins (Dia)</p>
-                        <p id="score-wins" class="text-3xl font-black text-white">0</p>
-                    </div>
-                    <div class="glass-card p-4 rounded-xl border-b-2 border-red-500 relative overflow-hidden group">
-                        <div class="absolute right-2 top-2 opacity-10 group-hover:opacity-20 transition-opacity"><i data-lucide="trending-down" class="w-8 h-8 text-red-500"></i></div>
-                        <p class="text-[10px] text-red-500 font-bold uppercase tracking-wider mb-1">Losses (Dia)</p>
-                        <p id="score-losses" class="text-3xl font-black text-white">0</p>
-                    </div>
-                     <div class="glass-card p-4 rounded-xl border-b-2 border-blue-500 relative overflow-hidden group">
-                        <div class="absolute right-2 top-2 opacity-10 group-hover:opacity-20 transition-opacity"><i data-lucide="activity" class="w-8 h-8 text-blue-500"></i></div>
-                        <p class="text-[10px] text-blue-500 font-bold uppercase tracking-wider mb-1">Total Trades</p>
-                        <p id="score-total" class="text-3xl font-black text-white">0</p>
-                    </div>
-                </div>
-                
-                <!-- Best Assets -->
+                <!-- Best Assets Scroll -->
                 <div>
                      <div class="flex items-center gap-2 mb-3">
-                        <i data-lucide="search" class="w-4 h-4 text-amber-500"></i>
-                        <h3 class="text-xs font-bold text-slate-400 uppercase tracking-widest">Oportunidades (≥ 70% WR)</h3>
+                        <i data-lucide="trending-up" class="w-4 h-4 text-amber-500"></i>
+                        <h3 class="text-xs font-bold text-slate-400 uppercase tracking-widest">Melhores Oportunidades</h3>
                     </div>
                     <div id="top-assets-container" class="flex overflow-x-auto gap-3 pb-2 scrollbar-hide min-h-[90px]">
                          <div id="empty-assets-msg" class="glass-card p-4 rounded-xl border border-dashed border-slate-700 flex items-center justify-center text-slate-500 text-xs w-full">
@@ -160,16 +111,41 @@
                     </div>
                 </div>
 
-                <!-- Recent Activity -->
-                <div class="glass-card rounded-xl border border-slate-800 overflow-hidden flex flex-col h-64">
-                    <div class="bg-slate-900/50 p-3 border-b border-slate-800 flex justify-between items-center">
-                         <h3 class="text-xs font-bold text-slate-300 flex items-center gap-2">
-                             <i data-lucide="terminal" class="w-3 h-3 text-amber-500"></i> LOG DE EXECUÇÃO
-                         </h3>
-                         <span class="text-[9px] text-slate-600 font-mono">LIVE FEED</span>
+                <!-- Stats Grid -->
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div class="glass-card p-4 rounded-xl relative overflow-hidden group border-t-2 border-slate-600">
+                        <p class="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">Saldo Atual</p>
+                        <p id="stat-balance" class="text-xl font-bold text-white tracking-tight">$---</p>
                     </div>
-                    <div id="terminal-output-mini" class="font-mono text-[10px] text-slate-400 p-3 space-y-1.5 overflow-y-auto flex-1 bg-black/20">
-                        <div class="text-slate-600 italic">Iniciando feed...</div>
+                    <div class="glass-card p-4 rounded-xl border-t-2 border-green-500 relative overflow-hidden group">
+                        <div class="flex justify-between items-center">
+                            <div>
+                                <p class="text-[10px] text-green-500 font-bold uppercase tracking-wider mb-1">Wins (Dia)</p>
+                                <p id="score-wins" class="text-3xl font-black text-white">0</p>
+                            </div>
+                            <div class="text-right">
+                                <p class="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">Lucro (Dia)</p>
+                                <p id="stat-profit" class="text-lg font-bold text-slate-300">$0.00</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="glass-card p-4 rounded-xl border-t-2 border-red-500 relative overflow-hidden group">
+                        <p class="text-[10px] text-red-500 font-bold uppercase tracking-wider mb-1">Losses (Dia)</p>
+                        <p id="score-losses" class="text-3xl font-black text-white">0</p>
+                    </div>
+                     <div class="glass-card p-4 rounded-xl border-t-2 border-blue-500 relative overflow-hidden group">
+                        <p class="text-[10px] text-blue-500 font-bold uppercase tracking-wider mb-1">Total Trades</p>
+                        <p id="score-total" class="text-3xl font-black text-white">0</p>
+                    </div>
+                </div>
+
+                <!-- Recent History (Today) -->
+                <div>
+                    <div class="flex justify-between items-center mb-3">
+                        <h3 class="text-xs font-bold text-slate-400 flex items-center gap-2"><i data-lucide="history" class="w-3 h-3"></i> Histórico Recente (Hoje)</h3>
+                    </div>
+                    <div id="signals-list-home" class="space-y-2 pb-4 min-h-[100px]">
+                        <div class="text-center text-slate-600 text-xs py-4">Carregando histórico...</div>
                     </div>
                 </div>
             </div>
@@ -177,32 +153,31 @@
             <!-- VIEW: SETTINGS -->
             <div id="view-settings" class="view-section hidden space-y-6 max-w-2xl mx-auto">
                 <h1 class="text-2xl font-bold text-white mb-2">Configurações</h1>
-                <p class="text-xs text-slate-500 mb-6">Ajuste os parâmetros de risco e modo de operação.</p>
                 
                 <!-- Mode Selector -->
                 <div class="glass-card p-1 rounded-xl border border-slate-700 bg-slate-900/50 flex mb-6">
                     <button onclick="setMode('LIVE')" id="btn-mode-live" class="flex-1 p-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2">
-                        <i data-lucide="zap" class="w-4 h-4"></i> CONTA REAL (LIVE)
+                        <i data-lucide="zap" class="w-4 h-4"></i> CONTA REAL
                     </button>
                     <button onclick="setMode('OBSERVE')" id="btn-mode-observe" class="flex-1 p-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2">
-                        <i data-lucide="eye" class="w-4 h-4"></i> OBSERVAÇÃO (SIMULADO)
+                        <i data-lucide="eye" class="w-4 h-4"></i> OBSERVAÇÃO
                     </button>
                 </div>
                 
-                <!-- Quick Presets -->
+                <!-- Presets -->
                 <div class="grid grid-cols-3 gap-3 mb-6">
                     <button onclick="applyPreset('conservative')" class="p-4 rounded-xl bg-slate-800/50 hover:bg-slate-700/50 border border-slate-700 hover:border-green-500/50 transition-all text-center group">
-                        <div class="w-8 h-8 rounded-full bg-green-500/10 text-green-500 flex items-center justify-center mx-auto mb-2 group-hover:scale-110 transition-transform"><i data-lucide="shield" class="w-4 h-4"></i></div>
+                        <div class="w-8 h-8 rounded-full bg-green-500/10 text-green-500 flex items-center justify-center mx-auto mb-2"><i data-lucide="shield" class="w-4 h-4"></i></div>
                         <p class="text-xs font-bold text-white">Conservador</p>
                         <p class="text-[9px] text-slate-500 mt-1">3 Trades (2W/1L)</p>
                     </button>
                     <button onclick="applyPreset('sniper')" class="p-4 rounded-xl bg-slate-800/50 hover:bg-slate-700/50 border border-slate-700 hover:border-amber-500/50 transition-all text-center group ring-1 ring-amber-500/30">
-                        <div class="w-8 h-8 rounded-full bg-amber-500/10 text-amber-500 flex items-center justify-center mx-auto mb-2 group-hover:scale-110 transition-transform"><i data-lucide="crosshair" class="w-4 h-4"></i></div>
-                        <p class="text-xs font-bold text-white">Sniper OTC</p>
+                        <div class="w-8 h-8 rounded-full bg-amber-500/10 text-amber-500 flex items-center justify-center mx-auto mb-2"><i data-lucide="crosshair" class="w-4 h-4"></i></div>
+                        <p class="text-xs font-bold text-white">Sniper</p>
                         <p class="text-[9px] text-slate-500 mt-1">2 Trades (1W/1L)</p>
                     </button>
                     <button onclick="applyPreset('aggressive')" class="p-4 rounded-xl bg-slate-800/50 hover:bg-slate-700/50 border border-slate-700 hover:border-red-500/50 transition-all text-center group">
-                        <div class="w-8 h-8 rounded-full bg-red-500/10 text-red-500 flex items-center justify-center mx-auto mb-2 group-hover:scale-110 transition-transform"><i data-lucide="flame" class="w-4 h-4"></i></div>
+                        <div class="w-8 h-8 rounded-full bg-red-500/10 text-red-500 flex items-center justify-center mx-auto mb-2"><i data-lucide="flame" class="w-4 h-4"></i></div>
                         <p class="text-xs font-bold text-white">Agressivo</p>
                         <p class="text-[9px] text-slate-500 mt-1">6 Trades (4W/2L)</p>
                     </button>
@@ -210,85 +185,54 @@
 
                 <form id="settings-form" class="space-y-6">
                     <div class="glass-card p-6 rounded-xl space-y-6 border border-slate-800">
-                        <!-- Operational -->
                         <div class="grid grid-cols-2 gap-4">
-                            <div>
-                                <label class="text-[10px] text-slate-400 font-bold uppercase tracking-wider block mb-1.5">Valor Entrada ($)</label>
-                                <input type="number" id="conf-entry" class="w-full bg-slate-900 border border-slate-700 text-white p-3 rounded-lg focus:border-amber-500 outline-none transition-colors font-mono" placeholder="10.0">
-                            </div>
-                            <div>
-                                <label class="text-[10px] text-slate-400 font-bold uppercase tracking-wider block mb-1.5">Tipo Conta</label>
-                                <select id="conf-account" class="w-full bg-slate-900 border border-slate-700 text-white p-3 rounded-lg focus:border-amber-500 outline-none transition-colors">
-                                    <option value="PRACTICE">DEMO</option>
-                                    <option value="REAL">REAL</option>
-                                </select>
-                            </div>
+                            <div><label class="text-[10px] text-slate-400 font-bold uppercase tracking-wider block mb-1.5">Entrada ($)</label><input type="number" id="conf-entry" class="w-full bg-slate-900 border border-slate-700 text-white p-3 rounded-lg focus:border-amber-500 outline-none transition-colors font-mono"></div>
+                            <div><label class="text-[10px] text-slate-400 font-bold uppercase tracking-wider block mb-1.5">Conta</label><select id="conf-account" class="w-full bg-slate-900 border border-slate-700 text-white p-3 rounded-lg focus:border-amber-500 outline-none transition-colors"><option value="PRACTICE">DEMO</option><option value="REAL">REAL</option></select></div>
                         </div>
 
                         <div class="h-px bg-slate-700/50"></div>
 
                         <!-- Daily Limits -->
                         <div>
-                            <h3 class="text-sm font-bold text-white mb-4 flex items-center gap-2"><i data-lucide="lock" class="w-4 h-4 text-amber-500"></i> Limites Diários (Quantidade)</h3>
+                            <h3 class="text-sm font-bold text-white mb-4 flex items-center gap-2"><i data-lucide="lock" class="w-4 h-4 text-amber-500"></i> Metas Diárias (Stop)</h3>
                             <div class="grid grid-cols-3 gap-3">
-                                <div>
-                                    <label class="text-[9px] text-blue-400 font-bold uppercase tracking-wider block mb-1.5 text-center">Max Trades</label>
-                                    <input type="number" id="conf-max-trades" class="w-full bg-slate-900 border border-slate-700 text-white p-3 rounded-lg focus:border-blue-500 outline-none font-mono text-center text-lg">
-                                </div>
-                                <div>
-                                    <label class="text-[9px] text-green-500 font-bold uppercase tracking-wider block mb-1.5 text-center">Meta Wins</label>
-                                    <input type="number" id="conf-max-wins" class="w-full bg-slate-900 border border-slate-700 text-white p-3 rounded-lg focus:border-green-500 outline-none font-mono text-center text-lg">
-                                </div>
-                                <div>
-                                    <label class="text-[9px] text-red-500 font-bold uppercase tracking-wider block mb-1.5 text-center">Limite Loss</label>
-                                    <input type="number" id="conf-max-losses" class="w-full bg-slate-900 border border-slate-700 text-white p-3 rounded-lg focus:border-red-500 outline-none font-mono text-center text-lg">
-                                </div>
+                                <div><label class="text-[9px] text-blue-400 font-bold uppercase tracking-wider block mb-1.5 text-center">Max Trades</label><input type="number" id="conf-max-trades" class="w-full bg-slate-900 border border-slate-700 text-white p-3 rounded-lg focus:border-blue-500 outline-none font-mono text-center text-lg"></div>
+                                <div><label class="text-[9px] text-green-500 font-bold uppercase tracking-wider block mb-1.5 text-center">Meta Wins</label><input type="number" id="conf-max-wins" class="w-full bg-slate-900 border border-slate-700 text-white p-3 rounded-lg focus:border-green-500 outline-none font-mono text-center text-lg"></div>
+                                <div><label class="text-[9px] text-red-500 font-bold uppercase tracking-wider block mb-1.5 text-center">Limite Loss</label><input type="number" id="conf-max-losses" class="w-full bg-slate-900 border border-slate-700 text-white p-3 rounded-lg focus:border-red-500 outline-none font-mono text-center text-lg"></div>
                             </div>
                         </div>
-
-                        <!-- Scheduler -->
+                        
                         <div class="bg-slate-900/30 p-4 rounded-lg border border-slate-700/50">
                              <div class="flex items-center justify-between mb-3">
-                                <label class="text-sm font-bold text-white flex items-center gap-2"><i data-lucide="clock" class="w-4 h-4 text-slate-400"></i> Agendamento Automático</label>
-                                <label class="relative inline-flex items-center cursor-pointer">
-                                    <input type="checkbox" id="conf-timer-enabled" class="sr-only peer">
-                                    <div class="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600"></div>
-                                </label>
+                                <label class="text-sm font-bold text-white flex items-center gap-2"><i data-lucide="clock" class="w-4 h-4 text-slate-400"></i> Agendamento</label>
+                                <label class="relative inline-flex items-center cursor-pointer"><input type="checkbox" id="conf-timer-enabled" class="sr-only peer"><div class="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600"></div></label>
                             </div>
-                            <div class="grid grid-cols-2 gap-3 opacity-50 transition-opacity" id="timer-inputs">
-                                <input type="time" id="conf-timer-start" class="bg-slate-900 border border-slate-700 text-white p-2 rounded-lg text-sm w-full">
-                                <input type="time" id="conf-timer-end" class="bg-slate-900 border border-slate-700 text-white p-2 rounded-lg text-sm w-full">
+                            <div class="grid grid-cols-2 gap-3" id="timer-inputs">
+                                <input type="time" id="conf-timer-start" class="bg-slate-900 border border-slate-700 text-white p-2 rounded-lg text-sm">
+                                <input type="time" id="conf-timer-end" class="bg-slate-900 border border-slate-700 text-white p-2 rounded-lg text-sm">
                             </div>
                         </div>
                     </div>
-                    
-                    <button type="submit" class="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-4 rounded-xl shadow-lg shadow-amber-500/20 active:scale-95 transition-transform flex items-center justify-center gap-2">
-                        <i data-lucide="save" class="w-5 h-5"></i> Salvar Configurações
-                    </button>
+                    <button type="submit" class="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-4 rounded-xl shadow-lg flex items-center justify-center gap-2"><i data-lucide="save" class="w-5 h-5"></i> Salvar</button>
                 </form>
+            </div>
+            
+             <!-- VIEW: REPORTS (Full History) -->
+            <div id="view-reports" class="view-section hidden space-y-6 max-w-5xl mx-auto">
+                <h1 class="text-2xl font-bold text-white">Relatório Completo</h1>
+                <div id="signals-list-full" class="space-y-3 pb-8"></div>
             </div>
 
              <!-- VIEW: LOGS -->
             <div id="view-logs" class="view-section hidden h-full flex flex-col max-w-5xl mx-auto">
                 <div class="flex justify-between items-center mb-4">
-                    <h1 class="text-2xl font-bold text-white">Terminal do Sistema</h1>
-                    <button class="text-xs text-slate-500 hover:text-white px-3 py-1.5 bg-slate-800 rounded-lg border border-slate-700 transition-colors" onclick="document.getElementById('terminal-output').innerHTML = ''">Limpar Tela</button>
+                    <h1 class="text-2xl font-bold text-white">Terminal</h1>
+                    <button class="text-xs text-slate-500 hover:text-white px-3 py-1 bg-slate-800 rounded-lg" onclick="document.getElementById('terminal-output').innerHTML = ''">Limpar</button>
                 </div>
-                <div id="terminal-output" class="flex-1 glass-card rounded-xl p-4 overflow-y-auto font-mono text-xs space-y-2 bg-black/60 border border-slate-800 min-h-[500px]">
-                    <div class="text-slate-600 italic">Conectando ao feed de logs...</div>
-                </div>
-            </div>
-            
-            <!-- VIEW: REPORTS -->
-            <div id="view-reports" class="view-section hidden space-y-6 max-w-5xl mx-auto">
-                <h1 class="text-2xl font-bold text-white mb-4">Histórico Detalhado</h1>
-                <div id="signals-list" class="space-y-3 pb-8">
-                     <!-- Filled by JS -->
-                </div>
+                <div id="terminal-output" class="flex-1 glass-card rounded-xl p-4 overflow-y-auto font-mono text-xs space-y-2 bg-black/60 border border-slate-800 min-h-[500px]"></div>
             </div>
         </main>
 
-        <!-- MOBILE NAV -->
         <nav class="md:hidden fixed bottom-0 left-0 right-0 bg-[#0f172a]/95 backdrop-blur-xl border-t border-slate-800 flex justify-around px-2 pb-safe z-40 h-16 items-center">
             <button onclick="router.navigate('home')" class="flex flex-col items-center p-2 text-slate-500 active-nav rounded-lg" data-target="home"><i data-lucide="layout-dashboard" class="w-5 h-5"></i></button>
             <button onclick="router.navigate('reports')" class="flex flex-col items-center p-2 text-slate-500 rounded-lg" data-target="reports"><i data-lucide="bar-chart-2" class="w-5 h-5"></i></button>
@@ -299,8 +243,6 @@
 
     <script>
         const SUPABASE_URL = 'https://ioduahwknfsktujthfyc.supabase.co';
-        // Note: It's generally not safe to expose API keys in frontend code. 
-        // Ensure RLS (Row Level Security) is enabled on your Supabase tables.
         const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlvZHVhaHdrbmZza3R1anRoZnljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEzMDc0NDcsImV4cCI6MjA2Njg4MzQ0N30.96f8wZO6SvABKFMWjIiw1pSugAB4Isldj7yxLcLJRSE';
         let supabaseClient;
         const appStartTime = Date.now();
@@ -322,7 +264,7 @@
                         btn.classList.remove('text-slate-500');
                     }
                 });
-                if (viewName === 'reports') fetchReports();
+                if (viewName === 'reports') fetchReports('signals-list-full');
             }
         };
 
@@ -335,12 +277,9 @@
                 document.getElementById('toggle-bot-btn').addEventListener('click', handleToggle);
                 document.getElementById('restart-bot-btn').addEventListener('click', handleRestart);
                 document.getElementById('logout-btn').addEventListener('click', handleLogout);
-                
-                // Toggle Timer UI opacity
                 document.getElementById('conf-timer-enabled').addEventListener('change', (e) => {
                      document.getElementById('timer-inputs').style.opacity = e.target.checked ? '1' : '0.5';
                 });
-                
                 checkSession();
             } catch(e) { console.error(e); hideSplash(); }
         }
@@ -349,10 +288,7 @@
             const splash = document.getElementById('splash-screen');
             if(splash && !splash.classList.contains('fade-out')) {
                 const elapsed = Date.now() - appStartTime;
-                setTimeout(() => { 
-                    splash.classList.add('fade-out'); 
-                    setTimeout(() => splash.remove(), 600); 
-                }, Math.max(0, 4000 - elapsed)); // Force 4s splash
+                setTimeout(() => { splash.classList.add('fade-out'); setTimeout(() => splash.remove(), 600); }, Math.max(0, 4000 - elapsed));
             }
         }
 
@@ -377,10 +313,8 @@
         async function handleLogin(e) {
             e.preventDefault();
             const btn = document.getElementById('login-btn');
-            const originalText = btn.innerHTML;
             btn.innerHTML = '<i data-lucide="loader-2" class="animate-spin w-5 h-5 mx-auto"></i>';
             lucide.createIcons();
-            
             try {
                 const email = document.getElementById('email').value;
                 const password = document.getElementById('password').value;
@@ -388,9 +322,9 @@
                 if(error) throw error;
                 checkSession();
             } catch(err) {
-                document.getElementById('login-error').textContent = "Erro: " + err.message;
+                document.getElementById('login-error').innerText = "Erro: " + err.message;
                 document.getElementById('login-error').classList.remove('hidden');
-                btn.innerHTML = originalText;
+                btn.innerHTML = 'Entrar';
             }
         }
 
@@ -422,13 +356,8 @@
                 btn.innerHTML = '<i data-lucide="check" class="w-4 h-4 inline"></i> Salvo!';
                 btn.classList.add('bg-green-600');
                 lucide.createIcons();
-                setTimeout(() => {
-                    btn.innerHTML = originalText;
-                    btn.classList.remove('bg-green-600');
-                    lucide.createIcons();
-                }, 2000);
+                setTimeout(() => { btn.innerHTML = originalText; btn.classList.remove('bg-green-600'); lucide.createIcons(); }, 2000);
             } catch(err) { 
-                console.error(err); 
                 btn.innerHTML = originalText;
                 alert("Erro ao salvar.");
             }
@@ -438,9 +367,8 @@
             const btn = document.getElementById('toggle-bot-btn');
             const isRun = btn.innerText.includes('PAUSAR');
             updateButtonState(!isRun);
-            try {
-                await supabaseClient.from('bot_config').update({ status: isRun ? 'PAUSED' : 'RUNNING' }).eq('id', 1);
-            } catch(e) { updateButtonState(isRun); }
+            try { await supabaseClient.from('bot_config').update({ status: isRun ? 'PAUSED' : 'RUNNING' }).eq('id', 1); } 
+            catch(e) { updateButtonState(isRun); }
         }
         
         async function handleRestart() {
@@ -454,7 +382,7 @@
         function updateButtonState(isRunning) {
             const btn = document.getElementById('toggle-bot-btn');
             btn.innerHTML = isRunning ? '<i data-lucide="pause" class="w-3 h-3"></i> PAUSAR' : '<i data-lucide="play" class="w-3 h-3"></i> INICIAR';
-            btn.className = `px-4 py-2 rounded-lg text-xs font-bold min-w-[100px] shadow-lg flex items-center gap-2 justify-center transition-all ${isRunning ? 'bg-amber-500/10 text-amber-500 border border-amber-500/20' : 'bg-green-500 text-white'}`;
+            btn.className = `px-4 py-3 rounded-lg text-xs font-bold min-w-[120px] shadow-lg flex items-center gap-2 justify-center transition-all ${isRunning ? 'bg-amber-500/10 text-amber-500 border border-amber-500/20' : 'bg-green-500 text-white'}`;
             lucide.createIcons();
         }
         
@@ -464,11 +392,11 @@
             const btnObs = document.getElementById('btn-mode-observe');
             
             if(mode === 'LIVE') {
-                btnLive.className = "p-3 rounded-lg border border-green-500 bg-green-500/10 text-green-400 text-xs font-bold transition-all shadow-[0_0_15px_rgba(34,197,94,0.3)]";
-                btnObs.className = "p-3 rounded-lg border border-transparent bg-slate-900 text-slate-400 text-xs font-bold transition-all hover:bg-slate-800";
+                btnLive.className = "flex-1 p-3 rounded-lg border border-green-500 bg-green-500/10 text-green-400 text-xs font-bold transition-all shadow-[0_0_15px_rgba(34,197,94,0.3)]";
+                btnObs.className = "flex-1 p-3 rounded-lg border border-transparent bg-slate-900 text-slate-400 text-xs font-bold transition-all hover:bg-slate-800";
             } else {
-                btnLive.className = "p-3 rounded-lg border border-transparent bg-slate-900 text-slate-400 text-xs font-bold transition-all hover:bg-slate-800";
-                btnObs.className = "p-3 rounded-lg border border-blue-500 bg-blue-500/10 text-blue-400 text-xs font-bold transition-all shadow-[0_0_15px_rgba(59,130,246,0.3)]";
+                btnLive.className = "flex-1 p-3 rounded-lg border border-transparent bg-slate-900 text-slate-400 text-xs font-bold transition-all hover:bg-slate-800";
+                btnObs.className = "flex-1 p-3 rounded-lg border border-blue-500 bg-blue-500/10 text-blue-400 text-xs font-bold transition-all shadow-[0_0_15px_rgba(59,130,246,0.3)]";
             }
         }
 
@@ -499,47 +427,33 @@
                 const { data } = await supabaseClient.from('bot_config').select('*').eq('id', 1).single();
                 if(data) updateUI(data);
                 
+                // Logs
                 const logs = await supabaseClient.from('logs').select('*').order('created_at', { ascending: false }).limit(20);
                 if(logs.data && logs.data.length > 0) {
                      const newest = logs.data[0];
                      if(newest.id !== lastLogId) {
                          lastLogId = newest.id;
                          const term = document.getElementById('terminal-output');
-                         const mini = document.getElementById('terminal-output-mini');
                          
-                         // Clear loading message
-                         if(term.innerHTML.includes('Conectando') || term.innerHTML.includes('Aguardando')) {
-                             term.innerHTML = '';
-                             mini.innerHTML = '';
-                         }
-
                          const html = logs.data.map(l => {
                             let colorClass = "text-slate-400";
-                            let icon = "info";
-                            if(l.message.includes('WIN') || l.message.includes('SUCCESS')) { colorClass = "text-green-400"; icon = "check"; }
-                            if(l.message.includes('LOSS') || l.message.includes('ERROR') || l.message.includes('🛑')) { colorClass = "text-red-400"; icon = "alert-circle"; }
-                            if(l.message.includes('WARNING') || l.message.includes('⚠️')) { colorClass = "text-amber-400"; icon = "alert-triangle"; }
+                            if(l.message.includes('WIN') || l.message.includes('SUCCESS')) colorClass = "text-green-400";
+                            if(l.message.includes('LOSS') || l.message.includes('ERROR') || l.message.includes('🛑')) colorClass = "text-red-400";
+                            if(l.message.includes('WARNING') || l.message.includes('⚠️')) colorClass = "text-amber-400";
                             if(l.message.includes('DEBUG')) colorClass = "text-slate-500";
-                            
-                            // Parse message for cleaner display
                             let displayMsg = l.message.replace('ANALISE_DETALHADA::', '').replace('SCAN_ENTRADA::', 'SCAN: ');
-                            
-                            return `<div class="text-xs font-mono mb-1.5 border-b border-white/5 pb-1 flex items-start gap-2">
-                                <span class="text-slate-600 whitespace-nowrap pt-0.5">[${new Date(l.created_at).toLocaleTimeString()}]</span> 
-                                <span class="${colorClass} break-all">${displayMsg}</span>
-                            </div>`;
+                            return `<div class="text-xs font-mono mb-1.5 border-b border-white/5 pb-1 flex items-start gap-2"><span class="text-slate-600 whitespace-nowrap pt-0.5">[${new Date(l.created_at).toLocaleTimeString()}]</span> <span class="${colorClass} break-all">${displayMsg}</span></div>`;
                         }).join('');
                         
                         term.innerHTML = html;
-                        mini.innerHTML = html;
                      }
                 }
                 
-                // Real-time stats from DB history
-                 const today = new Date().toISOString().split('T')[0];
-                 const signals = await supabaseClient.from('trade_signals').select('*').gte('created_at', today + 'T00:00:00').order('created_at', {ascending: false});
+                // Fetch Daily Stats & History (Today)
+                const today = new Date().toISOString().split('T')[0];
+                const signals = await supabaseClient.from('trade_signals').select('*').gte('created_at', today + 'T00:00:00').order('created_at', {ascending: false});
                  
-                 if(signals.data) {
+                if(signals.data) {
                      let wins = 0, losses = 0, profit = 0;
                      signals.data.forEach(s => {
                          if(s.result === 'WIN') { wins++; profit += parseFloat(s.profit || 0); }
@@ -550,13 +464,16 @@
                      document.getElementById('score-total').textContent = wins + losses;
                      document.getElementById('stat-profit').textContent = `${profit >= 0 ? '+' : ''}$${profit.toFixed(2)}`;
                      document.getElementById('stat-profit').className = `text-2xl font-bold tracking-tight ${profit >= 0 ? 'text-green-500' : 'text-red-500'}`;
+                     
+                     // Update Home List
+                     renderSignalsList('signals-list-home', signals.data);
                  }
                  
                  // Fetch Best Assets
                  const assets = await supabaseClient.from('cataloged_assets').select('*').order('win_rate', { ascending: false }).limit(3);
                  if(assets.data) renderAssetCards(assets.data);
 
-            } catch(e) { console.error("Loop error", e); }
+            } catch(e) { }
         }
 
         function renderAssetCards(assets) {
@@ -582,45 +499,45 @@
                 </div>
              `).join('');
              
-             // Simple diff to avoid redraw
              if(container.innerHTML !== cards) {
                  container.innerHTML = cards;
                  lucide.createIcons();
              }
         }
         
-        // Reports Section Fetch
-        async function fetchReports() {
+        async function fetchReports(targetId) {
              const today = new Date().toISOString().split('T')[0];
-             const { data } = await supabaseClient.from('trade_signals')
-                .select('*')
-                .gte('created_at', today + 'T00:00:00')
-                .order('created_at', {ascending: false});
-             
-             const container = document.getElementById('signals-list');
-             if(!data || data.length === 0) {
-                 container.innerHTML = '<div class="text-center text-slate-600 py-8 text-xs font-mono">Nenhum trade realizado hoje.</div>';
+             const { data } = await supabaseClient.from('trade_signals').select('*').order('created_at', {ascending: false}).limit(100); // Show all history in Reports tab
+             renderSignalsList(targetId, data);
+        }
+
+        function renderSignalsList(targetId, data) {
+            const container = document.getElementById(targetId);
+            if(!container) return;
+            
+            if(!data || data.length === 0) {
+                 container.innerHTML = '<div class="text-center text-slate-600 py-8 text-xs font-mono">Nenhum trade realizado.</div>';
                  return;
-             }
+            }
              
-             container.innerHTML = data.map(s => {
+            container.innerHTML = data.map(s => {
                  const isWin = s.result === 'WIN';
                  const color = isWin ? 'text-green-500' : (s.result === 'LOSS' ? 'text-red-500' : 'text-slate-400');
                  const border = isWin ? 'border-l-green-500' : (s.result === 'LOSS' ? 'border-l-red-500' : 'border-l-slate-600');
                  
                  return `
-                 <div class="glass-card p-4 rounded-xl border-l-4 ${border} flex justify-between items-center">
+                 <div class="glass-card p-3 rounded-xl border-l-4 ${border} flex justify-between items-center">
                     <div class="flex items-center gap-3">
-                        <div class="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center border border-slate-700">
-                             <i data-lucide="${s.direction === 'call' ? 'arrow-up' : 'arrow-down'}" class="w-5 h-5 ${s.direction === 'call' ? 'text-green-400' : 'text-red-400'}"></i>
+                        <div class="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center border border-slate-700">
+                             <i data-lucide="${s.direction === 'call' ? 'arrow-up' : 'arrow-down'}" class="w-4 h-4 ${s.direction === 'call' ? 'text-green-400' : 'text-red-400'}"></i>
                         </div>
                         <div>
                             <p class="text-xs font-bold text-white">${s.pair}</p>
-                            <p class="text-[10px] text-slate-500 font-mono">${new Date(s.created_at).toLocaleTimeString()}</p>
+                            <p class="text-[9px] text-slate-500 font-mono">${new Date(s.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
                         </div>
                     </div>
                     <div class="text-right">
-                        <span class="text-xs font-bold ${color}">${s.result}</span>
+                        <span class="text-[10px] font-bold ${color}">${s.result}</span>
                         <p class="text-[10px] text-slate-400 font-mono mt-0.5">${parseFloat(s.profit).toFixed(2)}</p>
                     </div>
                  </div>`;
@@ -632,19 +549,20 @@
             updateButtonState(config.status === 'RUNNING');
             
             const modeLabel = document.getElementById('mode-display');
+            const badge = document.getElementById('mode-badge');
+            
             if(config.mode === 'OBSERVE') {
                 currentMode = 'OBSERVE';
-                modeLabel.textContent = "MODO OBSERVAÇÃO";
-                modeLabel.className = "text-[9px] font-bold mt-1 text-blue-300 bg-blue-500/20 px-2 py-0.5 rounded border border-blue-500/30 inline-block tracking-widest";
+                badge.innerText = "MODO OBSERVAÇÃO";
+                badge.className = "px-2 py-0.5 rounded text-[10px] font-bold bg-blue-500/10 text-blue-400 border border-blue-500/30";
                 setMode('OBSERVE');
             } else {
                 currentMode = 'LIVE';
-                modeLabel.textContent = "MODO CONTA REAL";
-                modeLabel.className = "text-[9px] font-bold mt-1 text-green-400 bg-green-500/20 px-2 py-0.5 rounded border border-green-500/30 inline-block tracking-widest";
+                badge.innerText = "MODO REAL";
+                badge.className = "px-2 py-0.5 rounded text-[10px] font-bold bg-green-500/10 text-green-400 border border-green-500/30";
                 setMode('LIVE');
             }
             
-            // Sync inputs only if not focused
             if(document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'SELECT') {
                 document.getElementById('conf-entry').value = config.entry_value;
                 document.getElementById('conf-account').value = config.account_type;
