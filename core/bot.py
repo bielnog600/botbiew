@@ -92,12 +92,10 @@ class TechnicalAnalysis:
 
     @staticmethod
     def check_candle_quality(candles, asset_name):
-        """Valida se o candle DE SINAL (fechado, -2) tem qualidade"""
         if len(candles) < 20: return False, "Dados insuficientes"
         last_closed = candles[-2] 
         current_body = abs(last_closed['close'] - last_closed['open'])
         
-        # Threshold por tipo de ativo
         MIN_BODY = 0.015 if "JPY" in asset_name else 0.00015
         if current_body < MIN_BODY: return False, "Mercado Morto"
 
@@ -106,12 +104,10 @@ class TechnicalAnalysis:
         
         if current_body < (avg_body * 0.6): return False, "Candle fraco (<60% média)"
             
-        # Filtro de Deslocamento (Preço vs EMA)
         ema21 = TechnicalAnalysis.calculate_ema(candles[:-1], 21) 
         distance = abs(last_closed['close'] - ema21)
         if distance < (avg_body * 0.5): return False, "Sem deslocamento real"
 
-        # 5. FILTRO DE VOLATILIDADE ABSOLUTA (SPIKE)
         ranges = [(c['max'] - c['min']) for c in candles[-15:-2]]
         avg_range = sum(ranges) / len(ranges) if ranges else 0.0001
         last_range = last_closed['max'] - last_closed['min']
@@ -122,22 +118,48 @@ class TechnicalAnalysis:
         return True, "OK"
 
     @staticmethod
-    def calculate_entry_score(candles, regime, strength, sig, asset_name):
-        """Calcula score de 0 a 100 para a entrada. Requer >= 75 para aprovar."""
+    def calculate_entry_score(candles, regime, strength, sig, asset_name, strategy_type="TREND"):
+        """Calcula score de 0 a 100 para a entrada."""
         score = 0
         details = []
 
         last_closed = candles[-2]
         body = abs(last_closed['close'] - last_closed['open'])
-        
         bodies = [abs(c['close'] - c['open']) for c in candles[-12:-2]]
         avg_body = sum(bodies) / len(bodies) if bodies else 0.00001
+        
+        # --- SCORE PARA ESTRATÉGIA DE SHOCK ---
+        if strategy_type == "SHOCK_REVERSAL":
+            score = 70 # Base alta pois já passou pelos filtros rígidos
+            details.append("Base Shock")
+            
+            # Bônus por força extrema do corpo
+            if body >= avg_body * 2.0:
+                score += 10
+                details.append("Corpo Massivo (>2x)")
+            
+            # Bônus por fechamento extremo (top/bottom 10%)
+            rng = last_closed['max'] - last_closed['min']
+            if sig == 'put': # Shock de alta
+                if last_closed['close'] >= last_closed['max'] - (rng * 0.10):
+                    score += 10
+                    details.append("Fechamento no Talo")
+            else: # Shock de baixa
+                if last_closed['close'] <= last_closed['min'] + (rng * 0.10):
+                    score += 10
+                    details.append("Fechamento no Fundo")
 
-        # 1. Contexto Geral (+20)
+            # Penalidade se for contra tendência forte (Safety)
+            if regime == "TREND" and strength == "STRONG":
+                score -= 20
+                details.append("Contra Trend Forte")
+
+            return score, ", ".join(details)
+
+        # --- SCORE PARA ESTRATÉGIAS DE TENDÊNCIA (V2 / MICRO) ---
         score += 20 
         details.append("Contexto OK")
         
-        # Score Extra por Spread
         ema9 = TechnicalAnalysis.calculate_ema(candles[:-1], 9)
         ema21 = TechnicalAnalysis.calculate_ema(candles[:-1], 21)
         spread = abs(ema9 - ema21)
@@ -145,7 +167,6 @@ class TechnicalAnalysis:
             score += 10
             details.append("Spread Forte")
 
-        # 2. Regime de Mercado (+25)
         if regime == "TREND" and strength == "STRONG":
             score += 25
             details.append("Trend Strong")
@@ -153,7 +174,6 @@ class TechnicalAnalysis:
             score += 15 
             details.append("Micro Pullback")
 
-        # 3. Expansão de Volatilidade (+20)
         if body > (avg_body * 1.3):
             score += 20
             details.append("Expansão Forte")
@@ -161,13 +181,10 @@ class TechnicalAnalysis:
             score += 10
             details.append("Expansão Moderada")
 
-        # 4. Padrão Técnico Limpo (+15)
-        is_engulf = TechnicalAnalysis.engulf_filter(candles, sig)
-        if is_engulf:
+        if TechnicalAnalysis.engulf_filter(candles, sig):
             score += 15
             details.append("Engolfo Limpo")
         
-        # 5. Horário "Nobre" (+10)
         hr = datetime.now(BR_TIMEZONE).hour
         if 8 <= hr <= 11 or 15 <= hr <= 17:
             score += 10
@@ -206,28 +223,19 @@ class TechnicalAnalysis:
         min_slope = avg_body * 0.02
         ema21_slope = ema21 - ema21_prev
         
-        # TENDÊNCIA DE ALTA
         if ema9 > ema21 and ema21_slope > min_slope:
             touched_ema = reject_candle['min'] <= (ema21 + (avg_body * 0.1))
             held_support = reject_candle['close'] >= (ema21 - (avg_body * 0.3))
             if touched_ema and held_support:
                 if confirm_candle['color'] == 'green' and confirm_candle['close'] > confirm_candle['open']:
-                     # Filtro de engolfo obrigatório
-                     if engulf_required and not TechnicalAnalysis.engulf_filter(candles, "call"):
-                         return None, "Sem engolfo (obrigatório)"
                      return 'call', "V2 CALL"
 
-        # TENDÊNCIA DE BAIXA
         elif ema9 < ema21 and ema21_slope < -min_slope:
             touched_ema = reject_candle['max'] >= (ema21 - (avg_body * 0.1))
             held_resistance = reject_candle['close'] <= (ema21 + (avg_body * 0.3))
             if touched_ema and held_resistance:
                 if confirm_candle['color'] == 'red' and confirm_candle['close'] < confirm_candle['open']:
-                     # Filtro de engolfo obrigatório
-                     if engulf_required and not TechnicalAnalysis.engulf_filter(candles, "put"):
-                         return None, "Sem engolfo (obrigatório)"
                      return 'put', "V2 PUT"
-                     
         return None, "Sem configuração"
 
     @staticmethod
@@ -237,6 +245,51 @@ class TechnicalAnalysis:
         if direction == "call": return (last['color'] == 'green' and prev['color'] == 'red' and last['body'] >= prev['body'] * 0.6)
         if direction == "put": return (last['color'] == 'red' and prev['color'] == 'green' and last['body'] >= prev['body'] * 0.6)
         return False
+
+# --- 🔥 NOVA ESTRATÉGIA: SHOCK REVERSAL ---
+class ShockReversalStrategy:
+    @staticmethod
+    def get_signal(candles):
+        if len(candles) < 20: return None, "Dados insuficientes"
+        
+        last_closed = candles[-2] # Vela de explosão
+        # prev = candles[-3]
+        
+        # Estatísticas recentes (10 velas ANTES do shock)
+        bodies = [abs(c['close'] - c['open']) for c in candles[-12:-2]]
+        avg_body = sum(bodies) / len(bodies) if bodies else 0.00001
+        
+        ranges = [(c['max'] - c['min']) for c in candles[-12:-2]]
+        avg_range = sum(ranges) / len(ranges) if ranges else 0.00001
+        
+        # Dados da vela atual
+        body = abs(last_closed['close'] - last_closed['open'])
+        rng = last_closed['max'] - last_closed['min']
+        
+        if rng == 0: return None, "Doji"
+
+        # --- SHOCK UP (Explosão de Alta) ---
+        if last_closed['close'] > last_closed['open']: # Verde
+            upper_wick = last_closed['max'] - last_closed['close']
+            
+            # 1. Tamanho do corpo e range (Explosão)
+            if body >= (avg_body * 1.6) and rng >= (avg_range * 1.6):
+                # 2. Fechamento no topo (esticado)
+                if last_closed['close'] >= last_closed['max'] - (rng * 0.15):
+                    # 3. Wick controlado
+                    if upper_wick <= (body * 0.6):
+                        return "put", "SHOCK_UP_REVERSAL"
+        
+        # --- SHOCK DOWN (Explosão de Baixa) ---
+        elif last_closed['close'] < last_closed['open']: # Vermelha
+            lower_wick = last_closed['close'] - last_closed['min']
+            
+            if body >= (avg_body * 1.6) and rng >= (avg_range * 1.6):
+                if last_closed['close'] <= last_closed['min'] + (rng * 0.15):
+                    if lower_wick <= (body * 0.6):
+                        return "call", "SHOCK_DOWN_REVERSAL"
+                        
+        return None, "Sem Shock"
 
 class MarketRegimeClassifier:
     @staticmethod
@@ -316,7 +369,8 @@ class SimpleBot:
             "status": "PAUSED", "account_type": "PRACTICE", "entry_value": 1.0,
             "max_trades_per_day": 0, "max_wins_per_day": 0, "max_losses_per_day": 0,
             "timer_enabled": False, "timer_start": "00:00", "timer_end": "00:00",
-            "mode": "LIVE"
+            "mode": "LIVE",
+            "strategy_mode": "AUTO" # V2_TREND, SHOCK_REVERSAL, AUTO
         }
         self.last_loss_time = 0
         self.asset_cooldowns = {}  
@@ -340,6 +394,7 @@ class SimpleBot:
         self.strategy_performance = {
             "TREND_STRONG": {'wins': 0, 'losses': 0, 'consecutive_losses': 0, 'active': True},
             "TREND_WEAK": {'wins': 0, 'losses': 0, 'consecutive_losses': 0, 'active': True},
+            "SHOCK_REVERSAL": {'wins': 0, 'losses': 0, 'consecutive_losses': 0, 'active': True},
             "RANGE": {'wins': 0, 'losses': 0, 'consecutive_losses': 0, 'active': False} 
         }
         self.init_supabase()
@@ -390,7 +445,6 @@ class SimpleBot:
         except: pass
 
     def start_new_session(self):
-        """Inicia uma nova sessão de trading, zerando contadores"""
         self.session_blocked = False 
         self.consecutive_losses.clear() 
         self.range_loss_by_hour.clear()
@@ -398,30 +452,25 @@ class SimpleBot:
         self.daily_wins = 0
         self.daily_losses = 0
         self.daily_total = 0
-        self.strategy_performance = {
-            "TREND_STRONG": {'wins': 0, 'losses': 0, 'consecutive_losses': 0, 'active': True},
-            "TREND_WEAK": {'wins': 0, 'losses': 0, 'consecutive_losses': 0, 'active': True},
-            "RANGE": {'wins': 0, 'losses': 0, 'consecutive_losses': 0, 'active': False}
-        }
+        
+        # Reset Strategies
+        for k in self.strategy_performance:
+             self.strategy_performance[k] = {'wins': 0, 'losses': 0, 'consecutive_losses': 0, 'active': True}
+        self.strategy_performance["RANGE"]["active"] = False
+
         if self.api: self.update_balance_remote()
         self.log_to_db(f"🚀 NOVA SESSÃO INICIADA ({self.config.get('mode', 'LIVE')})", "SYSTEM")
 
-    # 🔥 1. SCORE MÍNIMO ADAPTATIVO
     def get_min_score(self):
         base = 75
-        if self.daily_losses >= 2 and self.daily_wins == 0:
-            return base + 5
-        if self.daily_wins >= 3 and self.daily_losses == 0:
-            return base - 5
+        if self.daily_losses >= 2 and self.daily_wins == 0: return base + 5
+        if self.daily_wins >= 3 and self.daily_losses == 0: return base - 5
         return base
 
-    # 🔥 3. STAKE ADAPTATIVO
     def get_entry_value(self):
         base = self.config["entry_value"]
-        if self.daily_losses >= 1:
-            return round(base * 0.8, 2)
-        if self.daily_wins >= 2 and self.daily_losses == 0:
-            return round(base * 1.2, 2)
+        if self.daily_losses >= 1: return round(base * 0.8, 2)
+        if self.daily_wins >= 2 and self.daily_losses == 0: return round(base * 1.2, 2)
         return base
 
     def update_strategy_stats(self, strategy_key, result, asset):
@@ -456,22 +505,23 @@ class SimpleBot:
         else:
             stats['losses'] += 1
             stats['consecutive_losses'] += 1
-            if key == "RANGE" and stats['losses'] >= 1:
+            # Self-Disable
+            if key == "SHOCK_REVERSAL" and stats['losses'] >= 2:
                  stats['active'] = False
-                 self.log_to_db(f"🚫 Estratégia RANGE DESATIVADA (Limite: 1 Loss)", "WARNING")
+                 self.log_to_db(f"🚫 SHOCK_REVERSAL Desativada (2 Losses)", "WARNING")
             elif key == "TREND_WEAK" and stats['losses'] >= 2:
                  stats['active'] = False
-                 self.log_to_db(f"🚫 Estratégia MICRO-TREND DESATIVADA (Limite: 2 Losses)", "WARNING")
+                 self.log_to_db(f"🚫 Estratégia MICRO-TREND Desativada", "WARNING")
             elif key == "TREND_STRONG" and (stats['consecutive_losses'] >= 3 or stats['losses'] >= 4):
                  stats['active'] = False
-                 self.log_to_db(f"🚫 Estratégia TREND STRONG DESATIVADA (Performance Ruim)", "WARNING")
+                 self.log_to_db(f"🚫 Estratégia TREND STRONG Desativada", "WARNING")
 
     def check_auto_disable(self):
         active_strats = [k for k, v in self.strategy_performance.items() if v['active']]
         if not active_strats:
             self.log_to_db("🧠 Todas estratégias falharam. Pausando bot.", "WARNING")
             self.session_blocked = True
-            self.pause_bot_by_management(block_session=True)
+            self.pause_bot_by_management()
             return False
         return True
 
@@ -493,20 +543,17 @@ class SimpleBot:
             prev_mode = self.config.get("mode")
             new_mode = (data.get("mode") or "LIVE").strip().upper()
 
-            # CORREÇÃO 1: Tratar status RESTARTING
             if new_status == "RESTARTING":
-                self.log_to_db("♻️ RESTARTING recebido. Reiniciando conexão...", "SYSTEM")
+                self.log_to_db("♻️ RESTARTING recebido...", "SYSTEM")
                 if self.supabase:
                     try: self.supabase.table("bot_config").update({"status": "RUNNING"}).eq("id", 1).execute()
                     except: pass
-                # Força desconexão
                 if self.api: 
                     try: self.api.api.close()
                     except: pass
                 self.api = None
                 time.sleep(2)
                 self.connect()
-                # Não retorna imediatamente, deixa atualizar config
                 new_status = "RUNNING" 
 
             if self.session_blocked and new_status == "RUNNING":
@@ -515,14 +562,13 @@ class SimpleBot:
                  except: pass
                  new_status = "PAUSED"
 
-            # Inicia nova sessão se não estiver bloqueado
-            should_start = ((prev_status != "RUNNING" and new_status == "RUNNING") or (prev_mode != new_mode))
-            if should_start and not self.session_blocked:
+            if ((prev_status != "RUNNING" and new_status == "RUNNING") or (prev_mode != new_mode)) and not self.session_blocked:
                 self.start_new_session()
             
             self.config.update({
                 "status": new_status,
                 "mode": new_mode,
+                "strategy_mode": (data.get("strategy_mode") or "AUTO").strip().upper(),
                 "account_type": (data.get("account_type") or "PRACTICE").strip().upper(),
                 "entry_value": float(data.get("entry_value") or 1.0),
                 "max_trades_per_day": int(data.get("max_trades_per_day") or 0),
@@ -538,7 +584,6 @@ class SimpleBot:
             self.init_supabase()
 
     def check_schedule(self):
-        # ⛔ PRIORIDADE ABSOLUTA: STOP DIÁRIO
         if self.session_blocked: return
 
         if not self.config.get("timer_enabled", False): return 
@@ -549,7 +594,6 @@ class SimpleBot:
         hour = now_br.hour
         minute = now_br.minute
         
-        # Bloqueios Horários (Madrugada/Troca)
         if 0 <= hour < 4: return
         if hour == 13 and minute >= 30: return
         if hour == 14 and minute <= 30: return
@@ -591,11 +635,8 @@ class SimpleBot:
             return False
         return True
 
-    def pause_bot_by_management(self, block_session=False):
+    def pause_bot_by_management(self):
         self.config["status"] = "PAUSED"
-        if block_session:
-            self.session_blocked = True
-            
         if self.supabase: 
             try: self.supabase.table("bot_config").update({"status": "PAUSED"}).eq("id", 1).execute()
             except: pass
@@ -634,8 +675,7 @@ class SimpleBot:
                 wins, total = 0, 0
                 for i in range(50, len(candles)-1):
                     sub = candles[i-50:i+1]
-                    regime = MarketRegimeClassifier.classify(sub)
-                    if regime != "TREND": continue 
+                    # Simula V2
                     sig, _ = TechnicalAnalysis.get_signal(sub)
                     if sig:
                         total += 1
@@ -645,7 +685,7 @@ class SimpleBot:
                 if total >= 5: 
                     wr = (wins / total) * 100
                     if wr >= 70:
-                       results.append({'pair': asset, 'win_rate': wr, 'best_strategy': 'V2'})
+                       results.append({'pair': asset, 'win_rate': wr, 'best_strategy': 'V2/Shock'})
             except: pass
             time.sleep(0.05)
         
@@ -782,7 +822,7 @@ class SimpleBot:
                 if not self.check_daily_limits():
                      self.log_to_db("🛑 LIMITE DIÁRIO ATINGIDO — PAUSANDO BOT IMEDIATAMENTE", "WARNING")
                      self.session_blocked = True
-                     self.pause_bot_by_management(block_session=True)
+                     self.pause_bot_by_management()
 
             else:
                 self.log_to_db("❌ Falha na ordem", "ERROR")
@@ -797,13 +837,10 @@ class SimpleBot:
         
         while True:
             try:
-                # 2. WATCHDOG FIX: Atualiza sempre que o loop roda
                 global LAST_LOG_TIME
                 LAST_LOG_TIME = time.time()
-                
                 self.fetch_config()
                 
-                # CORREÇÃO 2: Verificação de Limite no Loop
                 if not self.check_daily_limits():
                     if time.time() - self.last_blocked_log > 300:
                          self.log_to_db("⛔ Limite diário atingido (Loop).", "WARNING")
@@ -817,21 +854,21 @@ class SimpleBot:
                     if time.time() - self.last_blocked_log > 300:
                         self.log_to_db("⛔ Bloqueado por limite diário.", "WARNING")
                         self.last_blocked_log = time.time()
-                    if self.supabase:
-                        try:
-                            self.supabase.table("bot_config").update({"status": "PAUSED"}).eq("id", 1).execute()
-                        except: pass
+                    self.supabase.table("bot_config").update({"status": "PAUSED"}).eq("id", 1).execute()
                     time.sleep(10)
                     continue
                 
-                self.check_schedule() # CORREÇÃO 3: Schedule agora é chamado
+                self.check_schedule()
                 
                 if self.config["status"] == "PAUSED":
                     time.sleep(5)
                     continue
+
+                if self.config["status"] == "RESTARTING":
+                    if self.supabase: self.supabase.table("bot_config").update({"status": "RUNNING"}).eq("id", 1).execute()
+                    break
                 
-                # CORREÇÃO 2: Verificação de API no loop
-                if not self.api or not self.api.check_connect(): 
+                if not self.api.check_connect(): 
                     self.connect()
                     continue
 
@@ -840,6 +877,7 @@ class SimpleBot:
 
                 now_sec = datetime.now().second
                 if 55 <= now_sec <= 59:
+                     strat_mode = self.config.get("strategy_mode", "AUTO")
                      for asset in self.best_assets:
                          with self.trade_lock:
                              if asset in self.active_trades: continue
@@ -856,23 +894,33 @@ class SimpleBot:
 
                                  regime = MarketRegimeClassifier.classify(candles)
                                  sig, reason, strat_key = None, "", "UNKNOWN"
-                                 strength = "WEAK" # CORREÇÃO 3: Init Strength
+                                 strength = "WEAK" 
                                  
-                                 if regime == "NO_TRADE": continue
-                                 
-                                 if regime == "TREND":
-                                     strength = TrendStrength.classify(candles)
-                                     if strength == "STRONG": 
-                                         sig, reason = TechnicalAnalysis.get_signal(candles)
-                                         strat_key = "TREND_STRONG"
-                                     else: 
-                                         sig, reason = MicroPullbackStrategy.get_signal(candles)
-                                         strat_key = "TREND_WEAK"
+                                 # 1. SHOCK REVERSAL (SE HABILITADO)
+                                 if strat_mode in ["AUTO", "SHOCK_REVERSAL"]:
+                                     sig_shock, reason_shock = ShockReversalStrategy.get_signal(candles)
+                                     if sig_shock:
+                                          # Filtro extra: Não opera contra TREND STRONG
+                                          st = TrendStrength.classify(candles)
+                                          if regime == "TREND" and st == "STRONG":
+                                               self.log_rejection(asset, "Shock contra Trend Forte", "SHOCK")
+                                          else:
+                                               sig, reason, strat_key = sig_shock, reason_shock, "SHOCK_REVERSAL"
+
+                                 # 2. V2 TREND (SE AINDA NÃO ACHOU SINAL E MODO PERMITIR)
+                                 if not sig and strat_mode in ["AUTO", "V2_TREND"]:
+                                     if regime == "TREND":
+                                         strength = TrendStrength.classify(candles)
+                                         if strength == "STRONG": 
+                                             sig, reason = TechnicalAnalysis.get_signal(candles)
+                                             strat_key = "TREND_STRONG"
+                                         else: 
+                                             sig, reason = MicroPullbackStrategy.get_signal(candles)
+                                             strat_key = "TREND_WEAK"
                                  
                                  if sig:
-                                     # AJUSTE 1: Uso correto de 'strength'
                                      min_score = self.get_min_score()
-                                     score, score_det = TechnicalAnalysis.calculate_entry_score(candles, regime, strength, sig, asset)
+                                     score, score_det = TechnicalAnalysis.calculate_entry_score(candles, regime, strength, sig, asset, strat_key) # Passa strat_key
                                      
                                      if score >= min_score:
                                          self.execute_trade(asset, sig, strat_key, reason)
