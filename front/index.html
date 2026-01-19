@@ -6,7 +6,7 @@
     <title>Marombiew Bot</title>
     
     <!-- PWA Settings -->
-    <meta name="theme-color" content="#111827"> <!-- Slate 900 -->
+    <meta name="theme-color" content="#111827">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/4712/4712109.png">
@@ -18,7 +18,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 
     <style>
-        /* Fundo Cinza Escuro Premium */
+        /* Paleta Dark Premium */
         :root { --bg-dark: #0f1115; --card-bg: #181b21; --gold: #f59e0b; }
         
         body { 
@@ -31,11 +31,11 @@
         
         .font-mono { font-family: 'JetBrains Mono', monospace; }
         
-        /* Cards mais sólidos e limpos para o tema dark */
+        /* Cards Sólidos */
         .glass-card { 
             background: var(--card-bg); 
             border: 1px solid rgba(255, 255, 255, 0.05); 
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2);
         }
         
         .active-nav { 
@@ -46,12 +46,11 @@
         
         input, select, button { -webkit-appearance: none; border-radius: 0.5rem; }
         
-        /* Table Styling for Reports */
         .report-table-header { @apply text-[10px] text-slate-500 font-bold uppercase tracking-wider py-3 px-4 text-left border-b border-slate-800; }
         .report-table-row { @apply border-b border-slate-800/50 hover:bg-white/5 transition-colors; }
         .report-cell { @apply py-3 px-4 text-xs; }
 
-        /* Splash Screen Animation */
+        /* Splash Screen */
         #splash-screen { position: fixed; inset: 0; background-color: var(--bg-dark); z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center; transition: opacity 0.6s ease-out, visibility 0.6s; }
         #splash-screen.fade-out { opacity: 0; visibility: hidden; pointer-events: none; }
         .pulse-logo { animation: pulse-gold 2s infinite; }
@@ -59,8 +58,6 @@
         
         .scrollbar-hide::-webkit-scrollbar { display: none; }
         .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
-        
-        .stat-value { font-variant-numeric: tabular-nums; }
     </style>
 </head>
 <body class="flex flex-col h-screen text-slate-200">
@@ -72,9 +69,6 @@
         </div>
         <h1 class="text-3xl font-bold text-white tracking-wider">MAROMBIEW</h1>
         <p class="text-amber-500/60 text-xs font-mono mt-2 tracking-widest">TRADING INTELLIGENCE</p>
-        <div class="mt-8 flex items-center gap-2 text-slate-500 text-xs font-mono">
-            <i data-lucide="loader-2" class="w-3 h-3 animate-spin"></i> Inicializando sistemas...
-        </div>
     </div>
 
     <!-- LOGIN -->
@@ -84,20 +78,18 @@
                 <div class="w-16 h-16 bg-amber-500/10 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-amber-500/20">
                     <i data-lucide="dumbbell" class="text-amber-500 w-8 h-8"></i>
                 </div>
-                <h1 class="text-2xl font-bold text-white">Bem-vindo</h1>
+                <h1 class="text-2xl font-bold text-white">Login</h1>
             </div>
             <form id="login-form" class="space-y-4" onsubmit="return false;">
                 <input type="email" id="email" class="w-full bg-[#0f1115] border border-slate-700 text-white p-3.5 rounded-xl focus:border-amber-500 outline-none transition-colors" placeholder="Email" required>
                 <input type="password" id="password" class="w-full bg-[#0f1115] border border-slate-700 text-white p-3.5 rounded-xl focus:border-amber-500 outline-none transition-colors" placeholder="Senha" required>
-                <button type="submit" id="login-btn" class="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-amber-500/20">Entrar na Plataforma</button>
-                <div id="login-error" class="text-red-400 text-xs text-center hidden p-3 bg-red-500/10 rounded-lg border border-red-500/20"></div>
+                <button type="submit" id="login-btn" class="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-amber-500/20">Entrar</button>
             </form>
         </div>
     </div>
 
-    <!-- APP CONTAINER -->
+    <!-- APP -->
     <div id="app" class="flex-1 flex flex-col md:flex-row overflow-hidden hidden opacity-0 transition-opacity duration-500">
-        
         <!-- SIDEBAR -->
         <aside class="hidden md:flex flex-col w-64 glass-card border-r border-slate-800 z-20">
             <div class="h-20 flex items-center px-6 border-b border-slate-800/50 gap-3">
@@ -136,10 +128,10 @@
                 <!-- Header -->
                 <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                     <div>
-                        <h1 class="text-2xl md:text-3xl font-bold text-white tracking-tight">Visão Geral</h1>
+                        <h1 class="text-2xl md:text-3xl font-bold text-white tracking-tight">Dashboard</h1>
                         <div class="flex items-center gap-2 mt-1">
                              <span id="bot-status-indicator" class="w-2 h-2 rounded-full bg-slate-500"></span>
-                             <span id="mode-badge" class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">AGUARDANDO...</span>
+                             <span id="mode-badge" class="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-2 py-0.5 rounded border border-slate-700 bg-slate-800">...</span>
                         </div>
                     </div>
                     <div class="flex items-center gap-2 w-full md:w-auto">
@@ -158,7 +150,7 @@
                              <h2 id="stat-balance" class="text-4xl font-black text-white tracking-tight mb-4">$---</h2>
                              <div class="flex items-center gap-2">
                                  <div class="bg-white/5 rounded-lg px-3 py-1.5 border border-white/5">
-                                     <p class="text-[9px] text-slate-500 font-bold uppercase">Lucro Hoje</p>
+                                     <p class="text-[9px] text-slate-500 font-bold uppercase">Resultado do Dia</p>
                                      <p id="stat-profit" class="text-sm font-bold text-white">$0.00</p>
                                  </div>
                              </div>
@@ -168,7 +160,7 @@
                     <!-- Placar Card -->
                     <div class="glass-card p-6 rounded-2xl border-l-4 border-blue-500 relative overflow-hidden flex flex-col justify-between">
                          <div class="absolute right-0 top-0 p-6 opacity-5"><i data-lucide="bar-chart-2" class="w-24 h-24 text-white"></i></div>
-                         <p class="text-xs text-slate-400 font-bold uppercase tracking-widest mb-4">Performance do Dia</p>
+                         <p class="text-xs text-slate-400 font-bold uppercase tracking-widest mb-4">Placar da Sessão</p>
                          
                          <div class="flex justify-between items-center text-center divide-x divide-slate-700/50 mb-4">
                              <div class="px-2 w-full">
@@ -180,7 +172,7 @@
                                  <p id="score-losses" class="text-3xl font-black text-white">0</p>
                              </div>
                              <div class="px-2 w-full">
-                                 <p class="text-[10px] text-blue-500 font-bold mb-1">TRADES</p>
+                                 <p class="text-[10px] text-blue-500 font-bold mb-1">TOTAL</p>
                                  <p id="score-total" class="text-3xl font-black text-white">0</p>
                              </div>
                          </div>
@@ -209,7 +201,7 @@
                     </div>
                 </div>
 
-                <!-- Recent History (Today) -->
+                <!-- Recent History -->
                 <div class="glass-card rounded-2xl border border-slate-800 overflow-hidden flex-1 min-h-[300px]">
                     <div class="p-4 border-b border-slate-800 bg-[#1f2229] flex justify-between items-center">
                         <h3 class="text-xs font-bold text-white flex items-center gap-2"><i data-lucide="list" class="w-4 h-4 text-blue-500"></i> Histórico Recente</h3>
@@ -221,10 +213,9 @@
                 </div>
             </div>
 
-            <!-- VIEW: RELATÓRIOS (NOVO MODELO) -->
+            <!-- VIEW: RELATÓRIOS -->
             <div id="view-reports" class="view-section hidden space-y-6 max-w-5xl mx-auto">
                 <h1 class="text-2xl font-bold text-white mb-4">Relatório Detalhado</h1>
-                
                 <div class="glass-card rounded-xl border border-slate-800 overflow-hidden">
                     <div class="overflow-x-auto">
                         <table class="w-full text-left border-collapse">
@@ -239,9 +230,7 @@
                                 </tr>
                             </thead>
                             <tbody id="reports-table-body" class="divide-y divide-slate-800/50">
-                                <tr>
-                                    <td colspan="6" class="p-8 text-center text-slate-500 text-xs">Carregando dados...</td>
-                                </tr>
+                                <tr><td colspan="6" class="p-8 text-center text-slate-500 text-xs">Carregando...</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -255,14 +244,24 @@
                 
                 <!-- Mode Selector -->
                 <div class="glass-card p-1 rounded-xl border border-slate-700 bg-[#1f2229] flex mb-6">
-                    <button onclick="setMode('LIVE')" id="btn-mode-live" class="flex-1 p-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 text-slate-400 hover:text-white">
+                    <button onclick="setMode('LIVE')" id="btn-mode-live" class="flex-1 p-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2">
                         <i data-lucide="zap" class="w-4 h-4"></i> CONTA REAL
                     </button>
-                    <button onclick="setMode('OBSERVE')" id="btn-mode-observe" class="flex-1 p-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 text-slate-400 hover:text-white">
+                    <button onclick="setMode('OBSERVE')" id="btn-mode-observe" class="flex-1 p-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2">
                         <i data-lucide="eye" class="w-4 h-4"></i> OBSERVAÇÃO
                     </button>
                 </div>
                 
+                <!-- Strategy Selector -->
+                <div class="glass-card p-4 rounded-xl border border-slate-800 mb-6 bg-[#1f2229]">
+                    <h3 class="text-xs font-bold text-white mb-3 flex items-center gap-2"><i data-lucide="cpu" class="w-4 h-4 text-blue-500"></i> Modo de Estratégia</h3>
+                    <select id="conf-strategy-mode" class="w-full bg-[#0f1115] border border-slate-700 text-white p-3 rounded-lg focus:border-blue-500 outline-none transition-colors text-sm">
+                        <option value="AUTO">🤖 AUTO (IA decide entre V2 e Shock)</option>
+                        <option value="V2_TREND">🛡️ V2 TREND (Conservador)</option>
+                        <option value="SHOCK_REVERSAL">🔥 SHOCK REVERSAL (Agressiva)</option>
+                    </select>
+                </div>
+
                 <!-- Presets -->
                 <div class="grid grid-cols-3 gap-3 mb-6">
                     <button onclick="applyPreset('conservative')" class="p-4 rounded-xl bg-[#1f2229] hover:bg-slate-800 border border-slate-700 hover:border-green-500/50 transition-all text-center group">
@@ -291,7 +290,7 @@
 
                         <div class="h-px bg-slate-700/50"></div>
 
-                        <!-- Daily Limits -->
+                        <!-- Daily Limits (Quantity) -->
                         <div>
                             <h3 class="text-sm font-bold text-white mb-4 flex items-center gap-2"><i data-lucide="lock" class="w-4 h-4 text-amber-500"></i> Metas Diárias (Quantidade)</h3>
                             <div class="grid grid-cols-3 gap-3">
@@ -382,10 +381,7 @@
             const splash = document.getElementById('splash-screen');
             if(splash && !splash.classList.contains('fade-out')) {
                 const elapsed = Date.now() - appStartTime;
-                setTimeout(() => { 
-                    splash.classList.add('fade-out'); 
-                    setTimeout(() => splash.remove(), 600); 
-                }, Math.max(0, 4000 - elapsed));
+                setTimeout(() => { splash.classList.add('fade-out'); setTimeout(() => splash.remove(), 600); }, Math.max(0, 4000 - elapsed));
             }
         }
 
@@ -448,7 +444,8 @@
                     timer_enabled: document.getElementById('conf-timer-enabled').checked,
                     timer_start: document.getElementById('conf-timer-start').value,
                     timer_end: document.getElementById('conf-timer-end').value,
-                    mode: currentMode
+                    mode: currentMode,
+                    strategy_mode: document.getElementById('conf-strategy-mode').value
                 }).eq('id', 1);
                 
                 btn.innerHTML = '<i data-lucide="check" class="w-4 h-4 inline"></i> Salvo!';
@@ -479,12 +476,18 @@
 
         function updateButtonState(isRunning) {
             const btn = document.getElementById('toggle-bot-btn');
-            btn.innerHTML = isRunning ? '<i data-lucide="pause" class="w-3 h-3"></i> PAUSAR' : '<i data-lucide="play" class="w-3 h-3"></i> INICIAR';
-            btn.className = `px-4 py-3 rounded-xl text-xs font-bold min-w-[120px] shadow-lg flex items-center gap-2 justify-center transition-all ${isRunning ? 'bg-amber-500/10 text-amber-500 border border-amber-500/20' : 'bg-green-600 text-white border border-green-500/30'}`;
-            lucide.createIcons();
+            const ind = document.getElementById('bot-status-indicator');
             
-            const badge = document.getElementById('bot-status-indicator');
-            if (badge) badge.className = `w-2 h-2 rounded-full ${isRunning ? 'bg-green-500 animate-pulse' : 'bg-slate-500'}`;
+            if (isRunning) {
+                btn.innerHTML = '<i data-lucide="pause" class="w-3 h-3"></i> PAUSAR';
+                btn.className = `px-4 py-3 rounded-xl text-xs font-bold min-w-[120px] shadow-lg flex items-center gap-2 justify-center transition-all ${isRunning ? 'bg-amber-500/10 text-amber-500 border border-amber-500/20' : 'bg-green-600 text-white border border-green-500/30'}`;
+                ind.className = 'w-2 h-2 rounded-full bg-green-500 animate-pulse';
+            } else {
+                btn.innerHTML = '<i data-lucide="play" class="w-3 h-3"></i> INICIAR';
+                btn.className = `px-4 py-3 rounded-xl text-xs font-bold min-w-[120px] shadow-lg flex items-center gap-2 justify-center transition-all bg-green-600 text-white border border-green-500/30 active:scale-95`;
+                ind.className = 'w-2 h-2 rounded-full bg-slate-500';
+            }
+            lucide.createIcons();
         }
         
         function setMode(mode) {
@@ -498,14 +501,14 @@
                 btnObs.className = "flex-1 p-3 rounded-lg border border-transparent bg-[#0f1115] text-slate-400 text-xs font-bold transition-all hover:bg-slate-800";
                 if(badge) {
                     badge.innerText = "CONTA REAL";
-                    badge.className = "px-2.5 py-0.5 rounded text-[10px] font-bold bg-green-500/10 text-green-400 border border-green-500/30 tracking-widest";
+                    badge.className = "text-[10px] font-bold text-green-400 uppercase tracking-widest bg-green-500/10 px-2 py-0.5 rounded border border-green-500/20";
                 }
             } else {
                 btnLive.className = "flex-1 p-3 rounded-lg border border-transparent bg-[#0f1115] text-slate-400 text-xs font-bold transition-all hover:bg-slate-800";
                 btnObs.className = "flex-1 p-3 rounded-lg border border-blue-500 bg-blue-500/10 text-blue-400 text-xs font-bold transition-all shadow-[0_0_15px_rgba(59,130,246,0.3)]";
                 if(badge) {
                     badge.innerText = "OBSERVAÇÃO";
-                    badge.className = "px-2.5 py-0.5 rounded text-[10px] font-bold bg-blue-500/10 text-blue-400 border border-blue-500/30 tracking-widest";
+                    badge.className = "text-[10px] font-bold text-blue-400 uppercase tracking-widest bg-blue-500/10 px-2 py-0.5 rounded border border-blue-500/20";
                 }
             }
         }
@@ -559,13 +562,13 @@
                      }
                 }
                 
-                // Fetch Daily Stats & History (Today - LOCAL TIME)
+                // Fetch Daily Stats
                 const today = new Date().toLocaleDateString('pt-BR'); 
                 const signals = await supabaseClient.from('trade_signals').select('*').order('created_at', {ascending: false}).limit(100);
                  
                 if(signals.data) {
                      let wins = 0, losses = 0, profit = 0;
-                     // Filter locally to match user timezone
+                     // Filter locally
                      const todaysSignals = signals.data.filter(s => new Date(s.created_at).toLocaleDateString('pt-BR') === today);
 
                      todaysSignals.forEach(s => {
@@ -579,17 +582,15 @@
                      document.getElementById('stat-profit').textContent = `${profit >= 0 ? '+' : ''}$${profit.toFixed(2)}`;
                      document.getElementById('stat-profit').className = `text-sm font-bold stat-value ${profit >= 0 ? 'text-green-500' : 'text-red-500'}`;
                      
-                     // Update Bar
+                     // Bar
                      const total = wins + losses;
                      const rate = total > 0 ? (wins / total) * 100 : 0;
                      document.getElementById('win-rate-bar').style.width = `${rate}%`;
                      document.getElementById('win-rate-text').textContent = `${Math.round(rate)}%`;
 
-                     // Update Home List (Last 10)
                      renderSignalsList('signals-list-home', todaysSignals.slice(0, 10)); 
                  }
                  
-                 // Fetch Best Assets
                  const assets = await supabaseClient.from('cataloged_assets').select('*').order('win_rate', { ascending: false }).limit(3);
                  if(assets.data) renderAssetCards(assets.data);
 
@@ -657,7 +658,7 @@
             if(!container) return;
             
             if(!data || data.length === 0) {
-                 container.innerHTML = '<div class="text-center text-slate-600 py-8 text-xs font-mono border border-dashed border-slate-800 rounded-xl">Nenhuma operação realizada hoje.</div>';
+                 container.innerHTML = '<div class="text-center text-slate-600 py-8 text-xs font-mono border border-dashed border-slate-800 rounded-xl opacity-50">Nenhuma operação realizada hoje.</div>';
                  return;
             }
              
@@ -704,6 +705,9 @@
                 document.getElementById('conf-timer-start').value = config.timer_start;
                 document.getElementById('conf-timer-end').value = config.timer_end;
                 document.getElementById('timer-inputs').style.opacity = config.timer_enabled ? '1' : '0.5';
+                
+                const stratSelect = document.getElementById('conf-strategy-mode');
+                if(stratSelect) stratSelect.value = config.strategy_mode || 'AUTO';
             }
         }
 
