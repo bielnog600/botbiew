@@ -456,6 +456,13 @@ class SimpleBot:
         self.log_to_db(f"🚀 NOVA SESSÃO INICIADA ({self.config.get('mode', 'LIVE')})", "SYSTEM")
 
     def get_min_score(self):
+        strat_mode = self.config.get("strategy_mode", "AUTO")
+
+        # ✅ FIX 2: Se estiver em modo SHOCK exclusivo, libera score mínimo para 70
+        # (O Shock básico é 70, antes estava filtrando tudo porque exigia 75)
+        if strat_mode == "SHOCK_REVERSAL":
+            return 70
+
         base = 75
         if self.daily_losses >= 2 and self.daily_wins == 0: return base + 5
         if self.daily_wins >= 3 and self.daily_losses == 0: return base - 5
@@ -543,8 +550,9 @@ class SimpleBot:
             # 1. Leitura RAW do banco (pode ser string ou None)
             db_raw_strat = data.get("strategy_mode")
             
-            # 2. Conversão para String limpa
-            db_strat = (str(db_raw_strat) or "AUTO").strip().upper()
+            # 2. Conversão para String limpa (com replace de espaços)
+            # ✅ FIX 5: Normalização robusta ("Shock Reversal" -> "SHOCK_REVERSAL")
+            db_strat = (str(db_raw_strat) or "AUTO").strip().upper().replace(" ", "_")
             
             # 3. Mapeamento Forçado (Correção do "EMA_V2" fantasma)
             raw_strat = db_strat
@@ -933,6 +941,11 @@ class SimpleBot:
                                  # 1. SHOCK REVERSAL (Prioridade ou Única se selecionada)
                                  if not trade_executed and strat_mode in ["AUTO", "SHOCK_REVERSAL", "SHOCK"]:
                                      sig_shock, reason_shock = ShockReversalStrategy.get_signal(candles)
+                                     
+                                     # ✅ FIX 4: Debug Explícito para ver se o Shock está sendo detectado
+                                     if strat_mode == "SHOCK_REVERSAL":
+                                          self.log_to_db(f"⚡ SHOCK_CHECK {asset}: {reason_shock}", "DEBUG")
+
                                      if sig_shock:
                                           st = TrendStrength.classify(candles)
                                           # Evita shock contra trend muito forte, a menos que seja modo SHOCK exclusivo
