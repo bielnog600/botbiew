@@ -15,7 +15,7 @@ try:
 except ImportError:
     print("[ERRO] Biblioteca 'exnovaapi' não instalada.")
 
-BOT_VERSION = "SHOCK_ENGINE_V4_55s_2026-01-20"
+BOT_VERSION = "SHOCK_ENGINE_V5_BINARY_ONLY_2026-01-20"
 print(f"🚀 START::{BOT_VERSION}")
 
 # --- CONFIGURAÇÃO GERAL ---
@@ -744,32 +744,16 @@ class SimpleBot:
 
         return [x['pair'] for x in final_list]
 
-    # ✅ FIX 2: safe_buy melhorado para verificar status AND ID
-    def safe_buy(self, asset, amount, direction):
-        if self.config["mode"] == "OBSERVE": return True, "VIRTUAL", "OBSERVE"
-        
-        # Tentativa 1: Digital Spot
+    # ✅ FIX 1: safe_buy_binary novo, forçando apenas Binária
+    def safe_buy_binary(self, asset, amount, direction):
+        if self.config["mode"] == "OBSERVE": return True, "VIRTUAL"
         try:
-            status, order_id = self.api.buy_digital_spot(asset, amount, direction, 1)
-            # Verifica se realmente veio ID (API às vezes devolve True sem ID)
-            if status and order_id:
-                return True, order_id, "DIGITAL"
-            else:
-                self.log_to_db(f"⚠️ Digital falhou (ID nulo). Tentando Binary...", "WARNING")
-        except Exception as e:
-            self.log_to_db(f"⚠️ DIGITAL Exception: {e}", "WARNING")
-
-        # Tentativa 2: Binária Normal (Fallback)
-        try:
+            # ✅ APENAS BINÁRIA
             status, order_id = self.api.buy(amount, asset, direction, 1)
-            if status and order_id:
-                return True, order_id, "BINARY"
-            else:
-                self.log_to_db(f"⚠️ Binary falhou também.", "WARNING")
+            return status, order_id
         except Exception as e:
             self.log_to_db(f"⚠️ BINARY Exception: {e}", "WARNING")
-
-        return False, None, "FAILED"
+            return False, None
 
     def execute_trade(self, asset, direction, strategy_key, strategy_name="Unknown"):
         now = time.time()
@@ -812,10 +796,10 @@ class SimpleBot:
             else:
                 amount = self.get_entry_value()
             
-            # ✅ FIX 1: Log honesto de TENTATIVA antes da ordem
+            # ✅ FIX 2: Log honesto de TENTATIVA antes da ordem (Binária)
             mode_prefix = "[OBSERVE] " if self.config["mode"] == "OBSERVE" else ""
             self.log_to_db(
-                f"🟡 TENTANDO ENTRAR ({strategy_name}): {asset} | {direction.upper()} | ${amount}",
+                f"🟡 TENTANDO ENTRAR (BINARIA) ({strategy_name}): {asset} | {direction.upper()} | ${amount}",
                 "INFO"
             )
 
@@ -829,17 +813,17 @@ class SimpleBot:
                         return
                 except: return
 
-            # ✅ Tenta Comprar
-            status, order_id, order_type = self.safe_buy(asset, amount, direction)
+            # ✅ Tenta Comprar APENAS BINÁRIA
+            status, order_id = self.safe_buy_binary(asset, amount, direction)
 
             # ✅ Valida se a ordem existe mesmo
             if not status or not order_id:
-                self.log_to_db(f"❌ ORDEM NÃO ACEITA (Recusada pela corretora)", "ERROR")
+                self.log_to_db(f"❌ BINARIA RECUSADA | {asset}", "ERROR")
                 return
 
             # ✅ Só aqui confirma a entrada no log
             self.log_to_db(
-                f"✅ {mode_prefix}ENTRADA CONFIRMADA ({strategy_name}): {asset} | {direction.upper()} | ${amount} | ORDEM={order_id}",
+                f"✅ {mode_prefix}BINARIA CONFIRMADA ({strategy_name}): {asset} | {direction.upper()} | ${amount} | ORDEM={order_id}",
                 "SUCCESS"
             )
 
