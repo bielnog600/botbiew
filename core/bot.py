@@ -17,6 +17,7 @@ except ImportError:
 
 # --- CONFIGURAÇÃO GERAL ---
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://ioduahwknfsktujthfyc.supabase.co")
+# Note: It is recommended to use environment variables for keys in production
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlvZHVhaHdrbmZza3R1anRoZnljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEzMDc0NDcsImV4cCI6MjA2Njg4MzQ0N30.96f8wZO6SvABKFMWjIiw1pSugAB4Isldj7yxLcLJRSE")
 EXNOVA_EMAIL = os.environ.get("EXNOVA_EMAIL", "seu_email@exemplo.com")
 EXNOVA_PASSWORD = os.environ.get("EXNOVA_PASSWORD", "sua_senha")
@@ -47,7 +48,7 @@ def watchdog():
             os._exit(1)
 
 # ==============================================================================
-#                               MOTORES DE ANÁLISE
+#                                MOTORES DE ANÁLISE
 # ==============================================================================
 
 class TechnicalAnalysis:
@@ -320,7 +321,7 @@ class RangeStrategy:
         return None, "RANGE_DISABLED"
 
 # ==============================================================================
-#                               BOT PRINCIPAL
+#                                BOT PRINCIPAL
 # ==============================================================================
 
 class SimpleBot:
@@ -884,29 +885,29 @@ class SimpleBot:
                                  # 2. V2 TREND (Apenas se não achou shock e modo permite)
                                  if not sig and strat_mode in ["AUTO", "V2_TREND"]:
                                      if TechnicalAnalysis.check_compression(candles): 
-                                         self.log_rejection(asset, "Compressão", "COMPRESSION")
-                                         continue
-                                         
+                                          self.log_rejection(asset, "Compressão", "COMPRESSION")
+                                          continue
+                                     
                                      if regime == "NO_TRADE": continue
                                      
                                      if regime == "TREND":
-                                         strength = TrendStrength.classify(candles)
-                                         if strength == "STRONG": 
-                                             sig, reason = TechnicalAnalysis.get_signal(candles)
-                                             strat_key = "TREND_STRONG"
-                                         else: 
-                                             sig, reason = MicroPullbackStrategy.get_signal(candles)
-                                             strat_key = "TREND_WEAK"
-                                 
-                                 if sig:
-                                     min_score = self.get_min_score()
-                                     score, score_det = TechnicalAnalysis.calculate_entry_score(candles, regime, strength, sig, asset, strat_key)
+                                          strength = TrendStrength.classify(candles)
+                                          if strength == "STRONG": 
+                                               sig, reason = TechnicalAnalysis.get_signal(candles)
+                                               strat_key = "TREND_STRONG"
+                                          else: 
+                                               sig, reason = MicroPullbackStrategy.get_signal(candles)
+                                               strat_key = "TREND_WEAK"
                                      
-                                     if score >= min_score:
-                                         self.execute_trade(asset, sig, strat_key, reason)
-                                         break 
-                                     else:
-                                         self.log_rejection(asset, f"Score {score} < {min_score}: {score_det}", regime)
+                                     if sig:
+                                          min_score = self.get_min_score()
+                                          score, score_det = TechnicalAnalysis.calculate_entry_score(candles, regime, strength, sig, asset, strat_key)
+                                          
+                                          if score >= min_score:
+                                               self.execute_trade(asset, sig, strat_key, reason)
+                                               break 
+                                          else:
+                                               self.log_rejection(asset, f"Score {score} < {min_score}: {score_det}", regime)
                          except: pass
                      time.sleep(1)
                 time.sleep(0.5)
