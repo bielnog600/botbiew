@@ -15,7 +15,7 @@ try:
 except ImportError:
     print("[ERRO] Biblioteca 'exnovaapi' não instalada.")
 
-BOT_VERSION = "SHOCK_ENGINE_V1_2026-01-20"
+BOT_VERSION = "SHOCK_ENGINE_V2_2026-01-20"
 print(f"🚀 START::{BOT_VERSION}")
 
 # --- CONFIGURAÇÃO GERAL ---
@@ -140,6 +140,7 @@ class TechnicalAnalysis:
             # 2. Fechamento no Extremo / Careca (+10) & Sem Wick Contrário (+10)
             is_green = last_closed['close'] > last_closed['open']
             
+            # ✅ CÁLCULO ROBUSTO DE WICK
             upper_wick = last_closed['max'] - max(last_closed['open'], last_closed['close'])
             lower_wick = min(last_closed['open'], last_closed['close']) - last_closed['min']
             
@@ -156,6 +157,7 @@ class TechnicalAnalysis:
                 details.append("Fechou no Talo")
 
             # 3. Sem Pavio Contrário (+10)
+            # Indica força total desde a abertura. ✅ Ajustado para < 15%
             if last_range > 0 and (wick_contra / last_range) < 0.15:
                 score += 10
                 details.append("Sem Wick Contrário")
@@ -540,8 +542,15 @@ class SimpleBot:
             prev_mode = self.config.get("mode")
             new_mode = (data.get("mode") or "LIVE").strip().upper()
             
+            # --- NORMALIZAÇÃO ROBUSTA DA ESTRATÉGIA ---
+            # 1. Leitura RAW do banco (pode ser string ou None)
             db_raw_strat = data.get("strategy_mode")
+            
+            # 2. Conversão para String limpa (com replace de espaços)
+            # ✅ FIX 5: Normalização robusta ("Shock Reversal" -> "SHOCK_REVERSAL")
             db_strat = (str(db_raw_strat) or "AUTO").strip().upper().replace(" ", "_")
+            
+            # 3. Mapeamento Forçado (Correção do "EMA_V2" fantasma)
             raw_strat = db_strat
             
             if "SHOCK" in db_strat: 
@@ -551,11 +560,15 @@ class SimpleBot:
             elif "AUTO" in db_strat:
                 raw_strat = "AUTO"
             else:
-                raw_strat = "V2_TREND"
+                raw_strat = "V2_TREND" # Fallback se vier lixo
             
+            # 4. Detecção de Mudança
             prev_strat = self.config.get("strategy_mode")
             if prev_strat != raw_strat:
+                 # Debug explicito: Mostra o que veio do banco e no que virou
                  self.log_to_db(f"🔄 MUDANÇA ESTRATÉGIA: DB='{db_raw_strat}' ➡️ BOT='{raw_strat}'", "SYSTEM")
+                 
+                 # Limpa o cache de ativos para obrigar recatalogação correta
                  self.best_assets = [] 
                  self.last_catalog_time = 0
 
@@ -728,14 +741,27 @@ class SimpleBot:
 
         return [x['pair'] for x in final_list]
 
+    # ✅ FIX 2: safe_buy melhorado para retornar tipo da ordem ou falha detalhada
     def safe_buy(self, asset, amount, direction):
-        if self.config["mode"] == "OBSERVE": return True, "VIRTUAL"
+        if self.config["mode"] == "OBSERVE": return True, "VIRTUAL", "OBSERVE"
+        
+        # Tentativa 1: Digital Spot
         try:
-             status, id = self.api.buy_digital_spot(asset, amount, direction, 1)
-             if not status:
-                 status, id = self.api.buy(amount, asset, direction, 1)
-             return status, id
-        except: return False, None
+            status, order_id = self.api.buy_digital_spot(asset, amount, direction, 1)
+            if status:
+                return True, order_id, "DIGITAL"
+        except Exception as e:
+            self.log_to_db(f"⚠️ DIGITAL ERRO: {asset} | {e}", "WARNING")
+
+        # Tentativa 2: Binária Normal
+        try:
+            status, order_id = self.api.buy(amount, asset, direction, 1)
+            if status:
+                return True, order_id, "BINARY"
+        except Exception as e:
+            self.log_to_db(f"⚠️ BINARY ERRO: {asset} | {e}", "WARNING")
+
+        return False, None, "FAILED"
 
     def execute_trade(self, asset, direction, strategy_key, strategy_name="Unknown"):
         now = time.time()
@@ -778,9 +804,7 @@ class SimpleBot:
             else:
                 amount = self.get_entry_value()
             
-            mode_prefix = "[OBSERVE] " if self.config["mode"] == "OBSERVE" else ""
-            self.log_to_db(f"➡️ {mode_prefix}ENTRADA ({strategy_name}): {asset} | {direction.upper()} | ${amount}", "INFO")
-
+            # ✅ FIX 1: Tenta comprar PRIMEIRO, depois loga se deu certo
             balance_before = 0.0
             if self.config["mode"] == "LIVE":
                 try: 
@@ -791,72 +815,74 @@ class SimpleBot:
                         return
                 except: return
 
-            status, id = self.safe_buy(asset, amount, direction)
+            status, order_id, order_type = self.safe_buy(asset, amount, direction)
 
-            if status:
-                self.log_to_db(f"✅ Ordem {id} aceita. Aguardando...", "INFO")
-                self.log_to_db("⏳ Aguardando fechamento da vela...", "DEBUG")
-                time.sleep(62) 
-                
-                res_str = "DOJI"
-                profit = 0.0
-                
-                if self.config["mode"] == "OBSERVE":
-                    try:
-                        candles = self.api.get_candles(asset, 60, 2, int(time.time()))
-                        last = candles[-2] 
-                        is_win = (direction == 'call' and last['close'] > last['open']) or \
-                                 (direction == 'put' and last['close'] < last['open'])
-                        
-                        if is_win: 
-                            res_str = "WIN"
-                            profit = amount * 0.87
-                        elif abs(last['close'] - last['open']) < 0.000001:
-                            res_str = "DOJI"
-                            profit = 0
-                        else:
-                            res_str = "LOSS"
-                            profit = -amount
-                    except: res_str = "UNKNOWN"
-                else:
-                    try:
-                        balance_after = self.api.get_balance()
-                        delta = balance_after - balance_before
-                        if delta > 0.01: res_str = "WIN"; profit = delta
-                        elif delta < -0.01: res_str = "LOSS"; profit = delta
-                    except: res_str = "UNKNOWN"
+            if not status:
+                self.log_to_db(f"❌ ORDEM RECUSADA: {asset} | {direction.upper()} | ${amount} | ({order_type})", "ERROR")
+                return
 
-                # ✅ RECONEXÃO EM CASO DE ERRO
-                if res_str == "UNKNOWN":
-                    self.log_to_db("⚠️ Resultado UNKNOWN, reconectando API...", "WARNING")
-                    self.api = None
-                    return
+            # ✅ Só aqui é ENTRADA REAL
+            mode_prefix = "[OBSERVE] " if self.config["mode"] == "OBSERVE" else ""
+            self.log_to_db(f"➡️ {mode_prefix}ENTRADA CONFIRMADA ({strategy_name}): {asset} | {direction.upper()} | ${amount} | ID:{order_id} | {order_type}", "INFO")
 
-                if res_str == 'DOJI':
-                    self.log_to_db("DOJI neutro", "DEBUG")
-                    return
-
-                self.update_strategy_stats(strategy_key, res_str, asset)
-
-                log_type = "SUCCESS" if res_str == 'WIN' else "ERROR"
-                self.log_to_db(f"{mode_prefix}{'🏆' if res_str == 'WIN' else '🔻'} {res_str}: ${profit:.2f} ({self.daily_wins}W/{self.daily_losses}L)", log_type)
-                
-                if self.supabase:
-                     try: self.supabase.table("trade_signals").insert({
-                         "pair": asset, "direction": direction, "result": res_str, 
-                         "profit": profit, "created_at": datetime.now(timezone.utc).isoformat(),
-                         "strategy": f"{strategy_key} ({self.config['mode']})"
-                     }).execute()
-                     except: pass
-                     if self.config["mode"] == "LIVE": self.update_balance_remote()
-
-                if not self.check_daily_limits():
-                     self.log_to_db("🛑 LIMITE DIÁRIO ATINGIDO — PAUSANDO BOT IMEDIATAMENTE", "WARNING")
-                     self.session_blocked = True
-                     self.pause_bot_by_management()
-
+            time.sleep(62) 
+            
+            res_str = "DOJI"
+            profit = 0.0
+            
+            if self.config["mode"] == "OBSERVE":
+                try:
+                    candles = self.api.get_candles(asset, 60, 2, int(time.time()))
+                    last = candles[-2] 
+                    is_win = (direction == 'call' and last['close'] > last['open']) or \
+                             (direction == 'put' and last['close'] < last['open'])
+                    
+                    if is_win: 
+                        res_str = "WIN"
+                        profit = amount * 0.87
+                    elif abs(last['close'] - last['open']) < 0.000001:
+                        res_str = "DOJI"
+                        profit = 0
+                    else:
+                        res_str = "LOSS"
+                        profit = -amount
+                except: res_str = "UNKNOWN"
             else:
-                self.log_to_db("❌ Falha na ordem", "ERROR")
+                try:
+                    balance_after = self.api.get_balance()
+                    delta = balance_after - balance_before
+                    if delta > 0.01: res_str = "WIN"; profit = delta
+                    elif delta < -0.01: res_str = "LOSS"; profit = delta
+                except: res_str = "UNKNOWN"
+
+            # ✅ RECONEXÃO EM CASO DE ERRO
+            if res_str == "UNKNOWN":
+                self.log_to_db("⚠️ Resultado UNKNOWN, reconectando API...", "WARNING")
+                self.api = None
+                return
+
+            if res_str == 'DOJI':
+                self.log_to_db("DOJI neutro", "DEBUG")
+                return
+
+            self.update_strategy_stats(strategy_key, res_str, asset)
+
+            log_type = "SUCCESS" if res_str == 'WIN' else "ERROR"
+            self.log_to_db(f"{mode_prefix}{'🏆' if res_str == 'WIN' else '🔻'} {res_str}: ${profit:.2f} ({self.daily_wins}W/{self.daily_losses}L)", log_type)
+            
+            if self.supabase:
+                 try: self.supabase.table("trade_signals").insert({
+                     "pair": asset, "direction": direction, "result": res_str, 
+                     "profit": profit, "created_at": datetime.now(timezone.utc).isoformat(),
+                     "strategy": f"{strategy_key} ({self.config['mode']})"
+                 }).execute()
+                 except: pass
+                 if self.config["mode"] == "LIVE": self.update_balance_remote()
+
+            if not self.check_daily_limits():
+                 self.log_to_db("🛑 LIMITE DIÁRIO ATINGIDO — PAUSANDO BOT IMEDIATAMENTE", "WARNING")
+                 self.session_blocked = True
+                 self.pause_bot_by_management()
 
         finally:
             with self.trade_lock: self.active_trades.discard(asset)
@@ -908,54 +934,15 @@ class SimpleBot:
                     assets_pool = ["EURUSD-OTC", "EURGBP-OTC", "USDCHF-OTC", "EURJPY-OTC", "NZDUSD-OTC", "GBPUSD-OTC", "GBPJPY-OTC", "USDJPY-OTC", "AUDCAD-OTC", "AUDUSD-OTC", "USDCAD-OTC", "AUDJPY-OTC"]
                     self.best_assets = self.catalog_assets(assets_pool)
 
+                # ✅ FIX 2: USA FUSO HORÁRIO BRASIL PARA NÃO QUEBRAR EM VPS (UTC)
                 now_dt = datetime.now(BR_TIMEZONE)
                 now_sec = now_dt.second
                 
-                # ==============================================================================
-                # ✅ MODO SHOCK EXCLUSIVO (Loop Isolado)
-                # ==============================================================================
-                if strat_mode == "SHOCK_REVERSAL":
-                    if 0 <= now_sec <= 4:
-                        self.log_to_db(f"MODE_ATIVO::{strat_mode} [{now_dt.strftime('%H:%M:%S')}]", "DEBUG")
-                        
-                        for asset in self.best_assets: # Em modo Shock, best_assets = todos
-                            with self.trade_lock:
-                                if asset in self.active_trades: continue
-                            try:
-                                candles = self.api.get_candles(asset, 60, 100, int(time.time()))
-                                if not candles: continue
-                                
-                                # Análise Pura de Price Action (Sem filtro de qualidade TREND)
-                                sig_shock, reason_shock = ShockReversalStrategy.get_signal(candles)
-                                self.log_to_db(f"⚡ SHOCK_CHECK {asset}: {reason_shock}", "DEBUG")
-
-                                if sig_shock:
-                                    # Valida Score e Min Score (70)
-                                    regime = MarketRegimeClassifier.classify(candles)
-                                    st = TrendStrength.classify(candles)
-                                    min_score = self.get_min_score() # Retorna 70 aqui
-
-                                    shock_score, shock_det = TechnicalAnalysis.calculate_entry_score(
-                                        candles, regime, st, sig_shock, asset, "SHOCK_REVERSAL"
-                                    )
-
-                                    if shock_score >= min_score:
-                                        self.log_to_db(f"⚡ SHOCK SIGNAL {asset}: {sig_shock.upper()} ({reason_shock})", "INFO")
-                                        self.execute_trade(asset, sig_shock, "SHOCK_REVERSAL", f"{reason_shock} | {shock_det}")
-                                        time.sleep(55) # Evita reentradas no mesmo minuto
-                                        break
-                                    else:
-                                        self.log_rejection(asset, f"Score {shock_score} < {min_score}: {shock_det}", "SHOCK")
-                            except: pass
-                        time.sleep(1)
-                    time.sleep(0.5)
-                    continue # ⛔ PULA O RESTO DO LOOP PARA NÃO EXECUTAR V2
-
-                # ==============================================================================
-                # ✅ MODO AUTO / V2 TREND (Loop Padrão)
-                # ==============================================================================
+                # --- JANELA DE EXECUÇÃO: 0 a 4 SEGUNDOS ---
+                # ✅ FIX 2: Janela aumentada para absorver lag de API/VPS
                 if 0 <= now_sec <= 4:
-                     self.log_to_db(f"MODE_ATIVO::{strat_mode} [{now_dt.strftime('%H:%M:%S')}]", "DEBUG")
+                     current_mode_label = f"{strat_mode}_ENGINE [{now_dt.strftime('%H:%M:%S')}]"
+                     self.log_to_db(f"MODE_ATIVO::{current_mode_label}", "DEBUG")
                      
                      for asset in self.best_assets:
                          with self.trade_lock:
@@ -963,40 +950,49 @@ class SimpleBot:
                          try:
                              candles = self.api.get_candles(asset, 60, 100, int(time.time()))
                              if candles:
+                                 regime = MarketRegimeClassifier.classify(candles)
                                  min_score = self.get_min_score()
                                  trade_executed = False
                                  
-                                 # 1. Tenta Shock primeiro (se AUTO)
-                                 if strat_mode == "AUTO":
+                                 # 1. SHOCK REVERSAL (Prioridade ou Única se selecionada)
+                                 if not trade_executed and strat_mode in ["AUTO", "SHOCK_REVERSAL", "SHOCK"]:
                                      sig_shock, reason_shock = ShockReversalStrategy.get_signal(candles)
+                                     
+                                     # ✅ FIX 4: Debug Explícito para ver se o Shock está sendo detectado
+                                     if strat_mode == "SHOCK_REVERSAL":
+                                          self.log_to_db(f"⚡ SHOCK_CHECK {asset}: {reason_shock}", "DEBUG")
+
                                      if sig_shock:
                                           st = TrendStrength.classify(candles)
-                                          regime = MarketRegimeClassifier.classify(candles)
-                                          if regime == "TREND" and st == "STRONG":
+                                          # Evita shock contra trend muito forte, a menos que seja modo SHOCK exclusivo
+                                          if regime == "TREND" and st == "STRONG" and strat_mode == "AUTO":
                                                self.log_rejection(asset, "Shock contra Trend Forte (Auto)", "SHOCK")
                                           else:
+                                               # ✅ Validação de Score Turbinado para Shock
                                                shock_score, shock_det = TechnicalAnalysis.calculate_entry_score(
                                                    candles, regime, st, sig_shock, asset, "SHOCK_REVERSAL"
                                                )
-                                               if shock_score >= 70: # Hardcoded 70 para shock em auto
+                                               if shock_score >= min_score:
+                                                    # ✅ FIX 1: Executa Shock ANTES de verificar qualidade (Quality Check ignorado se for Shock)
                                                     self.execute_trade(asset, sig_shock, "SHOCK_REVERSAL", f"{reason_shock} | {shock_det}")
                                                     trade_executed = True
                                                     break
+                                               else:
+                                                    self.log_rejection(asset, f"Shock Score {shock_score} < {min_score}: {shock_det}", "SHOCK")
 
-                                 # 2. Se não foi shock, verifica qualidade para Trend
+                                 # ✅ FIX 1: Só verifica qualidade se não entrou em Shock
                                  if not trade_executed:
                                      qual, q_reason = TechnicalAnalysis.check_candle_quality(candles, asset)
                                      if not qual: 
                                          self.log_rejection(asset, q_reason, "QUALITY")
                                          continue
 
-                                     # 3. V2 TREND
+                                     # 2. V2 TREND (Apenas se não achou shock e modo permite)
                                      if strat_mode in ["AUTO", "V2_TREND"]:
                                          if TechnicalAnalysis.check_compression(candles): 
                                               self.log_rejection(asset, "Compressão", "COMPRESSION")
                                               continue
                                          
-                                         regime = MarketRegimeClassifier.classify(candles)
                                          if regime == "NO_TRADE": continue
                                          
                                          if regime == "TREND":
@@ -1011,6 +1007,7 @@ class SimpleBot:
                                                    strat_key = "TREND_WEAK"
                                          
                                               if sig:
+                                                   # ✅ Passando "TREND" explicitamente
                                                    score, score_det = TechnicalAnalysis.calculate_entry_score(
                                                        candles, regime, strength, sig, asset, "TREND"
                                                    )
