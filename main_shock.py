@@ -995,7 +995,7 @@ class SimpleBot:
                 # ✅ MODO AUTO / V2 TREND (Loop Padrão)
                 # --- JANELA DE EXECUÇÃO: 55 a 59 SEGUNDOS ---
                 # ==============================================================================
-                if 55 <= now_sec <= 59:
+                if 50 <= now_sec <= 54:
                      # Log refletindo o mode real e nível SYSTEM
                      self.log_to_db(f"MODE_ATIVO::{strat_mode} (Scan V2/Trend) [{now_dt.strftime('%H:%M:%S')}]", "SYSTEM")
                      
