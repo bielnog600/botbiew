@@ -954,7 +954,7 @@ class SimpleBot:
                 # --- JANELA DE EXECUÇÃO: 55 a 59 SEGUNDOS (SNIPER) ---
                 # ==============================================================================
                 if strat_mode == "SHOCK_REVERSAL":
-                    if 55 <= now_sec <= 59:
+                    if 50 <= now_sec <= 54:
                         # Log específico para SHOCK e nível SYSTEM
                         self.log_to_db(f"⚡ Monitor: SHOCK ativo (sem EMA/WR) [{now_dt.strftime('%H:%M:%S')}]", "SYSTEM")
                         
