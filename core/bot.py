@@ -15,6 +15,8 @@ try:
 except ImportError:
     print("[ERRO] Biblioteca 'exnovaapi' não instalada.")
 
+print("✅ BOT VERSÃO 2026-01-20 - SHOCK PATCH ATIVO ✅")
+
 # --- CONFIGURAÇÃO GERAL ---
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://ioduahwknfsktujthfyc.supabase.co")
 # ✅ FIX 3: SEGURANÇA - Chave removida do código. Deve estar nas Variáveis de Ambiente.
@@ -768,7 +770,13 @@ class SimpleBot:
         try:
             current_hour = datetime.now(BR_TIMEZONE).hour
             if self.hourly_loss_count.get(current_hour, 0) >= 2:
-                 self.log_rejection(asset, f"Horário {current_hour}h bloqueado", "ALL")
+                 msg = f"Horário {current_hour}h bloqueado"
+                 # ✅ Modificação para log específico de bloqueio no Shock
+                 if strategy_key == "SHOCK_REVERSAL" or self.config.get("strategy_mode") == "SHOCK_REVERSAL":
+                     msg = f"⛔ SHOCK bloqueado por 2 losses na hora {current_hour}h"
+                     self.log_to_db(msg, "WARNING")
+                 
+                 self.log_rejection(asset, msg, "ALL")
                  return
 
             if asset in self.asset_cooldowns:
