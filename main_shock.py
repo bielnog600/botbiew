@@ -15,7 +15,7 @@ try:
 except ImportError:
     print("[ERRO] Biblioteca 'exnovaapi' não instalada.")
 
-BOT_VERSION = "SHOCK_ENGINE_V2_2026-01-20"
+BOT_VERSION = "SHOCK_ENGINE_V3_FINAL_2026-01-20"
 print(f"🚀 START::{BOT_VERSION}")
 
 # --- CONFIGURAÇÃO GERAL ---
@@ -34,7 +34,8 @@ for logger_name in ["websocket", "exnovaapi", "iqoptionapi", "urllib3", "iqoptio
 
 # --- WATCHDOG ---
 WATCHDOG_CHECK_EVERY = 60
-WATCHDOG_MAX_SILENCE = 180
+# ✅ FIX: Aumentado para 300s para evitar restarts desnecessários em lags
+WATCHDOG_MAX_SILENCE = 300 
 COOLIFY_RESTART_URL = "https://biewdev.se/api/v1/applications/ig80skg8ssog04g4oo88wswg/restart"
 COOLIFY_API_TOKEN = os.environ.get("COOLIFY_API_TOKEN")
 LAST_LOG_TIME = time.time()
@@ -683,6 +684,8 @@ class SimpleBot:
                 self.log_to_db("✅ Conectado!", "SUCCESS")
                 self.active_account_type = self.config["account_type"]
                 self.api.change_balance(self.active_account_type)
+                # ✅ Log obrigatório para confirmar conta
+                self.log_to_db(f"🏦 CONTA ATIVA: {self.active_account_type}", "SYSTEM")
                 self.update_balance_remote()
                 return True
             else:
@@ -741,27 +744,32 @@ class SimpleBot:
 
         return [x['pair'] for x in final_list]
 
-    # ✅ FIX 2: safe_buy melhorado para retornar tipo da ordem ou falha detalhada
+    # ✅ FIX 2: safe_buy melhorado para verificar status AND ID
     def safe_buy(self, asset, amount, direction):
-        if self.config["mode"] == "OBSERVE": return True, "VIRTUAL", "OBSERVE"
+        if self.config["mode"] == "OBSERVE": return True, "VIRTUAL"
         
         # Tentativa 1: Digital Spot
         try:
             status, order_id = self.api.buy_digital_spot(asset, amount, direction, 1)
-            if status:
-                return True, order_id, "DIGITAL"
+            # Verifica se realmente veio ID (API às vezes devolve True sem ID)
+            if status and order_id:
+                return True, order_id
+            else:
+                self.log_to_db(f"⚠️ Digital falhou (ID nulo). Tentando Binary...", "WARNING")
         except Exception as e:
-            self.log_to_db(f"⚠️ DIGITAL ERRO: {asset} | {e}", "WARNING")
+            self.log_to_db(f"⚠️ DIGITAL Exception: {e}", "WARNING")
 
-        # Tentativa 2: Binária Normal
+        # Tentativa 2: Binária Normal (Fallback)
         try:
             status, order_id = self.api.buy(amount, asset, direction, 1)
-            if status:
-                return True, order_id, "BINARY"
+            if status and order_id:
+                return True, order_id
+            else:
+                self.log_to_db(f"⚠️ Binary falhou também.", "WARNING")
         except Exception as e:
-            self.log_to_db(f"⚠️ BINARY ERRO: {asset} | {e}", "WARNING")
+            self.log_to_db(f"⚠️ BINARY Exception: {e}", "WARNING")
 
-        return False, None, "FAILED"
+        return False, None
 
     def execute_trade(self, asset, direction, strategy_key, strategy_name="Unknown"):
         now = time.time()
@@ -777,7 +785,6 @@ class SimpleBot:
             current_hour = datetime.now(BR_TIMEZONE).hour
             if self.hourly_loss_count.get(current_hour, 0) >= 2:
                  msg = f"Horário {current_hour}h bloqueado"
-                 # ✅ Log explícito se for Shock
                  if strategy_key == "SHOCK_REVERSAL" or self.config.get("strategy_mode") == "SHOCK_REVERSAL":
                      msg = f"⛔ SHOCK bloqueado por 2 losses na hora {current_hour}h"
                      self.log_to_db(msg, "WARNING")
@@ -804,7 +811,13 @@ class SimpleBot:
             else:
                 amount = self.get_entry_value()
             
-            # ✅ FIX 1: Tenta comprar PRIMEIRO, depois loga se deu certo
+            # ✅ FIX 1: Log honesto de TENTATIVA antes da ordem
+            mode_prefix = "[OBSERVE] " if self.config["mode"] == "OBSERVE" else ""
+            self.log_to_db(
+                f"🟡 TENTANDO ENTRAR ({strategy_name}): {asset} | {direction.upper()} | ${amount}",
+                "INFO"
+            )
+
             balance_before = 0.0
             if self.config["mode"] == "LIVE":
                 try: 
@@ -815,15 +828,19 @@ class SimpleBot:
                         return
                 except: return
 
-            status, order_id, order_type = self.safe_buy(asset, amount, direction)
+            # ✅ Tenta Comprar
+            status, order_id = self.safe_buy(asset, amount, direction)
 
-            if not status:
-                self.log_to_db(f"❌ ORDEM RECUSADA: {asset} | {direction.upper()} | ${amount} | ({order_type})", "ERROR")
+            # ✅ Valida se a ordem existe mesmo
+            if not status or not order_id:
+                self.log_to_db(f"❌ ORDEM NÃO ACEITA (Recusada pela corretora)", "ERROR")
                 return
 
-            # ✅ Só aqui é ENTRADA REAL
-            mode_prefix = "[OBSERVE] " if self.config["mode"] == "OBSERVE" else ""
-            self.log_to_db(f"➡️ {mode_prefix}ENTRADA CONFIRMADA ({strategy_name}): {asset} | {direction.upper()} | ${amount} | ID:{order_id} | {order_type}", "INFO")
+            # ✅ Só aqui confirma a entrada no log
+            self.log_to_db(
+                f"✅ {mode_prefix}ENTRADA CONFIRMADA ({strategy_name}): {asset} | {direction.upper()} | ${amount} | ORDEM={order_id}",
+                "SUCCESS"
+            )
 
             time.sleep(62) 
             
