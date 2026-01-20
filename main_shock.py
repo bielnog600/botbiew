@@ -15,7 +15,7 @@ try:
 except ImportError:
     print("[ERRO] Biblioteca 'exnovaapi' não instalada.")
 
-BOT_VERSION = "SHOCK_ENGINE_V3_FINAL_2026-01-20"
+BOT_VERSION = "SHOCK_ENGINE_V4_55s_2026-01-20"
 print(f"🚀 START::{BOT_VERSION}")
 
 # --- CONFIGURAÇÃO GERAL ---
@@ -746,14 +746,14 @@ class SimpleBot:
 
     # ✅ FIX 2: safe_buy melhorado para verificar status AND ID
     def safe_buy(self, asset, amount, direction):
-        if self.config["mode"] == "OBSERVE": return True, "VIRTUAL"
+        if self.config["mode"] == "OBSERVE": return True, "VIRTUAL", "OBSERVE"
         
         # Tentativa 1: Digital Spot
         try:
             status, order_id = self.api.buy_digital_spot(asset, amount, direction, 1)
             # Verifica se realmente veio ID (API às vezes devolve True sem ID)
             if status and order_id:
-                return True, order_id
+                return True, order_id, "DIGITAL"
             else:
                 self.log_to_db(f"⚠️ Digital falhou (ID nulo). Tentando Binary...", "WARNING")
         except Exception as e:
@@ -763,13 +763,13 @@ class SimpleBot:
         try:
             status, order_id = self.api.buy(amount, asset, direction, 1)
             if status and order_id:
-                return True, order_id
+                return True, order_id, "BINARY"
             else:
                 self.log_to_db(f"⚠️ Binary falhou também.", "WARNING")
         except Exception as e:
             self.log_to_db(f"⚠️ BINARY Exception: {e}", "WARNING")
 
-        return False, None
+        return False, None, "FAILED"
 
     def execute_trade(self, asset, direction, strategy_key, strategy_name="Unknown"):
         now = time.time()
@@ -785,6 +785,7 @@ class SimpleBot:
             current_hour = datetime.now(BR_TIMEZONE).hour
             if self.hourly_loss_count.get(current_hour, 0) >= 2:
                  msg = f"Horário {current_hour}h bloqueado"
+                 # ✅ Log explícito se for Shock
                  if strategy_key == "SHOCK_REVERSAL" or self.config.get("strategy_mode") == "SHOCK_REVERSAL":
                      msg = f"⛔ SHOCK bloqueado por 2 losses na hora {current_hour}h"
                      self.log_to_db(msg, "WARNING")
@@ -829,7 +830,7 @@ class SimpleBot:
                 except: return
 
             # ✅ Tenta Comprar
-            status, order_id = self.safe_buy(asset, amount, direction)
+            status, order_id, order_type = self.safe_buy(asset, amount, direction)
 
             # ✅ Valida se a ordem existe mesmo
             if not status or not order_id:
@@ -842,7 +843,8 @@ class SimpleBot:
                 "SUCCESS"
             )
 
-            time.sleep(62) 
+            # ✅ FIX: Wait Time 70s
+            time.sleep(70) 
             
             res_str = "DOJI"
             profit = 0.0
@@ -951,15 +953,59 @@ class SimpleBot:
                     assets_pool = ["EURUSD-OTC", "EURGBP-OTC", "USDCHF-OTC", "EURJPY-OTC", "NZDUSD-OTC", "GBPUSD-OTC", "GBPJPY-OTC", "USDJPY-OTC", "AUDCAD-OTC", "AUDUSD-OTC", "USDCAD-OTC", "AUDJPY-OTC"]
                     self.best_assets = self.catalog_assets(assets_pool)
 
-                # ✅ FIX 2: USA FUSO HORÁRIO BRASIL PARA NÃO QUEBRAR EM VPS (UTC)
+                # ✅ FIX: USA FUSO HORÁRIO BRASIL PARA NÃO QUEBRAR EM VPS (UTC)
                 now_dt = datetime.now(BR_TIMEZONE)
                 now_sec = now_dt.second
                 
-                # --- JANELA DE EXECUÇÃO: 0 a 4 SEGUNDOS ---
-                # ✅ FIX 2: Janela aumentada para absorver lag de API/VPS
-                if 0 <= now_sec <= 4:
-                     current_mode_label = f"{strat_mode}_ENGINE [{now_dt.strftime('%H:%M:%S')}]"
-                     self.log_to_db(f"MODE_ATIVO::{current_mode_label}", "DEBUG")
+                # ==============================================================================
+                # ✅ MODO SHOCK EXCLUSIVO (Loop Isolado)
+                # --- JANELA DE EXECUÇÃO: 55 a 59 SEGUNDOS (SNIPER) ---
+                # ==============================================================================
+                if strat_mode == "SHOCK_REVERSAL":
+                    if 55 <= now_sec <= 59:
+                        # Log específico para SHOCK e nível SYSTEM
+                        self.log_to_db(f"⚡ Monitor: SHOCK ativo (sem EMA/WR) [{now_dt.strftime('%H:%M:%S')}]", "SYSTEM")
+                        
+                        for asset in self.best_assets: # Em modo Shock, best_assets = todos
+                            with self.trade_lock:
+                                if asset in self.active_trades: continue
+                            try:
+                                candles = self.api.get_candles(asset, 60, 100, int(time.time()))
+                                if not candles: continue
+                                
+                                # Análise Pura de Price Action (Sem filtro de qualidade TREND)
+                                sig_shock, reason_shock = ShockReversalStrategy.get_signal(candles)
+                                self.log_to_db(f"⚡ SHOCK_CHECK {asset}: {reason_shock}", "DEBUG")
+
+                                if sig_shock:
+                                    # Valida Score e Min Score (70)
+                                    regime = MarketRegimeClassifier.classify(candles)
+                                    st = TrendStrength.classify(candles)
+                                    min_score = self.get_min_score() # Retorna 70 aqui
+
+                                    shock_score, shock_det = TechnicalAnalysis.calculate_entry_score(
+                                        candles, regime, st, sig_shock, asset, "SHOCK_REVERSAL"
+                                    )
+
+                                    if shock_score >= min_score:
+                                        self.log_to_db(f"⚡ SHOCK SIGNAL {asset}: {sig_shock.upper()} ({reason_shock})", "INFO")
+                                        self.execute_trade(asset, sig_shock, "SHOCK_REVERSAL", f"{reason_shock} | {shock_det}")
+                                        time.sleep(55) # Evita reentradas no mesmo minuto
+                                        break
+                                    else:
+                                        self.log_rejection(asset, f"Score {shock_score} < {min_score}: {shock_det}", "SHOCK")
+                            except: pass
+                        time.sleep(1)
+                    time.sleep(0.5)
+                    continue # ⛔ PULA O RESTO DO LOOP PARA NÃO EXECUTAR V2
+
+                # ==============================================================================
+                # ✅ MODO AUTO / V2 TREND (Loop Padrão)
+                # --- JANELA DE EXECUÇÃO: 55 a 59 SEGUNDOS ---
+                # ==============================================================================
+                if 55 <= now_sec <= 59:
+                     # Log refletindo o mode real e nível SYSTEM
+                     self.log_to_db(f"MODE_ATIVO::{strat_mode} (Scan V2/Trend) [{now_dt.strftime('%H:%M:%S')}]", "SYSTEM")
                      
                      for asset in self.best_assets:
                          with self.trade_lock:
@@ -967,49 +1013,40 @@ class SimpleBot:
                          try:
                              candles = self.api.get_candles(asset, 60, 100, int(time.time()))
                              if candles:
-                                 regime = MarketRegimeClassifier.classify(candles)
                                  min_score = self.get_min_score()
                                  trade_executed = False
                                  
-                                 # 1. SHOCK REVERSAL (Prioridade ou Única se selecionada)
-                                 if not trade_executed and strat_mode in ["AUTO", "SHOCK_REVERSAL", "SHOCK"]:
+                                 # 1. Tenta Shock primeiro (se AUTO)
+                                 if strat_mode == "AUTO":
                                      sig_shock, reason_shock = ShockReversalStrategy.get_signal(candles)
-                                     
-                                     # ✅ FIX 4: Debug Explícito para ver se o Shock está sendo detectado
-                                     if strat_mode == "SHOCK_REVERSAL":
-                                          self.log_to_db(f"⚡ SHOCK_CHECK {asset}: {reason_shock}", "DEBUG")
-
                                      if sig_shock:
                                           st = TrendStrength.classify(candles)
-                                          # Evita shock contra trend muito forte, a menos que seja modo SHOCK exclusivo
-                                          if regime == "TREND" and st == "STRONG" and strat_mode == "AUTO":
+                                          regime = MarketRegimeClassifier.classify(candles)
+                                          if regime == "TREND" and st == "STRONG":
                                                self.log_rejection(asset, "Shock contra Trend Forte (Auto)", "SHOCK")
                                           else:
-                                               # ✅ Validação de Score Turbinado para Shock
                                                shock_score, shock_det = TechnicalAnalysis.calculate_entry_score(
                                                    candles, regime, st, sig_shock, asset, "SHOCK_REVERSAL"
                                                )
-                                               if shock_score >= min_score:
-                                                    # ✅ FIX 1: Executa Shock ANTES de verificar qualidade (Quality Check ignorado se for Shock)
+                                               if shock_score >= 70: # Hardcoded 70 para shock em auto
                                                     self.execute_trade(asset, sig_shock, "SHOCK_REVERSAL", f"{reason_shock} | {shock_det}")
                                                     trade_executed = True
                                                     break
-                                               else:
-                                                    self.log_rejection(asset, f"Shock Score {shock_score} < {min_score}: {shock_det}", "SHOCK")
 
-                                 # ✅ FIX 1: Só verifica qualidade se não entrou em Shock
+                                 # 2. Se não foi shock, verifica qualidade para Trend
                                  if not trade_executed:
                                      qual, q_reason = TechnicalAnalysis.check_candle_quality(candles, asset)
                                      if not qual: 
                                          self.log_rejection(asset, q_reason, "QUALITY")
                                          continue
 
-                                     # 2. V2 TREND (Apenas se não achou shock e modo permite)
+                                     # 3. V2 TREND
                                      if strat_mode in ["AUTO", "V2_TREND"]:
                                          if TechnicalAnalysis.check_compression(candles): 
                                               self.log_rejection(asset, "Compressão", "COMPRESSION")
                                               continue
                                          
+                                         regime = MarketRegimeClassifier.classify(candles)
                                          if regime == "NO_TRADE": continue
                                          
                                          if regime == "TREND":
