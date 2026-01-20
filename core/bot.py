@@ -17,8 +17,9 @@ except ImportError:
 
 # --- CONFIGURAÇÃO GERAL ---
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://ioduahwknfsktujthfyc.supabase.co")
-# Note: It is recommended to use environment variables for keys in production
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlvZHVhaHdrbmZza3R1anRoZnljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEzMDc0NDcsImV4cCI6MjA2Njg4MzQ0N30.96f8wZO6SvABKFMWjIiw1pSugAB4Isldj7yxLcLJRSE")
+# ✅ FIX 3: SEGURANÇA - Chave removida do código. Deve estar nas Variáveis de Ambiente.
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY") 
+
 EXNOVA_EMAIL = os.environ.get("EXNOVA_EMAIL", "seu_email@exemplo.com")
 EXNOVA_PASSWORD = os.environ.get("EXNOVA_PASSWORD", "sua_senha")
 BR_TIMEZONE = timezone(timedelta(hours=-3))
@@ -68,18 +69,6 @@ class TechnicalAnalysis:
         return ema
 
     @staticmethod
-    def calculate_ema_series(values, period):
-        if len(values) < period: return []
-        ema_values = []
-        sma = sum(values[:period]) / period
-        ema_values.append(sma)
-        k = 2 / (period + 1)
-        for price in values[period:]:
-            ema = price * k + ema_values[-1] * (1 - k)
-            ema_values.append(ema)
-        return ema_values
-
-    @staticmethod
     def analyze_candle(candle):
         open_p = candle['open']
         close_p = candle['close']
@@ -93,12 +82,10 @@ class TechnicalAnalysis:
 
     @staticmethod
     def check_candle_quality(candles, asset_name):
-        """Valida se o candle DE SINAL (fechado, -2) tem qualidade"""
         if len(candles) < 20: return False, "Dados insuficientes"
         last_closed = candles[-2] 
         current_body = abs(last_closed['close'] - last_closed['open'])
         
-        # Threshold por tipo de ativo
         MIN_BODY = 0.015 if "JPY" in asset_name else 0.00015
         if current_body < MIN_BODY: return False, "Mercado Morto"
 
@@ -107,24 +94,21 @@ class TechnicalAnalysis:
         
         if current_body < (avg_body * 0.6): return False, "Candle fraco (<60% média)"
             
-        # Filtro de Deslocamento (Preço vs EMA)
         ema21 = TechnicalAnalysis.calculate_ema(candles[:-1], 21) 
         distance = abs(last_closed['close'] - ema21)
         if distance < (avg_body * 0.5): return False, "Sem deslocamento real"
 
-        # 5. FILTRO DE VOLATILIDADE ABSOLUTA (SPIKE)
         ranges = [(c['max'] - c['min']) for c in candles[-15:-2]]
         avg_range = sum(ranges) / len(ranges) if ranges else 0.0001
         last_range = last_closed['max'] - last_closed['min']
         
         if last_range > (avg_range * 2.5):
-            return False, "Spike de volatilidade (Exaustão)"
+            return False, "Spike de volatilidade"
             
         return True, "OK"
 
     @staticmethod
     def calculate_entry_score(candles, regime, strength, sig, asset_name, strategy_type="TREND"):
-        """Calcula score de 0 a 100 para a entrada. Requer >= 75 para aprovar."""
         score = 0
         details = []
 
@@ -133,16 +117,51 @@ class TechnicalAnalysis:
         bodies = [abs(c['close'] - c['open']) for c in candles[-12:-2]]
         avg_body = sum(bodies) / len(bodies) if bodies else 0.00001
 
-        # SCORE ESPECÍFICO PARA SHOCK REVERSAL
+        # --- SCORE SHOCK REVERSAL TURBINADO (70 a 100) ---
         if strategy_type == "SHOCK_REVERSAL":
-            score = 70 # Base alta
+            score = 70 # Base alta para entrar
             details.append("Base Shock")
-            if body >= avg_body * 2.0: 
+            
+            # 1. Range Explosivo (+10)
+            ranges = [(c['max'] - c['min']) for c in candles[-15:-2]]
+            avg_range = sum(ranges) / len(ranges) if ranges else 0.0001
+            last_range = last_closed['max'] - last_closed['min']
+            
+            if last_range >= avg_range * 2.0:
                 score += 10
-                details.append("Corpo Massivo")
+                details.append("Range 2x (Explosão)")
+            elif body >= avg_body * 2.0:
+                 score += 10
+                 details.append("Corpo 2x")
+
+            # 2. Fechamento no Extremo / Careca (+10) & Sem Wick Contrário (+10)
+            is_green = last_closed['close'] > last_closed['open']
+            
+            # ✅ CÁLCULO ROBUSTO DE WICK
+            upper_wick = last_closed['max'] - max(last_closed['open'], last_closed['close'])
+            lower_wick = min(last_closed['open'], last_closed['close']) - last_closed['min']
+            
+            if is_green:
+                wick_favor = upper_wick
+                wick_contra = lower_wick
+            else:
+                wick_favor = lower_wick
+                wick_contra = upper_wick
+            
+            # Se pavio a favor for minúsculo (menor que 5% do range)
+            if last_range > 0 and (wick_favor / last_range) < 0.05:
+                score += 10
+                details.append("Fechou no Talo")
+
+            # 3. Sem Pavio Contrário (+10)
+            # Indica força total desde a abertura. ✅ Ajustado para < 15%
+            if last_range > 0 and (wick_contra / last_range) < 0.15:
+                score += 10
+                details.append("Sem Wick Contrário")
+
             return score, ", ".join(details)
 
-        # SCORE PADRÃO (TREND)
+        # --- SCORE TREND PADRÃO ---
         score += 20 
         details.append("Contexto OK")
         
@@ -191,9 +210,7 @@ class TechnicalAnalysis:
 
     @staticmethod
     def get_signal(candles):
-        """Estratégia EMA V2 (Tendência Forte)"""
         if len(candles) < 60: return None, "Dados insuficientes"
-        
         current_hour = datetime.now(BR_TIMEZONE).hour
         engulf_required = True
         if current_hour >= 14: engulf_required = False
@@ -249,14 +266,21 @@ class ShockReversalStrategy:
         rng = last_closed['max'] - last_closed['min']
         if rng == 0: return None, "Doji"
 
+        # Filtro de Wick: Garante que o fechamento foi no extremo (máx 15% de recuo)
+        # Isso filtra "Vela Doida" que explode e volta tudo
+        
         if last_closed['close'] > last_closed['open']: # Verde (Alta)
             if body >= (avg_body * 1.6) and rng >= (avg_range * 1.6):
+                # Pavio superior deve ser pequeno (máx 15% do range)
                 if last_closed['close'] >= last_closed['max'] - (rng * 0.15): 
                     return "put", "SHOCK_UP_REVERSAL"
+        
         elif last_closed['close'] < last_closed['open']: # Vermelha (Baixa)
             if body >= (avg_body * 1.6) and rng >= (avg_range * 1.6):
+                # Pavio inferior deve ser pequeno (máx 15% do range)
                 if last_closed['close'] <= last_closed['min'] + (rng * 0.15): 
                     return "call", "SHOCK_DOWN_REVERSAL"
+                    
         return None, "Sem Shock"
 
 class MarketRegimeClassifier:
@@ -369,7 +393,9 @@ class SimpleBot:
 
     def init_supabase(self):
         try:
-            self.supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+            if not SUPABASE_KEY:
+                print("⚠️ AVISO: SUPABASE_KEY não encontrada nas variáveis de ambiente!")
+            self.supabase = create_client(SUPABASE_URL, SUPABASE_KEY or "invalid_key")
             print("✅ Supabase conectado.")
         except Exception as e:
             print(f"❌ Erro Supabase: {e}")
@@ -413,7 +439,6 @@ class SimpleBot:
         except: pass
 
     def start_new_session(self):
-        """Inicia uma nova sessão de trading, zerando contadores"""
         self.session_blocked = False 
         self.consecutive_losses.clear() 
         self.range_loss_by_hour.clear()
@@ -514,19 +539,32 @@ class SimpleBot:
             prev_mode = self.config.get("mode")
             new_mode = (data.get("mode") or "LIVE").strip().upper()
             
-            # Normalização e Leitura da Estratégia
-            prev_strat = self.config.get("strategy_mode")
-            db_strat = (data.get("strategy_mode") or "AUTO").strip().upper()
+            # --- NORMALIZAÇÃO ROBUSTA DA ESTRATÉGIA ---
+            # 1. Leitura RAW do banco (pode ser string ou None)
+            db_raw_strat = data.get("strategy_mode")
             
-            # Normalização Robusta
+            # 2. Conversão para String limpa
+            db_strat = (str(db_raw_strat) or "AUTO").strip().upper()
+            
+            # 3. Mapeamento Forçado (Correção do "EMA_V2" fantasma)
             raw_strat = db_strat
-            if "SHOCK" in db_strat: raw_strat = "SHOCK_REVERSAL"
-            elif "EMA" in db_strat or "V2" in db_strat: raw_strat = "V2_TREND"
             
-            # Detecção de Mudança de Estratégia
+            if "SHOCK" in db_strat: 
+                raw_strat = "SHOCK_REVERSAL"
+            elif "EMA" in db_strat or "V2" in db_strat or "AGGRESSIVE" in db_strat:
+                raw_strat = "V2_TREND"
+            elif "AUTO" in db_strat:
+                raw_strat = "AUTO"
+            else:
+                raw_strat = "V2_TREND" # Fallback se vier lixo
+            
+            # 4. Detecção de Mudança
+            prev_strat = self.config.get("strategy_mode")
             if prev_strat != raw_strat:
-                 self.log_to_db(f"🔄 Estratégia: {prev_strat} -> {raw_strat} (DB: {db_strat})", "SYSTEM")
-                 # [IMPORTANTE] Limpa cache de ativos para forçar nova catalogação com a nova lógica
+                 # Debug explicito: Mostra o que veio do banco e no que virou
+                 self.log_to_db(f"🔄 MUDANÇA ESTRATÉGIA: DB='{db_raw_strat}' ➡️ BOT='{raw_strat}'", "SYSTEM")
+                 
+                 # Limpa o cache de ativos para obrigar recatalogação correta
                  self.best_assets = [] 
                  self.last_catalog_time = 0
 
@@ -792,6 +830,12 @@ class SimpleBot:
                         elif delta < -0.01: res_str = "LOSS"; profit = delta
                     except: res_str = "UNKNOWN"
 
+                # ✅ FIX 4: RECONEXÃO EM CASO DE ERRO
+                if res_str == "UNKNOWN":
+                    self.log_to_db("⚠️ Resultado UNKNOWN, reconectando API...", "WARNING")
+                    self.api = None
+                    return
+
                 if res_str == 'DOJI':
                     self.log_to_db("DOJI neutro", "DEBUG")
                     return
@@ -866,9 +910,14 @@ class SimpleBot:
                     assets_pool = ["EURUSD-OTC", "EURGBP-OTC", "USDCHF-OTC", "EURJPY-OTC", "NZDUSD-OTC", "GBPUSD-OTC", "GBPJPY-OTC", "USDJPY-OTC", "AUDCAD-OTC", "AUDUSD-OTC", "USDCAD-OTC", "AUDJPY-OTC"]
                     self.best_assets = self.catalog_assets(assets_pool)
 
-                now_sec = datetime.now().second
-                if 55 <= now_sec <= 59:
-                     current_mode_label = f"{strat_mode}_ENGINE"
+                # ✅ FIX 2: USA FUSO HORÁRIO BRASIL PARA NÃO QUEBRAR EM VPS (UTC)
+                now_dt = datetime.now(BR_TIMEZONE)
+                now_sec = now_dt.second
+                
+                # --- JANELA DE EXECUÇÃO: 0 a 4 SEGUNDOS ---
+                # ✅ FIX 2: Janela aumentada para absorver lag de API/VPS
+                if 0 <= now_sec <= 4:
+                     current_mode_label = f"{strat_mode}_ENGINE [{now_dt.strftime('%H:%M:%S')}]"
                      self.log_to_db(f"MODE_ATIVO::{current_mode_label}", "DEBUG")
                      
                      for asset in self.best_assets:
@@ -877,19 +926,12 @@ class SimpleBot:
                          try:
                              candles = self.api.get_candles(asset, 60, 100, int(time.time()))
                              if candles:
-                                 # Filtro de qualidade comum
-                                 qual, q_reason = TechnicalAnalysis.check_candle_quality(candles, asset)
-                                 if not qual: 
-                                     self.log_rejection(asset, q_reason, "QUALITY")
-                                     continue
-
                                  regime = MarketRegimeClassifier.classify(candles)
-                                 sig, reason, strat_key = None, "", "UNKNOWN"
-                                 strength = "WEAK" 
+                                 min_score = self.get_min_score()
+                                 trade_executed = False
                                  
                                  # 1. SHOCK REVERSAL (Prioridade ou Única se selecionada)
-                                 # Aceita "SHOCK" ou "SHOCK_REVERSAL"
-                                 if strat_mode in ["AUTO", "SHOCK_REVERSAL", "SHOCK"]:
+                                 if not trade_executed and strat_mode in ["AUTO", "SHOCK_REVERSAL", "SHOCK"]:
                                      sig_shock, reason_shock = ShockReversalStrategy.get_signal(candles)
                                      if sig_shock:
                                           st = TrendStrength.classify(candles)
@@ -897,34 +939,56 @@ class SimpleBot:
                                           if regime == "TREND" and st == "STRONG" and strat_mode == "AUTO":
                                                self.log_rejection(asset, "Shock contra Trend Forte (Auto)", "SHOCK")
                                           else:
-                                               sig, reason, strat_key = sig_shock, reason_shock, "SHOCK_REVERSAL"
+                                               # ✅ Validação de Score Turbinado para Shock
+                                               shock_score, shock_det = TechnicalAnalysis.calculate_entry_score(
+                                                   candles, regime, st, sig_shock, asset, "SHOCK_REVERSAL"
+                                               )
+                                               if shock_score >= min_score:
+                                                    # ✅ FIX 1: Executa Shock ANTES de verificar qualidade (Quality Check ignorado se for Shock)
+                                                    self.execute_trade(asset, sig_shock, "SHOCK_REVERSAL", f"{reason_shock} | {shock_det}")
+                                                    trade_executed = True
+                                                    break
+                                               else:
+                                                    self.log_rejection(asset, f"Shock Score {shock_score} < {min_score}: {shock_det}", "SHOCK")
 
-                                 # 2. V2 TREND (Apenas se não achou shock e modo permite)
-                                 if not sig and strat_mode in ["AUTO", "V2_TREND"]:
-                                     if TechnicalAnalysis.check_compression(candles): 
-                                          self.log_rejection(asset, "Compressão", "COMPRESSION")
-                                          continue
-                                     
-                                     if regime == "NO_TRADE": continue
-                                     
-                                     if regime == "TREND":
-                                          strength = TrendStrength.classify(candles)
-                                          if strength == "STRONG": 
-                                               sig, reason = TechnicalAnalysis.get_signal(candles)
-                                               strat_key = "TREND_STRONG"
-                                          else: 
-                                               sig, reason = MicroPullbackStrategy.get_signal(candles)
-                                               strat_key = "TREND_WEAK"
-                                     
-                                     if sig:
-                                          min_score = self.get_min_score()
-                                          score, score_det = TechnicalAnalysis.calculate_entry_score(candles, regime, strength, sig, asset, strat_key)
-                                          
-                                          if score >= min_score:
-                                               self.execute_trade(asset, sig, strat_key, reason)
-                                               break 
-                                          else:
-                                               self.log_rejection(asset, f"Score {score} < {min_score}: {score_det}", regime)
+                                 # ✅ FIX 1: Só verifica qualidade se não entrou em Shock
+                                 if not trade_executed:
+                                     qual, q_reason = TechnicalAnalysis.check_candle_quality(candles, asset)
+                                     if not qual: 
+                                         self.log_rejection(asset, q_reason, "QUALITY")
+                                         continue
+
+                                     # 2. V2 TREND (Apenas se não achou shock e modo permite)
+                                     if strat_mode in ["AUTO", "V2_TREND"]:
+                                         if TechnicalAnalysis.check_compression(candles): 
+                                              self.log_rejection(asset, "Compressão", "COMPRESSION")
+                                              continue
+                                         
+                                         if regime == "NO_TRADE": continue
+                                         
+                                         if regime == "TREND":
+                                              strength = TrendStrength.classify(candles)
+                                              sig, reason, strat_key = None, "", "UNKNOWN"
+                                              
+                                              if strength == "STRONG": 
+                                                   sig, reason = TechnicalAnalysis.get_signal(candles)
+                                                   strat_key = "TREND_STRONG"
+                                              else: 
+                                                   sig, reason = MicroPullbackStrategy.get_signal(candles)
+                                                   strat_key = "TREND_WEAK"
+                                         
+                                              if sig:
+                                                   # ✅ Passando "TREND" explicitamente
+                                                   score, score_det = TechnicalAnalysis.calculate_entry_score(
+                                                       candles, regime, strength, sig, asset, "TREND"
+                                                   )
+                                                   
+                                                   if score >= min_score:
+                                                        self.execute_trade(asset, sig, strat_key, reason)
+                                                        trade_executed = True
+                                                        break 
+                                                   else:
+                                                        self.log_rejection(asset, f"Score {score} < {min_score}: {score_det}", regime)
                          except: pass
                      time.sleep(1)
                 time.sleep(0.5)
