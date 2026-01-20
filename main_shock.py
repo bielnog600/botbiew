@@ -15,7 +15,7 @@ try:
 except ImportError:
     print("[ERRO] Biblioteca 'exnovaapi' não instalada.")
 
-BOT_VERSION = "SHOCK_ENGINE_V5_BINARY_ONLY_2026-01-20"
+BOT_VERSION = "SHOCK_ENGINE_V6_TIMER_BLOCK_2026-01-20"
 print(f"🚀 START::{BOT_VERSION}")
 
 # --- CONFIGURAÇÃO GERAL ---
@@ -378,6 +378,10 @@ class SimpleBot:
         self.session_initial_balance = 0.0
         self.last_blocked_log = 0 
         
+        # ✅ FIX: Variáveis para Cooldown Global de 15min
+        self.hour_block_until = 0
+        self.consecutive_losses_global = 0
+
         self.daily_wins = 0
         self.daily_losses = 0
         self.daily_total = 0
@@ -446,6 +450,9 @@ class SimpleBot:
         self.daily_wins = 0
         self.daily_losses = 0
         self.daily_total = 0
+        self.consecutive_losses_global = 0
+        self.hour_block_until = 0
+        
         self.strategy_performance = {
             "TREND_STRONG": {'wins': 0, 'losses': 0, 'consecutive_losses': 0, 'active': True},
             "TREND_WEAK": {'wins': 0, 'losses': 0, 'consecutive_losses': 0, 'active': True},
@@ -479,12 +486,18 @@ class SimpleBot:
             self.daily_wins += 1
             self.consecutive_losses[asset] = 0
             self.asset_cooldowns.pop(asset, None)
+            self.consecutive_losses_global = 0 # ✅ Reseta contador global
+            
         elif result == 'LOSS':
             self.daily_losses += 1
             self.hourly_loss_count[current_hour] = self.hourly_loss_count.get(current_hour, 0) + 1
             
-            if self.hourly_loss_count[current_hour] >= 2:
-                 self.log_to_db(f"⛔ Horário {current_hour}h bloqueado hoje (2 Losses)", "WARNING")
+            # ✅ FIX: Lógica de 2 losses consecutivos = 15min cooldown
+            self.consecutive_losses_global += 1
+            if self.consecutive_losses_global >= 2:
+                self.hour_block_until = time.time() + 900 # 15 minutos
+                self.consecutive_losses_global = 0 # Reseta para contar o próximo ciclo
+                self.log_to_db("⏸️ 2 Loss seguidos — Pausando operações por 15 minutos", "WARNING")
 
             current_cons = self.consecutive_losses.get(asset, 0) + 1
             self.consecutive_losses[asset] = current_cons
@@ -766,16 +779,11 @@ class SimpleBot:
             self.active_trades.add(asset)
 
         try:
-            current_hour = datetime.now(BR_TIMEZONE).hour
-            if self.hourly_loss_count.get(current_hour, 0) >= 2:
-                 msg = f"Horário {current_hour}h bloqueado"
-                 # ✅ Log explícito se for Shock
-                 if strategy_key == "SHOCK_REVERSAL" or self.config.get("strategy_mode") == "SHOCK_REVERSAL":
-                     msg = f"⛔ SHOCK bloqueado por 2 losses na hora {current_hour}h"
-                     self.log_to_db(msg, "WARNING")
-                 
-                 self.log_rejection(asset, msg, "ALL")
-                 return
+            # ✅ FIX: Verifica BLOQUEIO GLOBAL DE 15 MINUTOS antes
+            if time.time() < self.hour_block_until:
+                remaining = int(self.hour_block_until - time.time())
+                self.log_rejection(asset, f"Cooldown global ativo ({remaining}s restantes)", "GLOBAL_PAUSE")
+                return
 
             if asset in self.asset_cooldowns:
                  if time.time() < self.asset_cooldowns[asset]: return
@@ -937,7 +945,7 @@ class SimpleBot:
                     assets_pool = ["EURUSD-OTC", "EURGBP-OTC", "USDCHF-OTC", "EURJPY-OTC", "NZDUSD-OTC", "GBPUSD-OTC", "GBPJPY-OTC", "USDJPY-OTC", "AUDCAD-OTC", "AUDUSD-OTC", "USDCAD-OTC", "AUDJPY-OTC"]
                     self.best_assets = self.catalog_assets(assets_pool)
 
-                # ✅ FIX: USA FUSO HORÁRIO BRASIL PARA NÃO QUEBRAR EM VPS (UTC)
+                # ✅ FIX 2: USA FUSO HORÁRIO BRASIL PARA NÃO QUEBRAR EM VPS (UTC)
                 now_dt = datetime.now(BR_TIMEZONE)
                 now_sec = now_dt.second
                 
