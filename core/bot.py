@@ -513,6 +513,17 @@ class SimpleBot:
             new_status = (data.get("status") or "PAUSED").strip().upper()
             prev_mode = self.config.get("mode")
             new_mode = (data.get("mode") or "LIVE").strip().upper()
+            
+            # Normalização da estratégia
+            raw_strat = (data.get("strategy_mode") or "AUTO").strip().upper()
+            # Mapeamento de compatibilidade para nomes antigos ou curtos
+            if "SHOCK" in raw_strat: raw_strat = "SHOCK_REVERSAL"
+            elif "EMA" in raw_strat or "V2" in raw_strat: raw_strat = "V2_TREND"
+            
+            prev_strat = self.config.get("strategy_mode")
+
+            if prev_strat != raw_strat:
+                 self.log_to_db(f"🔄 Estratégia alterada: {prev_strat} -> {raw_strat}", "SYSTEM")
 
             if new_status == "RESTARTING":
                 self.log_to_db("♻️ RESTARTING recebido. Reiniciando conexão...", "SYSTEM")
@@ -539,7 +550,7 @@ class SimpleBot:
             self.config.update({
                 "status": new_status,
                 "mode": new_mode,
-                "strategy_mode": (data.get("strategy_mode") or "AUTO").strip().upper(),
+                "strategy_mode": raw_strat,
                 "account_type": (data.get("account_type") or "PRACTICE").strip().upper(),
                 "entry_value": float(data.get("entry_value") or 1.0),
                 "max_trades_per_day": int(data.get("max_trades_per_day") or 0),
@@ -872,7 +883,8 @@ class SimpleBot:
                                  strength = "WEAK" 
                                  
                                  # 1. SHOCK REVERSAL (Prioridade ou Única se selecionada)
-                                 if strat_mode in ["AUTO", "SHOCK_REVERSAL"]:
+                                 # Aceita "SHOCK" ou "SHOCK_REVERSAL"
+                                 if strat_mode in ["AUTO", "SHOCK_REVERSAL", "SHOCK"]:
                                      sig_shock, reason_shock = ShockReversalStrategy.get_signal(candles)
                                      if sig_shock:
                                           st = TrendStrength.classify(candles)
