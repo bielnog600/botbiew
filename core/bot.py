@@ -514,16 +514,21 @@ class SimpleBot:
             prev_mode = self.config.get("mode")
             new_mode = (data.get("mode") or "LIVE").strip().upper()
             
-            # Normalização da estratégia
-            raw_strat = (data.get("strategy_mode") or "AUTO").strip().upper()
-            # Mapeamento de compatibilidade para nomes antigos ou curtos
-            if "SHOCK" in raw_strat: raw_strat = "SHOCK_REVERSAL"
-            elif "EMA" in raw_strat or "V2" in raw_strat: raw_strat = "V2_TREND"
-            
+            # Normalização e Leitura da Estratégia
             prev_strat = self.config.get("strategy_mode")
-
+            db_strat = (data.get("strategy_mode") or "AUTO").strip().upper()
+            
+            # Normalização Robusta
+            raw_strat = db_strat
+            if "SHOCK" in db_strat: raw_strat = "SHOCK_REVERSAL"
+            elif "EMA" in db_strat or "V2" in db_strat: raw_strat = "V2_TREND"
+            
+            # Detecção de Mudança de Estratégia
             if prev_strat != raw_strat:
-                 self.log_to_db(f"🔄 Estratégia alterada: {prev_strat} -> {raw_strat}", "SYSTEM")
+                 self.log_to_db(f"🔄 Estratégia: {prev_strat} -> {raw_strat} (DB: {db_strat})", "SYSTEM")
+                 # [IMPORTANTE] Limpa cache de ativos para forçar nova catalogação com a nova lógica
+                 self.best_assets = [] 
+                 self.last_catalog_time = 0
 
             if new_status == "RESTARTING":
                 self.log_to_db("♻️ RESTARTING recebido. Reiniciando conexão...", "SYSTEM")
