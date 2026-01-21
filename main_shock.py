@@ -15,7 +15,7 @@ try:
 except ImportError:
     print("[ERRO] Biblioteca 'exnovaapi' não instalada.")
 
-BOT_VERSION = "SHOCK_ENGINE_V6_TIMER_BLOCK_2026-01-20"
+BOT_VERSION = "SHOCK_ENGINE_V7_AUTO_FIX_2026-01-20"
 print(f"🚀 START::{BOT_VERSION}")
 
 # --- CONFIGURAÇÃO GERAL ---
@@ -464,8 +464,9 @@ class SimpleBot:
 
     def get_min_score(self):
         strat_mode = self.config.get("strategy_mode", "AUTO")
-        # ✅ LIBERA SCORE 70 PARA SHOCK
-        if strat_mode == "SHOCK_REVERSAL": return 70
+        # ✅ LIBERA SCORE 70 PARA SHOCK (Inclusive se for AUTO)
+        if "SHOCK" in strat_mode or strat_mode == "AUTO":
+             return 70
 
         base = 75
         if self.daily_losses >= 2 and self.daily_wins == 0: return base + 5
@@ -711,13 +712,17 @@ class SimpleBot:
         if time.time() - self.last_catalog_time < 1800 and self.best_assets:
              return self.best_assets
         
+        # ✅ PATCH 3: Filtro de Win Rate reduzido para 60% em AUTO
+        threshold = 60 if self.config.get("strategy_mode") == "AUTO" else 70
+        
+        # Se for SHOCK_REVERSAL puro, usa todos os pares
         if self.config.get("strategy_mode") == "SHOCK_REVERSAL":
             self.log_to_db("🔥 Modo SHOCK: Usando todos os pares.", "SYSTEM")
             self.best_assets = assets_pool 
             self.last_catalog_time = time.time()
             return assets_pool
 
-        self.log_to_db(f"📊 Catalogando Top 3 (Win Rate >= 60%)...", "SYSTEM")
+        self.log_to_db(f"📊 Catalogando Top 3 (Win Rate >= {threshold}%)...", "SYSTEM")
         results = []
         for asset in assets_pool:
             try:
@@ -736,7 +741,7 @@ class SimpleBot:
                         if is_win: wins += 1
                 if total >= 5: 
                     wr = (wins / total) * 100
-                    if wr >= 70:
+                    if wr >= threshold: # ✅ Usa 60% no AUTO
                        results.append({'pair': asset, 'win_rate': wr, 'best_strategy': 'V2'})
             except: pass
             time.sleep(0.05)
@@ -750,7 +755,7 @@ class SimpleBot:
              except: pass
         
         self.last_catalog_time = time.time()
-        if not final_list: self.log_to_db("⚠️ Nenhum ativo >= 70% WR. Aguardando.", "WARNING")
+        if not final_list: self.log_to_db(f"⚠️ Nenhum ativo >= {threshold}% WR. Aguardando.", "WARNING")
         else: 
             pairs_str = ", ".join([f"{r['pair']} ({r['win_rate']:.0f}%)" for r in final_list])
             self.log_to_db(f"💎 Melhores: {pairs_str}", "SUCCESS")
@@ -904,6 +909,9 @@ class SimpleBot:
         self.check_ip()
         
         self.log_to_db(f"🚀 START::{BOT_VERSION}", "SYSTEM")
+        
+        # ✅ Define assets_pool GLOBALMENTE no início para garantir fallback
+        ASSETS_POOL = ["EURUSD-OTC", "EURGBP-OTC", "USDCHF-OTC", "EURJPY-OTC", "NZDUSD-OTC", "GBPUSD-OTC", "GBPJPY-OTC", "USDJPY-OTC", "AUDCAD-OTC", "AUDUSD-OTC", "USDCAD-OTC", "AUDJPY-OTC"]
 
         while True:
             try:
@@ -942,10 +950,9 @@ class SimpleBot:
                 
                 # CATALOGAÇÃO (Ignorada se SHOCK_REVERSAL)
                 if not self.best_assets or int(time.time()) % 900 < 5:
-                    assets_pool = ["EURUSD-OTC", "EURGBP-OTC", "USDCHF-OTC", "EURJPY-OTC", "NZDUSD-OTC", "GBPUSD-OTC", "GBPJPY-OTC", "USDJPY-OTC", "AUDCAD-OTC", "AUDUSD-OTC", "USDCAD-OTC", "AUDJPY-OTC"]
-                    self.best_assets = self.catalog_assets(assets_pool)
+                    self.best_assets = self.catalog_assets(ASSETS_POOL)
 
-                # ✅ FIX 2: USA FUSO HORÁRIO BRASIL PARA NÃO QUEBRAR EM VPS (UTC)
+                # ✅ FIX: USA FUSO HORÁRIO BRASIL PARA NÃO QUEBRAR EM VPS (UTC)
                 now_dt = datetime.now(BR_TIMEZONE)
                 now_sec = now_dt.second
                 
@@ -954,7 +961,7 @@ class SimpleBot:
                 # --- JANELA DE EXECUÇÃO: 55 a 59 SEGUNDOS (SNIPER) ---
                 # ==============================================================================
                 if strat_mode == "SHOCK_REVERSAL":
-                    if 50 <= now_sec <= 54:
+                    if 55 <= now_sec <= 59:
                         # Log específico para SHOCK e nível SYSTEM
                         self.log_to_db(f"⚡ Monitor: SHOCK ativo (sem EMA/WR) [{now_dt.strftime('%H:%M:%S')}]", "SYSTEM")
                         
@@ -995,11 +1002,14 @@ class SimpleBot:
                 # ✅ MODO AUTO / V2 TREND (Loop Padrão)
                 # --- JANELA DE EXECUÇÃO: 55 a 59 SEGUNDOS ---
                 # ==============================================================================
-                if 50 <= now_sec <= 54:
+                if 55 <= now_sec <= 59:
                      # Log refletindo o mode real e nível SYSTEM
                      self.log_to_db(f"MODE_ATIVO::{strat_mode} (Scan V2/Trend) [{now_dt.strftime('%H:%M:%S')}]", "SYSTEM")
                      
-                     for asset in self.best_assets:
+                     # ✅ PATCH 1: Fallback para assets_pool se catálogo falhar
+                     assets_to_scan = self.best_assets if self.best_assets else ASSETS_POOL
+                     
+                     for asset in assets_to_scan:
                          with self.trade_lock:
                              if asset in self.active_trades: continue
                          try:
@@ -1020,7 +1030,8 @@ class SimpleBot:
                                                shock_score, shock_det = TechnicalAnalysis.calculate_entry_score(
                                                    candles, regime, st, sig_shock, asset, "SHOCK_REVERSAL"
                                                )
-                                               if shock_score >= 70: # Hardcoded 70 para shock em auto
+                                               # ✅ PATCH 2: Score mínimo fixo em 70 para Shock no AUTO
+                                               if shock_score >= 70: 
                                                     self.execute_trade(asset, sig_shock, "SHOCK_REVERSAL", f"{reason_shock} | {shock_det}")
                                                     trade_executed = True
                                                     break
