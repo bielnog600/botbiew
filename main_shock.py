@@ -16,7 +16,7 @@ try:
 except ImportError:
     print("[ERRO] Biblioteca 'exnovaapi' não instalada.")
 
-BOT_VERSION = "SHOCK_ENGINE_V21_BINARY_ONLY_HARDLOCK_2026-01-21"
+BOT_VERSION = "SHOCK_ENGINE_V23_OPTIMIZED_SAFE_2026-01-21"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -533,9 +533,6 @@ class SimpleBot:
             self.log_to_db(f"❌ Erro fetch_config: {e}", "ERROR")
 
     def check_schedule(self):
-        if not self.config.get("timer_enabled", False):
-            return
-
         now_br = datetime.now(BR_TIMEZONE)
         now_str = now_br.strftime("%H:%M")
         start_str = self.config.get("timer_start", "00:00")
@@ -543,11 +540,27 @@ class SimpleBot:
 
         hour = now_br.hour
         minute = now_br.minute
+        
+        # ✅ FIX SCHEDULER: Forçar PAUSED em horários bloqueados
+        blocked_time = False
         if 0 <= hour < 4:
-            return
+            blocked_time = True
         if hour == 13 and minute >= 30:
-            return
+            blocked_time = True
         if hour == 14 and minute <= 30:
+            blocked_time = True
+            
+        if blocked_time:
+            if self.config["status"] == "RUNNING":
+                self.log_to_db("⛔ Horário bloqueado — PAUSANDO", "WARNING")
+                try:
+                    self.supabase.table("bot_config").update({"status": "PAUSED"}).eq("id", 1).execute()
+                    self.config["status"] = "PAUSED"
+                except:
+                    pass
+            return
+
+        if not self.config.get("timer_enabled", False):
             return
 
         is_inside = False
@@ -775,22 +788,21 @@ class SimpleBot:
                 
                 # ✅ FIX 2: GALE SINCRONIZADO PARA PRÓXIMO MINUTO E SEGUNDO CORRETO
                 if gale_level == 0 and self.config.get("martingale_enabled", True):
-                    # Calcula o próximo minuto com base na entrada
-                    next_minute = (entry_dt + timedelta(minutes=2)).strftime("%Y%m%d%H%M")
+                    # Calcula o próximo minuto com base na entrada (FIX: +1 minuto)
+                    next_minute = (entry_dt + timedelta(minutes=1)).strftime("%Y%m%d%H%M")
                     
-                    # ✅ Define o segundo alvo baseado no tipo da entrada original
-                    # Shock (Binária) -> 50s | V2 (agora Binária) -> 55s
-                    gale_second = ENTRY_SECOND if prefer_binary else 55
+                    # ✅ FIX: Define o segundo alvo baseado no segundo real da entrada
+                    entry_sec = entry_dt.second
                     
-                    self.log_to_db(f"🎯 GALE G1 ARMADO para {asset} (Min: {next_minute} Sec: {gale_second})", "WARNING")
+                    self.log_to_db(f"🎯 GALE G1 ARMADO para {asset} (Min: {next_minute} Sec: {entry_sec})", "WARNING")
                     self.pending_gale[asset] = {
                         'asset': asset,
                         'direction': direction,
                         'strategy_key': strategy_key,
                         'strategy_label': strategy_label,
-                        'prefer_binary': prefer_binary,
+                        'prefer_binary': True,
                         'minute_key': next_minute,
-                        'second_key': gale_second # ✅ Salva o segundo correto
+                        'second_key': entry_sec # ✅ Salva o segundo correto
                     }
 
             if self.loss_streak >= 2:
@@ -860,6 +872,9 @@ class SimpleBot:
                         continue
                 
                 # ✅ FIX 2B: EXECUÇÃO DE GALE SINCRONIZADA
+                # Flag para saber se houve execução de gale neste ciclo
+                executed_gale = False
+
                 if self.pending_gale:
                     now_dt = datetime.now(BR_TIMEZONE)
                     current_key = now_dt.strftime("%Y%m%d%H%M")
@@ -874,10 +889,10 @@ class SimpleBot:
                         if g.get("minute_key") != current_key:
                             continue
 
-                        # Valida segundo com janela de 2s
+                        # ✅ FIX: Valida segundo com janela SIMÉTRICA (±1s)
                         sec_target = int(g.get("second_key", ENTRY_SECOND))
                         
-                        if not (sec_target <= now_sec <= sec_target + 2):
+                        if not (sec_target - 1 <= now_sec <= sec_target + 1):
                             continue
                             
                         del self.pending_gale[asset]
@@ -891,7 +906,12 @@ class SimpleBot:
                             prefer_binary=g['prefer_binary'],
                             gale_level=1
                         )
-                    time.sleep(0.5)
+                        executed_gale = True
+                    
+                    # ✅ FIX: Se executou Gale, não tenta operar normal neste loop
+                    if executed_gale:
+                        time.sleep(0.25)
+                        continue
 
                 if not self.best_assets or (time.time() - self.last_catalog_time > 900):
                     self.best_assets = self.catalog_assets(assets_pool)
@@ -921,7 +941,8 @@ class SimpleBot:
                                 if asset in self.active_trades:
                                     continue
                             try:
-                                candles = self.api.get_candles(asset, 60, 100, int(time.time()))
+                                # ✅ OTIMIZAÇÃO: 100 -> 60 candles
+                                candles = self.api.get_candles(asset, 60, 60, int(time.time()))
                                 if not candles:
                                     continue
 
@@ -943,16 +964,16 @@ class SimpleBot:
                                              self.auto_candidate = cand
                                              self.auto_candidate_key = current_minute_key
                                         self.log_to_db(f"🤖 AUTO_CANDIDATE(SHOCK) {asset} Score={cand['score']:.2f}", "SYSTEM")
-                                    
+                                     
                                     elif strat_mode == "SHOCK_REVERSAL":
                                          self.execute_trade(
-                                            asset=asset,
-                                            direction=sig,
-                                            strategy_key="SHOCK_REVERSAL",
-                                            strategy_label=reason,
-                                            prefer_binary=True,
-                                            gale_level=0
-                                        )
+                                             asset=asset,
+                                             direction=sig,
+                                             strategy_key="SHOCK_REVERSAL",
+                                             strategy_label=reason,
+                                             prefer_binary=True,
+                                             gale_level=0
+                                         )
                                          break
                             except:
                                 pass
@@ -969,7 +990,8 @@ class SimpleBot:
                             with self.trade_lock:
                                 if asset in self.active_trades: continue
                             try:
-                                candles = self.api.get_candles(asset, 60, 100, int(time.time()))
+                                # ✅ OTIMIZAÇÃO: 100 -> 60 candles
+                                candles = self.api.get_candles(asset, 60, 60, int(time.time()))
                                 if not candles: continue
 
                                 sig_tm, reason_tm = TendMaxStrategy.get_signal(candles)
@@ -1002,7 +1024,8 @@ class SimpleBot:
                                 if asset in self.active_trades:
                                     continue
                             try:
-                                candles = self.api.get_candles(asset, 60, 100, int(time.time()))
+                                # ✅ OTIMIZAÇÃO: 100 -> 60 candles
+                                candles = self.api.get_candles(asset, 60, 60, int(time.time()))
                                 if not candles: continue
 
                                 # 1. TENDMAX (para AUTO)
