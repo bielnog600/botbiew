@@ -18,13 +18,13 @@
     <!-- Supabase JS -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     
-    <!-- Lucide Icons -->
-    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Phosphor Icons (Mais estável que Lucide para React CDN) -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
     
     <!-- Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 
-    <!-- ✅ FIX FAVICON: Ícone do Haltere para evitar erro 404 nos logs -->
+    <!-- ✅ FIX FAVICON -->
     <link rel="icon" type="image/png" href="https://cdn-icons-png.flaticon.com/512/4712/4712109.png">
     <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/4712/4712109.png">
 
@@ -35,7 +35,7 @@
             background-color: var(--bg-dark); 
             color: #e2e8f0; 
             font-family: 'Inter', sans-serif;
-            overflow: hidden; /* App-like feel */
+            overflow: hidden; 
         }
 
         .font-mono { font-family: 'JetBrains Mono', monospace; }
@@ -86,17 +86,9 @@
     <script type="text/babel">
         const { useState, useEffect, useMemo, useRef } = React;
 
-        // --- CONFIGURAÇÃO SUPABASE ---
         const SUPABASE_URL = "https://ioduahwknfsktujthfyc.supabase.co";
         const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlvZHVhaHdrbmZza3R1anRoZnljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEzMDc0NDcsImV4cCI6MjA2Njg4MzQ0N30.96f8wZO6SvABKFMWjIiw1pSugAB4Isldj7yxLcLJRSE";
         const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-
-        // --- HOOK PARA LUCIDE ICONS ---
-        const useLucide = () => {
-            useEffect(() => {
-                if (window.lucide) window.lucide.createIcons();
-            });
-        };
 
         // --- COMPONENTES UI ---
 
@@ -109,7 +101,7 @@
             return (
                 <div className="fixed inset-0 bg-[#0f1115] z-[9999] flex flex-col items-center justify-center">
                     <div className="w-24 h-24 bg-amber-500/10 rounded-3xl flex items-center justify-center border border-amber-500/20 pulse-gold mb-6">
-                        <i data-lucide="dumbbell" className="text-amber-500 w-12 h-12"></i>
+                        <i className="ph ph-barbell text-amber-500 text-5xl"></i>
                     </div>
                     <h1 className="text-3xl font-bold text-white tracking-wider">MAROMBIEW</h1>
                     <p className="text-amber-500/60 text-xs font-mono mt-2 tracking-widest">TRADING INTELLIGENCE</p>
@@ -122,7 +114,6 @@
             const [password, setPassword] = useState('');
             const [loading, setLoading] = useState(false);
             const [error, setError] = useState(null);
-            useLucide();
 
             const handleSubmit = async (e) => {
                 e.preventDefault();
@@ -144,7 +135,7 @@
                     <div className="glass-card w-full max-w-md p-8 rounded-2xl border-t border-slate-700">
                         <div className="text-center mb-8">
                             <div className="w-16 h-16 bg-amber-500/10 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-amber-500/20">
-                                <i data-lucide="dumbbell" className="text-amber-500 w-8 h-8"></i>
+                                <i className="ph ph-barbell text-amber-500 text-3xl"></i>
                             </div>
                             <h1 className="text-2xl font-bold text-white">Login</h1>
                             <p className="text-slate-500 text-sm mt-2">Acesse o painel Shock Engine</p>
@@ -164,7 +155,7 @@
                             />
                             {error && <p className="text-red-500 text-xs text-center">{error}</p>}
                             <button type="submit" disabled={loading} className="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2">
-                                {loading ? <i data-lucide="loader-2" className="animate-spin w-5 h-5"></i> : 'Entrar'}
+                                {loading ? <i className="ph ph-spinner animate-spin text-xl"></i> : 'Entrar'}
                             </button>
                         </form>
                     </div>
@@ -188,7 +179,7 @@
                         {subtext && <p className={`text-[10px] mt-1 ${colors[color].split(' ')[0]}`}>{subtext}</p>}
                     </div>
                     <div className={`p-3 rounded-full ${colors[color].split(' ')[1]} ${colors[color].split(' ')[0]}`}>
-                        <i data-lucide={icon} className="w-6 h-6"></i>
+                        <i className={`ph ${icon} text-xl`}></i>
                     </div>
                 </div>
             );
@@ -202,8 +193,6 @@
             const [signals, setSignals] = useState([]);
             const [logs, setLogs] = useState([]);
             const [saving, setSaving] = useState(false);
-            
-            useLucide();
 
             // DATA FETCHING
             const fetchData = async () => {
@@ -223,7 +212,6 @@
                 fetchData();
                 const interval = setInterval(fetchData, 5000); 
                 
-                // Realtime
                 const channel = supabase.channel('realtime')
                     .on('postgres_changes', { event: '*', schema: 'public', table: 'trade_signals' }, (payload) => {
                         if(payload.eventType === 'INSERT') setSignals(p => [payload.new, ...p]);
@@ -270,7 +258,6 @@
             // STATS CALC
             const stats = useMemo(() => {
                 if (!signals.length) return { wins:0, losses:0, profit:0, wr:0 };
-                // Filtra apenas do dia atual (simplificado)
                 const today = new Date().toISOString().split('T')[0];
                 const daily = signals.filter(s => s.created_at.startsWith(today) && s.status !== 'PENDING');
                 
@@ -281,35 +268,35 @@
                 return { wins, losses, profit, wr, count: wins+losses };
             }, [signals]);
 
-            if (!config) return <div className="h-screen flex items-center justify-center text-amber-500"><i data-lucide="loader-2" className="animate-spin w-8 h-8"></i></div>;
+            if (!config) return <div className="h-screen flex items-center justify-center text-amber-500"><i className="ph ph-spinner animate-spin text-3xl"></i></div>;
 
             return (
                 <div className="flex h-screen overflow-hidden bg-[#0f1115]">
                     {/* SIDEBAR (Desktop) */}
                     <aside className="hidden md:flex flex-col w-64 glass-card border-r border-slate-800 z-20">
                         <div className="h-20 flex items-center px-6 border-b border-slate-800/50 gap-3">
-                            <i data-lucide="dumbbell" className="text-amber-500 w-6 h-6"></i>
+                            <i className="ph ph-barbell text-amber-500 text-2xl"></i>
                             <span className="font-bold text-lg text-white tracking-wide">MAROMBIEW</span>
                         </div>
                         <nav className="flex-1 p-4 space-y-2">
                             {[
-                                { id: 'home', icon: 'layout-dashboard', label: 'Dashboard' },
-                                { id: 'reports', icon: 'file-text', label: 'Relatórios' },
-                                { id: 'settings', icon: 'settings', label: 'Configurações' },
-                                { id: 'logs', icon: 'terminal', label: 'Terminal' },
+                                { id: 'home', icon: 'ph-squares-four', label: 'Dashboard' },
+                                { id: 'reports', icon: 'ph-file-text', label: 'Relatórios' },
+                                { id: 'settings', icon: 'ph-gear', label: 'Configurações' },
+                                { id: 'logs', icon: 'ph-terminal-window', label: 'Terminal' },
                             ].map(item => (
                                 <button 
                                     key={item.id}
                                     onClick={() => setView(item.id)}
                                     className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${view === item.id ? 'active-nav' : 'text-slate-400 hover:bg-slate-800/50 hover:text-white'}`}
                                 >
-                                    <i data-lucide={item.icon} className="w-5 h-5"></i> {item.label}
+                                    <i className={`ph ${item.icon} text-lg`}></i> {item.label}
                                 </button>
                             ))}
                         </nav>
                         <div className="p-4 border-t border-slate-800/50">
                             <button onClick={onLogout} className="flex items-center gap-3 px-4 py-3 text-sm text-red-400 hover:bg-red-500/10 rounded-lg w-full transition-all">
-                                <i data-lucide="log-out" className="w-5 h-5"></i> Sair
+                                <i className="ph ph-sign-out text-lg"></i> Sair
                             </button>
                         </div>
                     </aside>
@@ -320,7 +307,7 @@
                         {/* TOPBAR (Mobile & Desktop Status) */}
                         <header className="h-20 border-b border-slate-800/50 bg-[#0f1115]/90 backdrop-blur flex items-center justify-between px-6 shrink-0">
                             <div className="md:hidden flex items-center gap-2">
-                                <i data-lucide="dumbbell" className="text-amber-500 w-6 h-6"></i>
+                                <i className="ph ph-barbell text-amber-500 text-2xl"></i>
                                 <span className="font-bold text-white">MAROMBIEW</span>
                             </div>
                             
@@ -345,7 +332,7 @@
                                         : 'bg-amber-500 text-white hover:bg-amber-600 shadow-amber-500/20'
                                     }`}
                                 >
-                                    {config.status === 'RUNNING' ? <><i data-lucide="pause" className="w-4 h-4"></i> PAUSAR</> : <><i data-lucide="play" className="w-4 h-4"></i> INICIAR</>}
+                                    {config.status === 'RUNNING' ? <><i className="ph ph-pause"></i> PAUSAR</> : <><i className="ph ph-play"></i> INICIAR</>}
                                 </button>
                             </div>
                         </header>
@@ -358,10 +345,10 @@
                                 <div className="space-y-6 max-w-6xl mx-auto">
                                     {/* Stats Grid */}
                                     <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                                        <StatCard title="LUCRO HOJE" value={`$${stats.profit.toFixed(2)}`} color={stats.profit >= 0 ? "emerald" : "red"} icon="dollar-sign" />
-                                        <StatCard title="WINS" value={stats.wins} color="emerald" icon="check-circle-2" />
-                                        <StatCard title="LOSSES" value={stats.losses} color="red" icon="x-circle" />
-                                        <StatCard title="ASSERTIVIDADE" value={`${stats.wr}%`} color="amber" icon="pie-chart" />
+                                        <StatCard title="LUCRO HOJE" value={`$${stats.profit.toFixed(2)}`} color={stats.profit >= 0 ? "emerald" : "red"} icon="ph-currency-dollar" />
+                                        <StatCard title="WINS" value={stats.wins} color="emerald" icon="ph-check-circle" />
+                                        <StatCard title="LOSSES" value={stats.losses} color="red" icon="ph-x-circle" />
+                                        <StatCard title="ASSERTIVIDADE" value={`${stats.wr}%`} color="amber" icon="ph-chart-pie-slice" />
                                     </div>
 
                                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -369,7 +356,7 @@
                                         <div className="lg:col-span-2 glass-card rounded-xl overflow-hidden flex flex-col h-[500px]">
                                             <div className="p-4 border-b border-slate-700/50 bg-[#1f2229]/50 flex justify-between items-center">
                                                 <h3 className="font-bold text-white text-sm flex items-center gap-2">
-                                                    <i data-lucide="activity" className="text-amber-500 w-4 h-4"></i> Operações Recentes
+                                                    <i className="ph ph-pulse text-amber-500 text-lg"></i> Operações Recentes
                                                 </h3>
                                                 <span className="text-[10px] bg-white/5 px-2 py-1 rounded text-slate-400">Tempo Real</span>
                                             </div>
@@ -393,7 +380,8 @@
                                                                     <td className="p-3 font-mono text-slate-400">{new Date(s.created_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</td>
                                                                     <td className="p-3 font-bold text-white">{s.pair}</td>
                                                                     <td className="p-3">
-                                                                        <span className={`px-1.5 py-0.5 rounded font-bold ${s.direction === 'call' ? 'text-green-400 bg-green-500/10' : 'text-red-400 bg-red-500/10'}`}>
+                                                                        <span className={`px-1.5 py-0.5 rounded font-bold flex items-center gap-1 w-fit ${s.direction === 'call' ? 'text-green-400 bg-green-500/10' : 'text-red-400 bg-red-500/10'}`}>
+                                                                            <i className={`ph ${s.direction === 'call' ? 'ph-arrow-up' : 'ph-arrow-down'}`}></i>
                                                                             {s.direction.toUpperCase()}
                                                                         </span>
                                                                     </td>
@@ -404,7 +392,7 @@
                                                                         </div>
                                                                     </td>
                                                                     <td className="p-3 text-right">
-                                                                        {s.status === 'PENDING' ? <span className="text-yellow-500 animate-pulse">⏳</span> : 
+                                                                        {s.status === 'PENDING' ? <span className="text-yellow-500 animate-pulse font-bold">⏳</span> : 
                                                                          <span className={`font-bold ${s.result === 'WIN' ? 'text-green-400' : s.result === 'LOSS' ? 'text-red-400' : 'text-slate-400'}`}>
                                                                              {s.result === 'WIN' ? `+$${s.profit.toFixed(2)}` : s.result === 'LOSS' ? `-$${Math.abs(s.profit).toFixed(2)}` : s.result}
                                                                          </span>}
@@ -457,7 +445,7 @@
                                             </div>
 
                                             <button onClick={saveSettings} disabled={saving} className="w-full bg-slate-700 hover:bg-slate-600 text-white py-3 rounded-lg font-bold text-sm transition-colors mt-2 flex items-center justify-center gap-2">
-                                                {saving ? <i data-lucide="loader-2" className="animate-spin w-4 h-4"></i> : <i data-lucide="save" className="w-4 h-4"></i>} 
+                                                {saving ? <i className="ph ph-spinner animate-spin"></i> : <i className="ph ph-floppy-disk"></i>} 
                                                 Atualizar
                                             </button>
                                         </div>
@@ -495,7 +483,6 @@
                                 <div className="max-w-2xl mx-auto">
                                     <h2 className="text-2xl font-bold text-white mb-6">Configurações Avançadas</h2>
                                     <div className="glass-card p-8 rounded-2xl border border-slate-800">
-                                        {/* Reusing logic from quick config but expanded */}
                                         <p className="text-slate-500 mb-4">Use o painel lateral na Home para ajustes rápidos.</p>
                                         <button onClick={() => setView('home')} className="bg-amber-500 text-white px-6 py-3 rounded-lg font-bold">Voltar para Home</button>
                                     </div>
@@ -529,9 +516,14 @@
 
                     {/* MOBILE NAV */}
                     <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-[#0f172a]/95 backdrop-blur-xl border-t border-slate-800 flex justify-around px-2 pb-safe z-40 h-16 items-center">
-                        {['home', 'reports', 'settings', 'logs'].map(tab => (
-                            <button key={tab} onClick={() => setView(tab)} className={`flex flex-col items-center p-2 rounded-lg ${view === tab ? 'text-amber-500' : 'text-slate-500'}`}>
-                                <i data-lucide={tab === 'home' ? 'layout-dashboard' : tab === 'reports' ? 'file-text' : tab === 'settings' ? 'settings' : 'terminal'} className="w-5 h-5"></i>
+                        {[
+                            {id: 'home', icon: 'ph-squares-four'}, 
+                            {id: 'reports', icon: 'ph-file-text'}, 
+                            {id: 'settings', icon: 'ph-gear'}, 
+                            {id: 'logs', icon: 'ph-terminal-window'}
+                        ].map(tab => (
+                            <button key={tab.id} onClick={() => setView(tab.id)} className={`flex flex-col items-center p-2 rounded-lg ${view === tab.id ? 'text-amber-500' : 'text-slate-500'}`}>
+                                <i className={`ph ${tab.icon} text-xl`}></i>
                             </button>
                         ))}
                     </nav>
@@ -554,7 +546,7 @@
                 return () => subscription.unsubscribe();
             }, []);
 
-            if (loading) return <Splash onFinish={() => {}} />; // Just a placeholder
+            if (loading) return <Splash onFinish={() => {}} />; 
             if (!session) return <Login onLogin={() => {}} />;
 
             return <Dashboard session={session} onLogout={() => supabase.auth.signOut()} />;
