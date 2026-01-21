@@ -1,717 +1,563 @@
 <!DOCTYPE html>
-<html lang="pt-PT" class="dark">
+<html lang="pt-BR" class="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Marombiew Bot</title>
+    <title>Marombiew Bot | Shock Engine</title>
     
-    <!-- PWA Settings -->
-    <meta name="theme-color" content="#111827">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/4712/4712109.png">
-
-    <!-- Tailwind & Supabase -->
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
+    <!-- Babel -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Supabase JS -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    
+    <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <!-- Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 
     <style>
-        /* Paleta Dark Premium */
         :root { --bg-dark: #0f1115; --card-bg: #181b21; --gold: #f59e0b; }
         
         body { 
-            font-family: 'Inter', sans-serif; 
             background-color: var(--bg-dark); 
             color: #e2e8f0; 
-            overflow: hidden; 
-            user-select: none; 
+            font-family: 'Inter', sans-serif;
+            overflow: hidden; /* App-like feel */
         }
-        
+
         .font-mono { font-family: 'JetBrains Mono', monospace; }
-        
-        /* Cards Sólidos */
+
+        /* Glass / Card Styles */
         .glass-card { 
             background: var(--card-bg); 
             border: 1px solid rgba(255, 255, 255, 0.05); 
             box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2);
         }
         
+        /* Inputs */
+        .input-dark { 
+            background: #0f1115; 
+            border: 1px solid #334155; 
+            color: white; 
+            transition: all 0.2s;
+        }
+        .input-dark:focus { outline: none; border-color: var(--gold); }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #0f1115; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #475569; }
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+
+        /* Animations */
+        .animate-pulse-slow { animation: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        .pulse-gold { animation: pulse-gold-shadow 2s infinite; }
+        @keyframes pulse-gold-shadow { 
+            0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4); } 
+            70% { box-shadow: 0 0 0 20px rgba(245, 158, 11, 0); } 
+            100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); } 
+        }
+
+        /* Nav Active State */
         .active-nav { 
             color: var(--gold) !important; 
-            background-color: rgba(245, 158, 11, 0.08); 
+            background-color: rgba(245, 158, 11, 0.1); 
             border-left: 2px solid var(--gold);
         }
-        
-        input, select, button { -webkit-appearance: none; border-radius: 0.5rem; }
-        
-        .report-table-header { @apply text-[10px] text-slate-500 font-bold uppercase tracking-wider py-3 px-4 text-left border-b border-slate-800; }
-        .report-table-row { @apply border-b border-slate-800/50 hover:bg-white/5 transition-colors; }
-        .report-cell { @apply py-3 px-4 text-xs; }
-
-        /* Splash Screen */
-        #splash-screen { position: fixed; inset: 0; background-color: var(--bg-dark); z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center; transition: opacity 0.6s ease-out, visibility 0.6s; }
-        #splash-screen.fade-out { opacity: 0; visibility: hidden; pointer-events: none; }
-        .pulse-logo { animation: pulse-gold 2s infinite; }
-        @keyframes pulse-gold { 0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4); } 70% { box-shadow: 0 0 0 20px rgba(245, 158, 11, 0); } 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); } }
-        
-        .scrollbar-hide::-webkit-scrollbar { display: none; }
-        .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
     </style>
 </head>
-<body class="flex flex-col h-screen text-slate-200">
+<body>
+    <div id="root" class="h-screen flex flex-col"></div>
 
-    <!-- SPLASH SCREEN -->
-    <div id="splash-screen">
-        <div class="w-24 h-24 bg-amber-500/10 rounded-3xl flex items-center justify-center border border-amber-500/20 pulse-logo mb-6">
-            <i data-lucide="dumbbell" class="text-amber-500 w-12 h-12"></i>
-        </div>
-        <h1 class="text-3xl font-bold text-white tracking-wider">MAROMBIEW</h1>
-        <p class="text-amber-500/60 text-xs font-mono mt-2 tracking-widest">TRADING INTELLIGENCE</p>
-    </div>
+    <script type="text/babel">
+        const { useState, useEffect, useMemo, useRef } = React;
 
-    <!-- LOGIN -->
-    <div id="login-screen" class="fixed inset-0 z-50 flex items-center justify-center bg-[#0b0d11] p-4 hidden">
-        <div class="glass-card w-full max-w-md p-8 rounded-2xl border-t border-slate-700 bg-[#181b21]">
-            <div class="text-center mb-8">
-                <div class="w-16 h-16 bg-amber-500/10 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-amber-500/20">
-                    <i data-lucide="dumbbell" class="text-amber-500 w-8 h-8"></i>
-                </div>
-                <h1 class="text-2xl font-bold text-white">Login</h1>
-            </div>
-            <form id="login-form" class="space-y-4" onsubmit="return false;">
-                <input type="email" id="email" class="w-full bg-[#0f1115] border border-slate-700 text-white p-3.5 rounded-xl focus:border-amber-500 outline-none transition-colors" placeholder="Email" required>
-                <input type="password" id="password" class="w-full bg-[#0f1115] border border-slate-700 text-white p-3.5 rounded-xl focus:border-amber-500 outline-none transition-colors" placeholder="Senha" required>
-                <button type="submit" id="login-btn" class="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-amber-500/20">Entrar</button>
-            </form>
-        </div>
-    </div>
+        // --- CONFIGURAÇÃO SUPABASE ---
+        const SUPABASE_URL = "https://ioduahwknfsktujthfyc.supabase.co";
+        const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlvZHVhaHdrbmZza3R1anRoZnljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEzMDc0NDcsImV4cCI6MjA2Njg4MzQ0N30.96f8wZO6SvABKFMWjIiw1pSugAB4Isldj7yxLcLJRSE";
+        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-    <!-- APP -->
-    <div id="app" class="flex-1 flex flex-col md:flex-row overflow-hidden hidden opacity-0 transition-opacity duration-500">
-        <!-- SIDEBAR -->
-        <aside class="hidden md:flex flex-col w-64 glass-card border-r border-slate-800 z-20">
-            <div class="h-20 flex items-center px-6 border-b border-slate-800/50 gap-3">
-                <i data-lucide="dumbbell" class="text-amber-500 w-6 h-6"></i>
-                <span class="font-bold text-lg text-white tracking-wide">MAROMBIEW</span>
-            </div>
-            <nav class="flex-1 p-4 space-y-2">
-                <button onclick="router.navigate('home')" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-lg text-slate-400 hover:bg-slate-800/50 hover:text-white active-nav transition-all" data-target="home">
-                    <i data-lucide="layout-dashboard" class="w-5 h-5"></i> Dashboard
-                </button>
-                <button onclick="router.navigate('reports')" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-lg text-slate-400 hover:bg-slate-800/50 hover:text-white transition-all" data-target="reports">
-                    <i data-lucide="file-text" class="w-5 h-5"></i> Relatórios
-                </button>
-                <button onclick="router.navigate('settings')" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-lg text-slate-400 hover:bg-slate-800/50 hover:text-white transition-all" data-target="settings">
-                    <i data-lucide="settings" class="w-5 h-5"></i> Configurações
-                </button>
-                <button onclick="router.navigate('logs')" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-lg text-slate-400 hover:bg-slate-800/50 hover:text-white transition-all" data-target="logs">
-                    <i data-lucide="terminal" class="w-5 h-5"></i> Terminal
-                </button>
-            </nav>
-            <div class="p-4 border-t border-slate-800/50">
-                <button id="logout-btn" class="flex items-center gap-3 px-4 py-3 text-sm text-red-400 hover:bg-red-500/10 rounded-lg w-full transition-all">
-                    <i data-lucide="log-out" class="w-5 h-5"></i> Sair
-                </button>
-            </div>
-        </aside>
-
-        <!-- MAIN -->
-        <main class="flex-1 overflow-y-auto p-4 md:p-8 pb-24 md:pb-8 relative z-10 bg-[#0f1115]">
-            <div id="connection-warning" class="hidden mb-6 bg-red-500/10 border border-red-500/20 text-red-400 p-3 rounded-xl flex items-center gap-2 text-sm animate-pulse">
-                <i data-lucide="wifi-off" class="w-4 h-4"></i> Bot Offline: Sem sinal há mais de 3 minutos.
-            </div>
-
-            <!-- VIEW: HOME -->
-            <div id="view-home" class="view-section space-y-6 max-w-5xl mx-auto">
-                <!-- Header -->
-                <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                    <div>
-                        <h1 class="text-2xl md:text-3xl font-bold text-white tracking-tight">Dashboard</h1>
-                        <div class="flex items-center gap-2 mt-1">
-                             <span id="bot-status-indicator" class="w-2 h-2 rounded-full bg-slate-500"></span>
-                             <span id="mode-badge" class="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-2 py-0.5 rounded border border-slate-700 bg-slate-800">...</span>
-                        </div>
-                    </div>
-                    <div class="flex items-center gap-2 w-full md:w-auto">
-                         <button id="restart-bot-btn" class="p-3 rounded-xl bg-[#181b21] text-slate-400 border border-slate-700/50 hover:text-white hover:bg-slate-700 transition-all" title="Reiniciar"><i data-lucide="power" class="w-5 h-5"></i></button>
-                         <button id="toggle-bot-btn" class="flex-1 md:flex-none px-6 py-3 rounded-xl text-sm font-bold bg-[#181b21] text-white min-w-[140px] shadow-lg flex items-center gap-2 justify-center border border-slate-700/50 transition-all active:scale-95"><i data-lucide="loader-2" class="animate-spin w-4 h-4"></i> ...</button>
-                    </div>
-                </div>
-
-                <!-- Stats Row -->
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <!-- Saldo Card -->
-                    <div class="glass-card p-6 rounded-2xl border-l-4 border-amber-500 relative overflow-hidden group">
-                         <div class="absolute right-0 top-0 p-6 opacity-5 group-hover:opacity-10 transition-opacity"><i data-lucide="wallet" class="w-24 h-24 text-white"></i></div>
-                         <div class="relative z-10">
-                             <p class="text-xs text-slate-400 font-bold uppercase tracking-widest mb-1">Saldo Total</p>
-                             <h2 id="stat-balance" class="text-4xl font-black text-white tracking-tight mb-4">$---</h2>
-                             <div class="flex items-center gap-2">
-                                 <div class="bg-white/5 rounded-lg px-3 py-1.5 border border-white/5">
-                                     <p class="text-[9px] text-slate-500 font-bold uppercase">Resultado do Dia</p>
-                                     <p id="stat-profit" class="text-sm font-bold text-white">$0.00</p>
-                                 </div>
-                             </div>
-                         </div>
-                    </div>
-
-                    <!-- Placar Card -->
-                    <div class="glass-card p-6 rounded-2xl border-l-4 border-blue-500 relative overflow-hidden flex flex-col justify-between">
-                         <div class="absolute right-0 top-0 p-6 opacity-5"><i data-lucide="bar-chart-2" class="w-24 h-24 text-white"></i></div>
-                         <p class="text-xs text-slate-400 font-bold uppercase tracking-widest mb-4">Placar da Sessão</p>
-                         
-                         <div class="flex justify-between items-center text-center divide-x divide-slate-700/50 mb-4">
-                             <div class="px-2 w-full">
-                                 <p class="text-[10px] text-green-500 font-bold mb-1">WINS</p>
-                                 <p id="score-wins" class="text-3xl font-black text-white">0</p>
-                             </div>
-                             <div class="px-2 w-full">
-                                 <p class="text-[10px] text-red-500 font-bold mb-1">LOSSES</p>
-                                 <p id="score-losses" class="text-3xl font-black text-white">0</p>
-                             </div>
-                             <div class="px-2 w-full">
-                                 <p class="text-[10px] text-blue-500 font-bold mb-1">TOTAL</p>
-                                 <p id="score-total" class="text-3xl font-black text-white">0</p>
-                             </div>
-                         </div>
-
-                         <!-- Assertivity Bar -->
-                         <div class="w-full bg-slate-800/50 rounded-full h-1.5 overflow-hidden">
-                             <div id="win-rate-bar" class="bg-gradient-to-r from-green-500 to-emerald-400 h-1.5 rounded-full transition-all duration-500" style="width: 0%"></div>
-                         </div>
-                         <p class="text-right text-[9px] text-slate-500 mt-1 font-mono">Taxa de Acerto: <span id="win-rate-text" class="text-white">0%</span></p>
-                    </div>
-                </div>
-
-                <!-- Best Assets -->
-                <div>
-                     <div class="flex items-center gap-2 mb-3 px-1">
-                        <i data-lucide="radar" class="w-4 h-4 text-amber-500"></i>
-                        <h3 class="text-xs font-bold text-slate-400 uppercase tracking-widest">Oportunidades (≥ 70%)</h3>
-                    </div>
-                    <div id="top-assets-container" class="flex overflow-x-auto gap-3 pb-2 scrollbar-hide min-h-[100px]">
-                         <div id="empty-assets-msg" class="glass-card p-4 rounded-xl border border-dashed border-slate-700 flex items-center justify-center text-slate-500 text-xs w-full min-h-[90px]">
-                             <div class="text-center">
-                                 <i data-lucide="loader" class="w-5 h-5 animate-spin mx-auto mb-2 text-slate-600"></i> 
-                                 <span class="opacity-50">Escaneando ativos...</span>
-                             </div>
-                         </div>
-                    </div>
-                </div>
-
-                <!-- Recent History -->
-                <div class="glass-card rounded-2xl border border-slate-800 overflow-hidden flex-1 min-h-[300px]">
-                    <div class="p-4 border-b border-slate-800 bg-[#1f2229] flex justify-between items-center">
-                        <h3 class="text-xs font-bold text-white flex items-center gap-2"><i data-lucide="list" class="w-4 h-4 text-blue-500"></i> Histórico Recente</h3>
-                        <span class="text-[10px] text-slate-500 font-mono bg-white/5 px-2 py-1 rounded">HOJE</span>
-                    </div>
-                    <div id="signals-list-home" class="p-0 divide-y divide-slate-800/50 overflow-y-auto max-h-[400px]">
-                        <div class="text-center text-slate-600 text-xs py-10 opacity-50">Nenhuma operação realizada hoje.</div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- VIEW: RELATÓRIOS -->
-            <div id="view-reports" class="view-section hidden space-y-6 max-w-5xl mx-auto">
-                <h1 class="text-2xl font-bold text-white mb-4">Relatório Detalhado</h1>
-                <div class="glass-card rounded-xl border border-slate-800 overflow-hidden">
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-left border-collapse">
-                            <thead>
-                                <tr class="bg-[#1f2229] text-white">
-                                    <th class="report-table-header">Data / Hora</th>
-                                    <th class="report-table-header">Par</th>
-                                    <th class="report-table-header">Direção</th>
-                                    <th class="report-table-header">Estratégia</th>
-                                    <th class="report-table-header">Resultado</th>
-                                    <th class="report-table-header text-right">Lucro ($)</th>
-                                </tr>
-                            </thead>
-                            <tbody id="reports-table-body" class="divide-y divide-slate-800/50">
-                                <tr><td colspan="6" class="p-8 text-center text-slate-500 text-xs">Carregando...</td></tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-
-            <!-- VIEW: SETTINGS -->
-            <div id="view-settings" class="view-section hidden space-y-6 max-w-2xl mx-auto">
-                <h1 class="text-2xl font-bold text-white mb-2">Configurações</h1>
-                <p class="text-xs text-slate-500 mb-6">Ajuste os parâmetros de risco e modo de operação.</p>
-                
-                <!-- Mode Selector -->
-                <div class="glass-card p-1 rounded-xl border border-slate-700 bg-[#1f2229] flex mb-6">
-                    <button onclick="setMode('LIVE')" id="btn-mode-live" class="flex-1 p-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2">
-                        <i data-lucide="zap" class="w-4 h-4"></i> CONTA REAL
-                    </button>
-                    <button onclick="setMode('OBSERVE')" id="btn-mode-observe" class="flex-1 p-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2">
-                        <i data-lucide="eye" class="w-4 h-4"></i> OBSERVAÇÃO
-                    </button>
-                </div>
-                
-                <!-- Strategy Selector -->
-                <div class="glass-card p-4 rounded-xl border border-slate-800 mb-6 bg-[#1f2229]">
-                    <h3 class="text-xs font-bold text-white mb-3 flex items-center gap-2"><i data-lucide="cpu" class="w-4 h-4 text-blue-500"></i> Modo de Estratégia</h3>
-                    <select id="conf-strategy-mode" class="w-full bg-[#0f1115] border border-slate-700 text-white p-3 rounded-lg focus:border-blue-500 outline-none transition-colors text-sm">
-                        <option value="AUTO">🤖 AUTO (IA decide entre V2 e Shock)</option>
-                        <option value="V2_TREND">🛡️ V2 TREND (Conservador)</option>
-                        <option value="SHOCK_REVERSAL">🔥 SHOCK REVERSAL (Agressiva)</option>
-                    </select>
-                </div>
-
-                <!-- Presets -->
-                <div class="grid grid-cols-3 gap-3 mb-6">
-                    <button onclick="applyPreset('conservative')" class="p-4 rounded-xl bg-[#1f2229] hover:bg-slate-800 border border-slate-700 hover:border-green-500/50 transition-all text-center group">
-                        <div class="w-8 h-8 rounded-full bg-green-500/10 text-green-500 flex items-center justify-center mx-auto mb-2"><i data-lucide="shield" class="w-4 h-4"></i></div>
-                        <p class="text-xs font-bold text-white">Conservador</p>
-                        <p class="text-[9px] text-slate-500 mt-1">3 Trades (2W/1L)</p>
-                    </button>
-                    <button onclick="applyPreset('sniper')" class="p-4 rounded-xl bg-[#1f2229] hover:bg-slate-800 border border-slate-700 hover:border-amber-500/50 transition-all text-center group ring-1 ring-amber-500/30">
-                        <div class="w-8 h-8 rounded-full bg-amber-500/10 text-amber-500 flex items-center justify-center mx-auto mb-2"><i data-lucide="crosshair" class="w-4 h-4"></i></div>
-                        <p class="text-xs font-bold text-white">Sniper</p>
-                        <p class="text-[9px] text-slate-500 mt-1">2 Trades (1W/1L)</p>
-                    </button>
-                    <button onclick="applyPreset('aggressive')" class="p-4 rounded-xl bg-[#1f2229] hover:bg-slate-800 border border-slate-700 hover:border-red-500/50 transition-all text-center group">
-                        <div class="w-8 h-8 rounded-full bg-red-500/10 text-red-500 flex items-center justify-center mx-auto mb-2"><i data-lucide="flame" class="w-4 h-4"></i></div>
-                        <p class="text-xs font-bold text-white">Agressivo</p>
-                        <p class="text-[9px] text-slate-500 mt-1">6 Trades (4W/2L)</p>
-                    </button>
-                </div>
-
-                <form id="settings-form" class="space-y-6">
-                    <div class="glass-card p-6 rounded-xl space-y-6 border border-slate-800">
-                        <div class="grid grid-cols-2 gap-4">
-                            <div><label class="text-[10px] text-slate-400 font-bold uppercase tracking-wider block mb-1.5">Entrada ($)</label><input type="number" id="conf-entry" class="w-full bg-[#0f1115] border border-slate-700 rounded-lg p-3 text-white outline-none focus:border-amber-500 transition-colors font-mono"></div>
-                            <div><label class="text-[10px] text-slate-400 font-bold uppercase tracking-wider block mb-1.5">Conta</label><select id="conf-account" class="w-full bg-[#0f1115] border border-slate-700 rounded-lg p-3 text-white outline-none focus:border-amber-500 transition-colors"><option value="PRACTICE">DEMO</option><option value="REAL">REAL</option></select></div>
-                        </div>
-
-                        <div class="h-px bg-slate-700/50"></div>
-
-                        <!-- Daily Limits (Quantity) -->
-                        <div>
-                            <h3 class="text-sm font-bold text-white mb-4 flex items-center gap-2"><i data-lucide="lock" class="w-4 h-4 text-amber-500"></i> Metas Diárias (Quantidade)</h3>
-                            <div class="grid grid-cols-3 gap-3">
-                                <div><label class="text-[9px] text-blue-400 font-bold uppercase tracking-wider block mb-1.5 text-center">Max Trades</label><input type="number" id="conf-max-trades" class="w-full bg-[#0f1115] border border-slate-700 text-white p-3 rounded-lg focus:border-blue-500 outline-none font-mono text-center text-lg"></div>
-                                <div><label class="text-[9px] text-green-500 font-bold uppercase tracking-wider block mb-1.5 text-center">Meta Wins</label><input type="number" id="conf-max-wins" class="w-full bg-[#0f1115] border border-slate-700 text-white p-3 rounded-lg focus:border-green-500 outline-none font-mono text-center text-lg"></div>
-                                <div><label class="text-[9px] text-red-500 font-bold uppercase tracking-wider block mb-1.5 text-center">Limite Loss</label><input type="number" id="conf-max-losses" class="w-full bg-[#0f1115] border border-slate-700 text-white p-3 rounded-lg focus:border-red-500 outline-none font-mono text-center text-lg"></div>
-                            </div>
-                        </div>
-                        
-                        <div class="bg-[#0f1115] p-4 rounded-lg border border-slate-700/50">
-                             <div class="flex items-center justify-between mb-3">
-                                <label class="text-sm font-bold text-white flex items-center gap-2"><i data-lucide="clock" class="w-4 h-4 text-amber-500"></i> Agendamento Automático</label>
-                                <label class="relative inline-flex items-center cursor-pointer"><input type="checkbox" id="conf-timer-enabled" class="sr-only peer"><div class="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600"></div></label>
-                            </div>
-                            <div class="grid grid-cols-2 gap-3" id="timer-inputs">
-                                <input type="time" id="conf-timer-start" class="bg-[#181b21] border border-slate-700 text-white p-2.5 rounded-lg text-sm">
-                                <input type="time" id="conf-timer-end" class="bg-[#181b21] border border-slate-700 text-white p-2.5 rounded-lg text-sm">
-                            </div>
-                        </div>
-                    </div>
-                    <button type="submit" class="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-4 rounded-xl shadow-lg flex items-center justify-center gap-2 transition-transform active:scale-95"><i data-lucide="save" class="w-5 h-5"></i> Salvar Configurações</button>
-                </form>
-            </div>
-
-             <!-- VIEW: LOGS -->
-            <div id="view-logs" class="view-section hidden h-full flex flex-col max-w-5xl mx-auto">
-                <div class="flex justify-between items-center mb-4">
-                    <h1 class="text-2xl font-bold text-white">Terminal</h1>
-                    <button class="text-xs text-slate-500 hover:text-white px-3 py-1.5 bg-[#181b21] rounded-lg border border-slate-700 transition-colors" onclick="document.getElementById('terminal-output').innerHTML = ''">Limpar Tela</button>
-                </div>
-                <div id="terminal-output" class="flex-1 glass-card rounded-xl p-4 overflow-y-auto font-mono text-xs space-y-2 bg-[#0f1115] border border-slate-800 min-h-[500px]"></div>
-            </div>
-        </main>
-
-        <!-- MOBILE NAV -->
-        <nav class="md:hidden fixed bottom-0 left-0 right-0 bg-[#0f172a]/95 backdrop-blur-xl border-t border-slate-800 flex justify-around px-2 pb-safe z-40 h-16 items-center">
-            <button onclick="router.navigate('home')" class="flex flex-col items-center p-2 text-slate-500 active-nav rounded-lg" data-target="home"><i data-lucide="layout-dashboard" class="w-5 h-5"></i></button>
-            <button onclick="router.navigate('reports')" class="flex flex-col items-center p-2 text-slate-500 rounded-lg" data-target="reports"><i data-lucide="file-text" class="w-5 h-5"></i></button>
-            <button onclick="router.navigate('settings')" class="flex flex-col items-center p-2 text-slate-500 rounded-lg" data-target="settings"><i data-lucide="settings" class="w-5 h-5"></i></button>
-            <button onclick="router.navigate('logs')" class="flex flex-col items-center p-2 text-slate-500 rounded-lg" data-target="logs"><i data-lucide="terminal" class="w-5 h-5"></i></button>
-        </nav>
-    </div>
-
-    <script>
-        const SUPABASE_URL = 'https://ioduahwknfsktujthfyc.supabase.co';
-        const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlvZHVhaHdrbmZza3R1anRoZnljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEzMDc0NDcsImV4cCI6MjA2Njg4MzQ0N30.96f8wZO6SvABKFMWjIiw1pSugAB4Isldj7yxLcLJRSE';
-        let supabaseClient;
-        const appStartTime = Date.now();
-        let loopInterval;
-        let currentMode = 'LIVE';
-        let lastLogId = null;
-
-        // ROUTER
-        const router = {
-            navigate: (viewName) => {
-                document.querySelectorAll('.view-section').forEach(el => el.classList.add('hidden'));
-                const target = document.getElementById(`view-${viewName}`);
-                if(target) target.classList.remove('hidden');
-                document.querySelectorAll('.nav-item, nav button').forEach(btn => {
-                    btn.classList.remove('active-nav', 'text-amber-500');
-                    btn.classList.add('text-slate-500');
-                    if(btn.dataset.target === viewName) {
-                        btn.classList.add('active-nav', 'text-amber-500');
-                        btn.classList.remove('text-slate-500');
-                    }
-                });
-                if (viewName === 'reports') fetchReportsTable();
-            }
+        // --- HOOK PARA LUCIDE ICONS ---
+        const useLucide = () => {
+            useEffect(() => {
+                if (window.lucide) window.lucide.createIcons();
+            });
         };
 
-        function initApp() {
-            try {
-                supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-                lucide.createIcons();
-                document.getElementById('login-form').addEventListener('submit', handleLogin);
-                document.getElementById('settings-form').addEventListener('submit', handleSettings);
-                document.getElementById('toggle-bot-btn').addEventListener('click', handleToggle);
-                document.getElementById('restart-bot-btn').addEventListener('click', handleRestart);
-                document.getElementById('logout-btn').addEventListener('click', handleLogout);
-                document.getElementById('conf-timer-enabled').addEventListener('change', (e) => {
-                     document.getElementById('timer-inputs').style.opacity = e.target.checked ? '1' : '0.5';
-                });
-                checkSession();
-            } catch(e) { console.error(e); hideSplash(); }
-        }
+        // --- COMPONENTES UI ---
 
-        function hideSplash() {
-            const splash = document.getElementById('splash-screen');
-            if(splash && !splash.classList.contains('fade-out')) {
-                const elapsed = Date.now() - appStartTime;
-                setTimeout(() => { splash.classList.add('fade-out'); setTimeout(() => splash.remove(), 600); }, Math.max(0, 4000 - elapsed));
-            }
-        }
+        const Splash = ({ onFinish }) => {
+            useEffect(() => {
+                const timer = setTimeout(() => onFinish(), 2500);
+                return () => clearTimeout(timer);
+            }, []);
 
-        async function checkSession() {
-            try {
-                const { data } = await supabaseClient.auth.getSession();
-                if (data.session) { 
-                    document.getElementById('app').classList.remove('hidden');
-                    setTimeout(() => document.getElementById('app').classList.remove('opacity-0'), 50);
-                    hideSplash();
-                    startLoop();
-                } else {
-                    document.getElementById('login-screen').classList.remove('hidden');
-                    hideSplash();
-                }
-            } catch {
-                document.getElementById('login-screen').classList.remove('hidden');
-                hideSplash();
-            }
-        }
-
-        async function handleLogin(e) {
-            e.preventDefault();
-            const btn = document.getElementById('login-btn');
-            const originalText = btn.innerHTML;
-            btn.innerHTML = '<i data-lucide="loader-2" class="animate-spin w-5 h-5 mx-auto"></i>';
-            lucide.createIcons();
-            try {
-                const email = document.getElementById('email').value;
-                const password = document.getElementById('password').value;
-                const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
-                if(error) throw error;
-                checkSession();
-            } catch(err) {
-                document.getElementById('login-error').innerText = "Erro: " + err.message;
-                document.getElementById('login-error').classList.remove('hidden');
-                btn.innerHTML = originalText;
-            }
-        }
-
-        async function handleLogout() {
-             await supabaseClient.auth.signOut();
-             location.reload();
-        }
-
-        async function handleSettings(e) {
-            e.preventDefault();
-            const btn = e.target.querySelector('button[type="submit"]');
-            const originalText = btn.innerHTML;
-            btn.innerHTML = '<i data-lucide="loader-2" class="animate-spin w-4 h-4 inline"></i> Salvando...';
-            lucide.createIcons();
-            
-            try {
-                await supabaseClient.from('bot_config').update({
-                    entry_value: Number(document.getElementById('conf-entry').value),
-                    account_type: document.getElementById('conf-account').value,
-                    max_trades_per_day: Number(document.getElementById('conf-max-trades').value),
-                    max_wins_per_day: Number(document.getElementById('conf-max-wins').value),
-                    max_losses_per_day: Number(document.getElementById('conf-max-losses').value),
-                    timer_enabled: document.getElementById('conf-timer-enabled').checked,
-                    timer_start: document.getElementById('conf-timer-start').value,
-                    timer_end: document.getElementById('conf-timer-end').value,
-                    mode: currentMode,
-                    strategy_mode: document.getElementById('conf-strategy-mode').value
-                }).eq('id', 1);
-                
-                btn.innerHTML = '<i data-lucide="check" class="w-4 h-4 inline"></i> Salvo!';
-                btn.classList.add('bg-green-600');
-                lucide.createIcons();
-                setTimeout(() => { btn.innerHTML = originalText; btn.classList.remove('bg-green-600'); lucide.createIcons(); }, 2000);
-            } catch(err) { 
-                btn.innerHTML = originalText;
-                alert("Erro ao salvar.");
-            }
-        }
-
-        async function handleToggle() {
-            const btn = document.getElementById('toggle-bot-btn');
-            const isRun = btn.innerText.includes('PAUSAR');
-            updateButtonState(!isRun);
-            try { await supabaseClient.from('bot_config').update({ status: isRun ? 'PAUSED' : 'RUNNING' }).eq('id', 1); } 
-            catch(e) { updateButtonState(isRun); }
-        }
-        
-        async function handleRestart() {
-            if (!confirm("Reiniciar conexão do bot?")) return;
-            try {
-                await supabaseClient.from('bot_config').update({ status: 'RESTARTING' }).eq('id', 1);
-                alert("Comando de reinício enviado.");
-            } catch(err) { alert("Erro ao enviar comando."); }
-        }
-
-        function updateButtonState(isRunning) {
-            const btn = document.getElementById('toggle-bot-btn');
-            const ind = document.getElementById('bot-status-indicator');
-            
-            if (isRunning) {
-                btn.innerHTML = '<i data-lucide="pause" class="w-3 h-3"></i> PAUSAR';
-                btn.className = `px-4 py-3 rounded-xl text-xs font-bold min-w-[120px] shadow-lg flex items-center gap-2 justify-center transition-all ${isRunning ? 'bg-amber-500/10 text-amber-500 border border-amber-500/20' : 'bg-green-600 text-white border border-green-500/30'}`;
-                ind.className = 'w-2 h-2 rounded-full bg-green-500 animate-pulse';
-            } else {
-                btn.innerHTML = '<i data-lucide="play" class="w-3 h-3"></i> INICIAR';
-                btn.className = `px-4 py-3 rounded-xl text-xs font-bold min-w-[120px] shadow-lg flex items-center gap-2 justify-center transition-all bg-green-600 text-white border border-green-500/30 active:scale-95`;
-                ind.className = 'w-2 h-2 rounded-full bg-slate-500';
-            }
-            lucide.createIcons();
-        }
-        
-        function setMode(mode) {
-            currentMode = mode;
-            const btnLive = document.getElementById('btn-mode-live');
-            const btnObs = document.getElementById('btn-mode-observe');
-            const badge = document.getElementById('mode-badge');
-            
-            if(mode === 'LIVE') {
-                btnLive.className = "flex-1 p-3 rounded-lg border border-green-500 bg-green-500/10 text-green-400 text-xs font-bold transition-all shadow-[0_0_15px_rgba(34,197,94,0.3)]";
-                btnObs.className = "flex-1 p-3 rounded-lg border border-transparent bg-[#0f1115] text-slate-400 text-xs font-bold transition-all hover:bg-slate-800";
-                if(badge) {
-                    badge.innerText = "CONTA REAL";
-                    badge.className = "text-[10px] font-bold text-green-400 uppercase tracking-widest bg-green-500/10 px-2 py-0.5 rounded border border-green-500/20";
-                }
-            } else {
-                btnLive.className = "flex-1 p-3 rounded-lg border border-transparent bg-[#0f1115] text-slate-400 text-xs font-bold transition-all hover:bg-slate-800";
-                btnObs.className = "flex-1 p-3 rounded-lg border border-blue-500 bg-blue-500/10 text-blue-400 text-xs font-bold transition-all shadow-[0_0_15px_rgba(59,130,246,0.3)]";
-                if(badge) {
-                    badge.innerText = "OBSERVAÇÃO";
-                    badge.className = "text-[10px] font-bold text-blue-400 uppercase tracking-widest bg-blue-500/10 px-2 py-0.5 rounded border border-blue-500/20";
-                }
-            }
-        }
-
-        function applyPreset(mode) {
-            if(mode === 'conservative') {
-                document.getElementById('conf-max-trades').value = 3;
-                document.getElementById('conf-max-wins').value = 2;
-                document.getElementById('conf-max-losses').value = 1;
-            } else if (mode === 'sniper') {
-                document.getElementById('conf-max-trades').value = 2;
-                document.getElementById('conf-max-wins').value = 1;
-                document.getElementById('conf-max-losses').value = 1;
-            } else if (mode === 'aggressive') {
-                document.getElementById('conf-max-trades').value = 6;
-                document.getElementById('conf-max-wins').value = 4;
-                document.getElementById('conf-max-losses').value = 2;
-            }
-        }
-
-        function startLoop() {
-            if(loopInterval) clearInterval(loopInterval);
-            fetchData();
-            loopInterval = setInterval(fetchData, 3000);
-        }
-        
-        async function fetchData() {
-             try {
-                const { data } = await supabaseClient.from('bot_config').select('*').eq('id', 1).single();
-                if(data) updateUI(data);
-                
-                // Logs
-                const logs = await supabaseClient.from('logs').select('*').order('created_at', { ascending: false }).limit(20);
-                if(logs.data && logs.data.length > 0) {
-                     const newest = logs.data[0];
-                     if(newest.id !== lastLogId) {
-                         lastLogId = newest.id;
-                         const term = document.getElementById('terminal-output');
-                         
-                         const html = logs.data.map(l => {
-                            let colorClass = "text-slate-400";
-                            if(l.message.includes('WIN') || l.message.includes('SUCCESS')) colorClass = "text-green-400";
-                            if(l.message.includes('LOSS') || l.message.includes('ERROR') || l.message.includes('🛑')) colorClass = "text-red-400";
-                            if(l.message.includes('WARNING') || l.message.includes('⚠️')) colorClass = "text-amber-400";
-                            if(l.message.includes('DEBUG')) colorClass = "text-slate-500";
-                            let displayMsg = l.message.replace('ANALISE_DETALHADA::', '').replace('SCAN_ENTRADA::', 'SCAN: ');
-                            return `<div class="text-xs font-mono mb-1.5 border-b border-white/5 pb-1 flex items-start gap-2"><span class="text-slate-600 whitespace-nowrap pt-0.5">[${new Date(l.created_at).toLocaleTimeString()}]</span> <span class="${colorClass} break-all">${displayMsg}</span></div>`;
-                        }).join('');
-                        
-                        term.innerHTML = html;
-                     }
-                }
-                
-                // Fetch Daily Stats
-                const today = new Date().toLocaleDateString('pt-BR'); 
-                const signals = await supabaseClient.from('trade_signals').select('*').order('created_at', {ascending: false}).limit(100);
-                 
-                if(signals.data) {
-                     let wins = 0, losses = 0, profit = 0;
-                     // Filter locally
-                     const todaysSignals = signals.data.filter(s => new Date(s.created_at).toLocaleDateString('pt-BR') === today);
-
-                     todaysSignals.forEach(s => {
-                         if(s.result === 'WIN') { wins++; profit += parseFloat(s.profit || 0); }
-                         if(s.result === 'LOSS') { losses++; profit += parseFloat(s.profit || 0); }
-                     });
-                     
-                     document.getElementById('score-wins').textContent = wins;
-                     document.getElementById('score-losses').textContent = losses;
-                     document.getElementById('score-total').textContent = wins + losses;
-                     document.getElementById('stat-profit').textContent = `${profit >= 0 ? '+' : ''}$${profit.toFixed(2)}`;
-                     document.getElementById('stat-profit').className = `text-sm font-bold stat-value ${profit >= 0 ? 'text-green-500' : 'text-red-500'}`;
-                     
-                     // Bar
-                     const total = wins + losses;
-                     const rate = total > 0 ? (wins / total) * 100 : 0;
-                     document.getElementById('win-rate-bar').style.width = `${rate}%`;
-                     document.getElementById('win-rate-text').textContent = `${Math.round(rate)}%`;
-
-                     renderSignalsList('signals-list-home', todaysSignals.slice(0, 10)); 
-                 }
-                 
-                 const assets = await supabaseClient.from('cataloged_assets').select('*').order('win_rate', { ascending: false }).limit(3);
-                 if(assets.data) renderAssetCards(assets.data);
-
-            } catch(e) { }
-        }
-
-        async function fetchReportsTable() {
-             const { data } = await supabaseClient.from('trade_signals').select('*').order('created_at', {ascending: false}).limit(50);
-             const tbody = document.getElementById('reports-table-body');
-             if(!tbody) return;
-
-             if(!data || data.length === 0) {
-                 tbody.innerHTML = '<tr><td colspan="6" class="p-8 text-center text-slate-500 text-xs">Nenhum trade encontrado.</td></tr>';
-                 return;
-             }
-
-             tbody.innerHTML = data.map(s => {
-                 const isWin = s.result === 'WIN';
-                 const color = isWin ? 'text-green-400' : (s.result === 'LOSS' ? 'text-red-400' : 'text-slate-400');
-                 const profitClass = parseFloat(s.profit) >= 0 ? 'text-green-400' : 'text-red-400';
-                 
-                 return `
-                 <tr class="report-table-row">
-                    <td class="report-cell text-slate-400 font-mono">${new Date(s.created_at).toLocaleString()}</td>
-                    <td class="report-cell font-bold text-white">${s.pair}</td>
-                    <td class="report-cell"><span class="px-2 py-0.5 rounded text-[10px] font-bold ${s.direction === 'call' ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}">${s.direction.toUpperCase()}</span></td>
-                    <td class="report-cell text-slate-500 text-[10px]">${s.strategy || '-'}</td>
-                    <td class="report-cell font-bold ${color}">${s.result}</td>
-                    <td class="report-cell text-right font-mono ${profitClass}">${parseFloat(s.profit).toFixed(2)}</td>
-                 </tr>`;
-             }).join('');
-        }
-
-        function renderAssetCards(assets) {
-             const container = document.getElementById('top-assets-container');
-             if(!assets || assets.length === 0) {
-                 if(!container.innerHTML.includes('Aguardando'))
-                    container.innerHTML = `<div id="empty-assets-msg" class="glass-card p-4 rounded-xl border border-dashed border-slate-700 flex items-center justify-center text-slate-500 text-xs w-full"><i data-lucide="search" class="w-4 h-4 animate-spin mr-2"></i> Buscando oportunidades...</div>`;
-                 lucide.createIcons();
-                 return;
-             }
-
-             const cards = assets.map(a => `
-                <div class="glass-card p-3 rounded-lg min-w-[150px] border-t-2 border-slate-600 flex-shrink-0 relative overflow-hidden group hover:bg-white/5 transition-colors cursor-pointer">
-                    <div class="absolute inset-0 bg-gradient-to-br from-green-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                    <div class="flex justify-between items-start mb-2 relative z-10">
-                        <span class="font-bold text-white text-xs flex items-center gap-1">${a.pair}</span>
-                        <span class="text-[10px] font-bold text-green-400 bg-green-900/40 px-1.5 py-0.5 rounded border border-green-500/20">${Math.round(a.win_rate)}%</span>
+            return (
+                <div className="fixed inset-0 bg-[#0f1115] z-[9999] flex flex-col items-center justify-center">
+                    <div className="w-24 h-24 bg-amber-500/10 rounded-3xl flex items-center justify-center border border-amber-500/20 pulse-gold mb-6">
+                        <i data-lucide="dumbbell" className="text-amber-500 w-12 h-12"></i>
                     </div>
-                    <div class="flex items-center gap-1.5 mt-2 relative z-10">
-                        <span class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
-                        <div class="text-[9px] text-slate-400 font-mono uppercase tracking-wide">EMA V2 FLOW</div>
+                    <h1 className="text-3xl font-bold text-white tracking-wider">MAROMBIEW</h1>
+                    <p className="text-amber-500/60 text-xs font-mono mt-2 tracking-widest">TRADING INTELLIGENCE</p>
+                </div>
+            );
+        };
+
+        const Login = ({ onLogin }) => {
+            const [email, setEmail] = useState('');
+            const [password, setPassword] = useState('');
+            const [loading, setLoading] = useState(false);
+            const [error, setError] = useState(null);
+            useLucide();
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                setLoading(true);
+                setError(null);
+                try {
+                    const { error } = await supabase.auth.signInWithPassword({ email, password });
+                    if (error) throw error;
+                    onLogin();
+                } catch (err) {
+                    setError(err.message);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            return (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0b0d11] p-4">
+                    <div className="glass-card w-full max-w-md p-8 rounded-2xl border-t border-slate-700">
+                        <div className="text-center mb-8">
+                            <div className="w-16 h-16 bg-amber-500/10 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-amber-500/20">
+                                <i data-lucide="dumbbell" className="text-amber-500 w-8 h-8"></i>
+                            </div>
+                            <h1 className="text-2xl font-bold text-white">Login</h1>
+                            <p className="text-slate-500 text-sm mt-2">Acesse o painel Shock Engine</p>
+                        </div>
+                        <form onSubmit={handleSubmit} className="space-y-4">
+                            <input 
+                                type="email" 
+                                value={email} onChange={e => setEmail(e.target.value)}
+                                className="w-full bg-[#0f1115] border border-slate-700 text-white p-3.5 rounded-xl focus:border-amber-500 outline-none transition-colors" 
+                                placeholder="Email" required 
+                            />
+                            <input 
+                                type="password" 
+                                value={password} onChange={e => setPassword(e.target.value)}
+                                className="w-full bg-[#0f1115] border border-slate-700 text-white p-3.5 rounded-xl focus:border-amber-500 outline-none transition-colors" 
+                                placeholder="Senha" required 
+                            />
+                            {error && <p className="text-red-500 text-xs text-center">{error}</p>}
+                            <button type="submit" disabled={loading} className="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2">
+                                {loading ? <i data-lucide="loader-2" className="animate-spin w-5 h-5"></i> : 'Entrar'}
+                            </button>
+                        </form>
                     </div>
                 </div>
-             `).join('');
-             
-             if(container.innerHTML !== cards) {
-                 container.innerHTML = cards;
-                 lucide.createIcons();
-             }
-        }
-        
-        function renderSignalsList(targetId, data) {
-            const container = document.getElementById(targetId);
-            if(!container) return;
-            
-            if(!data || data.length === 0) {
-                 container.innerHTML = '<div class="text-center text-slate-600 py-8 text-xs font-mono border border-dashed border-slate-800 rounded-xl opacity-50">Nenhuma operação realizada hoje.</div>';
-                 return;
-            }
-             
-            container.innerHTML = data.map(s => {
-                 const isWin = s.result === 'WIN';
-                 const color = isWin ? 'text-green-500' : (s.result === 'LOSS' ? 'text-red-500' : 'text-slate-400');
-                 const border = isWin ? 'border-l-green-500' : (s.result === 'LOSS' ? 'border-l-red-500' : 'border-l-slate-600');
-                 const icon = s.direction === 'call' ? 'arrow-up' : 'arrow-down';
-                 const iconColor = s.direction === 'call' ? 'text-green-400' : 'text-red-400';
-                 
-                 return `
-                 <div class="glass-card p-3 rounded-xl border-l-4 ${border} flex justify-between items-center hover:bg-white/5 transition-colors">
-                    <div class="flex items-center gap-3">
-                        <div class="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center border border-slate-700">
-                             <i data-lucide="${icon}" class="w-4 h-4 ${iconColor}"></i>
-                        </div>
-                        <div>
-                            <p class="text-xs font-bold text-white">${s.pair}</p>
-                            <p class="text-[9px] text-slate-500 font-mono">${new Date(s.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
-                        </div>
-                    </div>
-                    <div class="text-right">
-                        <span class="text-[10px] font-bold ${color} tracking-wider bg-slate-900/50 px-1.5 py-0.5 rounded uppercase">${s.result}</span>
-                        <p class="text-[10px] text-slate-400 font-mono mt-0.5">${parseFloat(s.profit) >= 0 ? '+' : ''}${parseFloat(s.profit).toFixed(2)}</p>
-                    </div>
-                 </div>`;
-             }).join('');
-             lucide.createIcons();
-        }
+            );
+        };
 
-        function updateUI(config) {
-            updateButtonState(config.status === 'RUNNING');
-            setMode(config.mode || 'LIVE');
+        const StatCard = ({ title, value, subtext, color = "amber", icon }) => {
+            const colors = {
+                amber: "text-amber-500 bg-amber-500/10 border-amber-500",
+                emerald: "text-emerald-500 bg-emerald-500/10 border-emerald-500",
+                red: "text-red-500 bg-red-500/10 border-red-500",
+                blue: "text-blue-500 bg-blue-500/10 border-blue-500",
+            };
             
-            document.getElementById('stat-balance').textContent = `$${config.current_balance?.toFixed(2) || '---'}`;
+            return (
+                <div className={`glass-card p-4 rounded-xl flex items-center justify-between border-l-4 ${colors[color].split(' ')[2]}`}>
+                    <div>
+                        <p className="text-slate-500 text-[10px] uppercase tracking-wider font-bold mb-1">{title}</p>
+                        <h3 className="text-2xl font-bold text-white tracking-tight">{value}</h3>
+                        {subtext && <p className={`text-[10px] mt-1 ${colors[color].split(' ')[0]}`}>{subtext}</p>}
+                    </div>
+                    <div className={`p-3 rounded-full ${colors[color].split(' ')[1]} ${colors[color].split(' ')[0]}`}>
+                        <i data-lucide={icon} className="w-6 h-6"></i>
+                    </div>
+                </div>
+            );
+        };
 
-            if(document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'SELECT') {
-                document.getElementById('conf-entry').value = config.entry_value;
-                document.getElementById('conf-account').value = config.account_type;
-                document.getElementById('conf-max-trades').value = config.max_trades_per_day;
-                document.getElementById('conf-max-wins').value = config.max_wins_per_day;
-                document.getElementById('conf-max-losses').value = config.max_losses_per_day;
-                document.getElementById('conf-timer-enabled').checked = config.timer_enabled;
-                document.getElementById('conf-timer-start').value = config.timer_start;
-                document.getElementById('conf-timer-end').value = config.timer_end;
-                document.getElementById('timer-inputs').style.opacity = config.timer_enabled ? '1' : '0.5';
+        // --- DASHBOARD PRINCIPAL ---
+
+        const Dashboard = ({ session, onLogout }) => {
+            const [view, setView] = useState('home'); // home, reports, settings, logs
+            const [config, setConfig] = useState(null);
+            const [signals, setSignals] = useState([]);
+            const [logs, setLogs] = useState([]);
+            const [saving, setSaving] = useState(false);
+            
+            useLucide();
+
+            // DATA FETCHING
+            const fetchData = async () => {
+                try {
+                    const { data: c } = await supabase.from('bot_config').select('*').eq('id', 1).single();
+                    if (c) setConfig(c);
+                    
+                    const { data: s } = await supabase.from('trade_signals').select('*').order('created_at', { ascending: false }).limit(50);
+                    if (s) setSignals(s);
+
+                    const { data: l } = await supabase.from('logs').select('*').order('created_at', { ascending: false }).limit(30);
+                    if (l) setLogs(l);
+                } catch(e) { console.error(e); }
+            };
+
+            useEffect(() => {
+                fetchData();
+                const interval = setInterval(fetchData, 5000); 
                 
-                const stratSelect = document.getElementById('conf-strategy-mode');
-                if(stratSelect) stratSelect.value = config.strategy_mode || 'AUTO';
-            }
-        }
+                // Realtime
+                const channel = supabase.channel('realtime')
+                    .on('postgres_changes', { event: '*', schema: 'public', table: 'trade_signals' }, (payload) => {
+                        if(payload.eventType === 'INSERT') setSignals(p => [payload.new, ...p]);
+                        else setSignals(p => p.map(x => x.id === payload.new.id ? payload.new : x));
+                    })
+                    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'logs' }, (payload) => {
+                        setLogs(p => [payload.new, ...p].slice(0, 30));
+                    })
+                    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'bot_config' }, (payload) => {
+                        if(payload.new.id === 1) setConfig(payload.new);
+                    })
+                    .subscribe();
 
-        document.addEventListener('DOMContentLoaded', initApp);
+                return () => { clearInterval(interval); supabase.removeChannel(channel); }
+            }, []);
+
+            // ACTIONS
+            const toggleBot = async () => {
+                if(!config) return;
+                const newStatus = config.status === 'RUNNING' ? 'PAUSED' : 'RUNNING';
+                setConfig(p => ({...p, status: newStatus})); // Otimista
+                await supabase.from('bot_config').update({ status: newStatus }).eq('id', 1);
+            };
+
+            const saveSettings = async (e) => {
+                e.preventDefault();
+                setSaving(true);
+                try {
+                    await supabase.from('bot_config').update({
+                        entry_value: parseFloat(config.entry_value),
+                        max_wins_per_day: parseInt(config.max_wins_per_day),
+                        max_losses_per_day: parseInt(config.max_losses_per_day),
+                        strategy_mode: config.strategy_mode,
+                        account_type: config.account_type,
+                        timer_enabled: config.timer_enabled,
+                        timer_start: config.timer_start,
+                        timer_end: config.timer_end
+                    }).eq('id', 1);
+                    alert("Configurações salvas!");
+                } catch(e) { alert("Erro ao salvar."); }
+                finally { setSaving(false); }
+            };
+
+            // STATS CALC
+            const stats = useMemo(() => {
+                if (!signals.length) return { wins:0, losses:0, profit:0, wr:0 };
+                // Filtra apenas do dia atual (simplificado)
+                const today = new Date().toISOString().split('T')[0];
+                const daily = signals.filter(s => s.created_at.startsWith(today) && s.status !== 'PENDING');
+                
+                const wins = daily.filter(s => s.result === 'WIN').length;
+                const losses = daily.filter(s => s.result === 'LOSS').length;
+                const profit = daily.reduce((acc, cur) => acc + (cur.profit || 0), 0);
+                const wr = (wins + losses) > 0 ? Math.round((wins / (wins+losses))*100) : 0;
+                return { wins, losses, profit, wr, count: wins+losses };
+            }, [signals]);
+
+            if (!config) return <div className="h-screen flex items-center justify-center text-amber-500"><i data-lucide="loader-2" className="animate-spin w-8 h-8"></i></div>;
+
+            return (
+                <div className="flex h-screen overflow-hidden bg-[#0f1115]">
+                    {/* SIDEBAR (Desktop) */}
+                    <aside className="hidden md:flex flex-col w-64 glass-card border-r border-slate-800 z-20">
+                        <div className="h-20 flex items-center px-6 border-b border-slate-800/50 gap-3">
+                            <i data-lucide="dumbbell" className="text-amber-500 w-6 h-6"></i>
+                            <span className="font-bold text-lg text-white tracking-wide">MAROMBIEW</span>
+                        </div>
+                        <nav className="flex-1 p-4 space-y-2">
+                            {[
+                                { id: 'home', icon: 'layout-dashboard', label: 'Dashboard' },
+                                { id: 'reports', icon: 'file-text', label: 'Relatórios' },
+                                { id: 'settings', icon: 'settings', label: 'Configurações' },
+                                { id: 'logs', icon: 'terminal', label: 'Terminal' },
+                            ].map(item => (
+                                <button 
+                                    key={item.id}
+                                    onClick={() => setView(item.id)}
+                                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${view === item.id ? 'active-nav' : 'text-slate-400 hover:bg-slate-800/50 hover:text-white'}`}
+                                >
+                                    <i data-lucide={item.icon} className="w-5 h-5"></i> {item.label}
+                                </button>
+                            ))}
+                        </nav>
+                        <div className="p-4 border-t border-slate-800/50">
+                            <button onClick={onLogout} className="flex items-center gap-3 px-4 py-3 text-sm text-red-400 hover:bg-red-500/10 rounded-lg w-full transition-all">
+                                <i data-lucide="log-out" className="w-5 h-5"></i> Sair
+                            </button>
+                        </div>
+                    </aside>
+
+                    {/* MAIN CONTENT */}
+                    <main className="flex-1 flex flex-col h-full relative z-10 overflow-hidden">
+                        
+                        {/* TOPBAR (Mobile & Desktop Status) */}
+                        <header className="h-20 border-b border-slate-800/50 bg-[#0f1115]/90 backdrop-blur flex items-center justify-between px-6 shrink-0">
+                            <div className="md:hidden flex items-center gap-2">
+                                <i data-lucide="dumbbell" className="text-amber-500 w-6 h-6"></i>
+                                <span className="font-bold text-white">MAROMBIEW</span>
+                            </div>
+                            
+                            <div className="hidden md:block">
+                                <h2 className="text-xl font-bold text-white">{view === 'home' ? 'Visão Geral' : view.charAt(0).toUpperCase() + view.slice(1)}</h2>
+                                <p className="text-xs text-slate-500 flex items-center gap-2">
+                                    <span className={`w-2 h-2 rounded-full ${config.status === 'RUNNING' ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></span>
+                                    {config.status} • {config.mode}
+                                </p>
+                            </div>
+
+                            <div className="flex items-center gap-4">
+                                <div className="text-right hidden sm:block">
+                                    <p className="text-[10px] text-slate-400 uppercase font-bold">Saldo</p>
+                                    <p className="text-xl font-mono font-bold text-emerald-400">$ {config.current_balance?.toFixed(2) || '---'}</p>
+                                </div>
+                                <button 
+                                    onClick={toggleBot}
+                                    className={`px-6 py-2.5 rounded-xl font-bold text-sm shadow-lg flex items-center gap-2 transition-all ${
+                                        config.status === 'RUNNING' 
+                                        ? 'bg-red-500/10 text-red-400 border border-red-500/50 hover:bg-red-500/20' 
+                                        : 'bg-amber-500 text-white hover:bg-amber-600 shadow-amber-500/20'
+                                    }`}
+                                >
+                                    {config.status === 'RUNNING' ? <><i data-lucide="pause" className="w-4 h-4"></i> PAUSAR</> : <><i data-lucide="play" className="w-4 h-4"></i> INICIAR</>}
+                                </button>
+                            </div>
+                        </header>
+
+                        {/* CONTENT SCROLLABLE AREA */}
+                        <div className="flex-1 overflow-y-auto p-4 md:p-8 pb-24 md:pb-8">
+                            
+                            {/* VIEW: HOME */}
+                            {view === 'home' && (
+                                <div className="space-y-6 max-w-6xl mx-auto">
+                                    {/* Stats Grid */}
+                                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                                        <StatCard title="LUCRO HOJE" value={`$${stats.profit.toFixed(2)}`} color={stats.profit >= 0 ? "emerald" : "red"} icon="dollar-sign" />
+                                        <StatCard title="WINS" value={stats.wins} color="emerald" icon="check-circle-2" />
+                                        <StatCard title="LOSSES" value={stats.losses} color="red" icon="x-circle" />
+                                        <StatCard title="ASSERTIVIDADE" value={`${stats.wr}%`} color="amber" icon="pie-chart" />
+                                    </div>
+
+                                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                                        {/* Signals Table */}
+                                        <div className="lg:col-span-2 glass-card rounded-xl overflow-hidden flex flex-col h-[500px]">
+                                            <div className="p-4 border-b border-slate-700/50 bg-[#1f2229]/50 flex justify-between items-center">
+                                                <h3 className="font-bold text-white text-sm flex items-center gap-2">
+                                                    <i data-lucide="activity" className="text-amber-500 w-4 h-4"></i> Operações Recentes
+                                                </h3>
+                                                <span className="text-[10px] bg-white/5 px-2 py-1 rounded text-slate-400">Tempo Real</span>
+                                            </div>
+                                            <div className="overflow-y-auto flex-1">
+                                                <table className="w-full text-left border-collapse">
+                                                    <thead className="bg-[#181b21] sticky top-0 z-10 text-[10px] uppercase text-slate-500 font-bold tracking-wider">
+                                                        <tr>
+                                                            <th className="p-3">Hora</th>
+                                                            <th className="p-3">Par</th>
+                                                            <th className="p-3">Dir</th>
+                                                            <th className="p-3">Estratégia</th>
+                                                            <th className="p-3 text-right">Res</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody className="divide-y divide-slate-800/50 text-xs">
+                                                        {signals.map(s => {
+                                                            const isGale = (s.strategy || "").includes("G1");
+                                                            const simpleStrat = (s.strategy || "").split("::")[0].replace("_", " ");
+                                                            return (
+                                                                <tr key={s.id} className="hover:bg-white/5 transition-colors">
+                                                                    <td className="p-3 font-mono text-slate-400">{new Date(s.created_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</td>
+                                                                    <td className="p-3 font-bold text-white">{s.pair}</td>
+                                                                    <td className="p-3">
+                                                                        <span className={`px-1.5 py-0.5 rounded font-bold ${s.direction === 'call' ? 'text-green-400 bg-green-500/10' : 'text-red-400 bg-red-500/10'}`}>
+                                                                            {s.direction.toUpperCase()}
+                                                                        </span>
+                                                                    </td>
+                                                                    <td className="p-3">
+                                                                        <div className="flex items-center gap-1">
+                                                                            {simpleStrat}
+                                                                            {isGale && <span className="px-1 py-0.5 bg-amber-500 text-[#0f1115] rounded font-bold text-[9px]">G1</span>}
+                                                                        </div>
+                                                                    </td>
+                                                                    <td className="p-3 text-right">
+                                                                        {s.status === 'PENDING' ? <span className="text-yellow-500 animate-pulse">⏳</span> : 
+                                                                         <span className={`font-bold ${s.result === 'WIN' ? 'text-green-400' : s.result === 'LOSS' ? 'text-red-400' : 'text-slate-400'}`}>
+                                                                             {s.result === 'WIN' ? `+$${s.profit.toFixed(2)}` : s.result === 'LOSS' ? `-$${Math.abs(s.profit).toFixed(2)}` : s.result}
+                                                                         </span>}
+                                                                    </td>
+                                                                </tr>
+                                                            )
+                                                        })}
+                                                        {!signals.length && <tr><td colSpan="5" className="p-8 text-center text-slate-600">Sem dados hoje.</td></tr>}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        </div>
+
+                                        {/* Quick Config */}
+                                        <div className="glass-card rounded-xl p-5 space-y-4 h-fit">
+                                            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Painel de Controle</h3>
+                                            
+                                            <div className="grid grid-cols-2 gap-2 mb-2">
+                                                <button onClick={() => setConfig(p => ({...p, mode: 'LIVE'}))} className={`p-3 rounded-lg border text-xs font-bold transition-all ${config.mode === 'LIVE' ? 'border-amber-500 bg-amber-500/10 text-amber-500' : 'border-slate-700 bg-[#0f1115] text-slate-400'}`}>
+                                                    CONTA REAL
+                                                </button>
+                                                <button onClick={() => setConfig(p => ({...p, mode: 'OBSERVE'}))} className={`p-3 rounded-lg border text-xs font-bold transition-all ${config.mode === 'OBSERVE' ? 'border-blue-500 bg-blue-500/10 text-blue-500' : 'border-slate-700 bg-[#0f1115] text-slate-400'}`}>
+                                                    OBSERVAR
+                                                </button>
+                                            </div>
+
+                                            <div>
+                                                <label className="text-[10px] text-slate-500 font-bold uppercase mb-1 block">Estratégia Ativa</label>
+                                                <select 
+                                                    value={config.strategy_mode}
+                                                    onChange={e => setConfig({...config, strategy_mode: e.target.value})}
+                                                    className="w-full input-dark p-3 rounded-lg text-sm"
+                                                >
+                                                    <option value="AUTO">🤖 AUTO (Híbrido Inteligente)</option>
+                                                    <option value="SHOCK_REVERSAL">⚡ SHOCK REVERSAL (Puro)</option>
+                                                    <option value="V2_TREND">📈 V2 TREND (Tendência)</option>
+                                                    <option value="TENDMAX">🚀 TENDMAX (Cruzamento)</option>
+                                                </select>
+                                            </div>
+
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <div>
+                                                    <label className="text-[10px] text-slate-500 font-bold uppercase mb-1 block">Entrada ($)</label>
+                                                    <input type="number" value={config.entry_value} onChange={e => setConfig({...config, entry_value: e.target.value})} className="w-full input-dark p-3 rounded-lg text-sm font-mono"/>
+                                                </div>
+                                                <div>
+                                                    <label className="text-[10px] text-slate-500 font-bold uppercase mb-1 block">Stop Loss</label>
+                                                    <input type="number" value={config.max_losses_per_day} onChange={e => setConfig({...config, max_losses_per_day: e.target.value})} className="w-full input-dark p-3 rounded-lg text-sm font-mono"/>
+                                                </div>
+                                            </div>
+
+                                            <button onClick={saveSettings} disabled={saving} className="w-full bg-slate-700 hover:bg-slate-600 text-white py-3 rounded-lg font-bold text-sm transition-colors mt-2 flex items-center justify-center gap-2">
+                                                {saving ? <i data-lucide="loader-2" className="animate-spin w-4 h-4"></i> : <i data-lucide="save" className="w-4 h-4"></i>} 
+                                                Atualizar
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* VIEW: REPORTS (Simple Table Clone for now) */}
+                            {view === 'reports' && (
+                                <div className="max-w-6xl mx-auto space-y-4">
+                                    <h2 className="text-2xl font-bold text-white">Relatório Completo</h2>
+                                    <div className="glass-card rounded-xl overflow-hidden">
+                                        <table className="w-full text-left">
+                                            <thead className="bg-[#1f2229] text-xs uppercase text-slate-500">
+                                                <tr><th className="p-4">Data</th><th className="p-4">Ativo</th><th className="p-4">Lado</th><th className="p-4">Res</th><th className="p-4 text-right">Profit</th></tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-800 text-sm">
+                                                {signals.map(s => (
+                                                    <tr key={s.id} className="hover:bg-white/5">
+                                                        <td className="p-4 text-slate-400 font-mono">{new Date(s.created_at).toLocaleString()}</td>
+                                                        <td className="p-4 font-bold">{s.pair}</td>
+                                                        <td className="p-4">{s.direction}</td>
+                                                        <td className={`p-4 font-bold ${s.result === 'WIN' ? 'text-green-500' : 'text-red-500'}`}>{s.result}</td>
+                                                        <td className={`p-4 text-right font-mono ${s.profit > 0 ? 'text-green-400' : 'text-red-400'}`}>{s.profit}</td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* VIEW: SETTINGS (Full Form) */}
+                            {view === 'settings' && (
+                                <div className="max-w-2xl mx-auto">
+                                    <h2 className="text-2xl font-bold text-white mb-6">Configurações Avançadas</h2>
+                                    <div className="glass-card p-8 rounded-2xl border border-slate-800">
+                                        {/* Reusing logic from quick config but expanded */}
+                                        <p className="text-slate-500 mb-4">Use o painel lateral na Home para ajustes rápidos.</p>
+                                        <button onClick={() => setView('home')} className="bg-amber-500 text-white px-6 py-3 rounded-lg font-bold">Voltar para Home</button>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* VIEW: LOGS */}
+                            {view === 'logs' && (
+                                <div className="max-w-5xl mx-auto h-[600px] flex flex-col">
+                                    <h2 className="text-2xl font-bold text-white mb-4">Terminal do Sistema</h2>
+                                    <div className="flex-1 glass-card rounded-xl p-4 overflow-y-auto bg-[#0b0d11] font-mono text-xs border border-slate-800 space-y-1">
+                                        {logs.map(l => {
+                                            let color = "text-slate-400";
+                                            if (l.level === 'SYSTEM') color = "text-blue-400 font-bold";
+                                            if (l.level === 'WARNING') color = "text-amber-400";
+                                            if (l.level === 'ERROR') color = "text-red-500 font-bold";
+                                            if (l.level === 'SUCCESS') color = "text-green-400";
+                                            return (
+                                                <div key={l.id} className="border-b border-white/5 pb-1">
+                                                    <span className="text-slate-600 mr-3">[{new Date(l.created_at).toLocaleTimeString()}]</span>
+                                                    <span className={color}>{l.message}</span>
+                                                </div>
+                                            )
+                                        })}
+                                    </div>
+                                </div>
+                            )}
+
+                        </div>
+                    </main>
+
+                    {/* MOBILE NAV */}
+                    <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-[#0f172a]/95 backdrop-blur-xl border-t border-slate-800 flex justify-around px-2 pb-safe z-40 h-16 items-center">
+                        {['home', 'reports', 'settings', 'logs'].map(tab => (
+                            <button key={tab} onClick={() => setView(tab)} className={`flex flex-col items-center p-2 rounded-lg ${view === tab ? 'text-amber-500' : 'text-slate-500'}`}>
+                                <i data-lucide={tab === 'home' ? 'layout-dashboard' : tab === 'reports' ? 'file-text' : tab === 'settings' ? 'settings' : 'terminal'} className="w-5 h-5"></i>
+                            </button>
+                        ))}
+                    </nav>
+                </div>
+            );
+        };
+
+        const App = () => {
+            const [session, setSession] = useState(null);
+            const [loading, setLoading] = useState(true);
+
+            useEffect(() => {
+                supabase.auth.getSession().then(({ data: { session } }) => {
+                    setSession(session);
+                    setLoading(false);
+                });
+                const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+                    setSession(session);
+                });
+                return () => subscription.unsubscribe();
+            }, []);
+
+            if (loading) return <Splash onFinish={() => {}} />; // Just a placeholder
+            if (!session) return <Login onLogin={() => {}} />;
+
+            return <Dashboard session={session} onLogout={() => supabase.auth.signOut()} />;
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById("root"));
+        root.render(<App />);
     </script>
 </body>
 </html>
