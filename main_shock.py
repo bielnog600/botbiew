@@ -16,7 +16,7 @@ try:
 except ImportError:
     print("[ERRO] Biblioteca 'exnovaapi' não instalada.")
 
-BOT_VERSION = "SHOCK_ENGINE_V14_AUTO_HYBRID_2026-01-21"
+BOT_VERSION = "SHOCK_ENGINE_V15_AUTO_SMART_HYBRID_GALEFIX_2026-01-21"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -864,15 +864,31 @@ class SimpleBot:
                                     self.log_to_db(f"⚡ SHOCK_CHECK {asset}: {reason}", "DEBUG")
 
                                 if sig:
-                                    self.execute_trade(
-                                        asset=asset,
-                                        direction=sig,
-                                        strategy_key="SHOCK_REVERSAL",
-                                        strategy_label=reason,
-                                        prefer_binary=True,
-                                        gale_level=0
-                                    )
-                                    break
+                                    # ✅ Se for AUTO, salva candidato para decidir na Fase 2
+                                    if strat_mode == "AUTO":
+                                        cand = {
+                                            "asset": asset, "direction": sig, "strategy": "SHOCK_REVERSAL",
+                                            "label": reason, "confidence": 0.82, 
+                                            "wr": self.get_strategy_wr("SHOCK_REVERSAL"), "prefer_binary": True
+                                        }
+                                        cand["score"] = self.score_candidate(cand)
+                                        # Armazena o melhor Shock encontrado no minuto
+                                        if not self.auto_candidate or cand["score"] > self.score_candidate(self.auto_candidate):
+                                             self.auto_candidate = cand
+                                             self.auto_candidate_key = now_dt.strftime("%Y%m%d%H%M")
+                                        self.log_to_db(f"🤖 AUTO_CANDIDATE(SHOCK) {asset} Score={cand['score']:.2f}", "SYSTEM")
+                                    
+                                    # ✅ Se for modo exclusivo, executa
+                                    elif strat_mode == "SHOCK_REVERSAL":
+                                         self.execute_trade(
+                                            asset=asset,
+                                            direction=sig,
+                                            strategy_key="SHOCK_REVERSAL",
+                                            strategy_label=reason,
+                                            prefer_binary=True,
+                                            gale_level=0
+                                        )
+                                         break
                             except:
                                 pass
 
@@ -896,9 +912,13 @@ class SimpleBot:
                                     self.log_to_db(f"📈 TENDMAX_CHECK {asset}: {reason_tm}", "DEBUG")
 
                                 if sig_tm:
-                                    self.execute_trade(asset, sig_tm, "TENDMAX", reason_tm, gale_level=0)
-                                    trade_executed = True
-                                    break
+                                    # Se modo exclusivo, executa
+                                    if strat_mode == "TENDMAX":
+                                        self.execute_trade(asset, sig_tm, "TENDMAX", reason_tm, gale_level=0)
+                                        trade_executed = True
+                                        break
+                                    # Se AUTO, salva candidato
+                                    # (será processado abaixo junto com V2)
                             except: pass
                         
                         if trade_executed:
@@ -906,7 +926,14 @@ class SimpleBot:
                             continue
 
                     if strat_mode in ["AUTO", "V2_TREND"]:
-                        # ✅ AUTO: Prioriza Shock (Fase 1), se não, cai aqui (Fase 2)
+                        # Se for AUTO, usamos uma lista de candidatos para escolher o melhor
+                        # Se for V2 exclusivo, executa o primeiro que achar
+                        
+                        candidates = []
+                        # Se já temos um Shock candidato do minuto (Fase 1)
+                        if strat_mode == "AUTO" and self.auto_candidate and self.auto_candidate_key == now_dt.strftime("%Y%m%d%H%M"):
+                             candidates.append(self.auto_candidate)
+
                         assets_to_scan = self.best_assets if self.best_assets else assets_pool
                         random.shuffle(assets_to_scan)
 
@@ -916,25 +943,55 @@ class SimpleBot:
                                     continue
                             try:
                                 candles = self.api.get_candles(asset, 60, 100, int(time.time()))
-                                if not candles:
-                                    continue
+                                if not candles: continue
 
-                                if TechnicalAnalysis.check_compression(candles):
-                                    continue
+                                # 1. TENDMAX (para AUTO)
+                                if strat_mode == "AUTO":
+                                     t_sig, t_reason = TendMaxStrategy.get_signal(candles)
+                                     if t_sig:
+                                          candidates.append({
+                                              "asset": asset, "direction": t_sig, "strategy": "TENDMAX",
+                                              "label": t_reason, "confidence": 0.65,
+                                              "wr": self.get_strategy_wr("TENDMAX"), "prefer_binary": False
+                                          })
 
-                                sig, reason = TechnicalAnalysis.get_signal_v2(candles)
-                                if sig:
-                                    self.execute_trade(
-                                        asset=asset,
-                                        direction=sig,
-                                        strategy_key="V2_TREND",
-                                        strategy_label=reason,
-                                        prefer_binary=False, 
-                                        gale_level=0
-                                    )
-                                    break
+                                # 2. V2 TREND
+                                if not TechnicalAnalysis.check_compression(candles):
+                                    sig, reason = TechnicalAnalysis.get_signal_v2(candles)
+                                    if sig:
+                                        if strat_mode == "V2_TREND":
+                                             self.execute_trade(asset, sig, "V2_TREND", reason, prefer_binary=False, gale_level=0)
+                                             break # Sai do loop de assets
+                                        elif strat_mode == "AUTO":
+                                             candidates.append({
+                                                  "asset": asset, "direction": sig, "strategy": "V2_TREND",
+                                                  "label": reason, "confidence": 0.70,
+                                                  "wr": self.get_strategy_wr("V2_TREND"), "prefer_binary": False
+                                             })
                             except:
                                 pass
+                        
+                        # ✅ AUTO DECISION LOGIC
+                        if strat_mode == "AUTO" and candidates:
+                             best = self.pick_best_candidate(candidates)
+                             if best:
+                                  self.log_to_db(
+                                      f"🤖 AUTO_DECISION {best['strategy']}::{best['label']} "
+                                      f"{best['asset']} {best['direction'].upper()} "
+                                      f"(WR={best['wr']:.2f} | Score={best['priority']:.2f})",
+                                      "SYSTEM"
+                                  )
+                                  self.execute_trade(
+                                      asset=best["asset"],
+                                      direction=best["direction"],
+                                      strategy_key=best["strategy"],
+                                      strategy_label=best["label"],
+                                      prefer_binary=best["prefer_binary"],
+                                      gale_level=0
+                                  )
+                                  # Reset candidate
+                                  self.auto_candidate = None
+                                  time.sleep(2)
 
                 time.sleep(0.25)
 
