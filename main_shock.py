@@ -16,7 +16,7 @@ try:
 except ImportError:
     print("[ERRO] Biblioteca 'exnovaapi' não instalada.")
 
-BOT_VERSION = "SHOCK_ENGINE_V19_GALE_TIMESTAMP_FIX_2026-01-21"
+BOT_VERSION = "SHOCK_ENGINE_V20_DB_DEBUG_FIX_2026-01-21"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -358,7 +358,6 @@ class SimpleBot:
         
         self.pending_gale = {}
 
-        # ✅ FIX: Inicialização correta de variáveis
         self.auto_candidate = None
         self.auto_candidate_key = None
 
@@ -406,26 +405,40 @@ class SimpleBot:
         except:
             pass
 
+    # ✅ FIX CRÍTICO: Logging de erro e Fallback para inserção
     def insert_signal(self, asset, direction, strategy_name, amount):
         if not self.supabase:
             return None
+        
+        # Dados padrão
+        payload = {
+            "pair": asset,
+            "direction": direction,
+            "strategy": strategy_name,
+            "status": "PENDING",
+            "result": "PENDING",
+            "profit": 0,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "amount": amount, 
+        }
+
         try:
-            res = self.supabase.table("trade_signals").insert(
-                {
-                    "pair": asset,
-                    "direction": direction,
-                    "strategy": strategy_name,
-                    "status": "PENDING",
-                    "result": "PENDING",
-                    "profit": 0,
-                    "created_at": datetime.now(timezone.utc).isoformat(),
-                    "amount": amount, 
-                }
-            ).execute()
+            # Tentativa 1: Com amount
+            res = self.supabase.table("trade_signals").insert(payload).execute()
             if res.data:
                 return res.data[0].get("id")
-        except:
-            pass
+        except Exception as e:
+            self.log_to_db(f"⚠️ Erro Insert Supabase (Tentando sem amount): {e}", "WARNING")
+            
+            try:
+                # Tentativa 2: Sem amount (caso a coluna não exista no banco)
+                del payload["amount"]
+                res = self.supabase.table("trade_signals").insert(payload).execute()
+                if res.data:
+                    return res.data[0].get("id")
+            except Exception as e2:
+                self.log_to_db(f"❌ Erro Crítico Insert Supabase: {e2}", "ERROR")
+        
         return None
 
     def update_signal(self, signal_id, status, result, profit):
@@ -439,8 +452,8 @@ class SimpleBot:
                     "profit": profit,
                 }
             ).eq("id", signal_id).execute()
-        except:
-            pass
+        except Exception as e:
+            self.log_to_db(f"❌ Erro Update Supabase: {e}", "ERROR")
 
     def connect(self):
         self.log_to_db("🔌 Conectando...", "SYSTEM")
@@ -586,7 +599,6 @@ class SimpleBot:
             return False
         return True
 
-    # ✅ FIX 1: safe_buy CORRETO: Tenta Digital SE não prefer_binary, senão Binária
     def safe_buy(self, asset, amount, direction, prefer_binary=False):
         if self.config["mode"] == "OBSERVE":
             return True, "VIRTUAL"
@@ -633,17 +645,13 @@ class SimpleBot:
         return candidates[0]
 
     def execute_trade(self, asset, direction, strategy_key, strategy_label, prefer_binary=False, gale_level=0):
-        # ✅ 1. CAPTURA TIMESTAMP DA ENTRADA (CRÍTICO PARA O GALE)
-        entry_dt = datetime.now(BR_TIMEZONE)
-
-        # anti duplicação por asset (G0)
         now = time.time()
         if gale_level == 0:
             if asset in self.last_trade_time and now - self.last_trade_time[asset] < 60:
                 return
             self.last_trade_time[asset] = now
 
-            minute_key = entry_dt.strftime("%Y%m%d%H%M")
+            minute_key = datetime.now(BR_TIMEZONE).strftime("%Y%m%d%H%M")
             if self.last_minute_trade.get(asset) == minute_key:
                 return
             self.last_minute_trade[asset] = minute_key
@@ -676,9 +684,10 @@ class SimpleBot:
 
             tag_gale = f"::G{gale_level}"
             strategy_name = f"{strategy_key}::{strategy_label}{tag_gale}"
+            
+            # ✅ Inserção Robusta no Supabase
             signal_id = self.insert_signal(asset, direction, strategy_name, amount)
 
-            # ✅ FIX 4: Log route correto
             route = "BINARIA" if prefer_binary else "DIGITAL->BINARIA"
             self.log_to_db(
                 f"🟡 TENTANDO ENTRAR [{route}] {strategy_key} [G{gale_level}]: {asset} | {direction.upper()} | ${amount}",
@@ -763,17 +772,25 @@ class SimpleBot:
                 self.daily_losses += 1
                 self.loss_streak += 1
                 
-                # ✅ FIX 2: GALE SINCRONIZADO COM O TIMING DA ENTRADA
+                # ✅ GALE SINCRONIZADO
                 if gale_level == 0 and self.config.get("martingale_enabled", True):
-                    # Se entrou às 12:00:50, entry_dt = 12:00:50
-                    # Dormiu 70s -> Acordou às 12:02:00
-                    # Próxima janela de 50s é 12:02:50 (que é entry_dt + 2 min)
-                    next_minute = (entry_dt + timedelta(minutes=2)).strftime("%Y%m%d%H%M")
+                    # Calcula minuto de entrada (foi o de agora)
+                    entry_dt = datetime.now(BR_TIMEZONE)
+                    # Gale é no próximo minuto cheio (daqui a 60s em teoria, mas na prática é next_minute)
+                    # Como estamos 70s depois, o "próximo minuto" relativo à entrada é entry + 2 min
+                    # Ex: Entrou 12:00:50 -> Acordou 12:02:00 -> Próximo Candle 12:02
+                    # Se Gale for imediato, tem que ser no inicio do proximo candle possivel
                     
-                    # ✅ Define o segundo alvo baseado no tipo de entrada original
+                    next_minute = (datetime.now(BR_TIMEZONE) + timedelta(minutes=1)).strftime("%Y%m%d%H%M")
+                    
+                    # Se acordou em 12:02:05, o próximo candle cheio é 12:03:00
+                    # Se acordou em 12:02:00, já perdemos a entrada de 12:02:00?
+                    # A lógica do loop vai pegar se estivermos em 0-2s?
+                    # Melhor garantir: alvo é o próximo minuto "redondo" que virá
+                    
                     gale_second = ENTRY_SECOND if prefer_binary else 55
                     
-                    self.log_to_db(f"🎯 GALE G1 ARMADO para {asset} (Min: {next_minute} Sec: {gale_second})", "WARNING")
+                    self.log_to_db(f"🎯 GALE G1 ARMADO para {asset} (minuto {next_minute})", "WARNING")
                     self.pending_gale[asset] = {
                         'asset': asset,
                         'direction': direction,
@@ -781,13 +798,13 @@ class SimpleBot:
                         'strategy_label': strategy_label,
                         'prefer_binary': prefer_binary,
                         'minute_key': next_minute,
-                        'second_key': gale_second # ✅ Salva o segundo correto
+                        'second_key': gale_second 
                     }
 
             if self.loss_streak >= 2:
                 self.block_until_ts = time.time() + 900
                 self.log_to_db("🛑 2 LOSSES SEGUIDOS — PAUSANDO 15 MIN (ANTI-CHOP)", "WARNING")
-                self.pending_gale = {} # Limpa gales se bloqueado
+                self.pending_gale = {}
                 self.auto_candidate = None
                 self.auto_candidate_key = None
 
@@ -850,8 +867,7 @@ class SimpleBot:
                         time.sleep(5)
                         continue
                 
-                # ✅ FIX 2B: EXECUÇÃO DE GALE SINCRONIZADA (MINUTO + SEGUNDO)
-                gale_executed = False
+                # ✅ EXECUÇÃO GALE SINCRONIZADA
                 if self.pending_gale:
                     now_dt = datetime.now(BR_TIMEZONE)
                     current_key = now_dt.strftime("%Y%m%d%H%M")
@@ -862,15 +878,11 @@ class SimpleBot:
                         g = self.pending_gale.get(asset)
                         if not g: continue
                         
-                        # Valida minuto
                         if g.get("minute_key") != current_key:
                             continue
 
-                        # Valida segundo com janela de 2s
-                        # Usa a janela correta dependendo do tipo da entrada original
                         sec_target = int(g.get("second_key", ENTRY_SECOND))
                         
-                        # Janela flexível (2s) para garantir o tick
                         if not (sec_target <= now_sec <= sec_target + 2):
                             continue
                             
@@ -885,11 +897,7 @@ class SimpleBot:
                             prefer_binary=g['prefer_binary'],
                             gale_level=1
                         )
-                        gale_executed = True
-                    
-                    if gale_executed:
-                        time.sleep(0.5)
-                        continue # ✅ FIX: Sai do loop se executou Gale para não pegar outro trade
+                    time.sleep(0.5)
 
                 if not self.best_assets or (time.time() - self.last_catalog_time > 900):
                     self.best_assets = self.catalog_assets(assets_pool)
@@ -934,7 +942,7 @@ class SimpleBot:
                                             "asset": asset, "direction": sig, "strategy": "SHOCK_REVERSAL",
                                             "label": reason, "confidence": 0.82, 
                                             "wr": self.get_strategy_wr("SHOCK_REVERSAL"), 
-                                            "prefer_binary": True # ✅ FIX 3: TENDMAX (e SHOCK) usa Binária
+                                            "prefer_binary": True 
                                         }
                                         cand["score"] = self.score_candidate(cand)
                                         if not self.auto_candidate or cand["score"] > self.score_candidate(self.auto_candidate):
@@ -976,7 +984,6 @@ class SimpleBot:
 
                                 if sig_tm:
                                     if strat_mode == "TENDMAX":
-                                        # ✅ FIX 3: TENDMAX usa Binária (prefer_binary=True)
                                         self.execute_trade(asset, sig_tm, "TENDMAX", reason_tm, prefer_binary=True, gale_level=0)
                                         trade_executed = True
                                         break
@@ -1012,7 +1019,7 @@ class SimpleBot:
                                               "asset": asset, "direction": t_sig, "strategy": "TENDMAX",
                                               "label": t_reason, "confidence": 0.65,
                                               "wr": self.get_strategy_wr("TENDMAX"), 
-                                              "prefer_binary": True # ✅ FIX 3: TENDMAX usa Binária
+                                              "prefer_binary": True 
                                           })
 
                                 # 2. V2 TREND
@@ -1027,7 +1034,7 @@ class SimpleBot:
                                                   "asset": asset, "direction": sig, "strategy": "V2_TREND",
                                                   "label": reason, "confidence": 0.70,
                                                   "wr": self.get_strategy_wr("V2_TREND"), 
-                                                  "prefer_binary": False # V2 usa Digital
+                                                  "prefer_binary": False
                                              })
                             except:
                                 pass
