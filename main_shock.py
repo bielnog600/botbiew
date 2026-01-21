@@ -7,6 +7,7 @@ import os
 import random
 import requests
 from datetime import datetime, timedelta, timezone
+from collections import deque
 from supabase import create_client, Client
 
 # --- IMPORTAÇÃO DA EXNOVA ---
@@ -15,7 +16,7 @@ try:
 except ImportError:
     print("[ERRO] Biblioteca 'exnovaapi' não instalada.")
 
-BOT_VERSION = "SHOCK_ENGINE_V12_BINARY_GALE_FIX_2026-01-21"
+BOT_VERSION = "SHOCK_ENGINE_V14_AUTO_HYBRID_2026-01-21"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -28,7 +29,7 @@ EXNOVA_PASSWORD = os.environ.get("EXNOVA_PASSWORD", "sua_senha")
 
 BR_TIMEZONE = timezone(timedelta(hours=-3))
 
-# ✅ SEGUNDO DE ENTRADA (padrão 50s)
+# ✅ SEGUNDO DE ENTRADA (padrão 50s para pegar a próxima vela de 1m)
 ENTRY_SECOND = int(os.environ.get("ENTRY_SECOND", "50"))
 
 # ✅ CONFIGURAÇÃO MARTINGALE
@@ -147,6 +148,16 @@ class TechnicalAnalysis:
         return spread < (avg_body * 0.15)
 
     @staticmethod
+    def engulf_filter(candles, direction):
+        last = TechnicalAnalysis.analyze_candle(candles[-2])
+        prev = TechnicalAnalysis.analyze_candle(candles[-3])
+        if direction == "call":
+            return (last["color"] == "green" and prev["color"] == "red" and last["body"] >= prev["body"] * 0.6)
+        if direction == "put":
+            return (last["color"] == "red" and prev["color"] == "green" and last["body"] >= prev["body"] * 0.6)
+        return False
+
+    @staticmethod
     def get_signal_v2(candles):
         if len(candles) < 60:
             return None, "Dados insuficientes"
@@ -172,7 +183,6 @@ class TechnicalAnalysis:
             held_support = reject["close"] >= (ema21 - (avg_body * 0.3))
             if touched_ema and held_support:
                 if confirm["color"] == "green":
-                    # Engolfo simplificado
                     last = confirm
                     prev = reject
                     is_engulf = (last["color"] == "green" and prev["color"] == "red" and last["body"] >= prev["body"] * 0.6)
@@ -186,7 +196,6 @@ class TechnicalAnalysis:
             held_resist = reject["close"] <= (ema21 + (avg_body * 0.3))
             if touched_ema and held_resist:
                 if confirm["color"] == "red":
-                    # Engolfo simplificado
                     last = confirm
                     prev = reject
                     is_engulf = (last["color"] == "red" and prev["color"] == "green" and last["body"] >= prev["body"] * 0.6)
@@ -297,6 +306,13 @@ class TendMaxStrategy:
         return None, "Sem cruzamento"
 
 
+class MarketRegimeClassifier:
+    @staticmethod
+    def classify(candles):
+        if not candles or len(candles) < 50: return "RANGE"
+        if TechnicalAnalysis.check_compression(candles): return "NO_TRADE"
+        return "TREND"
+
 # ==============================================================================
 # BOT
 # ==============================================================================
@@ -342,6 +358,12 @@ class SimpleBot:
         
         self.pending_gale = {}
 
+        self.strategy_memory = {
+            "SHOCK_REVERSAL": deque(maxlen=20),
+            "V2_TREND": deque(maxlen=20),
+            "TENDMAX": deque(maxlen=20),
+        }
+
         self.strategy_performance = {
             "TREND_STRONG": {'wins': 0, 'losses': 0, 'consecutive_losses': 0, 'active': True},
             "TREND_WEAK": {'wins': 0, 'losses': 0, 'consecutive_losses': 0, 'active': True},
@@ -380,8 +402,8 @@ class SimpleBot:
         except:
             pass
 
-    def insert_signal(self, asset, direction, strategy_name):
-        # ✅ FIX: Removido 'amount' para evitar erro de schema no Supabase
+    def insert_signal(self, asset, direction, strategy_name, amount):
+        # ✅ FIX 2: Restaurado amount para o front funcionar
         if not self.supabase:
             return None
         try:
@@ -394,7 +416,7 @@ class SimpleBot:
                     "result": "PENDING",
                     "profit": 0,
                     "created_at": datetime.now(timezone.utc).isoformat(),
-                    # "amount": amount,  <-- REMOVIDO PARA SEGURANÇA DO FRONT
+                    "amount": amount, 
                 }
             ).execute()
             if res.data:
@@ -559,28 +581,40 @@ class SimpleBot:
             return False
         return True
 
-    # ✅ FIX 4: Função Única e Exclusiva para Compra (BINÁRIA SOMENTE)
-    def safe_buy(self, asset, amount, direction):
+    def safe_buy(self, asset, amount, direction, prefer_binary=False):
         if self.config["mode"] == "OBSERVE":
-            return True, "VIRTUAL", "OBSERVE"
+            return True, "VIRTUAL"
 
-        # Tenta SOMENTE Binária (API buy)
         try:
             status, trade_id = self.api.buy(amount, asset, direction, 1)
-            # Verifica se realmente veio ID (API às vezes devolve True sem ID)
             if status and trade_id:
-                return True, trade_id, "BINARY"
-            else:
-                # Logar falha silenciosa se status=True mas ID=None
-                self.log_to_db(f"⚠️ Binária falhou (ID nulo).", "WARNING")
-        except Exception as e:
-            self.log_to_db(f"⚠️ BINARY Exception: {e}", "WARNING")
+                return True, trade_id
+            
+            if not prefer_binary:
+                 status, trade_id = self.api.buy_digital_spot(asset, amount, direction, 1)
+                 if status and trade_id:
+                     return True, trade_id
 
-        # Se falhar, retorna False. NADA DE DIGITAL.
-        return False, None, "FAILED"
+            self.log_to_db(f"⚠️ Binária falhou (ID nulo).", "WARNING")
+            return False, None
+        except:
+            return False, None
 
-    def execute_trade(self, asset, direction, strategy_key, strategy_label, gale_level=0):
-        # anti duplicação por asset (G0)
+    def get_strategy_wr(self, strategy_key):
+        mem = self.strategy_memory.get(strategy_key, [])
+        if not mem:
+            return 0.55
+        return sum(mem) / len(mem)
+
+    def pick_best_candidate(self, candidates):
+        if not candidates:
+            return None
+        for c in candidates:
+            c["priority"] = (c["wr"] * 0.7) + (c["confidence"] * 0.3)
+        candidates.sort(key=lambda x: x["priority"], reverse=True)
+        return candidates[0]
+
+    def execute_trade(self, asset, direction, strategy_key, strategy_label, prefer_binary=False, gale_level=0):
         now = time.time()
         if gale_level == 0:
             if asset in self.last_trade_time and now - self.last_trade_time[asset] < 60:
@@ -593,11 +627,9 @@ class SimpleBot:
             self.last_minute_trade[asset] = minute_key
 
         if time.time() < self.block_until_ts:
-            self.log_to_db(f"⏳ Bloqueado 15min (anti-chop). Ignorando {asset}", "DEBUG")
             return
 
         with self.trade_lock:
-            # G1 pode "re-entrar" no lock (RLock), G0 novo não
             if gale_level == 0 and asset in self.active_trades:
                 return
             self.active_trades.add(asset)
@@ -605,7 +637,6 @@ class SimpleBot:
         signal_id = None
         base_amount = float(self.config["entry_value"])
         
-        # ✅ FIX 2: Cálculo Martingale Escalável
         amount = base_amount
         if gale_level > 0:
             multiplier = self.config.get("martingale_multiplier", 2.0)
@@ -623,9 +654,7 @@ class SimpleBot:
 
             tag_gale = f"::G{gale_level}"
             strategy_name = f"{strategy_key}::{strategy_label}{tag_gale}"
-            
-            # ✅ FIX 3: Insert sem 'amount'
-            signal_id = self.insert_signal(asset, direction, strategy_name)
+            signal_id = self.insert_signal(asset, direction, strategy_name, amount)
 
             self.log_to_db(
                 f"🟡 TENTANDO ENTRAR (BINARIA) {strategy_key} [G{gale_level}]: {asset} | {direction.upper()} | ${amount}",
@@ -642,20 +671,17 @@ class SimpleBot:
                 except:
                     return
 
-            # ✅ FIX 4: Compra segura (Binária Only)
-            status, trade_id, order_type = self.safe_buy(asset, amount, direction)
+            status, trade_id = self.safe_buy(asset, amount, direction, prefer_binary=prefer_binary)
             
             if not status or not trade_id:
-                self.log_to_db(f"❌ ORDEM RECUSADA: {asset} (Binária)", "ERROR")
+                self.log_to_db(f"❌ ORDEM RECUSADA: {asset}", "ERROR")
                 self.update_signal(signal_id, "FAILED", "FAILED", 0)
                 return
 
-            self.log_to_db(f"✅ CONFIRMADA: Ordem {trade_id} ({order_type}). Aguardando...", "INFO")
+            self.log_to_db(f"✅ CONFIRMADA: Ordem {trade_id}. Aguardando...", "INFO")
 
-            # ✅ Wait Time
             time.sleep(70)
 
-            # Resultado
             res_str = "UNKNOWN"
             profit = 0.0
 
@@ -694,17 +720,14 @@ class SimpleBot:
                 except:
                     res_str = "UNKNOWN"
 
-            if res_str == "UNKNOWN":
-                 self.log_to_db("⚠️ Resultado UNKNOWN, reconectando API...", "WARNING")
-                 self.api = None
-                 return
-
             if res_str == "DOJI":
                 self.log_to_db("⚪ DOJI (ignorado)", "DEBUG")
                 self.update_signal(signal_id, "DOJI", "DOJI", 0)
                 return
+            
+            if res_str in ["WIN", "LOSS"] and strategy_key in self.strategy_memory:
+                 self.strategy_memory[strategy_key].append(1 if res_str == "WIN" else 0)
 
-            # Contadores
             self.daily_total += 1
             if res_str == "WIN":
                 self.daily_wins += 1
@@ -716,7 +739,6 @@ class SimpleBot:
                 self.daily_losses += 1
                 self.loss_streak += 1
                 
-                # ✅ FIX 1: Martingale Assíncrono (Arma G1 na fila)
                 if gale_level == 0 and self.config.get("martingale_enabled", True):
                     self.log_to_db(f"🎯 GALE G1 ARMADO para {asset} (Próximo minuto)", "WARNING")
                     self.pending_gale[asset] = {
@@ -724,14 +746,14 @@ class SimpleBot:
                         'direction': direction,
                         'strategy_key': strategy_key,
                         'strategy_label': strategy_label,
-                        # 'prefer_binary' removido pois agora é padrão
+                        'prefer_binary': prefer_binary,
                         'execute_at': time.time() 
                     }
 
             if self.loss_streak >= 2:
                 self.block_until_ts = time.time() + 900
                 self.log_to_db("🛑 2 LOSSES SEGUIDOS — PAUSANDO 15 MIN (ANTI-CHOP)", "WARNING")
-                self.pending_gale = {} # Limpa gales se bloqueado
+                self.pending_gale = {}
 
             self.update_signal(signal_id, res_str, res_str, profit)
 
@@ -758,8 +780,8 @@ class SimpleBot:
 
     def catalog_assets(self, assets_pool):
         strat = self.config.get("strategy_mode", "AUTO")
-        if strat in ["SHOCK_REVERSAL", "TENDMAX"]:
-            self.log_to_db("🔥 Modo SHOCK/TENDMAX: usando TODOS os ativos", "SYSTEM")
+        if strat in ["SHOCK_REVERSAL", "TENDMAX", "AUTO"]:
+            self.log_to_db("🔥 Modo FULL ASSETS: usando TODOS os ativos", "SYSTEM")
             return assets_pool
         return assets_pool
 
@@ -792,7 +814,6 @@ class SimpleBot:
                         time.sleep(5)
                         continue
                 
-                # ✅ EXECUÇÃO MARTINGALE PRIORITÁRIA (G1)
                 if self.pending_gale:
                     assets_gale = list(self.pending_gale.keys())
                     for asset in assets_gale:
@@ -805,6 +826,7 @@ class SimpleBot:
                             direction=gale_info['direction'],
                             strategy_key=gale_info['strategy_key'],
                             strategy_label=gale_info['strategy_label'],
+                            prefer_binary=gale_info['prefer_binary'],
                             gale_level=1
                         )
                     time.sleep(1)
@@ -821,7 +843,7 @@ class SimpleBot:
                 if now_sec in [0, 10, 20, 30, 40, 50]:
                     self.log_to_db(f"MODE_ATIVO::{strat_mode}::{now_dt.strftime('%H:%M:%S')}::ENTRY={ENTRY_SECOND}s", "DEBUG")
 
-                # ✅ FIX 5: JANELA DE ENTRADA CORRIGIDA (ENTRY_SECOND + 2s)
+                # ✅ FASE 1: SHOCK LIVE (ENTRY_SECOND)
                 if ENTRY_SECOND <= now_sec <= ENTRY_SECOND + 2:
                     if strat_mode in ["AUTO", "SHOCK_REVERSAL"]:
                         random_assets = self.best_assets.copy()
@@ -839,7 +861,7 @@ class SimpleBot:
                                 sig, reason, dbg = ShockLiveDetector.detect(candles, asset)
 
                                 if strat_mode == "SHOCK_REVERSAL":
-                                    self.log_to_db(f"⚡ SHOCK_LIVE_CHECK {asset}: {reason}", "DEBUG")
+                                    self.log_to_db(f"⚡ SHOCK_CHECK {asset}: {reason}", "DEBUG")
 
                                 if sig:
                                     self.execute_trade(
@@ -847,13 +869,14 @@ class SimpleBot:
                                         direction=sig,
                                         strategy_key="SHOCK_REVERSAL",
                                         strategy_label=reason,
+                                        prefer_binary=True,
                                         gale_level=0
                                     )
                                     break
                             except:
                                 pass
 
-                # ✅ V2 TREND + TENDMAX (55-59s)
+                # ✅ FASE 2: V2 TREND + TENDMAX (55-59s)
                 if 55 <= now_sec <= 59:
                     
                     if strat_mode in ["AUTO", "TENDMAX"]:
@@ -883,6 +906,7 @@ class SimpleBot:
                             continue
 
                     if strat_mode in ["AUTO", "V2_TREND"]:
+                        # ✅ AUTO: Prioriza Shock (Fase 1), se não, cai aqui (Fase 2)
                         assets_to_scan = self.best_assets if self.best_assets else assets_pool
                         random.shuffle(assets_to_scan)
 
@@ -905,6 +929,7 @@ class SimpleBot:
                                         direction=sig,
                                         strategy_key="V2_TREND",
                                         strategy_label=reason,
+                                        prefer_binary=False, 
                                         gale_level=0
                                     )
                                     break
