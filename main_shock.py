@@ -16,7 +16,7 @@ try:
 except ImportError:
     print("[ERRO] Biblioteca 'exnovaapi' não instalada.")
 
-BOT_VERSION = "SHOCK_ENGINE_V16_ATTRIBUTE_FIX_2026-01-21"
+BOT_VERSION = "SHOCK_ENGINE_V19_GALE_TIMESTAMP_FIX_2026-01-21"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -358,7 +358,7 @@ class SimpleBot:
         
         self.pending_gale = {}
 
-        # ✅ FIX: Inicialização correta de variáveis para evitar AttributeError
+        # ✅ FIX: Inicialização correta de variáveis
         self.auto_candidate = None
         self.auto_candidate_key = None
 
@@ -586,21 +586,23 @@ class SimpleBot:
             return False
         return True
 
+    # ✅ FIX 1: safe_buy CORRETO: Tenta Digital SE não prefer_binary, senão Binária
     def safe_buy(self, asset, amount, direction, prefer_binary=False):
         if self.config["mode"] == "OBSERVE":
             return True, "VIRTUAL"
 
         try:
+            # 1. Se NÃO prefere binária (V2), tenta DIGITAL primeiro
+            if not prefer_binary:
+                status, trade_id = self.api.buy_digital_spot(asset, amount, direction, 1)
+                if status and trade_id:
+                    return True, trade_id
+
+            # 2. Se preferir binária (SHOCK/TENDMAX) ou se digital falhou, tenta BINÁRIA
             status, trade_id = self.api.buy(amount, asset, direction, 1)
             if status and trade_id:
                 return True, trade_id
-            
-            if not prefer_binary:
-                 status, trade_id = self.api.buy_digital_spot(asset, amount, direction, 1)
-                 if status and trade_id:
-                     return True, trade_id
 
-            self.log_to_db(f"⚠️ Binária falhou (ID nulo).", "WARNING")
             return False, None
         except:
             return False, None
@@ -620,7 +622,6 @@ class SimpleBot:
         return candidates[0]
 
     def score_candidate(self, c):
-        # score = WR * 0.7 + confiança * 0.3
         return (c["wr"] * 0.7) + (c["confidence"] * 0.3)
 
     def choose_best(self, candidates):
@@ -632,13 +633,17 @@ class SimpleBot:
         return candidates[0]
 
     def execute_trade(self, asset, direction, strategy_key, strategy_label, prefer_binary=False, gale_level=0):
+        # ✅ 1. CAPTURA TIMESTAMP DA ENTRADA (CRÍTICO PARA O GALE)
+        entry_dt = datetime.now(BR_TIMEZONE)
+
+        # anti duplicação por asset (G0)
         now = time.time()
         if gale_level == 0:
             if asset in self.last_trade_time and now - self.last_trade_time[asset] < 60:
                 return
             self.last_trade_time[asset] = now
 
-            minute_key = datetime.now(BR_TIMEZONE).strftime("%Y%m%d%H%M")
+            minute_key = entry_dt.strftime("%Y%m%d%H%M")
             if self.last_minute_trade.get(asset) == minute_key:
                 return
             self.last_minute_trade[asset] = minute_key
@@ -673,8 +678,10 @@ class SimpleBot:
             strategy_name = f"{strategy_key}::{strategy_label}{tag_gale}"
             signal_id = self.insert_signal(asset, direction, strategy_name, amount)
 
+            # ✅ FIX 4: Log route correto
+            route = "BINARIA" if prefer_binary else "DIGITAL->BINARIA"
             self.log_to_db(
-                f"🟡 TENTANDO ENTRAR (BINARIA) {strategy_key} [G{gale_level}]: {asset} | {direction.upper()} | ${amount}",
+                f"🟡 TENTANDO ENTRAR [{route}] {strategy_key} [G{gale_level}]: {asset} | {direction.upper()} | ${amount}",
                 "INFO",
             )
 
@@ -756,21 +763,31 @@ class SimpleBot:
                 self.daily_losses += 1
                 self.loss_streak += 1
                 
+                # ✅ FIX 2: GALE SINCRONIZADO COM O TIMING DA ENTRADA
                 if gale_level == 0 and self.config.get("martingale_enabled", True):
-                    self.log_to_db(f"🎯 GALE G1 ARMADO para {asset} (Próximo minuto)", "WARNING")
+                    # Se entrou às 12:00:50, entry_dt = 12:00:50
+                    # Dormiu 70s -> Acordou às 12:02:00
+                    # Próxima janela de 50s é 12:02:50 (que é entry_dt + 2 min)
+                    next_minute = (entry_dt + timedelta(minutes=2)).strftime("%Y%m%d%H%M")
+                    
+                    # ✅ Define o segundo alvo baseado no tipo de entrada original
+                    gale_second = ENTRY_SECOND if prefer_binary else 55
+                    
+                    self.log_to_db(f"🎯 GALE G1 ARMADO para {asset} (Min: {next_minute} Sec: {gale_second})", "WARNING")
                     self.pending_gale[asset] = {
                         'asset': asset,
                         'direction': direction,
                         'strategy_key': strategy_key,
                         'strategy_label': strategy_label,
                         'prefer_binary': prefer_binary,
-                        'execute_at': time.time() 
+                        'minute_key': next_minute,
+                        'second_key': gale_second # ✅ Salva o segundo correto
                     }
 
             if self.loss_streak >= 2:
                 self.block_until_ts = time.time() + 900
                 self.log_to_db("🛑 2 LOSSES SEGUIDOS — PAUSANDO 15 MIN (ANTI-CHOP)", "WARNING")
-                self.pending_gale = {}
+                self.pending_gale = {} # Limpa gales se bloqueado
                 self.auto_candidate = None
                 self.auto_candidate_key = None
 
@@ -833,23 +850,46 @@ class SimpleBot:
                         time.sleep(5)
                         continue
                 
+                # ✅ FIX 2B: EXECUÇÃO DE GALE SINCRONIZADA (MINUTO + SEGUNDO)
+                gale_executed = False
                 if self.pending_gale:
+                    now_dt = datetime.now(BR_TIMEZONE)
+                    current_key = now_dt.strftime("%Y%m%d%H%M")
+                    now_sec = now_dt.second
                     assets_gale = list(self.pending_gale.keys())
+                    
                     for asset in assets_gale:
-                        gale_info = self.pending_gale[asset]
+                        g = self.pending_gale.get(asset)
+                        if not g: continue
+                        
+                        # Valida minuto
+                        if g.get("minute_key") != current_key:
+                            continue
+
+                        # Valida segundo com janela de 2s
+                        # Usa a janela correta dependendo do tipo da entrada original
+                        sec_target = int(g.get("second_key", ENTRY_SECOND))
+                        
+                        # Janela flexível (2s) para garantir o tick
+                        if not (sec_target <= now_sec <= sec_target + 2):
+                            continue
+                            
                         del self.pending_gale[asset]
                         
-                        self.log_to_db(f"🚀 EXECUTANDO GALE G1: {asset}", "INFO")
+                        self.log_to_db(f"🚀 EXECUTANDO GALE G1: {asset} (SYNC {current_key} @{sec_target}s)", "INFO")
                         self.execute_trade(
-                            asset=gale_info['asset'],
-                            direction=gale_info['direction'],
-                            strategy_key=gale_info['strategy_key'],
-                            strategy_label=gale_info['strategy_label'],
-                            prefer_binary=gale_info['prefer_binary'],
+                            asset=g['asset'],
+                            direction=g['direction'],
+                            strategy_key=g['strategy_key'],
+                            strategy_label=g['strategy_label'],
+                            prefer_binary=g['prefer_binary'],
                             gale_level=1
                         )
-                    time.sleep(1)
-                    continue
+                        gale_executed = True
+                    
+                    if gale_executed:
+                        time.sleep(0.5)
+                        continue # ✅ FIX: Sai do loop se executou Gale para não pegar outro trade
 
                 if not self.best_assets or (time.time() - self.last_catalog_time > 900):
                     self.best_assets = self.catalog_assets(assets_pool)
@@ -861,6 +901,12 @@ class SimpleBot:
 
                 if now_sec in [0, 10, 20, 30, 40, 50]:
                     self.log_to_db(f"MODE_ATIVO::{strat_mode}::{now_dt.strftime('%H:%M:%S')}::ENTRY={ENTRY_SECOND}s", "DEBUG")
+
+                # ✅ FIX 3: Reset de Candidato AUTO na virada do minuto
+                current_minute_key = now_dt.strftime("%Y%m%d%H%M")
+                if self.auto_candidate_key != current_minute_key:
+                    self.auto_candidate = None
+                    self.auto_candidate_key = current_minute_key
 
                 # ✅ FASE 1: SHOCK LIVE (ENTRY_SECOND)
                 if ENTRY_SECOND <= now_sec <= ENTRY_SECOND + 2:
@@ -883,21 +929,19 @@ class SimpleBot:
                                     self.log_to_db(f"⚡ SHOCK_CHECK {asset}: {reason}", "DEBUG")
 
                                 if sig:
-                                    # ✅ Se for AUTO, salva candidato para decidir na Fase 2
                                     if strat_mode == "AUTO":
                                         cand = {
                                             "asset": asset, "direction": sig, "strategy": "SHOCK_REVERSAL",
                                             "label": reason, "confidence": 0.82, 
-                                            "wr": self.get_strategy_wr("SHOCK_REVERSAL"), "prefer_binary": True
+                                            "wr": self.get_strategy_wr("SHOCK_REVERSAL"), 
+                                            "prefer_binary": True # ✅ FIX 3: TENDMAX (e SHOCK) usa Binária
                                         }
                                         cand["score"] = self.score_candidate(cand)
-                                        # Armazena o melhor Shock encontrado no minuto
                                         if not self.auto_candidate or cand["score"] > self.score_candidate(self.auto_candidate):
                                              self.auto_candidate = cand
-                                             self.auto_candidate_key = now_dt.strftime("%Y%m%d%H%M")
+                                             self.auto_candidate_key = current_minute_key
                                         self.log_to_db(f"🤖 AUTO_CANDIDATE(SHOCK) {asset} Score={cand['score']:.2f}", "SYSTEM")
                                     
-                                    # ✅ Se for modo exclusivo, executa
                                     elif strat_mode == "SHOCK_REVERSAL":
                                          self.execute_trade(
                                             asset=asset,
@@ -931,13 +975,12 @@ class SimpleBot:
                                     self.log_to_db(f"📈 TENDMAX_CHECK {asset}: {reason_tm}", "DEBUG")
 
                                 if sig_tm:
-                                    # Se modo exclusivo, executa
                                     if strat_mode == "TENDMAX":
-                                        self.execute_trade(asset, sig_tm, "TENDMAX", reason_tm, gale_level=0)
+                                        # ✅ FIX 3: TENDMAX usa Binária (prefer_binary=True)
+                                        self.execute_trade(asset, sig_tm, "TENDMAX", reason_tm, prefer_binary=True, gale_level=0)
                                         trade_executed = True
                                         break
-                                    # Se AUTO, salva candidato
-                                    # (será processado abaixo junto com V2)
+                                    # Em AUTO, salva candidato abaixo
                             except: pass
                         
                         if trade_executed:
@@ -947,8 +990,7 @@ class SimpleBot:
                     if strat_mode in ["AUTO", "V2_TREND"]:
                         
                         candidates = []
-                        # Se já temos um Shock candidato do minuto (Fase 1)
-                        if strat_mode == "AUTO" and self.auto_candidate and self.auto_candidate_key == now_dt.strftime("%Y%m%d%H%M"):
+                        if strat_mode == "AUTO" and self.auto_candidate and self.auto_candidate_key == current_minute_key:
                              candidates.append(self.auto_candidate)
 
                         assets_to_scan = self.best_assets if self.best_assets else assets_pool
@@ -969,7 +1011,8 @@ class SimpleBot:
                                           candidates.append({
                                               "asset": asset, "direction": t_sig, "strategy": "TENDMAX",
                                               "label": t_reason, "confidence": 0.65,
-                                              "wr": self.get_strategy_wr("TENDMAX"), "prefer_binary": False
+                                              "wr": self.get_strategy_wr("TENDMAX"), 
+                                              "prefer_binary": True # ✅ FIX 3: TENDMAX usa Binária
                                           })
 
                                 # 2. V2 TREND
@@ -978,17 +1021,17 @@ class SimpleBot:
                                     if sig:
                                         if strat_mode == "V2_TREND":
                                              self.execute_trade(asset, sig, "V2_TREND", reason, prefer_binary=False, gale_level=0)
-                                             break # Sai do loop de assets
+                                             break 
                                         elif strat_mode == "AUTO":
                                              candidates.append({
                                                   "asset": asset, "direction": sig, "strategy": "V2_TREND",
                                                   "label": reason, "confidence": 0.70,
-                                                  "wr": self.get_strategy_wr("V2_TREND"), "prefer_binary": False
+                                                  "wr": self.get_strategy_wr("V2_TREND"), 
+                                                  "prefer_binary": False # V2 usa Digital
                                              })
                             except:
                                 pass
                         
-                        # ✅ AUTO DECISION LOGIC
                         if strat_mode == "AUTO" and candidates:
                              best = self.pick_best_candidate(candidates)
                              if best:
@@ -1006,7 +1049,6 @@ class SimpleBot:
                                       prefer_binary=best["prefer_binary"],
                                       gale_level=0
                                   )
-                                  # Reset candidate
                                   self.auto_candidate = None
                                   time.sleep(2)
 
