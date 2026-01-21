@@ -18,13 +18,12 @@
     <!-- Supabase JS -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     
-    <!-- Phosphor Icons (Mais estável que Lucide para React CDN) -->
+    <!-- Phosphor Icons -->
     <script src="https://unpkg.com/@phosphor-icons/web"></script>
     
     <!-- Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 
-    <!-- ✅ FIX FAVICON -->
     <link rel="icon" type="image/png" href="https://cdn-icons-png.flaticon.com/512/4712/4712109.png">
     <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/4712/4712109.png">
 
@@ -241,9 +240,11 @@
                 setSaving(true);
                 try {
                     await supabase.from('bot_config').update({
+                        mode: config.mode,
                         entry_value: parseFloat(config.entry_value),
                         max_wins_per_day: parseInt(config.max_wins_per_day),
                         max_losses_per_day: parseInt(config.max_losses_per_day),
+                        max_trades_per_day: parseInt(config.max_trades_per_day),
                         strategy_mode: config.strategy_mode,
                         account_type: config.account_type,
                         timer_enabled: config.timer_enabled,
@@ -253,6 +254,19 @@
                     alert("Configurações salvas!");
                 } catch(e) { alert("Erro ao salvar."); }
                 finally { setSaving(false); }
+            };
+
+            const applyPreset = (preset) => {
+                if (!config) return;
+                let updates = {};
+                if (preset === 'conservative') {
+                    updates = { max_trades_per_day: 3, max_wins_per_day: 2, max_losses_per_day: 1 };
+                } else if (preset === 'sniper') {
+                    updates = { max_trades_per_day: 2, max_wins_per_day: 1, max_losses_per_day: 1 };
+                } else if (preset === 'aggressive') {
+                    updates = { max_trades_per_day: 6, max_wins_per_day: 4, max_losses_per_day: 2 };
+                }
+                setConfig(prev => ({ ...prev, ...updates }));
             };
 
             // STATS CALC
@@ -304,7 +318,7 @@
                     {/* MAIN CONTENT */}
                     <main className="flex-1 flex flex-col h-full relative z-10 overflow-hidden">
                         
-                        {/* TOPBAR (Mobile & Desktop Status) */}
+                        {/* TOPBAR */}
                         <header className="h-20 border-b border-slate-800/50 bg-[#0f1115]/90 backdrop-blur flex items-center justify-between px-6 shrink-0">
                             <div className="md:hidden flex items-center gap-2">
                                 <i className="ph ph-barbell text-amber-500 text-2xl"></i>
@@ -351,109 +365,63 @@
                                         <StatCard title="ASSERTIVIDADE" value={`${stats.wr}%`} color="amber" icon="ph-chart-pie-slice" />
                                     </div>
 
-                                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                                        {/* Signals Table */}
-                                        <div className="lg:col-span-2 glass-card rounded-xl overflow-hidden flex flex-col h-[500px]">
-                                            <div className="p-4 border-b border-slate-700/50 bg-[#1f2229]/50 flex justify-between items-center">
-                                                <h3 className="font-bold text-white text-sm flex items-center gap-2">
-                                                    <i className="ph ph-pulse text-amber-500 text-lg"></i> Operações Recentes
-                                                </h3>
-                                                <span className="text-[10px] bg-white/5 px-2 py-1 rounded text-slate-400">Tempo Real</span>
-                                            </div>
-                                            <div className="overflow-y-auto flex-1">
-                                                <table className="w-full text-left border-collapse">
-                                                    <thead className="bg-[#181b21] sticky top-0 z-10 text-[10px] uppercase text-slate-500 font-bold tracking-wider">
-                                                        <tr>
-                                                            <th className="p-3">Hora</th>
-                                                            <th className="p-3">Par</th>
-                                                            <th className="p-3">Dir</th>
-                                                            <th className="p-3">Estratégia</th>
-                                                            <th className="p-3 text-right">Res</th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody className="divide-y divide-slate-800/50 text-xs">
-                                                        {signals.map(s => {
-                                                            const isGale = (s.strategy || "").includes("G1");
-                                                            const simpleStrat = (s.strategy || "").split("::")[0].replace("_", " ");
-                                                            return (
-                                                                <tr key={s.id} className="hover:bg-white/5 transition-colors">
-                                                                    <td className="p-3 font-mono text-slate-400">{new Date(s.created_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</td>
-                                                                    <td className="p-3 font-bold text-white">{s.pair}</td>
-                                                                    <td className="p-3">
-                                                                        <span className={`px-1.5 py-0.5 rounded font-bold flex items-center gap-1 w-fit ${s.direction === 'call' ? 'text-green-400 bg-green-500/10' : 'text-red-400 bg-red-500/10'}`}>
-                                                                            <i className={`ph ${s.direction === 'call' ? 'ph-arrow-up' : 'ph-arrow-down'}`}></i>
-                                                                            {s.direction.toUpperCase()}
-                                                                        </span>
-                                                                    </td>
-                                                                    <td className="p-3">
-                                                                        <div className="flex items-center gap-1">
-                                                                            {simpleStrat}
-                                                                            {isGale && <span className="px-1 py-0.5 bg-amber-500 text-[#0f1115] rounded font-bold text-[9px]">G1</span>}
-                                                                        </div>
-                                                                    </td>
-                                                                    <td className="p-3 text-right">
-                                                                        {s.status === 'PENDING' ? <span className="text-yellow-500 animate-pulse font-bold">⏳</span> : 
-                                                                         <span className={`font-bold ${s.result === 'WIN' ? 'text-green-400' : s.result === 'LOSS' ? 'text-red-400' : 'text-slate-400'}`}>
-                                                                             {s.result === 'WIN' ? `+$${s.profit.toFixed(2)}` : s.result === 'LOSS' ? `-$${Math.abs(s.profit).toFixed(2)}` : s.result}
-                                                                         </span>}
-                                                                    </td>
-                                                                </tr>
-                                                            )
-                                                        })}
-                                                        {!signals.length && <tr><td colSpan="5" className="p-8 text-center text-slate-600">Sem dados hoje.</td></tr>}
-                                                    </tbody>
-                                                </table>
-                                            </div>
+                                    {/* Signals Table Only - Config Removed */}
+                                    <div className="glass-card rounded-xl overflow-hidden flex flex-col h-[500px]">
+                                        <div className="p-4 border-b border-slate-700/50 bg-[#1f2229]/50 flex justify-between items-center">
+                                            <h3 className="font-bold text-white text-sm flex items-center gap-2">
+                                                <i className="ph ph-pulse text-amber-500 text-lg"></i> Operações Recentes
+                                            </h3>
+                                            <span className="text-[10px] bg-white/5 px-2 py-1 rounded text-slate-400">Tempo Real</span>
                                         </div>
-
-                                        {/* Quick Config */}
-                                        <div className="glass-card rounded-xl p-5 space-y-4 h-fit">
-                                            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Painel de Controle</h3>
-                                            
-                                            <div className="grid grid-cols-2 gap-2 mb-2">
-                                                <button onClick={() => setConfig(p => ({...p, mode: 'LIVE'}))} className={`p-3 rounded-lg border text-xs font-bold transition-all ${config.mode === 'LIVE' ? 'border-amber-500 bg-amber-500/10 text-amber-500' : 'border-slate-700 bg-[#0f1115] text-slate-400'}`}>
-                                                    CONTA REAL
-                                                </button>
-                                                <button onClick={() => setConfig(p => ({...p, mode: 'OBSERVE'}))} className={`p-3 rounded-lg border text-xs font-bold transition-all ${config.mode === 'OBSERVE' ? 'border-blue-500 bg-blue-500/10 text-blue-500' : 'border-slate-700 bg-[#0f1115] text-slate-400'}`}>
-                                                    OBSERVAR
-                                                </button>
-                                            </div>
-
-                                            <div>
-                                                <label className="text-[10px] text-slate-500 font-bold uppercase mb-1 block">Estratégia Ativa</label>
-                                                <select 
-                                                    value={config.strategy_mode}
-                                                    onChange={e => setConfig({...config, strategy_mode: e.target.value})}
-                                                    className="w-full input-dark p-3 rounded-lg text-sm"
-                                                >
-                                                    <option value="AUTO">🤖 AUTO (Híbrido Inteligente)</option>
-                                                    <option value="SHOCK_REVERSAL">⚡ SHOCK REVERSAL (Puro)</option>
-                                                    <option value="V2_TREND">📈 V2 TREND (Tendência)</option>
-                                                    <option value="TENDMAX">🚀 TENDMAX (Cruzamento)</option>
-                                                </select>
-                                            </div>
-
-                                            <div className="grid grid-cols-2 gap-3">
-                                                <div>
-                                                    <label className="text-[10px] text-slate-500 font-bold uppercase mb-1 block">Entrada ($)</label>
-                                                    <input type="number" value={config.entry_value} onChange={e => setConfig({...config, entry_value: e.target.value})} className="w-full input-dark p-3 rounded-lg text-sm font-mono"/>
-                                                </div>
-                                                <div>
-                                                    <label className="text-[10px] text-slate-500 font-bold uppercase mb-1 block">Stop Loss</label>
-                                                    <input type="number" value={config.max_losses_per_day} onChange={e => setConfig({...config, max_losses_per_day: e.target.value})} className="w-full input-dark p-3 rounded-lg text-sm font-mono"/>
-                                                </div>
-                                            </div>
-
-                                            <button onClick={saveSettings} disabled={saving} className="w-full bg-slate-700 hover:bg-slate-600 text-white py-3 rounded-lg font-bold text-sm transition-colors mt-2 flex items-center justify-center gap-2">
-                                                {saving ? <i className="ph ph-spinner animate-spin"></i> : <i className="ph ph-floppy-disk"></i>} 
-                                                Atualizar
-                                            </button>
+                                        <div className="overflow-y-auto flex-1">
+                                            <table className="w-full text-left border-collapse">
+                                                <thead className="bg-[#181b21] sticky top-0 z-10 text-[10px] uppercase text-slate-500 font-bold tracking-wider">
+                                                    <tr>
+                                                        <th className="p-3">Hora</th>
+                                                        <th className="p-3">Par</th>
+                                                        <th className="p-3">Dir</th>
+                                                        <th className="p-3">Estratégia</th>
+                                                        <th className="p-3 text-right">Res</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-slate-800/50 text-xs">
+                                                    {signals.map(s => {
+                                                        const isGale = (s.strategy || "").includes("G1");
+                                                        const simpleStrat = (s.strategy || "").split("::")[0].replace("_", " ");
+                                                        return (
+                                                            <tr key={s.id} className="hover:bg-white/5 transition-colors">
+                                                                <td className="p-3 font-mono text-slate-400">{new Date(s.created_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</td>
+                                                                <td className="p-3 font-bold text-white">{s.pair}</td>
+                                                                <td className="p-3">
+                                                                    <span className={`px-1.5 py-0.5 rounded font-bold flex items-center gap-1 w-fit ${s.direction === 'call' ? 'text-green-400 bg-green-500/10' : 'text-red-400 bg-red-500/10'}`}>
+                                                                        <i className={`ph ${s.direction === 'call' ? 'ph-arrow-up' : 'ph-arrow-down'}`}></i>
+                                                                        {s.direction.toUpperCase()}
+                                                                    </span>
+                                                                </td>
+                                                                <td className="p-3">
+                                                                    <div className="flex items-center gap-1">
+                                                                        {simpleStrat}
+                                                                        {isGale && <span className="px-1 py-0.5 bg-amber-500 text-[#0f1115] rounded font-bold text-[9px]">G1</span>}
+                                                                    </div>
+                                                                </td>
+                                                                <td className="p-3 text-right">
+                                                                    {s.status === 'PENDING' ? <span className="text-yellow-500 animate-pulse font-bold">⏳</span> : 
+                                                                     <span className={`font-bold ${s.result === 'WIN' ? 'text-green-400' : s.result === 'LOSS' ? 'text-red-400' : 'text-slate-400'}`}>
+                                                                         {s.result === 'WIN' ? `+$${s.profit.toFixed(2)}` : s.result === 'LOSS' ? `-$${Math.abs(s.profit).toFixed(2)}` : s.result}
+                                                                     </span>}
+                                                                </td>
+                                                            </tr>
+                                                        )
+                                                    })}
+                                                    {!signals.length && <tr><td colSpan="5" className="p-8 text-center text-slate-600">Sem dados hoje.</td></tr>}
+                                                </tbody>
+                                            </table>
                                         </div>
                                     </div>
                                 </div>
                             )}
 
-                            {/* VIEW: REPORTS (Simple Table Clone for now) */}
+                            {/* VIEW: REPORTS */}
                             {view === 'reports' && (
                                 <div className="max-w-6xl mx-auto space-y-4">
                                     <h2 className="text-2xl font-bold text-white">Relatório Completo</h2>
@@ -478,14 +446,118 @@
                                 </div>
                             )}
 
-                            {/* VIEW: SETTINGS (Full Form) */}
+                            {/* VIEW: SETTINGS (Completo) */}
                             {view === 'settings' && (
-                                <div className="max-w-2xl mx-auto">
-                                    <h2 className="text-2xl font-bold text-white mb-6">Configurações Avançadas</h2>
-                                    <div className="glass-card p-8 rounded-2xl border border-slate-800">
-                                        <p className="text-slate-500 mb-4">Use o painel lateral na Home para ajustes rápidos.</p>
-                                        <button onClick={() => setView('home')} className="bg-amber-500 text-white px-6 py-3 rounded-lg font-bold">Voltar para Home</button>
+                                <div className="max-w-2xl mx-auto space-y-6">
+                                    <h2 className="text-2xl font-bold text-white">Configurações Avançadas</h2>
+                                    
+                                    {/* Mode Selector */}
+                                    <div className="glass-card p-1 rounded-xl border border-slate-700 bg-[#1f2229] flex">
+                                        <button onClick={() => setConfig(p => ({...p, mode: 'LIVE'}))} className={`flex-1 p-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 ${config.mode === 'LIVE' ? 'border border-amber-500 bg-amber-500/10 text-amber-500 shadow-[0_0_15px_rgba(245,158,11,0.2)]' : 'text-slate-400 hover:bg-slate-800'}`}>
+                                            <i className="ph ph-lightning"></i> CONTA REAL
+                                        </button>
+                                        <button onClick={() => setConfig(p => ({...p, mode: 'OBSERVE'}))} className={`flex-1 p-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 ${config.mode === 'OBSERVE' ? 'border border-blue-500 bg-blue-500/10 text-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.2)]' : 'text-slate-400 hover:bg-slate-800'}`}>
+                                            <i className="ph ph-eye"></i> OBSERVAÇÃO
+                                        </button>
                                     </div>
+
+                                    <form onSubmit={saveSettings} className="space-y-6">
+                                        {/* Strategy */}
+                                        <div className="glass-card p-6 rounded-xl border border-slate-800">
+                                            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+                                                <i className="ph ph-cpu text-blue-500"></i> Estratégia
+                                            </h3>
+                                            <select 
+                                                value={config.strategy_mode}
+                                                onChange={e => setConfig({...config, strategy_mode: e.target.value})}
+                                                className="w-full input-dark p-3 rounded-lg text-sm"
+                                            >
+                                                <option value="AUTO">🤖 AUTO (Híbrido Inteligente)</option>
+                                                <option value="SHOCK_REVERSAL">⚡ SHOCK REVERSAL (Puro)</option>
+                                                <option value="V2_TREND">📈 V2 TREND (Tendência)</option>
+                                                <option value="TENDMAX">🚀 TENDMAX (Cruzamento)</option>
+                                            </select>
+                                        </div>
+
+                                        {/* Presets */}
+                                        <div className="grid grid-cols-3 gap-3">
+                                            <button type="button" onClick={() => applyPreset('conservative')} className="p-4 rounded-xl bg-[#1f2229] hover:bg-slate-800 border border-slate-700 hover:border-green-500/50 transition-all text-center group">
+                                                <div className="w-8 h-8 rounded-full bg-green-500/10 text-green-500 flex items-center justify-center mx-auto mb-2"><i className="ph ph-shield-check text-lg"></i></div>
+                                                <p className="text-xs font-bold text-white">Conservador</p>
+                                                <p className="text-[9px] text-slate-500 mt-1">3 Trades (2W/1L)</p>
+                                            </button>
+                                            <button type="button" onClick={() => applyPreset('sniper')} className="p-4 rounded-xl bg-[#1f2229] hover:bg-slate-800 border border-slate-700 hover:border-amber-500/50 transition-all text-center group ring-1 ring-amber-500/30">
+                                                <div className="w-8 h-8 rounded-full bg-amber-500/10 text-amber-500 flex items-center justify-center mx-auto mb-2"><i className="ph ph-crosshair text-lg"></i></div>
+                                                <p className="text-xs font-bold text-white">Sniper</p>
+                                                <p className="text-[9px] text-slate-500 mt-1">2 Trades (1W/1L)</p>
+                                            </button>
+                                            <button type="button" onClick={() => applyPreset('aggressive')} className="p-4 rounded-xl bg-[#1f2229] hover:bg-slate-800 border border-slate-700 hover:border-red-500/50 transition-all text-center group">
+                                                <div className="w-8 h-8 rounded-full bg-red-500/10 text-red-500 flex items-center justify-center mx-auto mb-2"><i className="ph ph-fire text-lg"></i></div>
+                                                <p className="text-xs font-bold text-white">Agressivo</p>
+                                                <p className="text-[9px] text-slate-500 mt-1">6 Trades (4W/2L)</p>
+                                            </button>
+                                        </div>
+
+                                        {/* Main Configs */}
+                                        <div className="glass-card p-6 rounded-xl space-y-6 border border-slate-800">
+                                            <div className="grid grid-cols-2 gap-4">
+                                                <div>
+                                                    <label className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block mb-1.5">Entrada ($)</label>
+                                                    <input type="number" value={config.entry_value} onChange={e => setConfig({...config, entry_value: e.target.value})} className="input-dark w-full rounded-lg p-3 text-sm font-mono"/>
+                                                </div>
+                                                <div>
+                                                    <label className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block mb-1.5">Conta</label>
+                                                    <select value={config.account_type} onChange={e => setConfig({...config, account_type: e.target.value})} className="input-dark w-full rounded-lg p-3 text-sm">
+                                                        <option value="PRACTICE">DEMO</option>
+                                                        <option value="REAL">REAL</option>
+                                                    </select>
+                                                </div>
+                                            </div>
+
+                                            <div className="h-px bg-slate-700/50"></div>
+
+                                            {/* Daily Limits */}
+                                            <div>
+                                                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+                                                    <i className="ph ph-lock-key text-amber-500"></i> Metas e Limites
+                                                </h3>
+                                                <div className="grid grid-cols-3 gap-3">
+                                                    <div>
+                                                        <label className="text-[9px] text-blue-400 font-bold uppercase tracking-wider block mb-1.5 text-center">Max Trades</label>
+                                                        <input type="number" value={config.max_trades_per_day} onChange={e => setConfig({...config, max_trades_per_day: e.target.value})} className="input-dark w-full rounded-lg p-3 text-center text-lg font-mono"/>
+                                                    </div>
+                                                    <div>
+                                                        <label className="text-[9px] text-green-500 font-bold uppercase tracking-wider block mb-1.5 text-center">Meta Wins</label>
+                                                        <input type="number" value={config.max_wins_per_day} onChange={e => setConfig({...config, max_wins_per_day: e.target.value})} className="input-dark w-full rounded-lg p-3 text-center text-lg font-mono"/>
+                                                    </div>
+                                                    <div>
+                                                        <label className="text-[9px] text-red-500 font-bold uppercase tracking-wider block mb-1.5 text-center">Limite Loss</label>
+                                                        <input type="number" value={config.max_losses_per_day} onChange={e => setConfig({...config, max_losses_per_day: e.target.value})} className="input-dark w-full rounded-lg p-3 text-center text-lg font-mono"/>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            
+                                            {/* Timer */}
+                                            <div className="bg-[#0f1115] p-4 rounded-lg border border-slate-700/50">
+                                                <div className="flex items-center justify-between mb-3">
+                                                    <label className="text-sm font-bold text-white flex items-center gap-2"><i className="ph ph-clock text-amber-500"></i> Agendamento</label>
+                                                    <label className="relative inline-flex items-center cursor-pointer">
+                                                        <input type="checkbox" checked={config.timer_enabled} onChange={e => setConfig({...config, timer_enabled: e.target.checked})} className="sr-only peer"/>
+                                                        <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600"></div>
+                                                    </label>
+                                                </div>
+                                                <div className={`grid grid-cols-2 gap-3 transition-opacity ${config.timer_enabled ? 'opacity-100' : 'opacity-50 pointer-events-none'}`}>
+                                                    <input type="time" value={config.timer_start} onChange={e => setConfig({...config, timer_start: e.target.value})} className="bg-[#181b21] border border-slate-700 text-white p-2.5 rounded-lg text-sm"/>
+                                                    <input type="time" value={config.timer_end} onChange={e => setConfig({...config, timer_end: e.target.value})} className="bg-[#181b21] border border-slate-700 text-white p-2.5 rounded-lg text-sm"/>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <button type="submit" disabled={saving} className="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-4 rounded-xl shadow-lg flex items-center justify-center gap-2 transition-transform active:scale-95">
+                                            {saving ? <i className="ph ph-spinner animate-spin"></i> : <i className="ph ph-floppy-disk"></i>} 
+                                            SALVAR ALTERAÇÕES
+                                        </button>
+                                    </form>
                                 </div>
                             )}
 
