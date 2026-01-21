@@ -15,7 +15,7 @@ try:
 except ImportError:
     print("[ERRO] Biblioteca 'exnovaapi' não instalada.")
 
-BOT_VERSION = "SHOCK_ENGINE_V9_GALE_SYSTEM_2026-01-21"
+BOT_VERSION = "SHOCK_ENGINE_V10_GALE_INSTANT_2026-01-21"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -28,7 +28,7 @@ EXNOVA_PASSWORD = os.environ.get("EXNOVA_PASSWORD", "sua_senha")
 
 BR_TIMEZONE = timezone(timedelta(hours=-3))
 
-# ✅ SEGUNDO DE ENTRADA (ajuste via env ou padrão 50)
+# ✅ SEGUNDO DE ENTRADA (padrão 50s para pegar a próxima vela de 1m)
 ENTRY_SECOND = int(os.environ.get("ENTRY_SECOND", "50"))
 
 # ✅ CONFIGURAÇÃO MARTINGALE
@@ -136,10 +136,6 @@ class TechnicalAnalysis:
 
     @staticmethod
     def get_signal_v2(candles):
-        """
-        V2 Trend: rejeição em EMA21 + confirmação
-        Usa candle fechado: candles[-2] e rejeição candles[-3]
-        """
         if len(candles) < 60:
             return None, "Dados insuficientes"
 
@@ -180,24 +176,12 @@ class TechnicalAnalysis:
 
 
 class ShockLiveDetector:
-    """
-    ✅ Shock LIVE:
-    - acompanha candle atual (candles[-1] geralmente é o candle em formação)
-    - decide no segundo ENTRY_SECOND (50)
-    """
-
     @staticmethod
     def detect(candles, asset_name):
-        """
-        Retorna: (signal, reason, debug_info_dict)
-          signal: "call" ou "put" ou None
-        """
         if len(candles) < 30:
             return None, "Dados insuficientes", {}
 
-        # candle atual (em formação) e candles fechados anteriores
         live = TechnicalAnalysis.analyze_candle(candles[-1])
-        # últimas fechadas (para média)
         closed = candles[:-1]
 
         bodies = [abs(c["close"] - c["open"]) for c in closed[-20:]]
@@ -212,7 +196,7 @@ class ShockLiveDetector:
         if range_live <= 0:
             return None, "Doji", {}
 
-        close_pos = (live["close"] - live["min"]) / range_live
+        close_pos = (live["close"] - live["min"]) / range_live 
 
         if live["color"] == "green":
             pullback = live["max"] - live["close"]
@@ -266,7 +250,8 @@ class SimpleBot:
         self.api = None
         self.supabase = None
 
-        self.trade_lock = threading.Lock()
+        # ✅ RLock permite recursão no martingale sem travar a thread
+        self.trade_lock = threading.RLock()
         self.active_trades = set()
 
         self.config = {
@@ -285,7 +270,6 @@ class SimpleBot:
             "martingale_multiplier": MARTINGALE_MULTIPLIER,
         }
 
-        # Contadores (PLACAR)
         self.current_date = datetime.now(BR_TIMEZONE).date()
         self.daily_wins = 0
         self.daily_losses = 0
@@ -294,23 +278,15 @@ class SimpleBot:
         self.best_assets = []
         self.last_catalog_time = 0
 
-        # Controle
         self.last_trade_time = {}
         self.last_minute_trade = {}
         self.session_blocked = False
 
-        # Anti-chop (15 min)
         self.block_until_ts = 0
         self.loss_streak = 0
         
-        # ✅ Fila de Martingale: {asset: {direction, strategy, amount, time...}}
-        self.pending_gale = {}
-
         self.init_supabase()
 
-    # -----------------------
-    # Supabase / Logs
-    # -----------------------
     def init_supabase(self):
         try:
             if not SUPABASE_KEY:
@@ -337,10 +313,7 @@ class SimpleBot:
                 }
             ).execute()
         except:
-            try:
-                self.supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-            except:
-                pass
+            pass
 
     def insert_signal(self, asset, direction, strategy_name, amount):
         if not self.supabase:
@@ -378,9 +351,6 @@ class SimpleBot:
         except:
             pass
 
-    # -----------------------
-    # Config / conexão
-    # -----------------------
     def connect(self):
         self.log_to_db("🔌 Conectando...", "SYSTEM")
         try:
@@ -493,9 +463,6 @@ class SimpleBot:
             except:
                 pass
 
-    # -----------------------
-    # Gestão simples diária
-    # -----------------------
     def reset_daily_if_needed(self):
         today = datetime.now(BR_TIMEZONE).date()
         if today != self.current_date:
@@ -506,7 +473,6 @@ class SimpleBot:
             self.loss_streak = 0
             self.session_blocked = False
             self.block_until_ts = 0
-            self.pending_gale = {} 
             self.log_to_db("🚀 Nova sessão diária", "SYSTEM")
 
     def check_daily_limits(self):
@@ -524,9 +490,6 @@ class SimpleBot:
             return False
         return True
 
-    # -----------------------
-    # Compra / Execução
-    # -----------------------
     def safe_buy(self, asset, amount, direction, prefer_binary=False):
         if self.config["mode"] == "OBSERVE":
             return True, "VIRTUAL"
@@ -544,7 +507,7 @@ class SimpleBot:
             return False, None
 
     def execute_trade(self, asset, direction, strategy_key, strategy_label, prefer_binary=False, gale_level=0):
-        # anti duplicação por asset (G0)
+        # anti duplicação por asset (G0 apenas, G1 deve passar)
         now = time.time()
         if gale_level == 0:
             if asset in self.last_trade_time and now - self.last_trade_time[asset] < 60:
@@ -561,7 +524,8 @@ class SimpleBot:
             return
 
         with self.trade_lock:
-            if asset in self.active_trades:
+            # G1 pode "re-entrar" no lock (RLock), G0 novo não
+            if gale_level == 0 and asset in self.active_trades:
                 return
             self.active_trades.add(asset)
 
@@ -611,7 +575,7 @@ class SimpleBot:
 
             self.log_to_db(f"✅ Ordem aceita ({trade_id}). Aguardando...", "INFO")
 
-            # ✅ Espera fechamento da próxima vela (70s para garantir virada do minuto)
+            # ✅ Espera fechamento da vela (70s) para garantir resultado
             time.sleep(70)
 
             # Resultado
@@ -658,34 +622,31 @@ class SimpleBot:
                 self.update_signal(signal_id, "DOJI", "DOJI", 0)
                 return
 
-            # atualiza contadores
+            # atualiza contadores (PLACAR)
             self.daily_total += 1
             if res_str == "WIN":
                 self.daily_wins += 1
                 self.loss_streak = 0
-                if asset in self.pending_gale:
-                    del self.pending_gale[asset]
-                    
+            
             elif res_str == "LOSS":
                 self.daily_losses += 1
                 self.loss_streak += 1
                 
-                # ✅ Agendamento G1
+                # ✅ EXECUÇÃO IMEDIATA DO G1 (Recursiva)
                 if gale_level == 0 and self.config.get("martingale_enabled", True):
-                    self.log_to_db(f"⚠️ LOSS no G0. Agendando G1 para {asset}...", "WARNING")
-                    self.pending_gale[asset] = {
-                        'asset': asset,
-                        'direction': direction,
-                        'strategy_key': strategy_key,
-                        'strategy_label': strategy_label,
-                        'prefer_binary': prefer_binary,
-                        'execute_at': time.time() 
-                    }
+                    self.log_to_db(f"⚠️ LOSS G0. Executando G1 IMEDIATO em {asset}...", "WARNING")
+                    self.execute_trade(
+                        asset=asset,
+                        direction=direction,
+                        strategy_key=strategy_key,
+                        strategy_label=strategy_label,
+                        prefer_binary=prefer_binary,
+                        gale_level=1 # 🔥 Recursão para G1
+                    )
 
             if self.loss_streak >= 2:
                 self.block_until_ts = time.time() + 900
                 self.log_to_db("🛑 2 LOSSES SEGUIDOS — PAUSANDO 15 MIN (ANTI-CHOP)", "WARNING")
-                self.pending_gale = {} # Limpa gales se bloqueado
 
             self.update_signal(signal_id, res_str, res_str, profit)
 
@@ -751,25 +712,6 @@ class SimpleBot:
                     if not self.connect():
                         time.sleep(5)
                         continue
-                
-                # ✅ Execução de G1 Prioritária
-                if self.pending_gale:
-                    assets_gale = list(self.pending_gale.keys())
-                    for asset in assets_gale:
-                        gale_info = self.pending_gale[asset]
-                        del self.pending_gale[asset]
-                        
-                        self.log_to_db(f"🚀 EXECUTANDO MARTINGALE G1: {asset}", "INFO")
-                        self.execute_trade(
-                            asset=gale_info['asset'],
-                            direction=gale_info['direction'],
-                            strategy_key=gale_info['strategy_key'],
-                            strategy_label=gale_info['strategy_label'],
-                            prefer_binary=gale_info['prefer_binary'],
-                            gale_level=1
-                        )
-                    time.sleep(1)
-                    continue
 
                 if not self.best_assets or (time.time() - self.last_catalog_time > 900):
                     self.best_assets = self.catalog_assets(assets_pool)
@@ -808,6 +750,7 @@ class SimpleBot:
                                     )
 
                                 if sig:
+                                    # ✅ Shock entra SOMENTE BINÁRIA
                                     self.execute_trade(
                                         asset=asset,
                                         direction=sig,
