@@ -16,7 +16,7 @@ try:
 except ImportError:
     print("[ERRO] Biblioteca 'exnovaapi' não instalada.")
 
-BOT_VERSION = "SHOCK_ENGINE_V15_AUTO_SMART_HYBRID_GALEFIX_2026-01-21"
+BOT_VERSION = "SHOCK_ENGINE_V16_ATTRIBUTE_FIX_2026-01-21"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -29,7 +29,7 @@ EXNOVA_PASSWORD = os.environ.get("EXNOVA_PASSWORD", "sua_senha")
 
 BR_TIMEZONE = timezone(timedelta(hours=-3))
 
-# ✅ SEGUNDO DE ENTRADA (padrão 50s para pegar a próxima vela de 1m)
+# ✅ SEGUNDO DE ENTRADA
 ENTRY_SECOND = int(os.environ.get("ENTRY_SECOND", "50"))
 
 # ✅ CONFIGURAÇÃO MARTINGALE
@@ -358,6 +358,10 @@ class SimpleBot:
         
         self.pending_gale = {}
 
+        # ✅ FIX: Inicialização correta de variáveis para evitar AttributeError
+        self.auto_candidate = None
+        self.auto_candidate_key = None
+
         self.strategy_memory = {
             "SHOCK_REVERSAL": deque(maxlen=20),
             "V2_TREND": deque(maxlen=20),
@@ -403,7 +407,6 @@ class SimpleBot:
             pass
 
     def insert_signal(self, asset, direction, strategy_name, amount):
-        # ✅ FIX 2: Restaurado amount para o front funcionar
         if not self.supabase:
             return None
         try:
@@ -564,6 +567,8 @@ class SimpleBot:
             self.session_blocked = False
             self.block_until_ts = 0
             self.pending_gale = {} 
+            self.auto_candidate = None
+            self.auto_candidate_key = None
             self.log_to_db("🚀 Nova sessão diária", "SYSTEM")
 
     def check_daily_limits(self):
@@ -612,6 +617,18 @@ class SimpleBot:
         for c in candidates:
             c["priority"] = (c["wr"] * 0.7) + (c["confidence"] * 0.3)
         candidates.sort(key=lambda x: x["priority"], reverse=True)
+        return candidates[0]
+
+    def score_candidate(self, c):
+        # score = WR * 0.7 + confiança * 0.3
+        return (c["wr"] * 0.7) + (c["confidence"] * 0.3)
+
+    def choose_best(self, candidates):
+        if not candidates:
+            return None
+        for c in candidates:
+            c["score"] = self.score_candidate(c)
+        candidates.sort(key=lambda x: x["score"], reverse=True)
         return candidates[0]
 
     def execute_trade(self, asset, direction, strategy_key, strategy_label, prefer_binary=False, gale_level=0):
@@ -754,6 +771,8 @@ class SimpleBot:
                 self.block_until_ts = time.time() + 900
                 self.log_to_db("🛑 2 LOSSES SEGUIDOS — PAUSANDO 15 MIN (ANTI-CHOP)", "WARNING")
                 self.pending_gale = {}
+                self.auto_candidate = None
+                self.auto_candidate_key = None
 
             self.update_signal(signal_id, res_str, res_str, profit)
 
@@ -926,8 +945,6 @@ class SimpleBot:
                             continue
 
                     if strat_mode in ["AUTO", "V2_TREND"]:
-                        # Se for AUTO, usamos uma lista de candidatos para escolher o melhor
-                        # Se for V2 exclusivo, executa o primeiro que achar
                         
                         candidates = []
                         # Se já temos um Shock candidato do minuto (Fase 1)
