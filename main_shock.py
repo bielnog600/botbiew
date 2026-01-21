@@ -15,7 +15,7 @@ try:
 except ImportError:
     print("[ERRO] Biblioteca 'exnovaapi' não instalada.")
 
-BOT_VERSION = "SHOCK_ENGINE_V11_TENDMAX_2026-01-21"
+BOT_VERSION = "SHOCK_ENGINE_V12_BINARY_GALE_FIX_2026-01-21"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -28,7 +28,7 @@ EXNOVA_PASSWORD = os.environ.get("EXNOVA_PASSWORD", "sua_senha")
 
 BR_TIMEZONE = timezone(timedelta(hours=-3))
 
-# ✅ SEGUNDO DE ENTRADA (padrão 50s para pegar a próxima vela de 1m no Shock Live)
+# ✅ SEGUNDO DE ENTRADA (padrão 50s)
 ENTRY_SECOND = int(os.environ.get("ENTRY_SECOND", "50"))
 
 # ✅ CONFIGURAÇÃO MARTINGALE
@@ -90,15 +90,11 @@ class TechnicalAnalysis:
             ema = (price * k) + (ema * (1 - k))
         return ema
 
-    # ✅ Novas funções para séries (usadas no TENDMAX)
     @staticmethod
     def sma_series(values, period):
         if len(values) < period:
             return []
         out = []
-        # Calcula média móvel simples deslizante
-        # Otimização simples: recalcular soma a cada passo ou usar janela
-        # Para clareza, usando slice (performance ok para arrays pequenos de candles)
         for i in range(period - 1, len(values)):
             out.append(sum(values[i - period + 1 : i + 1]) / period)
         return out
@@ -108,11 +104,9 @@ class TechnicalAnalysis:
         if len(values) < period:
             return []
         out = []
-        # Primeiro valor é SMA
         sma = sum(values[:period]) / period
         out.append(sma)
         k = 2 / (period + 1)
-        # Restante é EMA recursiva
         for v in values[period:]:
             new_ema = v * k + out[-1] * (1 - k)
             out.append(new_ema)
@@ -153,16 +147,6 @@ class TechnicalAnalysis:
         return spread < (avg_body * 0.15)
 
     @staticmethod
-    def engulf_filter(candles, direction):
-        last = TechnicalAnalysis.analyze_candle(candles[-2])
-        prev = TechnicalAnalysis.analyze_candle(candles[-3])
-        if direction == "call":
-            return (last["color"] == "green" and prev["color"] == "red" and last["body"] >= prev["body"] * 0.6)
-        if direction == "put":
-            return (last["color"] == "red" and prev["color"] == "green" and last["body"] >= prev["body"] * 0.6)
-        return False
-
-    @staticmethod
     def get_signal_v2(candles):
         if len(candles) < 60:
             return None, "Dados insuficientes"
@@ -188,15 +172,26 @@ class TechnicalAnalysis:
             held_support = reject["close"] >= (ema21 - (avg_body * 0.3))
             if touched_ema and held_support:
                 if confirm["color"] == "green":
-                    if engulf_required and not TechnicalAnalysis.engulf_filter(candles, "call"):
+                    # Engolfo simplificado
+                    last = confirm
+                    prev = reject
+                    is_engulf = (last["color"] == "green" and prev["color"] == "red" and last["body"] >= prev["body"] * 0.6)
+                    
+                    if engulf_required and not is_engulf:
                         return None, "Sem engolfo"
                     return "call", "V2 CALL"
+
         elif ema9 < ema21 and ema21_slope < -min_slope:
             touched_ema = reject["max"] >= (ema21 - (avg_body * 0.1))
             held_resist = reject["close"] <= (ema21 + (avg_body * 0.3))
             if touched_ema and held_resist:
                 if confirm["color"] == "red":
-                    if engulf_required and not TechnicalAnalysis.engulf_filter(candles, "put"):
+                    # Engolfo simplificado
+                    last = confirm
+                    prev = reject
+                    is_engulf = (last["color"] == "red" and prev["color"] == "green" and last["body"] >= prev["body"] * 0.6)
+
+                    if engulf_required and not is_engulf:
                         return None, "Sem engolfo"
                     return "put", "V2 PUT"
 
@@ -269,50 +264,35 @@ class ShockLiveDetector:
         return None, "Sem padrão", debug
 
 
-# ✅ NOVA ESTRATÉGIA TENDMAX
 class TendMaxStrategy:
     @staticmethod
     def get_signal(candles):
-        # Precisamos de histórico suficiente para SMA34 + EMA6
         if len(candles) < 50:
             return None, "Dados insuficientes"
 
         closes = [c["close"] for c in candles]
-
-        # TendMax Logic (Fast=1, Slow=34, Signal=6)
-        sma_fast = TechnicalAnalysis.sma_series(closes, 1) # ~ Close
+        
+        sma_fast = TechnicalAnalysis.sma_series(closes, 1)
         sma_slow = TechnicalAnalysis.sma_series(closes, 34)
 
-        # Alinhar tamanhos (sma_fast é maior que sma_slow pois slow precisa de mais dados iniciais)
         min_len = min(len(sma_fast), len(sma_slow))
         sma_fast = sma_fast[-min_len:]
         sma_slow = sma_slow[-min_len:]
 
-        # Buffer1 = Fast - Slow
         buffer1 = [f - s for f, s in zip(sma_fast, sma_slow)]
-        
-        # Buffer2 = EMA(Buffer1, 6)
         buffer2 = TechnicalAnalysis.ema_series(buffer1, 6)
 
         if len(buffer2) < 3:
             return None, "Série insuficiente"
-
-        # Usar candle FECHADO (candles[-2] é o último fechado)
-        # buffer[-1] seria o candle em aberto, buffer[-2] o fechado
-        # Mas como calculate_ema/sma usam lista total, o final da lista corresponde ao final de candles
-        # Então candles[-1] (aberto) gera buffer[-1]
-        # Queremos sinal no fechamento de candles[-2], então olhamos índice -2 e -3
         
         b1_now, b1_prev = buffer1[-2], buffer1[-3]
         b2_now, b2_prev = buffer2[-2], buffer2[-3]
 
-        # CALL: Linha de sinal cruza pra cima
         if b1_now > b2_now and b1_prev < b2_prev:
-            return "call", "TENDMAX_CALL (Cruzamento UP)"
+            return "call", "TENDMAX_CALL"
 
-        # PUT: Linha de sinal cruza pra baixo
         if b1_now < b2_now and b1_prev > b2_prev:
-            return "put", "TENDMAX_PUT (Cruzamento DOWN)"
+            return "put", "TENDMAX_PUT"
 
         return None, "Sem cruzamento"
 
@@ -366,7 +346,7 @@ class SimpleBot:
             "TREND_STRONG": {'wins': 0, 'losses': 0, 'consecutive_losses': 0, 'active': True},
             "TREND_WEAK": {'wins': 0, 'losses': 0, 'consecutive_losses': 0, 'active': True},
             "SHOCK_REVERSAL": {'wins': 0, 'losses': 0, 'consecutive_losses': 0, 'active': True},
-            "TENDMAX": {'wins': 0, 'losses': 0, 'consecutive_losses': 0, 'active': True}, # ✅ Add Stats
+            "TENDMAX": {'wins': 0, 'losses': 0, 'consecutive_losses': 0, 'active': True},
             "RANGE": {'wins': 0, 'losses': 0, 'consecutive_losses': 0, 'active': False}
         }
 
@@ -400,7 +380,8 @@ class SimpleBot:
         except:
             pass
 
-    def insert_signal(self, asset, direction, strategy_name, amount):
+    def insert_signal(self, asset, direction, strategy_name):
+        # ✅ FIX: Removido 'amount' para evitar erro de schema no Supabase
         if not self.supabase:
             return None
         try:
@@ -413,7 +394,7 @@ class SimpleBot:
                     "result": "PENDING",
                     "profit": 0,
                     "created_at": datetime.now(timezone.utc).isoformat(),
-                    "amount": amount,
+                    # "amount": amount,  <-- REMOVIDO PARA SEGURANÇA DO FRONT
                 }
             ).execute()
             if res.data:
@@ -483,10 +464,9 @@ class SimpleBot:
             db_raw_strat = data.get("strategy_mode")
             db_strat = (str(db_raw_strat) or "AUTO").strip().upper().replace(" ", "_")
 
-            # Normalização:
             if "SHOCK" in db_strat:
                 strat = "SHOCK_REVERSAL"
-            elif "TENDMAX" in db_strat: # ✅ Reconhece TENDMAX
+            elif "TENDMAX" in db_strat:
                 strat = "TENDMAX"
             elif "V2" in db_strat or "EMA" in db_strat or "AGGRESSIVE" in db_strat:
                 strat = "V2_TREND"
@@ -579,23 +559,28 @@ class SimpleBot:
             return False
         return True
 
-    def safe_buy(self, asset, amount, direction, prefer_binary=False):
+    # ✅ FIX 4: Função Única e Exclusiva para Compra (BINÁRIA SOMENTE)
+    def safe_buy(self, asset, amount, direction):
         if self.config["mode"] == "OBSERVE":
-            return True, "VIRTUAL"
+            return True, "VIRTUAL", "OBSERVE"
 
+        # Tenta SOMENTE Binária (API buy)
         try:
-            if prefer_binary:
-                status, trade_id = self.api.buy(amount, asset, direction, 1)
-                return status, trade_id
+            status, trade_id = self.api.buy(amount, asset, direction, 1)
+            # Verifica se realmente veio ID (API às vezes devolve True sem ID)
+            if status and trade_id:
+                return True, trade_id, "BINARY"
+            else:
+                # Logar falha silenciosa se status=True mas ID=None
+                self.log_to_db(f"⚠️ Binária falhou (ID nulo).", "WARNING")
+        except Exception as e:
+            self.log_to_db(f"⚠️ BINARY Exception: {e}", "WARNING")
 
-            status, trade_id = self.api.buy_digital_spot(asset, amount, direction, 1)
-            if not status:
-                status, trade_id = self.api.buy(amount, asset, direction, 1)
-            return status, trade_id
-        except:
-            return False, None
+        # Se falhar, retorna False. NADA DE DIGITAL.
+        return False, None, "FAILED"
 
-    def execute_trade(self, asset, direction, strategy_key, strategy_label, prefer_binary=False, gale_level=0):
+    def execute_trade(self, asset, direction, strategy_key, strategy_label, gale_level=0):
+        # anti duplicação por asset (G0)
         now = time.time()
         if gale_level == 0:
             if asset in self.last_trade_time and now - self.last_trade_time[asset] < 60:
@@ -612,6 +597,7 @@ class SimpleBot:
             return
 
         with self.trade_lock:
+            # G1 pode "re-entrar" no lock (RLock), G0 novo não
             if gale_level == 0 and asset in self.active_trades:
                 return
             self.active_trades.add(asset)
@@ -619,10 +605,11 @@ class SimpleBot:
         signal_id = None
         base_amount = float(self.config["entry_value"])
         
+        # ✅ FIX 2: Cálculo Martingale Escalável
         amount = base_amount
         if gale_level > 0:
             multiplier = self.config.get("martingale_multiplier", 2.0)
-            amount = round(base_amount * multiplier, 2)
+            amount = round(base_amount * (multiplier ** gale_level), 2)
 
         try:
             if not self.check_daily_limits():
@@ -636,10 +623,12 @@ class SimpleBot:
 
             tag_gale = f"::G{gale_level}"
             strategy_name = f"{strategy_key}::{strategy_label}{tag_gale}"
-            signal_id = self.insert_signal(asset, direction, strategy_name, amount)
+            
+            # ✅ FIX 3: Insert sem 'amount'
+            signal_id = self.insert_signal(asset, direction, strategy_name)
 
             self.log_to_db(
-                f"➡️ ENTRADA {strategy_key} [G{gale_level}]: {asset} | {direction.upper()} | ${amount} | BINARIA={prefer_binary}",
+                f"🟡 TENTANDO ENTRAR (BINARIA) {strategy_key} [G{gale_level}]: {asset} | {direction.upper()} | ${amount}",
                 "INFO",
             )
 
@@ -653,16 +642,20 @@ class SimpleBot:
                 except:
                     return
 
-            status, trade_id = self.safe_buy(asset, amount, direction, prefer_binary=prefer_binary)
-            if not status:
-                self.log_to_db("❌ Falha na ordem", "ERROR")
+            # ✅ FIX 4: Compra segura (Binária Only)
+            status, trade_id, order_type = self.safe_buy(asset, amount, direction)
+            
+            if not status or not trade_id:
+                self.log_to_db(f"❌ ORDEM RECUSADA: {asset} (Binária)", "ERROR")
                 self.update_signal(signal_id, "FAILED", "FAILED", 0)
                 return
 
-            self.log_to_db(f"✅ Ordem aceita ({trade_id}). Aguardando...", "INFO")
+            self.log_to_db(f"✅ CONFIRMADA: Ordem {trade_id} ({order_type}). Aguardando...", "INFO")
 
+            # ✅ Wait Time
             time.sleep(70)
 
+            # Resultado
             res_str = "UNKNOWN"
             profit = 0.0
 
@@ -701,11 +694,17 @@ class SimpleBot:
                 except:
                     res_str = "UNKNOWN"
 
+            if res_str == "UNKNOWN":
+                 self.log_to_db("⚠️ Resultado UNKNOWN, reconectando API...", "WARNING")
+                 self.api = None
+                 return
+
             if res_str == "DOJI":
                 self.log_to_db("⚪ DOJI (ignorado)", "DEBUG")
                 self.update_signal(signal_id, "DOJI", "DOJI", 0)
                 return
 
+            # Contadores
             self.daily_total += 1
             if res_str == "WIN":
                 self.daily_wins += 1
@@ -717,20 +716,22 @@ class SimpleBot:
                 self.daily_losses += 1
                 self.loss_streak += 1
                 
+                # ✅ FIX 1: Martingale Assíncrono (Arma G1 na fila)
                 if gale_level == 0 and self.config.get("martingale_enabled", True):
-                    self.log_to_db(f"⚠️ LOSS G0. Executando G1 IMEDIATO em {asset}...", "WARNING")
-                    self.execute_trade(
-                        asset=asset,
-                        direction=direction,
-                        strategy_key=strategy_key,
-                        strategy_label=strategy_label,
-                        prefer_binary=prefer_binary,
-                        gale_level=1 
-                    )
+                    self.log_to_db(f"🎯 GALE G1 ARMADO para {asset} (Próximo minuto)", "WARNING")
+                    self.pending_gale[asset] = {
+                        'asset': asset,
+                        'direction': direction,
+                        'strategy_key': strategy_key,
+                        'strategy_label': strategy_label,
+                        # 'prefer_binary' removido pois agora é padrão
+                        'execute_at': time.time() 
+                    }
 
             if self.loss_streak >= 2:
                 self.block_until_ts = time.time() + 900
                 self.log_to_db("🛑 2 LOSSES SEGUIDOS — PAUSANDO 15 MIN (ANTI-CHOP)", "WARNING")
+                self.pending_gale = {} # Limpa gales se bloqueado
 
             self.update_signal(signal_id, res_str, res_str, profit)
 
@@ -757,17 +758,11 @@ class SimpleBot:
 
     def catalog_assets(self, assets_pool):
         strat = self.config.get("strategy_mode", "AUTO")
-        
-        # ✅ TENDMAX e SHOCK usam todos os ativos
         if strat in ["SHOCK_REVERSAL", "TENDMAX"]:
             self.log_to_db("🔥 Modo SHOCK/TENDMAX: usando TODOS os ativos", "SYSTEM")
             return assets_pool
-
         return assets_pool
 
-    # -----------------------
-    # LOOP PRINCIPAL
-    # -----------------------
     def start(self):
         t_watchdog = threading.Thread(target=watchdog, daemon=True)
         t_watchdog.start()
@@ -797,20 +792,19 @@ class SimpleBot:
                         time.sleep(5)
                         continue
                 
-                # Executa qualquer Gale pendente
+                # ✅ EXECUÇÃO MARTINGALE PRIORITÁRIA (G1)
                 if self.pending_gale:
                     assets_gale = list(self.pending_gale.keys())
                     for asset in assets_gale:
                         gale_info = self.pending_gale[asset]
                         del self.pending_gale[asset]
                         
-                        self.log_to_db(f"🚀 EXECUTANDO MARTINGALE G1: {asset}", "INFO")
+                        self.log_to_db(f"🚀 EXECUTANDO GALE G1: {asset}", "INFO")
                         self.execute_trade(
                             asset=gale_info['asset'],
                             direction=gale_info['direction'],
                             strategy_key=gale_info['strategy_key'],
                             strategy_label=gale_info['strategy_label'],
-                            prefer_binary=gale_info['prefer_binary'],
                             gale_level=1
                         )
                     time.sleep(1)
@@ -827,10 +821,8 @@ class SimpleBot:
                 if now_sec in [0, 10, 20, 30, 40, 50]:
                     self.log_to_db(f"MODE_ATIVO::{strat_mode}::{now_dt.strftime('%H:%M:%S')}::ENTRY={ENTRY_SECOND}s", "DEBUG")
 
-                # ==========================================================================
-                # ✅ SHOCK LIVE (Entrada antecipada no segundo 50)
-                # ==========================================================================
-                if ENTRY_SECOND <= now_sec <= ENTRY_SECOND + 1:
+                # ✅ FIX 5: JANELA DE ENTRADA CORRIGIDA (ENTRY_SECOND + 2s)
+                if ENTRY_SECOND <= now_sec <= ENTRY_SECOND + 2:
                     if strat_mode in ["AUTO", "SHOCK_REVERSAL"]:
                         random_assets = self.best_assets.copy()
                         random.shuffle(random_assets)
@@ -847,9 +839,7 @@ class SimpleBot:
                                 sig, reason, dbg = ShockLiveDetector.detect(candles, asset)
 
                                 if strat_mode == "SHOCK_REVERSAL":
-                                    self.log_to_db(
-                                        f"⚡ SHOCK_LIVE_CHECK {asset}: {reason}", "DEBUG"
-                                    )
+                                    self.log_to_db(f"⚡ SHOCK_LIVE_CHECK {asset}: {reason}", "DEBUG")
 
                                 if sig:
                                     self.execute_trade(
@@ -857,19 +847,15 @@ class SimpleBot:
                                         direction=sig,
                                         strategy_key="SHOCK_REVERSAL",
                                         strategy_label=reason,
-                                        prefer_binary=True,
                                         gale_level=0
                                     )
                                     break
                             except:
                                 pass
 
-                # ==========================================================================
-                # ✅ V2 TREND + TENDMAX (Entrada no fechamento 55-59s)
-                # ==========================================================================
+                # ✅ V2 TREND + TENDMAX (55-59s)
                 if 55 <= now_sec <= 59:
                     
-                    # ✅ 1) TENDMAX
                     if strat_mode in ["AUTO", "TENDMAX"]:
                         trade_executed = False
                         random_assets = self.best_assets.copy()
@@ -887,19 +873,16 @@ class SimpleBot:
                                     self.log_to_db(f"📈 TENDMAX_CHECK {asset}: {reason_tm}", "DEBUG")
 
                                 if sig_tm:
-                                    self.execute_trade(asset, sig_tm, "TENDMAX", reason_tm, prefer_binary=False, gale_level=0)
+                                    self.execute_trade(asset, sig_tm, "TENDMAX", reason_tm, gale_level=0)
                                     trade_executed = True
                                     break
                             except: pass
                         
-                        # Se executou TENDMAX, pula V2
                         if trade_executed:
                             time.sleep(1)
                             continue
 
-                    # ✅ 2) V2 TREND (se não rodou TENDMAX ou SHOCK acima)
                     if strat_mode in ["AUTO", "V2_TREND"]:
-                        # Fallback se catalogo falhar no AUTO
                         assets_to_scan = self.best_assets if self.best_assets else assets_pool
                         random.shuffle(assets_to_scan)
 
@@ -922,7 +905,6 @@ class SimpleBot:
                                         direction=sig,
                                         strategy_key="V2_TREND",
                                         strategy_label=reason,
-                                        prefer_binary=False, 
                                         gale_level=0
                                     )
                                     break
