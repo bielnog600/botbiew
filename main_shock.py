@@ -15,7 +15,7 @@ try:
 except ImportError:
     print("[ERRO] Biblioteca 'exnovaapi' não instalada.")
 
-BOT_VERSION = "SHOCK_LIVE_V1_VERIFIED_PLACAR"
+BOT_VERSION = "SHOCK_ENGINE_V8_GALE1_2026-01-21"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -31,6 +31,10 @@ BR_TIMEZONE = timezone(timedelta(hours=-3))
 # ✅ SEGUNDO DE ENTRADA (ajuste via env ou padrão 50)
 ENTRY_SECOND = int(os.environ.get("ENTRY_SECOND", "50"))
 
+# ✅ CONFIGURAÇÃO MARTINGALE
+MARTINGALE_ENABLED = os.environ.get("MARTINGALE_ENABLED", "1") == "1"
+MARTINGALE_MULTIPLIER = float(os.environ.get("MARTINGALE_MULTIPLIER", "2.0"))
+
 # ==============================================================================
 # LOGGING / WATCHDOG
 # ==============================================================================
@@ -39,7 +43,7 @@ for logger_name in ["websocket", "exnovaapi", "iqoptionapi", "urllib3", "iqoptio
     logging.getLogger(logger_name).setLevel(logging.CRITICAL)
 
 WATCHDOG_CHECK_EVERY = 60
-WATCHDOG_MAX_SILENCE = 180
+WATCHDOG_MAX_SILENCE = 300
 COOLIFY_RESTART_URL = "https://biewdev.se/api/v1/applications/ig80skg8ssog04g4oo88wswg/restart"
 COOLIFY_API_TOKEN = os.environ.get("COOLIFY_API_TOKEN")
 LAST_LOG_TIME = time.time()
@@ -288,6 +292,8 @@ class SimpleBot:
             "timer_end": "00:00",
             "mode": "LIVE",  # LIVE / OBSERVE
             "strategy_mode": "AUTO",  # AUTO / V2_TREND / SHOCK_REVERSAL
+            "martingale_enabled": MARTINGALE_ENABLED,
+            "martingale_multiplier": MARTINGALE_MULTIPLIER
         }
 
         # Contadores (PLACAR)
@@ -307,6 +313,9 @@ class SimpleBot:
         # Anti-chop (15 min)
         self.block_until_ts = 0             # bloqueio global de 15min
         self.loss_streak = 0
+        
+        # ✅ Fila de Martingale: {asset: {direction, strategy, amount, time...}}
+        self.pending_gale = {}
 
         self.init_supabase()
 
@@ -514,6 +523,7 @@ class SimpleBot:
             self.loss_streak = 0
             self.session_blocked = False
             self.block_until_ts = 0
+            self.pending_gale = {} # Limpa gales pendentes
             self.log_to_db("🚀 Nova sessão diária", "SYSTEM")
 
     def check_daily_limits(self):
@@ -554,21 +564,23 @@ class SimpleBot:
         except:
             return False, None
 
-    def execute_trade(self, asset, direction, strategy_key, strategy_label, prefer_binary=False):
+    def execute_trade(self, asset, direction, strategy_key, strategy_label, prefer_binary=False, gale_level=0):
         """
         strategy_key: "V2_TREND" ou "SHOCK_REVERSAL"
+        gale_level: 0 (entrada) ou 1 (gale)
         """
-        # anti duplicação por asset
+        # anti duplicação por asset (só se for G0)
         now = time.time()
-        if asset in self.last_trade_time and now - self.last_trade_time[asset] < 60:
-            return
-        self.last_trade_time[asset] = now
+        if gale_level == 0:
+            if asset in self.last_trade_time and now - self.last_trade_time[asset] < 60:
+                return
+            self.last_trade_time[asset] = now
 
-        # anti duplicação por minuto
-        minute_key = datetime.now(BR_TIMEZONE).strftime("%Y%m%d%H%M")
-        if self.last_minute_trade.get(asset) == minute_key:
-            return
-        self.last_minute_trade[asset] = minute_key
+            # anti duplicação por minuto
+            minute_key = datetime.now(BR_TIMEZONE).strftime("%Y%m%d%H%M")
+            if self.last_minute_trade.get(asset) == minute_key:
+                return
+            self.last_minute_trade[asset] = minute_key
 
         # bloqueio anti-chop 15min
         if time.time() < self.block_until_ts:
@@ -581,7 +593,13 @@ class SimpleBot:
             self.active_trades.add(asset)
 
         signal_id = None
-        amount = float(self.config["entry_value"])
+        base_amount = float(self.config["entry_value"])
+        
+        # ✅ Cálculo Amount (com Gale)
+        amount = base_amount
+        if gale_level > 0:
+            multiplier = self.config.get("martingale_multiplier", 2.0)
+            amount = round(base_amount * multiplier, 2)
 
         try:
             if not self.check_daily_limits():
@@ -594,11 +612,12 @@ class SimpleBot:
                 return
 
             # log no supabase pro front
-            strategy_name = f"{strategy_key}::{strategy_label}"
+            tag_gale = f"::G{gale_level}"
+            strategy_name = f"{strategy_key}::{strategy_label}{tag_gale}"
             signal_id = self.insert_signal(asset, direction, strategy_name, amount)
 
             self.log_to_db(
-                f"➡️ ENTRADA {strategy_key}: {asset} | {direction.upper()} | ${amount} | BINARIA={prefer_binary}",
+                f"➡️ ENTRADA {strategy_key} [G{gale_level}]: {asset} | {direction.upper()} | ${amount} | BINARIA={prefer_binary}",
                 "INFO",
             )
 
@@ -665,7 +684,7 @@ class SimpleBot:
                     res_str = "UNKNOWN"
 
             if res_str == "DOJI":
-                # DOJI ignora (não bloqueia streak)
+                # DOJI ignora (não bloqueia streak, não faz gale)
                 self.log_to_db("⚪ DOJI (ignorado)", "DEBUG")
                 self.update_signal(signal_id, "DOJI", "DOJI", 0)
                 return
@@ -674,22 +693,44 @@ class SimpleBot:
             self.daily_total += 1
             if res_str == "WIN":
                 self.daily_wins += 1
-                self.loss_streak = 0
+                self.loss_streak = 0 # WIN limpa streak
+                # Se tinha gale pendente desse ativo (raro se deu win), limpa
+                if asset in self.pending_gale:
+                    del self.pending_gale[asset]
+                    
             elif res_str == "LOSS":
                 self.daily_losses += 1
                 self.loss_streak += 1
+                
+                # ✅ LÓGICA DE AGENDAMENTO MARTINGALE (G1)
+                # Se foi G0, deu LOSS, e Martingale está ativo -> Agendar G1 para o próximo minuto (imediato)
+                if gale_level == 0 and self.config.get("martingale_enabled", True):
+                    self.log_to_db(f"⚠️ LOSS no G0. Agendando G1 para {asset}...", "WARNING")
+                    self.pending_gale[asset] = {
+                        'asset': asset,
+                        'direction': direction,
+                        'strategy_key': strategy_key,
+                        'strategy_label': strategy_label,
+                        'prefer_binary': prefer_binary,
+                        # Executar "já", pois o candle acabou de fechar
+                        'execute_at': time.time() 
+                    }
 
-            # ✅ Anti-chop: 2 losses seguidos => pausa 15min (não 1h!)
+            # ✅ Anti-chop: 2 losses seguidos => pausa 15min
+            # Se deu loss no G1, conta pro streak. Se deu loss no G0 e vai ter gale, o streak conta
+            # A lógica original bloqueava geral. Mantemos.
             if self.loss_streak >= 2:
                 self.block_until_ts = time.time() + 900  # 15 minutos
                 self.log_to_db("🛑 2 LOSSES SEGUIDOS — PAUSANDO 15 MIN (ANTI-CHOP)", "WARNING")
+                # Se bloqueou, limpa gales pendentes para não entrar no meio do bloqueio
+                self.pending_gale = {}
 
             # grava no supabase (front)
             self.update_signal(signal_id, res_str, res_str, profit)
 
             log_type = "SUCCESS" if res_str == "WIN" else "ERROR"
             self.log_to_db(
-                f"{'🏆' if res_str == 'WIN' else '🔻'} {res_str}: {profit:.2f} ({self.daily_wins}W/{self.daily_losses}L)",
+                f"{'🏆' if res_str == 'WIN' else '🔻'} {res_str} [G{gale_level}]: {profit:.2f} ({self.daily_wins}W/{self.daily_losses}L)",
                 log_type,
             )
             
@@ -753,7 +794,9 @@ class SimpleBot:
                     time.sleep(2)
                     continue
 
-                # bloqueio 15 min
+                # bloqueio 15 min (anti-chop)
+                # Verifica aqui para não iniciar novos G0
+                # Mas G1 deve ser permitido? Regra 8 diz: Se bloqueado, gale não executa.
                 if time.time() < self.block_until_ts:
                     time.sleep(2)
                     continue
@@ -762,6 +805,31 @@ class SimpleBot:
                     if not self.connect():
                         time.sleep(5)
                         continue
+                
+                # ✅ CHECK MARTINGALE (G1) ANTES DE TUDO
+                # Executa qualquer Gale pendente
+                if self.pending_gale:
+                    # Copia chaves para poder deletar durante iteração
+                    assets_gale = list(self.pending_gale.keys())
+                    for asset in assets_gale:
+                        gale_info = self.pending_gale[asset]
+                        
+                        # Remove da fila antes de executar para não duplicar se der erro
+                        del self.pending_gale[asset]
+                        
+                        # Executa G1
+                        self.log_to_db(f"🚀 EXECUTANDO MARTINGALE G1: {asset}", "INFO")
+                        self.execute_trade(
+                            asset=gale_info['asset'],
+                            direction=gale_info['direction'],
+                            strategy_key=gale_info['strategy_key'],
+                            strategy_label=gale_info['strategy_label'],
+                            prefer_binary=gale_info['prefer_binary'],
+                            gale_level=1
+                        )
+                    # Se executou gale, volta pro inicio do loop para nao misturar com scan normal
+                    time.sleep(1)
+                    continue
 
                 # lista atual de ativos
                 if not self.best_assets or (time.time() - self.last_catalog_time > 900):
@@ -813,6 +881,7 @@ class SimpleBot:
                                         strategy_key="SHOCK_REVERSAL",
                                         strategy_label=reason,
                                         prefer_binary=True,
+                                        gale_level=0
                                     )
                                     break
                             except:
@@ -848,6 +917,7 @@ class SimpleBot:
                                         strategy_key="V2_TREND",
                                         strategy_label=reason,
                                         prefer_binary=False,  # V2 pode tentar digital e fallback
+                                        gale_level=0
                                     )
                                     break
                             except:
