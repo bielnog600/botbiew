@@ -15,17 +15,20 @@ try:
 except ImportError:
     print("[ERRO] Biblioteca 'exnovaapi' não instalada.")
 
+BOT_VERSION = "SHOCK_LIVE_V1_VERIFIED_PLACAR"
+print(f"🚀 START::{BOT_VERSION}")
+
 # ==============================================================================
 # CONFIG GERAL
 # ==============================================================================
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://ioduahwknfsktujthfyc.supabase.co")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")  # ✅ SEM CHAVE HARDCODE
-EXNOVA_EMAIL = os.environ.get("EXNOVA_EMAIL")
-EXNOVA_PASSWORD = os.environ.get("EXNOVA_PASSWORD")
+EXNOVA_EMAIL = os.environ.get("EXNOVA_EMAIL", "seu_email@exemplo.com")
+EXNOVA_PASSWORD = os.environ.get("EXNOVA_PASSWORD", "sua_senha")
 
 BR_TIMEZONE = timezone(timedelta(hours=-3))
 
-# ✅ SEGUNDO DE ENTRADA (ajuste aqui: 50, 55, etc.)
+# ✅ SEGUNDO DE ENTRADA (ajuste via env ou padrão 50)
 ENTRY_SECOND = int(os.environ.get("ENTRY_SECOND", "50"))
 
 # ==============================================================================
@@ -287,7 +290,7 @@ class SimpleBot:
             "strategy_mode": "AUTO",  # AUTO / V2_TREND / SHOCK_REVERSAL
         }
 
-        # Contadores
+        # Contadores (PLACAR)
         self.current_date = datetime.now(BR_TIMEZONE).date()
         self.daily_wins = 0
         self.daily_losses = 0
@@ -398,12 +401,20 @@ class SimpleBot:
             if ok:
                 self.log_to_db("✅ Conectado!", "SUCCESS")
                 self.api.change_balance(self.config["account_type"])
+                self.update_balance_remote() # Atualiza saldo inicial
                 return True
             else:
                 self.log_to_db(f"❌ Falha conexão: {reason}", "ERROR")
         except Exception as e:
             self.log_to_db(f"❌ Erro crítico conexão: {e}", "ERROR")
         return False
+
+    def update_balance_remote(self):
+        if not self.api or not self.supabase: return
+        try:
+            balance = self.api.get_balance()
+            self.supabase.table("bot_config").update({"current_balance": balance}).eq("id", 1).execute()
+        except: pass
 
     def fetch_config(self):
         if not self.supabase:
@@ -510,13 +521,13 @@ class SimpleBot:
             return True
 
         if self.config["max_trades_per_day"] > 0 and self.daily_total >= self.config["max_trades_per_day"]:
-            self.log_to_db("🛑 Limite trades diário", "WARNING")
+            self.log_to_db(f"🛑 Limite trades ({self.daily_total})", "WARNING")
             return False
         if self.config["max_wins_per_day"] > 0 and self.daily_wins >= self.config["max_wins_per_day"]:
-            self.log_to_db("🏆 Meta wins diária", "SUCCESS")
+            self.log_to_db(f"🏆 Meta wins ({self.daily_wins})", "SUCCESS")
             return False
         if self.config["max_losses_per_day"] > 0 and self.daily_losses >= self.config["max_losses_per_day"]:
-            self.log_to_db("❌ Limite losses diário", "ERROR")
+            self.log_to_db(f"❌ Limite losses ({self.daily_losses})", "ERROR")
             return False
         return True
 
@@ -659,7 +670,7 @@ class SimpleBot:
                 self.update_signal(signal_id, "DOJI", "DOJI", 0)
                 return
 
-            # atualiza contadores
+            # atualiza contadores (PLACAR)
             self.daily_total += 1
             if res_str == "WIN":
                 self.daily_wins += 1
@@ -681,6 +692,10 @@ class SimpleBot:
                 f"{'🏆' if res_str == 'WIN' else '🔻'} {res_str}: {profit:.2f} ({self.daily_wins}W/{self.daily_losses}L)",
                 log_type,
             )
+            
+            # ✅ Atualiza Saldo no Front
+            if self.config["mode"] == "LIVE":
+                self.update_balance_remote()
 
             # pausa se bater limites
             if not self.check_daily_limits():
