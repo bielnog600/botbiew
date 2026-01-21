@@ -16,7 +16,7 @@ try:
 except ImportError:
     print("[ERRO] Biblioteca 'exnovaapi' não instalada.")
 
-BOT_VERSION = "SHOCK_ENGINE_V20_DB_DEBUG_FIX_2026-01-21"
+BOT_VERSION = "SHOCK_ENGINE_V21_BINARY_ONLY_HARDLOCK_2026-01-21"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -358,6 +358,7 @@ class SimpleBot:
         
         self.pending_gale = {}
 
+        # ✅ FIX: Inicialização correta de variáveis
         self.auto_candidate = None
         self.auto_candidate_key = None
 
@@ -599,24 +600,21 @@ class SimpleBot:
             return False
         return True
 
-    def safe_buy(self, asset, amount, direction, prefer_binary=False):
+    # ✅ FIX 1: safe_buy CORRETO E TRAVADO EM BINÁRIAS
+    def safe_buy(self, asset, amount, direction, prefer_binary=True):
         if self.config["mode"] == "OBSERVE":
             return True, "VIRTUAL"
 
         try:
-            # 1. Se NÃO prefere binária (V2), tenta DIGITAL primeiro
-            if not prefer_binary:
-                status, trade_id = self.api.buy_digital_spot(asset, amount, direction, 1)
-                if status and trade_id:
-                    return True, trade_id
-
-            # 2. Se preferir binária (SHOCK/TENDMAX) ou se digital falhou, tenta BINÁRIA
+            # ✅ SEMPRE usa Binárias, ignora prefer_binary
             status, trade_id = self.api.buy(amount, asset, direction, 1)
             if status and trade_id:
                 return True, trade_id
 
+            self.log_to_db(f"⚠️ Binária falhou (ID nulo).", "WARNING")
             return False, None
-        except:
+        except Exception as e:
+            self.log_to_db(f"⚠️ Erro Safe Buy: {e}", "ERROR")
             return False, None
 
     def get_strategy_wr(self, strategy_key):
@@ -645,13 +643,17 @@ class SimpleBot:
         return candidates[0]
 
     def execute_trade(self, asset, direction, strategy_key, strategy_label, prefer_binary=False, gale_level=0):
+        # ✅ 1. CAPTURA TIMESTAMP DA ENTRADA (CRÍTICO PARA O GALE)
+        entry_dt = datetime.now(BR_TIMEZONE)
+
+        # anti duplicação por asset (G0)
         now = time.time()
         if gale_level == 0:
             if asset in self.last_trade_time and now - self.last_trade_time[asset] < 60:
                 return
             self.last_trade_time[asset] = now
 
-            minute_key = datetime.now(BR_TIMEZONE).strftime("%Y%m%d%H%M")
+            minute_key = entry_dt.strftime("%Y%m%d%H%M")
             if self.last_minute_trade.get(asset) == minute_key:
                 return
             self.last_minute_trade[asset] = minute_key
@@ -684,11 +686,10 @@ class SimpleBot:
 
             tag_gale = f"::G{gale_level}"
             strategy_name = f"{strategy_key}::{strategy_label}{tag_gale}"
-            
-            # ✅ Inserção Robusta no Supabase
             signal_id = self.insert_signal(asset, direction, strategy_name, amount)
 
-            route = "BINARIA" if prefer_binary else "DIGITAL->BINARIA"
+            # ✅ FIX 4: Log route correto (Sempre Binária)
+            route = "BINARIA"
             self.log_to_db(
                 f"🟡 TENTANDO ENTRAR [{route}] {strategy_key} [G{gale_level}]: {asset} | {direction.upper()} | ${amount}",
                 "INFO",
@@ -772,25 +773,16 @@ class SimpleBot:
                 self.daily_losses += 1
                 self.loss_streak += 1
                 
-                # ✅ GALE SINCRONIZADO
+                # ✅ FIX 2: GALE SINCRONIZADO PARA PRÓXIMO MINUTO E SEGUNDO CORRETO
                 if gale_level == 0 and self.config.get("martingale_enabled", True):
-                    # Calcula minuto de entrada (foi o de agora)
-                    entry_dt = datetime.now(BR_TIMEZONE)
-                    # Gale é no próximo minuto cheio (daqui a 60s em teoria, mas na prática é next_minute)
-                    # Como estamos 70s depois, o "próximo minuto" relativo à entrada é entry + 2 min
-                    # Ex: Entrou 12:00:50 -> Acordou 12:02:00 -> Próximo Candle 12:02
-                    # Se Gale for imediato, tem que ser no inicio do proximo candle possivel
+                    # Calcula o próximo minuto com base na entrada
+                    next_minute = (entry_dt + timedelta(minutes=2)).strftime("%Y%m%d%H%M")
                     
-                    next_minute = (datetime.now(BR_TIMEZONE) + timedelta(minutes=1)).strftime("%Y%m%d%H%M")
-                    
-                    # Se acordou em 12:02:05, o próximo candle cheio é 12:03:00
-                    # Se acordou em 12:02:00, já perdemos a entrada de 12:02:00?
-                    # A lógica do loop vai pegar se estivermos em 0-2s?
-                    # Melhor garantir: alvo é o próximo minuto "redondo" que virá
-                    
+                    # ✅ Define o segundo alvo baseado no tipo da entrada original
+                    # Shock (Binária) -> 50s | V2 (agora Binária) -> 55s
                     gale_second = ENTRY_SECOND if prefer_binary else 55
                     
-                    self.log_to_db(f"🎯 GALE G1 ARMADO para {asset} (minuto {next_minute})", "WARNING")
+                    self.log_to_db(f"🎯 GALE G1 ARMADO para {asset} (Min: {next_minute} Sec: {gale_second})", "WARNING")
                     self.pending_gale[asset] = {
                         'asset': asset,
                         'direction': direction,
@@ -798,13 +790,13 @@ class SimpleBot:
                         'strategy_label': strategy_label,
                         'prefer_binary': prefer_binary,
                         'minute_key': next_minute,
-                        'second_key': gale_second 
+                        'second_key': gale_second # ✅ Salva o segundo correto
                     }
 
             if self.loss_streak >= 2:
                 self.block_until_ts = time.time() + 900
                 self.log_to_db("🛑 2 LOSSES SEGUIDOS — PAUSANDO 15 MIN (ANTI-CHOP)", "WARNING")
-                self.pending_gale = {}
+                self.pending_gale = {} # Limpa gales se bloqueado
                 self.auto_candidate = None
                 self.auto_candidate_key = None
 
@@ -867,7 +859,7 @@ class SimpleBot:
                         time.sleep(5)
                         continue
                 
-                # ✅ EXECUÇÃO GALE SINCRONIZADA
+                # ✅ FIX 2B: EXECUÇÃO DE GALE SINCRONIZADA
                 if self.pending_gale:
                     now_dt = datetime.now(BR_TIMEZONE)
                     current_key = now_dt.strftime("%Y%m%d%H%M")
@@ -878,9 +870,11 @@ class SimpleBot:
                         g = self.pending_gale.get(asset)
                         if not g: continue
                         
+                        # Valida minuto
                         if g.get("minute_key") != current_key:
                             continue
 
+                        # Valida segundo com janela de 2s
                         sec_target = int(g.get("second_key", ENTRY_SECOND))
                         
                         if not (sec_target <= now_sec <= sec_target + 2):
@@ -1027,14 +1021,14 @@ class SimpleBot:
                                     sig, reason = TechnicalAnalysis.get_signal_v2(candles)
                                     if sig:
                                         if strat_mode == "V2_TREND":
-                                             self.execute_trade(asset, sig, "V2_TREND", reason, prefer_binary=False, gale_level=0)
+                                             self.execute_trade(asset, sig, "V2_TREND", reason, prefer_binary=True, gale_level=0) # ✅ V2 Agora também é Binária
                                              break 
                                         elif strat_mode == "AUTO":
                                              candidates.append({
                                                   "asset": asset, "direction": sig, "strategy": "V2_TREND",
                                                   "label": reason, "confidence": 0.70,
                                                   "wr": self.get_strategy_wr("V2_TREND"), 
-                                                  "prefer_binary": False
+                                                  "prefer_binary": True # ✅ V2 Agora também é Binária
                                              })
                             except:
                                 pass
