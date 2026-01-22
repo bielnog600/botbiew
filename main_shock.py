@@ -17,7 +17,7 @@ try:
 except ImportError:
     print("[ERRO] Biblioteca 'exnovaapi' não instalada.")
 
-BOT_VERSION = "SHOCK_ENGINE_V32_LATE_ENTRY_FIX_2026-01-22"
+BOT_VERSION = "SHOCK_ENGINE_V35_SMART_LOCK_DB_SAFE_2026-01-22"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -210,6 +210,10 @@ class ShockLiveDetector:
             return None, "Dados insuficientes", {}
 
         live = TechnicalAnalysis.analyze_candle(candles[-1])
+        # ✅ PROTEÇÃO NANO TENDÊNCIA: Analisa 2 velas anteriores
+        prev1 = TechnicalAnalysis.analyze_candle(candles[-2])
+        prev2 = TechnicalAnalysis.analyze_candle(candles[-3])
+
         closed = candles[:-1]
 
         bodies = [abs(c["close"] - c["open"]) for c in closed[-20:]]
@@ -252,16 +256,27 @@ class ShockLiveDetector:
             "color": live["color"],
         }
 
+        # ✅ SUPER EXPLOSÃO: Permite contra-tendência se for exaustão absurda (> 2.2x)
+        super_explosive = (body_live >= avg_body * 2.2) and (range_live >= avg_range * 2.2)
+        
         explosive = (body_live >= avg_body * body_mult) and (range_live >= avg_range * range_mult)
         if not explosive:
             return None, "Sem explosão", debug
 
         if live["color"] == "green":
+            # ✅ FILTRO INTELIGENTE: Se 3 verdes e NÃO for super explosão, aborta.
+            if prev1["color"] == "green" and prev2["color"] == "green" and not super_explosive:
+                return None, "Abortar: Nano Tendência de Alta (3 Green)", debug
+
             if close_pos >= 0.85 and pullback_ratio <= 0.25:
                 return "put", "SHOCK_LIVE_UP", debug
             return None, "Explodiu mas não travou no topo", debug
 
         if live["color"] == "red":
+            # ✅ FILTRO INTELIGENTE: Se 3 vermelhas e NÃO for super explosão, aborta.
+            if prev1["color"] == "red" and prev2["color"] == "red" and not super_explosive:
+                return None, "Abortar: Nano Tendência de Baixa (3 Red)", debug
+
             if close_pos <= 0.15 and pullback_ratio <= 0.25:
                 return "call", "SHOCK_LIVE_DOWN", debug
             return None, "Explodiu mas não travou no fundo", debug
@@ -305,48 +320,33 @@ class TendMaxStrategy:
 class TsunamiFlowStrategy:
     """
     🌊 TSUNAMI FLOW: Estratégia de seguimento de tendência e momentum.
-    Refinado: Agora verifica pavio de rejeição com wick/range para evitar falsos positivos em corpos pequenos.
     """
     @staticmethod
     def get_signal(candles):
         if len(candles) < 55:
             return None, "Dados insuficientes"
 
-        # Usa velas fechadas
-        c1 = TechnicalAnalysis.analyze_candle(candles[-2]) # Última fechada (Trigger)
+        c1 = TechnicalAnalysis.analyze_candle(candles[-2])
         c2 = TechnicalAnalysis.analyze_candle(candles[-3])
         c3 = TechnicalAnalysis.analyze_candle(candles[-4])
 
         ema50 = TechnicalAnalysis.calculate_ema(candles[:-1], 50)
 
-        # Regra de Fluxo de Alta
         if c1["color"] == "green" and c2["color"] == "green" and c3["color"] == "green":
-            # Filtro: Corpo aumentando (C1 > C2)
             if c1["body"] > c2["body"]:
-                # Filtro: Acima da EMA50
                 if c1["close"] > ema50:
-                    # ✅ Filtro de Pavio (Otimizado): Wick/Range para realismo OTC
                     rejection = c1["upper_wick"] / c1["range"] if c1["range"] > 0 else 0
-                    if rejection > 0.35:
-                        return None, "Rejeição alta no topo"
-
-                    # Filtro anti-exaustão: C1 não pode ser absurdamente grande
+                    if rejection > 0.35: return None, "Rejeição alta no topo"
                     avg_body = (c2["body"] + c3["body"]) / 2
-                    if c1["body"] < avg_body * 3.0:
-                        return "call", "TSUNAMI_FLOW_UP"
+                    if c1["body"] < avg_body * 3.0: return "call", "TSUNAMI_FLOW_UP"
 
-        # Regra de Fluxo de Baixa
         if c1["color"] == "red" and c2["color"] == "red" and c3["color"] == "red":
             if c1["body"] > c2["body"]:
                 if c1["close"] < ema50:
-                    # ✅ Filtro de Pavio (Otimizado)
                     rejection = c1["lower_wick"] / c1["range"] if c1["range"] > 0 else 0
-                    if rejection > 0.35:
-                        return None, "Rejeição alta no fundo"
-
+                    if rejection > 0.35: return None, "Rejeição alta no fundo"
                     avg_body = (c2["body"] + c3["body"]) / 2
-                    if c1["body"] < avg_body * 3.0:
-                        return "put", "TSUNAMI_FLOW_DOWN"
+                    if c1["body"] < avg_body * 3.0: return "put", "TSUNAMI_FLOW_DOWN"
 
         return None, "Sem fluxo"
 
@@ -354,58 +354,38 @@ class TsunamiFlowStrategy:
 class VolumeReactorStrategy:
     """
     ☢️ VOLUME REACTOR (HÍBRIDO): Estratégia de Exaustão.
-    Se volume estiver disponível, usa VSA.
-    Se volume for zero (OTC comum), usa Range Analysis (Tamanho da vela + Pavio).
     """
     @staticmethod
     def get_signal(candles):
         if len(candles) < 30:
             return None, "Dados insuficientes"
             
-        c1 = TechnicalAnalysis.analyze_candle(candles[-2]) # Última fechada
-        
-        # Extrai volumes
-        volumes = [c.get("volume", 0) for c in candles[-22:-2]] # 20 anteriores
-        
-        has_real_volume = sum(volumes) > 10 # Verifica se tem dados reais
+        c1 = TechnicalAnalysis.analyze_candle(candles[-2])
+        volumes = [c.get("volume", 0) for c in candles[-22:-2]]
+        has_real_volume = sum(volumes) > 10
         avg_vol = sum(volumes) / len(volumes) if has_real_volume else 0
         
-        # Lógica Híbrida
         is_exhaustion = False
         label = ""
 
-        # MODO 1: Com Volume
         if has_real_volume:
             if c1["volume"] > (avg_vol * 2.0):
-                is_exhaustion = True
-                label = "VOL_CLIMAX"
-        
-        # MODO 2: Sem Volume (Range + Pavio)
+                is_exhaustion = True; label = "VOL_CLIMAX"
         else:
-            # Calcula média de range das últimas 20 velas
             ranges = [(c["max"] - c["min"]) for c in candles[-22:-2]]
             avg_range = sum(ranges) / len(ranges) if ranges else 0.00001
-            
-            # Se a vela atual for 2.5x maior que a média -> Exaustão potencial
             if c1["range"] > (avg_range * 2.5):
-                is_exhaustion = True
-                label = "RANGE_CLIMAX"
+                is_exhaustion = True; label = "RANGE_CLIMAX"
 
-        if not is_exhaustion:
-            return None, "Sem exaustão"
+        if not is_exhaustion: return None, "Sem exaustão"
 
-        # Gatilho de Reversão: Precisa ter pavio contra o movimento
-        # Alta -> Put
         if c1["color"] == "green":
             rejection_ratio = c1["upper_wick"] / c1["range"] if c1["range"] > 0 else 0
-            if rejection_ratio > 0.25: # Pavio considerável no topo
-                return "put", f"REACTOR_{label}_TOP"
+            if rejection_ratio > 0.25: return "put", f"REACTOR_{label}_TOP"
 
-        # Baixa -> Call
         if c1["color"] == "red":
             rejection_ratio = c1["lower_wick"] / c1["range"] if c1["range"] > 0 else 0
-            if rejection_ratio > 0.25: # Pavio considerável no fundo
-                return "call", f"REACTOR_{label}_BOTTOM"
+            if rejection_ratio > 0.25: return "call", f"REACTOR_{label}_BOTTOM"
                 
         return None, "Sem padrão reactor"
 
@@ -420,7 +400,8 @@ class SimpleBot:
         self.supabase = None
 
         self.trade_lock = threading.RLock()
-        self.api_lock = threading.RLock() # ✅ LOCK PARA API (Thread Safety)
+        self.api_lock = threading.RLock()
+        self.db_lock = threading.RLock() # ✅ LOCK PARA DB (Thread Safety)
         self.active_trades = set()
 
         self.config = {
@@ -452,7 +433,8 @@ class SimpleBot:
         
         self.asset_cooldown = {}
         self.last_heartbeat_ts = 0 
-        self.last_config_ts = 0 # ✅ TIMER para Throttling do Fetch Config
+        self.last_config_ts = 0 
+        self.last_global_minute = None 
 
         self.last_trade_time = {}
         self.last_minute_trade = {}
@@ -485,7 +467,6 @@ class SimpleBot:
         except Exception as e:
             print(f"❌ Erro Supabase: {e}")
 
-    # ✅ MÉTODO DE HEARTBEAT SILENCIOSO (Só atualiza a variável)
     def touch_watchdog(self):
         global LAST_LOG_TIME
         LAST_LOG_TIME = time.time()
@@ -494,56 +475,38 @@ class SimpleBot:
         global LAST_LOG_TIME
         LAST_LOG_TIME = time.time()
         print(f"[{level}] {message}")
-        if level == "DEBUG":
-            return
-        if not self.supabase:
-            return
+        if level == "DEBUG": return
+        if not self.supabase: return
         try:
-            self.supabase.table("logs").insert(
-                {
-                    "message": message,
-                    "level": level,
-                    "created_at": datetime.now(timezone.utc).isoformat(),
-                }
-            ).execute()
-        except:
-            pass
+            # ✅ DB LOCK
+            with self.db_lock:
+                self.supabase.table("logs").insert(
+                    {"message": message, "level": level, "created_at": datetime.now(timezone.utc).isoformat()}
+                ).execute()
+        except: pass
 
     def check_strategy_signal(self, strategy_name, candles):
-        if strategy_name == "TENDMAX":
-            return TendMaxStrategy.get_signal(candles)
+        if strategy_name == "TENDMAX": return TendMaxStrategy.get_signal(candles)
         elif strategy_name == "V2_TREND":
-            if not TechnicalAnalysis.check_compression(candles):
-                return TechnicalAnalysis.get_signal_v2(candles)
-        elif strategy_name == "TSUNAMI_FLOW":
-            return TsunamiFlowStrategy.get_signal(candles)
-        elif strategy_name == "VOLUME_REACTOR":
-            return VolumeReactorStrategy.get_signal(candles)
+            if not TechnicalAnalysis.check_compression(candles): return TechnicalAnalysis.get_signal_v2(candles)
+        elif strategy_name == "TSUNAMI_FLOW": return TsunamiFlowStrategy.get_signal(candles)
+        elif strategy_name == "VOLUME_REACTOR": return VolumeReactorStrategy.get_signal(candles)
         return None, None
 
-    # ✅ CALIBRAÇÃO EM THREAD (Safe & Non-Blocking)
     def calibrate_market(self):
-        if self.calibration_running:
-            return
-        
-        # ✅ FLAG SETADA ANTES DO START (Anti-Race Condition)
+        if self.calibration_running: return
         self.calibration_running = True
-        
         self.log_to_db("🔬 Disparando Thread de Calibração...", "SYSTEM")
         t = threading.Thread(target=self._run_calibration_task, daemon=True)
         t.start()
 
     def _run_calibration_task(self):
-        # ✅ WRAP GERAL COM TRY/FINALLY (Garante que a flag sempre reseta)
         try:
-            # ✅ CHECK SE API ESTÁ VIVA (Evita crash de thread)
             if not self.api or not self.api.check_connect():
-                self.log_to_db("⚠️ Calibração abortada: API offline", "WARNING")
-                return
+                self.log_to_db("⚠️ Calibração abortada: API offline", "WARNING"); return
 
             try:
                 strategies = ["V2_TREND", "TENDMAX", "TSUNAMI_FLOW", "VOLUME_REACTOR"]
-                
                 if not self.best_assets:
                      assets_pool = [
                         "EURUSD-OTC", "EURGBP-OTC", "USDCHF-OTC", "EURJPY-OTC",
@@ -557,104 +520,74 @@ class SimpleBot:
                 
                 for asset in assets:
                     try:
-                        # ✅ API LOCK COM MICRO-LOCK (Evita travar o loop principal)
-                        # Reduzido para 120 candles para performance
                         candles = None
                         with self.api_lock:
-                            try:
-                                candles = self.api.get_candles(asset, 60, 120, int(time.time()))
-                            except:
-                                candles = None
-                            
+                            try: candles = self.api.get_candles(asset, 60, 120, int(time.time()))
+                            except: candles = None
                         if not candles or len(candles) < 100: continue
                         
                         scores = {s: {'wins': 0, 'total': 0} for s in strategies}
-                        
-                        # ✅ Loop otimizado (passo 2) para backtest rápido
                         for i in range(60, len(candles)-1, 2):
-                            window = candles[i-60 : i+1]
-                            result_candle = candles[i+1]
-                            
+                            window = candles[i-60 : i+1]; result_candle = candles[i+1]
                             for s in strategies:
                                 sig, _ = self.check_strategy_signal(s, window)
                                 if sig:
                                     scores[s]['total'] += 1
-                                    is_win = False
-                                    if sig == "call" and result_candle["close"] > result_candle["open"]: is_win = True
-                                    if sig == "put" and result_candle["close"] < result_candle["open"]: is_win = True
-                                    
+                                    is_win = (sig == "call" and result_candle["close"] > result_candle["open"]) or (sig == "put" and result_candle["close"] < result_candle["open"])
                                     if is_win: scores[s]['wins'] += 1
                         
-                        best_s = None
-                        best_score = -1
-                        
+                        best_s = None; best_score = -1
                         for s, stats in scores.items():
                             total = stats['total']
                             if total > 0:
                                 wr = stats['wins'] / total
                                 score = wr * math.sqrt(total)
-                                
                                 if total >= 8 and wr >= 0.52 and score > best_score:
-                                    best_score = score
-                                    best_s = s
+                                    best_score = score; best_s = s
                         
                         if best_s:
-                            # ✅ Salva Score junto com a estratégia
                             new_map[asset] = {"strategy": best_s, "score": best_score}
                             self.log_to_db(f"✅ {asset} -> {best_s} (Score: {best_score:.2f} | WR: {scores[best_s]['wins']/scores[best_s]['total']:.2f})", "DEBUG")
-                        else:
-                            new_map[asset] = {"strategy": "V2_TREND", "score": 1.0}
-                    
-                    except Exception as e:
-                        pass
+                        else: new_map[asset] = {"strategy": "V2_TREND", "score": 1.0}
+                    except: pass
                 
                 self.asset_strategy_map = new_map
                 self.last_calibration_time = time.time()
                 self.log_to_db(f"🏁 Calibração concluída. {len(new_map)} pares mapeados.", "SUCCESS")
-            
-            except Exception as e:
-                self.log_to_db(f"❌ Erro na Lógica de Calibração: {e}", "ERROR")
-        
-        finally:
-            self.calibration_running = False
+            except Exception as e: self.log_to_db(f"❌ Erro na Lógica de Calibração: {e}", "ERROR")
+        finally: self.calibration_running = False
 
     def insert_signal(self, asset, direction, strategy_name, amount):
-        if not self.supabase:
-            return None
+        if not self.supabase: return None
         payload = {
-            "pair": asset,
-            "direction": direction,
-            "strategy": strategy_name,
-            "status": "PENDING",
-            "result": "PENDING",
-            "profit": 0,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "amount": amount, 
+            "pair": asset, "direction": direction, "strategy": strategy_name, "status": "PENDING",
+            "result": "PENDING", "profit": 0, "created_at": datetime.now(timezone.utc).isoformat(), "amount": amount
         }
         try:
-            res = self.supabase.table("trade_signals").insert(payload).execute()
-            if res.data: return res.data[0].get("id")
+            with self.db_lock: # ✅ DB LOCK
+                res = self.supabase.table("trade_signals").insert(payload).execute()
+                if res.data: return res.data[0].get("id")
         except:
             try:
                 del payload["amount"]
-                res = self.supabase.table("trade_signals").insert(payload).execute()
-                if res.data: return res.data[0].get("id")
+                with self.db_lock:
+                    res = self.supabase.table("trade_signals").insert(payload).execute()
+                    if res.data: return res.data[0].get("id")
             except: pass
         return None
 
     def update_signal(self, signal_id, status, result, profit):
         if not self.supabase or not signal_id: return
         try:
-            self.supabase.table("trade_signals").update({"status": status, "result": result, "profit": profit}).eq("id", signal_id).execute()
+            with self.db_lock: # ✅ DB LOCK
+                self.supabase.table("trade_signals").update({"status": status, "result": result, "profit": profit}).eq("id", signal_id).execute()
         except: pass
 
-    # ✅ CONNECT COM LOCK (Proteção total na API)
     def connect(self):
         self.log_to_db("🔌 Conectando...", "SYSTEM")
-        ok = False
-        reason = "UNKNOWN"
+        ok = False; reason = "UNKNOWN"
         try:
-            with self.api_lock: # ✅ Lock de API
+            with self.api_lock:
                 if self.api:
                     try: self.api.api.close()
                     except: pass
@@ -663,32 +596,29 @@ class SimpleBot:
                 if ok:
                     self.log_to_db("✅ Conectado!", "SUCCESS")
                     self.api.change_balance(self.config["account_type"])
-            
-            # Fora do lock para não travar
             if ok:
                 self.update_balance_remote()
                 return True
-            else:
-                self.log_to_db(f"❌ Falha conexão: {reason}", "ERROR")
-        except Exception as e:
-            self.log_to_db(f"❌ Erro crítico conexão: {e}", "ERROR")
+            else: self.log_to_db(f"❌ Falha conexão: {reason}", "ERROR")
+        except Exception as e: self.log_to_db(f"❌ Erro crítico conexão: {e}", "ERROR")
         return False
 
     def update_balance_remote(self):
         if not self.api or not self.supabase: return
         try:
-            # ✅ API LOCK (Proteção Balance)
-            with self.api_lock:
-                balance = self.api.get_balance()
-            self.supabase.table("bot_config").update({"current_balance": balance}).eq("id", 1).execute()
+            with self.api_lock: balance = self.api.get_balance()
+            with self.db_lock: # ✅ DB LOCK
+                self.supabase.table("bot_config").update({"current_balance": balance}).eq("id", 1).execute()
         except: pass
 
     def fetch_config(self):
         if not self.supabase: self.init_supabase(); return
         try:
-            res = self.supabase.table("bot_config").select("*").eq("id", 1).execute()
+            with self.db_lock: # ✅ DB LOCK
+                res = self.supabase.table("bot_config").select("*").eq("id", 1).execute()
             if not res.data:
-                self.supabase.table("bot_config").insert({"id": 1, "status": "PAUSED"}).execute()
+                with self.db_lock:
+                    self.supabase.table("bot_config").insert({"id": 1, "status": "PAUSED"}).execute()
                 return
             data = res.data[0]
             new_status = (data.get("status") or "PAUSED").strip().upper()
@@ -713,17 +643,14 @@ class SimpleBot:
                 "timer_start": str(data.get("timer_start") or "00:00"),
                 "timer_end": str(data.get("timer_end") or "00:00"),
             })
-        except Exception as e: 
-            # Erro silencioso para não poluir log se for rate limit leve
-            pass
+        except: pass
 
     def check_schedule(self):
         now_br = datetime.now(BR_TIMEZONE)
         now_str = now_br.strftime("%H:%M")
         start_str = self.config.get("timer_start", "00:00")
         end_str = self.config.get("timer_end", "00:00")
-        hour = now_br.hour
-        minute = now_br.minute
+        hour = now_br.hour; minute = now_br.minute
         blocked_time = False
         if 0 <= hour < 4: blocked_time = True
         if hour == 13 and minute >= 30: blocked_time = True
@@ -731,8 +658,9 @@ class SimpleBot:
         if blocked_time:
             if self.config["status"] == "RUNNING":
                 self.log_to_db("⛔ Horário bloqueado — PAUSANDO", "WARNING")
-                try:
-                    self.supabase.table("bot_config").update({"status": "PAUSED"}).eq("id", 1).execute()
+                try: 
+                    with self.db_lock:
+                        self.supabase.table("bot_config").update({"status": "PAUSED"}).eq("id", 1).execute()
                     self.config["status"] = "PAUSED"
                 except: pass
             return
@@ -742,11 +670,13 @@ class SimpleBot:
         else: is_inside = now_str >= start_str or now_str < end_str
         if is_inside and self.config["status"] == "PAUSED":
             self.log_to_db(f"⏰ Agendador: RUNNING ({start_str}-{end_str})", "SYSTEM")
-            try: self.supabase.table("bot_config").update({"status": "RUNNING"}).eq("id", 1).execute()
+            try: 
+                with self.db_lock: self.supabase.table("bot_config").update({"status": "RUNNING"}).eq("id", 1).execute()
             except: pass
         if (not is_inside) and self.config["status"] == "RUNNING":
             self.log_to_db("⏰ Agendador: PAUSED (fim)", "SYSTEM")
-            try: self.supabase.table("bot_config").update({"status": "PAUSED"}).eq("id", 1).execute()
+            try: 
+                with self.db_lock: self.supabase.table("bot_config").update({"status": "PAUSED"}).eq("id", 1).execute()
             except: pass
 
     def reset_daily_if_needed(self):
@@ -756,7 +686,7 @@ class SimpleBot:
             self.daily_wins = 0; self.daily_losses = 0; self.daily_total = 0; self.loss_streak = 0
             self.session_blocked = False; self.block_until_ts = 0; self.pending_gale = {}
             self.auto_candidate = None; self.auto_candidate_key = None
-            self.asset_cooldown = {} # Limpa cooldowns
+            self.asset_cooldown = {} 
             self.log_to_db("🚀 Nova sessão diária", "SYSTEM")
 
     def check_daily_limits(self):
@@ -769,13 +699,11 @@ class SimpleBot:
             self.log_to_db(f"❌ Limite losses ({self.daily_losses})", "ERROR"); return False
         return True
 
-    # ✅ SAFE BUY COM LOCK (Crítico para não travar API)
     def safe_buy(self, asset, amount, direction, prefer_binary=True):
         if self.config["mode"] == "OBSERVE": return True, "VIRTUAL"
         try:
             with self.api_lock:
                 status, trade_id = self.api.buy(amount, asset, direction, 1)
-            
             if status and trade_id: return True, trade_id
             self.log_to_db(f"⚠️ Binária falhou (ID nulo).", "WARNING")
             return False, None
@@ -800,14 +728,28 @@ class SimpleBot:
         candidates.sort(key=lambda x: x["score"], reverse=True)
         return candidates[0]
 
+    def launch_trade(self, **kwargs):
+        t = threading.Thread(target=self.execute_trade, kwargs=kwargs, daemon=True)
+        t.start()
+
     def execute_trade(self, asset, direction, strategy_key, strategy_label, prefer_binary=False, gale_level=0):
-        # ✅ COOLDOWN CHECK (Anti-Revenge)
-        # Só bloqueia entradas normais (G0). Gale (G1+) pode operar para recuperar.
-        if gale_level == 0 and time.time() < self.asset_cooldown.get(asset, 0):
-            return
+        if gale_level == 0 and time.time() < self.asset_cooldown.get(asset, 0): return
 
         entry_dt = datetime.now(BR_TIMEZONE)
         now = time.time()
+        
+        # ✅ SMART GLOBAL LOCK: Reserva sem travar, só trava se confirmar ordem
+        global_minute = entry_dt.strftime("%Y%m%d%H%M")
+        reserved_minute = False
+        
+        if gale_level == 0:
+            with self.trade_lock:
+                # ✅ MAX ACTIVE TRADES CHECK (G0)
+                if len(self.active_trades) >= 1: return
+                
+                if self.last_global_minute == global_minute: return
+                reserved_minute = True
+
         if gale_level == 0:
             if asset in self.last_trade_time and now - self.last_trade_time[asset] < 60: return
             self.last_trade_time[asset] = now
@@ -831,7 +773,8 @@ class SimpleBot:
             if not self.check_daily_limits():
                 self.session_blocked = True
                 self.log_to_db("⛔ Limite diário atingido. Pausando.", "WARNING")
-                try: self.supabase.table("bot_config").update({"status": "PAUSED"}).eq("id", 1).execute()
+                try: 
+                    with self.db_lock: self.supabase.table("bot_config").update({"status": "PAUSED"}).eq("id", 1).execute()
                 except: pass
                 return
 
@@ -845,11 +788,8 @@ class SimpleBot:
             balance_before = 0.0
             if self.config["mode"] == "LIVE":
                 try:
-                    # ✅ API LOCK
-                    with self.api_lock:
-                        balance_before = self.api.get_balance()
-                    if balance_before <= 0:
-                        self.log_to_db("❌ Saldo inválido", "ERROR"); return
+                    with self.api_lock: balance_before = self.api.get_balance()
+                    if balance_before <= 0: self.log_to_db("❌ Saldo inválido", "ERROR"); return
                 except: return
 
             status, trade_id = self.safe_buy(asset, amount, direction, prefer_binary=prefer_binary)
@@ -857,6 +797,10 @@ class SimpleBot:
                 self.log_to_db(f"❌ ORDEM RECUSADA: {asset}", "ERROR")
                 self.update_signal(signal_id, "FAILED", "FAILED", 0)
                 return
+            
+            # ✅ CONFIRM GLOBAL LOCK (Só trava se ordem entrou)
+            if gale_level == 0 and reserved_minute:
+                with self.trade_lock: self.last_global_minute = global_minute
 
             self.log_to_db(f"✅ CONFIRMADA: Ordem {trade_id}. Aguardando...", "INFO")
             time.sleep(70)
@@ -864,9 +808,7 @@ class SimpleBot:
             res_str = "UNKNOWN"; profit = 0.0
             if self.config["mode"] == "OBSERVE":
                 try:
-                    # ✅ API LOCK
-                    with self.api_lock:
-                        candles = self.api.get_candles(asset, 60, 2, int(time.time()))
+                    with self.api_lock: candles = self.api.get_candles(asset, 60, 2, int(time.time()))
                     last_closed = candles[-2]
                     is_win = (direction == "call" and last_closed["close"] > last_closed["open"]) or (direction == "put" and last_closed["close"] < last_closed["open"])
                     if is_win: res_str = "WIN"; profit = amount * 0.87
@@ -876,9 +818,7 @@ class SimpleBot:
                 except: res_str = "UNKNOWN"
             else:
                 try:
-                    # ✅ API LOCK
-                    with self.api_lock:
-                        balance_after = self.api.get_balance()
+                    with self.api_lock: balance_after = self.api.get_balance()
                     delta = balance_after - balance_before
                     if delta > 0.01: res_str = "WIN"; profit = delta
                     elif delta < -0.01: res_str = "LOSS"; profit = delta
@@ -898,13 +838,9 @@ class SimpleBot:
                 if asset in self.pending_gale: del self.pending_gale[asset]
             elif res_str == "LOSS":
                 self.daily_losses += 1; self.loss_streak += 1
-                
-                # ✅ COOLDOWN: 3 minutos de geladeira no ativo após LOSS
                 self.asset_cooldown[asset] = time.time() + 180
-
                 if gale_level == 0 and self.config.get("martingale_enabled", True):
                     next_minute = (entry_dt + timedelta(minutes=1)).strftime("%Y%m%d%H%M")
-                    # ✅ GALE SYNC: Força execução no ENTRY_SECOND fixo
                     entry_sec = ENTRY_SECOND
                     self.log_to_db(f"🎯 GALE G1 ARMADO para {asset} (Min: {next_minute} Sec: {entry_sec})", "WARNING")
                     self.pending_gale[asset] = {
@@ -925,7 +861,8 @@ class SimpleBot:
             if not self.check_daily_limits():
                 self.log_to_db("🛑 Limite diário atingido — PAUSANDO", "WARNING")
                 self.session_blocked = True
-                try: self.supabase.table("bot_config").update({"status": "PAUSED"}).eq("id", 1).execute()
+                try: 
+                    with self.db_lock: self.supabase.table("bot_config").update({"status": "PAUSED"}).eq("id", 1).execute()
                 except: pass
         finally:
             with self.trade_lock: self.active_trades.discard(asset)
@@ -948,17 +885,13 @@ class SimpleBot:
 
         while True:
             try:
-                # ✅ HEARTBEAT SAFE (1x a cada 30s, sem spam)
                 if time.time() - self.last_heartbeat_ts >= 30:
-                    self.last_heartbeat_ts = time.time()
-                    self.touch_watchdog()
+                    self.last_heartbeat_ts = time.time(); self.touch_watchdog()
 
                 self.reset_daily_if_needed()
                 
-                # ✅ THROTTLING CONFIG FETCH (A cada 5s)
                 if time.time() - self.last_config_ts >= 5:
-                    self.fetch_config()
-                    self.last_config_ts = time.time()
+                    self.fetch_config(); self.last_config_ts = time.time()
 
                 self.check_schedule()
                 if self.config["status"] == "PAUSED": time.sleep(2); continue
@@ -967,11 +900,8 @@ class SimpleBot:
                 if not self.api or not self.api.check_connect():
                     if not self.connect(): time.sleep(5); continue
                 
-                # ✅ Verifica se precisa calibrar (Inicio ou a cada 2h)
-                if (time.time() - self.last_calibration_time) > 7200:
-                    self.calibrate_market()
+                if (time.time() - self.last_calibration_time) > 7200: self.calibrate_market()
 
-                # ✅ Execução de GALE
                 executed_gale = False
                 if self.pending_gale:
                     now_dt = datetime.now(BR_TIMEZONE)
@@ -983,10 +913,10 @@ class SimpleBot:
                         if not g: continue
                         if g.get("minute_key") != current_key: continue
                         sec_target = int(g.get("second_key", ENTRY_SECOND))
-                        if not (sec_target - 1 <= now_sec <= sec_target + 1): continue
+                        if not (sec_target - 3 <= now_sec <= sec_target + 3): continue
                         del self.pending_gale[asset]
                         self.log_to_db(f"🚀 EXECUTANDO GALE G1: {asset} (SYNC {current_key} @{sec_target}s)", "INFO")
-                        self.execute_trade(
+                        self.launch_trade(
                             asset=g['asset'], direction=g['direction'], strategy_key=g['strategy_key'],
                             strategy_label=g['strategy_label'], prefer_binary=g['prefer_binary'], gale_level=1
                         )
@@ -1006,8 +936,7 @@ class SimpleBot:
 
                 current_minute_key = now_dt.strftime("%Y%m%d%H%M")
                 if self.auto_candidate_key != current_minute_key:
-                    self.auto_candidate = None
-                    self.auto_candidate_key = current_minute_key
+                    self.auto_candidate = None; self.auto_candidate_key = current_minute_key
 
                 # FASE 1: SHOCK LIVE
                 if ENTRY_SECOND <= now_sec <= ENTRY_SECOND + 2:
@@ -1018,9 +947,7 @@ class SimpleBot:
                             with self.trade_lock:
                                 if asset in self.active_trades: continue
                             try:
-                                # ✅ API LOCK
-                                with self.api_lock:
-                                    candles = self.api.get_candles(asset, 60, 60, int(time.time()))
+                                with self.api_lock: candles = self.api.get_candles(asset, 60, 60, int(time.time()))
                                 if not candles: continue
                                 sig, reason, dbg = ShockLiveDetector.detect(candles, asset)
                                 if strat_mode == "SHOCK_REVERSAL": self.log_to_db(f"⚡ SHOCK_CHECK {asset}: {reason}", "DEBUG")
@@ -1036,25 +963,21 @@ class SimpleBot:
                                              self.auto_candidate = cand; self.auto_candidate_key = current_minute_key
                                         self.log_to_db(f"🤖 AUTO_CANDIDATE(SHOCK) {asset} Score={cand['score']:.2f}", "SYSTEM")
                                         
-                                        # ✅ FIX: Se a entrada for tardia (>=53s), a Fase 2 não roda.
-                                        # Executa imediatamente para não perder o sinal.
                                         if ENTRY_SECOND >= 53:
                                             self.log_to_db(f"⚡ AUTO_EXEC (Late Entry) {asset}", "SYSTEM")
-                                            self.execute_trade(
+                                            self.launch_trade(
                                                 asset=cand["asset"], direction=cand["direction"], strategy_key=cand["strategy"],
                                                 strategy_label=cand["label"], prefer_binary=cand["prefer_binary"], gale_level=0
                                             )
-                                            self.auto_candidate = None
+                                            self.auto_candidate = None; break 
 
                                     elif strat_mode == "SHOCK_REVERSAL":
-                                         self.execute_trade(asset=asset, direction=sig, strategy_key="SHOCK_REVERSAL", strategy_label=reason, prefer_binary=True, gale_level=0)
+                                         self.launch_trade(asset=asset, direction=sig, strategy_key="SHOCK_REVERSAL", strategy_label=reason, prefer_binary=True, gale_level=0)
                                          break
                             except: pass
 
                 # FASE 2: ESTRATÉGIAS DE FECHAMENTO (55-59s)
-                # ✅ Proteção de Conflito: Não roda se a entrada do Shock for muito tarde (>=53s)
                 if 55 <= now_sec <= 59 and ENTRY_SECOND < 53:
-                    # MODO FORÇADO (Uma estratégia específica)
                     if strat_mode in ["TENDMAX", "V2_TREND", "TSUNAMI_FLOW", "VOLUME_REACTOR"]:
                         trade_executed = False
                         random_assets = self.best_assets.copy()
@@ -1063,24 +986,20 @@ class SimpleBot:
                             with self.trade_lock:
                                 if asset in self.active_trades: continue
                             try:
-                                # ✅ API LOCK
-                                with self.api_lock:
-                                    candles = self.api.get_candles(asset, 60, 60, int(time.time()))
+                                with self.api_lock: candles = self.api.get_candles(asset, 60, 60, int(time.time()))
                                 if not candles: continue
                                 sig, reason = self.check_strategy_signal(strat_mode, candles)
                                 if sig:
-                                    self.execute_trade(asset, sig, strat_mode, reason, prefer_binary=True, gale_level=0)
+                                    self.launch_trade(asset=asset, direction=sig, strategy_key=strat_mode, strategy_label=reason, prefer_binary=True, gale_level=0)
                                     trade_executed = True; break
                             except: pass
                         if trade_executed: time.sleep(1); continue
 
-                    # MODO AUTO INTELIGENTE (Usa o mapa da calibração)
                     if strat_mode == "AUTO":
                         candidates = []
                         if self.auto_candidate and self.auto_candidate_key == current_minute_key:
                              candidates.append(self.auto_candidate)
 
-                        # Usa chaves do mapa se disponíveis (são os ativos calibrados), senão usa pool
                         assets_to_scan = list(self.asset_strategy_map.keys()) if self.asset_strategy_map else self.best_assets
                         random.shuffle(assets_to_scan)
 
@@ -1088,26 +1007,18 @@ class SimpleBot:
                             with self.trade_lock:
                                 if asset in self.active_trades: continue
                             try:
-                                # Define a estratégia alvo para este ativo (do mapa de calibração)
                                 target_info = self.asset_strategy_map.get(asset, {"strategy": "V2_TREND", "score": 1.0})
                                 target_strat = target_info["strategy"]
-                                
-                                # ✅ API LOCK
-                                with self.api_lock:
-                                    candles = self.api.get_candles(asset, 60, 60, int(time.time()))
+                                with self.api_lock: candles = self.api.get_candles(asset, 60, 60, int(time.time()))
                                 if not candles: continue
-
                                 sig, lbl = self.check_strategy_signal(target_strat, candles)
                                 if sig:
-                                     # Boost de Confiança baseado no Score da Calibração
                                      boost = min(0.15, target_info["score"] / 10.0)
                                      confidence = 0.70 + boost
-                                     
                                      candidates.append({
                                         "asset": asset, "direction": sig, "strategy": target_strat,
                                         "label": lbl, "confidence": confidence,
-                                        "wr": self.get_strategy_wr(target_strat), 
-                                        "prefer_binary": True 
+                                        "wr": self.get_strategy_wr(target_strat), "prefer_binary": True 
                                     })
                             except: pass
                         
@@ -1115,17 +1026,15 @@ class SimpleBot:
                              best = self.pick_best_candidate(candidates)
                              if best:
                                   self.log_to_db(f"🤖 AUTO_DECISION {best['strategy']}::{best['label']} {best['asset']} {best['direction'].upper()}", "SYSTEM")
-                                  self.execute_trade(
+                                  self.launch_trade(
                                       asset=best["asset"], direction=best["direction"], strategy_key=best["strategy"],
                                       strategy_label=best["label"], prefer_binary=best["prefer_binary"], gale_level=0
                                   )
-                                  self.auto_candidate = None
-                                  time.sleep(2)
+                                  self.auto_candidate = None; time.sleep(2)
 
                 time.sleep(0.25)
             except Exception as e:
-                self.log_to_db(f"Erro loop principal: {e}", "ERROR")
-                time.sleep(3)
+                self.log_to_db(f"Erro loop principal: {e}", "ERROR"); time.sleep(3)
 
 if __name__ == "__main__":
     SimpleBot().start()
