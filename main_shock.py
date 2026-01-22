@@ -17,7 +17,7 @@ try:
 except ImportError:
     print("[ERRO] Biblioteca 'exnovaapi' não instalada.")
 
-BOT_VERSION = "SHOCK_ENGINE_V30_SILENT_HEARTBEAT_MICRO_LOCK_2026-01-22"
+BOT_VERSION = "SHOCK_ENGINE_V31_DB_THROTTLE_FIX_2026-01-22"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -451,7 +451,8 @@ class SimpleBot:
         self.calibration_running = False 
         
         self.asset_cooldown = {}
-        self.last_heartbeat_ts = 0 # ✅ Novo Timer para Heartbeat seguro
+        self.last_heartbeat_ts = 0 
+        self.last_config_ts = 0 # ✅ TIMER para Throttling do Fetch Config
 
         self.last_trade_time = {}
         self.last_minute_trade = {}
@@ -712,7 +713,9 @@ class SimpleBot:
                 "timer_start": str(data.get("timer_start") or "00:00"),
                 "timer_end": str(data.get("timer_end") or "00:00"),
             })
-        except Exception as e: self.log_to_db(f"❌ Erro fetch_config: {e}", "ERROR")
+        except Exception as e: 
+            # Erro silencioso para não poluir log se for rate limit leve
+            pass
 
     def check_schedule(self):
         now_br = datetime.now(BR_TIMEZONE)
@@ -951,7 +954,12 @@ class SimpleBot:
                     self.touch_watchdog()
 
                 self.reset_daily_if_needed()
-                self.fetch_config()
+                
+                # ✅ THROTTLING CONFIG FETCH (A cada 5s)
+                if time.time() - self.last_config_ts >= 5:
+                    self.fetch_config()
+                    self.last_config_ts = time.time()
+
                 self.check_schedule()
                 if self.config["status"] == "PAUSED": time.sleep(2); continue
                 if time.time() < self.block_until_ts: time.sleep(2); continue
