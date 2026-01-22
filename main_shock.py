@@ -5,6 +5,7 @@ import json
 import threading
 import os
 import random
+import math
 import requests
 from datetime import datetime, timedelta, timezone
 from collections import deque
@@ -16,7 +17,7 @@ try:
 except ImportError:
     print("[ERRO] Biblioteca 'exnovaapi' não instalada.")
 
-BOT_VERSION = "SHOCK_ENGINE_V23_OPTIMIZED_SAFE_2026-01-21"
+BOT_VERSION = "SHOCK_ENGINE_V27_THREAD_SAFE_FINAL_2026-01-22"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -124,6 +125,10 @@ class TechnicalAnalysis:
         lower_wick = min(open_p, close_p) - low_p
         color = "green" if close_p > open_p else "red" if close_p < open_p else "doji"
         rng = high_p - low_p
+        
+        # Safe volume check
+        vol = candle.get("volume", 0)
+        
         return {
             "color": color,
             "body": body,
@@ -134,6 +139,7 @@ class TechnicalAnalysis:
             "max": high_p,
             "min": low_p,
             "range": rng,
+            "volume": vol
         }
 
     @staticmethod
@@ -146,16 +152,6 @@ class TechnicalAnalysis:
         avg_body = sum(bodies) / len(bodies) if bodies else 0.00001
         spread = abs(ema9 - ema21)
         return spread < (avg_body * 0.15)
-
-    @staticmethod
-    def engulf_filter(candles, direction):
-        last = TechnicalAnalysis.analyze_candle(candles[-2])
-        prev = TechnicalAnalysis.analyze_candle(candles[-3])
-        if direction == "call":
-            return (last["color"] == "green" and prev["color"] == "red" and last["body"] >= prev["body"] * 0.6)
-        if direction == "put":
-            return (last["color"] == "red" and prev["color"] == "green" and last["body"] >= prev["body"] * 0.6)
-        return False
 
     @staticmethod
     def get_signal_v2(candles):
@@ -306,12 +302,114 @@ class TendMaxStrategy:
         return None, "Sem cruzamento"
 
 
-class MarketRegimeClassifier:
+class TsunamiFlowStrategy:
+    """
+    🌊 TSUNAMI FLOW: Estratégia de seguimento de tendência e momentum.
+    Refinado: Agora verifica pavio de rejeição com wick/range para evitar falsos positivos em corpos pequenos.
+    """
     @staticmethod
-    def classify(candles):
-        if not candles or len(candles) < 50: return "RANGE"
-        if TechnicalAnalysis.check_compression(candles): return "NO_TRADE"
-        return "TREND"
+    def get_signal(candles):
+        if len(candles) < 55:
+            return None, "Dados insuficientes"
+
+        # Usa velas fechadas
+        c1 = TechnicalAnalysis.analyze_candle(candles[-2]) # Última fechada (Trigger)
+        c2 = TechnicalAnalysis.analyze_candle(candles[-3])
+        c3 = TechnicalAnalysis.analyze_candle(candles[-4])
+
+        ema50 = TechnicalAnalysis.calculate_ema(candles[:-1], 50)
+
+        # Regra de Fluxo de Alta
+        if c1["color"] == "green" and c2["color"] == "green" and c3["color"] == "green":
+            # Filtro: Corpo aumentando (C1 > C2)
+            if c1["body"] > c2["body"]:
+                # Filtro: Acima da EMA50
+                if c1["close"] > ema50:
+                    # ✅ Filtro de Pavio (Otimizado): Wick/Range para realismo OTC
+                    rejection = c1["upper_wick"] / c1["range"] if c1["range"] > 0 else 0
+                    if rejection > 0.35:
+                        return None, "Rejeição alta no topo"
+
+                    # Filtro anti-exaustão: C1 não pode ser absurdamente grande
+                    avg_body = (c2["body"] + c3["body"]) / 2
+                    if c1["body"] < avg_body * 3.0:
+                        return "call", "TSUNAMI_FLOW_UP"
+
+        # Regra de Fluxo de Baixa
+        if c1["color"] == "red" and c2["color"] == "red" and c3["color"] == "red":
+            if c1["body"] > c2["body"]:
+                if c1["close"] < ema50:
+                    # ✅ Filtro de Pavio (Otimizado)
+                    rejection = c1["lower_wick"] / c1["range"] if c1["range"] > 0 else 0
+                    if rejection > 0.35:
+                        return None, "Rejeição alta no fundo"
+
+                    avg_body = (c2["body"] + c3["body"]) / 2
+                    if c1["body"] < avg_body * 3.0:
+                        return "put", "TSUNAMI_FLOW_DOWN"
+
+        return None, "Sem fluxo"
+
+
+class VolumeReactorStrategy:
+    """
+    ☢️ VOLUME REACTOR (HÍBRIDO): Estratégia de Exaustão.
+    Se volume estiver disponível, usa VSA.
+    Se volume for zero (OTC comum), usa Range Analysis (Tamanho da vela + Pavio).
+    """
+    @staticmethod
+    def get_signal(candles):
+        if len(candles) < 30:
+            return None, "Dados insuficientes"
+            
+        c1 = TechnicalAnalysis.analyze_candle(candles[-2]) # Última fechada
+        
+        # Extrai volumes
+        volumes = [c.get("volume", 0) for c in candles[-22:-2]] # 20 anteriores
+        
+        has_real_volume = sum(volumes) > 10 # Verifica se tem dados reais
+        avg_vol = sum(volumes) / len(volumes) if has_real_volume else 0
+        
+        # Lógica Híbrida
+        is_exhaustion = False
+        signal_type = None
+        label = ""
+
+        # MODO 1: Com Volume
+        if has_real_volume:
+            if c1["volume"] > (avg_vol * 2.0):
+                is_exhaustion = True
+                label = "VOL_CLIMAX"
+        
+        # MODO 2: Sem Volume (Range + Pavio)
+        else:
+            # Calcula média de range das últimas 20 velas
+            ranges = [(c["max"] - c["min"]) for c in candles[-22:-2]]
+            avg_range = sum(ranges) / len(ranges) if ranges else 0.00001
+            
+            # Se a vela atual for 2.5x maior que a média -> Exaustão potencial
+            if c1["range"] > (avg_range * 2.5):
+                is_exhaustion = True
+                label = "RANGE_CLIMAX"
+
+        if not is_exhaustion:
+            return None, "Sem exaustão"
+
+        # Gatilho de Reversão: Precisa ter pavio contra o movimento
+        # Alta -> Put
+        if c1["color"] == "green":
+            rejection_ratio = c1["upper_wick"] / c1["range"] if c1["range"] > 0 else 0
+            if rejection_ratio > 0.25: # Pavio considerável no topo
+                return "put", f"REACTOR_{label}_TOP"
+
+        # Baixa -> Call
+        if c1["color"] == "red":
+            rejection_ratio = c1["lower_wick"] / c1["range"] if c1["range"] > 0 else 0
+            if rejection_ratio > 0.25: # Pavio considerável no fundo
+                return "call", f"REACTOR_{label}_BOTTOM"
+                
+        return None, "Sem padrão reactor"
+
 
 # ==============================================================================
 # BOT
@@ -323,6 +421,7 @@ class SimpleBot:
         self.supabase = None
 
         self.trade_lock = threading.RLock()
+        self.api_lock = threading.RLock() # ✅ LOCK PARA API (Thread Safety)
         self.active_trades = set()
 
         self.config = {
@@ -348,6 +447,11 @@ class SimpleBot:
 
         self.best_assets = []
         self.last_catalog_time = 0
+        self.last_calibration_time = 0
+        self.asset_strategy_map = {} 
+        self.calibration_running = False 
+        
+        self.asset_cooldown = {}
 
         self.last_trade_time = {}
         self.last_minute_trade = {}
@@ -358,7 +462,6 @@ class SimpleBot:
         
         self.pending_gale = {}
 
-        # ✅ FIX: Inicialização correta de variáveis
         self.auto_candidate = None
         self.auto_candidate_key = None
 
@@ -366,14 +469,8 @@ class SimpleBot:
             "SHOCK_REVERSAL": deque(maxlen=20),
             "V2_TREND": deque(maxlen=20),
             "TENDMAX": deque(maxlen=20),
-        }
-
-        self.strategy_performance = {
-            "TREND_STRONG": {'wins': 0, 'losses': 0, 'consecutive_losses': 0, 'active': True},
-            "TREND_WEAK": {'wins': 0, 'losses': 0, 'consecutive_losses': 0, 'active': True},
-            "SHOCK_REVERSAL": {'wins': 0, 'losses': 0, 'consecutive_losses': 0, 'active': True},
-            "TENDMAX": {'wins': 0, 'losses': 0, 'consecutive_losses': 0, 'active': True},
-            "RANGE": {'wins': 0, 'losses': 0, 'consecutive_losses': 0, 'active': False}
+            "TSUNAMI_FLOW": deque(maxlen=20),
+            "VOLUME_REACTOR": deque(maxlen=20),
         }
 
         self.init_supabase()
@@ -406,12 +503,106 @@ class SimpleBot:
         except:
             pass
 
-    # ✅ FIX CRÍTICO: Logging de erro e Fallback para inserção
+    def check_strategy_signal(self, strategy_name, candles):
+        if strategy_name == "TENDMAX":
+            return TendMaxStrategy.get_signal(candles)
+        elif strategy_name == "V2_TREND":
+            if not TechnicalAnalysis.check_compression(candles):
+                return TechnicalAnalysis.get_signal_v2(candles)
+        elif strategy_name == "TSUNAMI_FLOW":
+            return TsunamiFlowStrategy.get_signal(candles)
+        elif strategy_name == "VOLUME_REACTOR":
+            return VolumeReactorStrategy.get_signal(candles)
+        return None, None
+
+    # ✅ CALIBRAÇÃO EM THREAD (Safe & Non-Blocking)
+    def calibrate_market(self):
+        if self.calibration_running:
+            return
+        
+        # ✅ FLAG SETADA ANTES DO START (Anti-Race Condition)
+        self.calibration_running = True
+        
+        self.log_to_db("🔬 Disparando Thread de Calibração...", "SYSTEM")
+        t = threading.Thread(target=self._run_calibration_task, daemon=True)
+        t.start()
+
+    def _run_calibration_task(self):
+        # (Flag já setada no caller)
+        try:
+            strategies = ["V2_TREND", "TENDMAX", "TSUNAMI_FLOW", "VOLUME_REACTOR"]
+            
+            if not self.best_assets:
+                 assets_pool = [
+                    "EURUSD-OTC", "EURGBP-OTC", "USDCHF-OTC", "EURJPY-OTC",
+                    "NZDUSD-OTC", "GBPUSD-OTC", "GBPJPY-OTC", "USDJPY-OTC",
+                    "AUDCAD-OTC", "AUDUSD-OTC", "USDCAD-OTC", "AUDJPY-OTC"
+                ]
+                 self.best_assets = self.catalog_assets(assets_pool)
+
+            assets = self.best_assets
+            new_map = {}
+            
+            for asset in assets:
+                try:
+                    # ✅ API LOCK PARA EVITAR CONFLITO COM O LOOP PRINCIPAL
+                    with self.api_lock:
+                        candles = self.api.get_candles(asset, 60, 150, int(time.time()))
+                        
+                    if not candles or len(candles) < 100: continue
+                    
+                    scores = {s: {'wins': 0, 'total': 0} for s in strategies}
+                    
+                    for i in range(60, len(candles)-1):
+                        window = candles[i-60 : i+1]
+                        result_candle = candles[i+1]
+                        
+                        for s in strategies:
+                            sig, _ = self.check_strategy_signal(s, window)
+                            if sig:
+                                scores[s]['total'] += 1
+                                is_win = False
+                                if sig == "call" and result_candle["close"] > result_candle["open"]: is_win = True
+                                if sig == "put" and result_candle["close"] < result_candle["open"]: is_win = True
+                                
+                                if is_win: scores[s]['wins'] += 1
+                    
+                    best_s = None
+                    best_score = -1
+                    
+                    for s, stats in scores.items():
+                        total = stats['total']
+                        if total > 0:
+                            wr = stats['wins'] / total
+                            score = wr * math.sqrt(total)
+                            
+                            if total >= 8 and wr >= 0.52 and score > best_score:
+                                best_score = score
+                                best_s = s
+                    
+                    if best_s:
+                        # ✅ Salva Score junto com a estratégia
+                        new_map[asset] = {"strategy": best_s, "score": best_score}
+                        self.log_to_db(f"✅ {asset} -> {best_s} (Score: {best_score:.2f} | WR: {scores[best_s]['wins']/scores[best_s]['total']:.2f})", "DEBUG")
+                    else:
+                        new_map[asset] = {"strategy": "V2_TREND", "score": 1.0}
+                
+                except Exception as e:
+                    pass
+            
+            self.asset_strategy_map = new_map
+            self.last_calibration_time = time.time()
+            self.log_to_db(f"🏁 Calibração concluída. {len(new_map)} pares mapeados.", "SUCCESS")
+        
+        except Exception as e:
+            self.log_to_db(f"❌ Erro na Thread de Calibração: {e}", "ERROR")
+        
+        finally:
+            self.calibration_running = False
+
     def insert_signal(self, asset, direction, strategy_name, amount):
         if not self.supabase:
             return None
-        
-        # Dados padrão
         payload = {
             "pair": asset,
             "direction": direction,
@@ -422,49 +613,29 @@ class SimpleBot:
             "created_at": datetime.now(timezone.utc).isoformat(),
             "amount": amount, 
         }
-
         try:
-            # Tentativa 1: Com amount
             res = self.supabase.table("trade_signals").insert(payload).execute()
-            if res.data:
-                return res.data[0].get("id")
-        except Exception as e:
-            self.log_to_db(f"⚠️ Erro Insert Supabase (Tentando sem amount): {e}", "WARNING")
-            
+            if res.data: return res.data[0].get("id")
+        except:
             try:
-                # Tentativa 2: Sem amount (caso a coluna não exista no banco)
                 del payload["amount"]
                 res = self.supabase.table("trade_signals").insert(payload).execute()
-                if res.data:
-                    return res.data[0].get("id")
-            except Exception as e2:
-                self.log_to_db(f"❌ Erro Crítico Insert Supabase: {e2}", "ERROR")
-        
+                if res.data: return res.data[0].get("id")
+            except: pass
         return None
 
     def update_signal(self, signal_id, status, result, profit):
-        if not self.supabase or not signal_id:
-            return
+        if not self.supabase or not signal_id: return
         try:
-            self.supabase.table("trade_signals").update(
-                {
-                    "status": status,
-                    "result": result,
-                    "profit": profit,
-                }
-            ).eq("id", signal_id).execute()
-        except Exception as e:
-            self.log_to_db(f"❌ Erro Update Supabase: {e}", "ERROR")
+            self.supabase.table("trade_signals").update({"status": status, "result": result, "profit": profit}).eq("id", signal_id).execute()
+        except: pass
 
     def connect(self):
         self.log_to_db("🔌 Conectando...", "SYSTEM")
         try:
             if self.api:
-                try:
-                    self.api.api.close()
-                except:
-                    pass
-
+                try: self.api.api.close()
+                except: pass
             self.api = Exnova(EXNOVA_EMAIL, EXNOVA_PASSWORD)
             ok, reason = self.api.connect()
             if ok:
@@ -486,202 +657,139 @@ class SimpleBot:
         except: pass
 
     def fetch_config(self):
-        if not self.supabase:
-            self.init_supabase()
-            return
+        if not self.supabase: self.init_supabase(); return
         try:
             res = self.supabase.table("bot_config").select("*").eq("id", 1).execute()
             if not res.data:
                 self.supabase.table("bot_config").insert({"id": 1, "status": "PAUSED"}).execute()
                 return
-
             data = res.data[0]
-
             new_status = (data.get("status") or "PAUSED").strip().upper()
             new_mode = (data.get("mode") or "LIVE").strip().upper()
-
             db_raw_strat = data.get("strategy_mode")
             db_strat = (str(db_raw_strat) or "AUTO").strip().upper().replace(" ", "_")
-
-            if "SHOCK" in db_strat:
-                strat = "SHOCK_REVERSAL"
-            elif "TENDMAX" in db_strat:
-                strat = "TENDMAX"
-            elif "V2" in db_strat or "EMA" in db_strat or "AGGRESSIVE" in db_strat:
-                strat = "V2_TREND"
-            elif "AUTO" in db_strat:
-                strat = "AUTO"
-            else:
-                strat = "AUTO"
-
-            self.config.update(
-                {
-                    "status": new_status,
-                    "mode": new_mode,
-                    "strategy_mode": strat,
-                    "account_type": (data.get("account_type") or "PRACTICE").strip().upper(),
-                    "entry_value": float(data.get("entry_value") or 1.0),
-                    "max_trades_per_day": int(data.get("max_trades_per_day") or 0),
-                    "max_wins_per_day": int(data.get("max_wins_per_day") or 0),
-                    "max_losses_per_day": int(data.get("max_losses_per_day") or 0),
-                    "timer_enabled": bool(data.get("timer_enabled")),
-                    "timer_start": str(data.get("timer_start") or "00:00"),
-                    "timer_end": str(data.get("timer_end") or "00:00"),
-                }
-            )
-        except Exception as e:
-            self.log_to_db(f"❌ Erro fetch_config: {e}", "ERROR")
+            if "SHOCK" in db_strat: strat = "SHOCK_REVERSAL"
+            elif "TENDMAX" in db_strat: strat = "TENDMAX"
+            elif "V2" in db_strat: strat = "V2_TREND"
+            elif "TSUNAMI" in db_strat: strat = "TSUNAMI_FLOW"
+            elif "REACTOR" in db_strat or "VOLUME" in db_strat: strat = "VOLUME_REACTOR"
+            elif "AUTO" in db_strat: strat = "AUTO"
+            else: strat = "AUTO"
+            self.config.update({
+                "status": new_status, "mode": new_mode, "strategy_mode": strat,
+                "account_type": (data.get("account_type") or "PRACTICE").strip().upper(),
+                "entry_value": float(data.get("entry_value") or 1.0),
+                "max_trades_per_day": int(data.get("max_trades_per_day") or 0),
+                "max_wins_per_day": int(data.get("max_wins_per_day") or 0),
+                "max_losses_per_day": int(data.get("max_losses_per_day") or 0),
+                "timer_enabled": bool(data.get("timer_enabled")),
+                "timer_start": str(data.get("timer_start") or "00:00"),
+                "timer_end": str(data.get("timer_end") or "00:00"),
+            })
+        except Exception as e: self.log_to_db(f"❌ Erro fetch_config: {e}", "ERROR")
 
     def check_schedule(self):
         now_br = datetime.now(BR_TIMEZONE)
         now_str = now_br.strftime("%H:%M")
         start_str = self.config.get("timer_start", "00:00")
         end_str = self.config.get("timer_end", "00:00")
-
         hour = now_br.hour
         minute = now_br.minute
-        
-        # ✅ FIX SCHEDULER: Forçar PAUSED em horários bloqueados
         blocked_time = False
-        if 0 <= hour < 4:
-            blocked_time = True
-        if hour == 13 and minute >= 30:
-            blocked_time = True
-        if hour == 14 and minute <= 30:
-            blocked_time = True
-            
+        if 0 <= hour < 4: blocked_time = True
+        if hour == 13 and minute >= 30: blocked_time = True
+        if hour == 14 and minute <= 30: blocked_time = True
         if blocked_time:
             if self.config["status"] == "RUNNING":
                 self.log_to_db("⛔ Horário bloqueado — PAUSANDO", "WARNING")
                 try:
                     self.supabase.table("bot_config").update({"status": "PAUSED"}).eq("id", 1).execute()
                     self.config["status"] = "PAUSED"
-                except:
-                    pass
+                except: pass
             return
-
-        if not self.config.get("timer_enabled", False):
-            return
-
+        if not self.config.get("timer_enabled", False): return
         is_inside = False
-        if start_str < end_str:
-            is_inside = start_str <= now_str < end_str
-        else:
-            is_inside = now_str >= start_str or now_str < end_str
-
+        if start_str < end_str: is_inside = start_str <= now_str < end_str
+        else: is_inside = now_str >= start_str or now_str < end_str
         if is_inside and self.config["status"] == "PAUSED":
             self.log_to_db(f"⏰ Agendador: RUNNING ({start_str}-{end_str})", "SYSTEM")
-            try:
-                self.supabase.table("bot_config").update({"status": "RUNNING"}).eq("id", 1).execute()
-            except:
-                pass
-
+            try: self.supabase.table("bot_config").update({"status": "RUNNING"}).eq("id", 1).execute()
+            except: pass
         if (not is_inside) and self.config["status"] == "RUNNING":
             self.log_to_db("⏰ Agendador: PAUSED (fim)", "SYSTEM")
-            try:
-                self.supabase.table("bot_config").update({"status": "PAUSED"}).eq("id", 1).execute()
-            except:
-                pass
+            try: self.supabase.table("bot_config").update({"status": "PAUSED"}).eq("id", 1).execute()
+            except: pass
 
     def reset_daily_if_needed(self):
         today = datetime.now(BR_TIMEZONE).date()
         if today != self.current_date:
             self.current_date = today
-            self.daily_wins = 0
-            self.daily_losses = 0
-            self.daily_total = 0
-            self.loss_streak = 0
-            self.session_blocked = False
-            self.block_until_ts = 0
-            self.pending_gale = {} 
-            self.auto_candidate = None
-            self.auto_candidate_key = None
+            self.daily_wins = 0; self.daily_losses = 0; self.daily_total = 0; self.loss_streak = 0
+            self.session_blocked = False; self.block_until_ts = 0; self.pending_gale = {}
+            self.auto_candidate = None; self.auto_candidate_key = None
+            self.asset_cooldown = {} # Limpa cooldowns
             self.log_to_db("🚀 Nova sessão diária", "SYSTEM")
 
     def check_daily_limits(self):
-        if self.config["mode"] == "OBSERVE":
-            return True
-
+        if self.config["mode"] == "OBSERVE": return True
         if self.config["max_trades_per_day"] > 0 and self.daily_total >= self.config["max_trades_per_day"]:
-            self.log_to_db(f"🛑 Limite trades ({self.daily_total})", "WARNING")
-            return False
+            self.log_to_db(f"🛑 Limite trades ({self.daily_total})", "WARNING"); return False
         if self.config["max_wins_per_day"] > 0 and self.daily_wins >= self.config["max_wins_per_day"]:
-            self.log_to_db(f"🏆 Meta wins ({self.daily_wins})", "SUCCESS")
-            return False
+            self.log_to_db(f"🏆 Meta wins ({self.daily_wins})", "SUCCESS"); return False
         if self.config["max_losses_per_day"] > 0 and self.daily_losses >= self.config["max_losses_per_day"]:
-            self.log_to_db(f"❌ Limite losses ({self.daily_losses})", "ERROR")
-            return False
+            self.log_to_db(f"❌ Limite losses ({self.daily_losses})", "ERROR"); return False
         return True
 
-    # ✅ FIX 1: safe_buy CORRETO E TRAVADO EM BINÁRIAS
     def safe_buy(self, asset, amount, direction, prefer_binary=True):
-        if self.config["mode"] == "OBSERVE":
-            return True, "VIRTUAL"
-
+        if self.config["mode"] == "OBSERVE": return True, "VIRTUAL"
         try:
-            # ✅ SEMPRE usa Binárias, ignora prefer_binary
             status, trade_id = self.api.buy(amount, asset, direction, 1)
-            if status and trade_id:
-                return True, trade_id
-
+            if status and trade_id: return True, trade_id
             self.log_to_db(f"⚠️ Binária falhou (ID nulo).", "WARNING")
             return False, None
         except Exception as e:
-            self.log_to_db(f"⚠️ Erro Safe Buy: {e}", "ERROR")
-            return False, None
+            self.log_to_db(f"⚠️ Erro Safe Buy: {e}", "ERROR"); return False, None
 
     def get_strategy_wr(self, strategy_key):
         mem = self.strategy_memory.get(strategy_key, [])
-        if not mem:
-            return 0.55
+        if not mem: return 0.55
         return sum(mem) / len(mem)
 
     def pick_best_candidate(self, candidates):
-        if not candidates:
-            return None
-        for c in candidates:
-            c["priority"] = (c["wr"] * 0.7) + (c["confidence"] * 0.3)
+        if not candidates: return None
+        for c in candidates: c["priority"] = (c["wr"] * 0.7) + (c["confidence"] * 0.3)
         candidates.sort(key=lambda x: x["priority"], reverse=True)
         return candidates[0]
 
-    def score_candidate(self, c):
-        return (c["wr"] * 0.7) + (c["confidence"] * 0.3)
-
+    def score_candidate(self, c): return (c["wr"] * 0.7) + (c["confidence"] * 0.3)
     def choose_best(self, candidates):
-        if not candidates:
-            return None
-        for c in candidates:
-            c["score"] = self.score_candidate(c)
+        if not candidates: return None
+        for c in candidates: c["score"] = self.score_candidate(c)
         candidates.sort(key=lambda x: x["score"], reverse=True)
         return candidates[0]
 
     def execute_trade(self, asset, direction, strategy_key, strategy_label, prefer_binary=False, gale_level=0):
-        # ✅ 1. CAPTURA TIMESTAMP DA ENTRADA (CRÍTICO PARA O GALE)
-        entry_dt = datetime.now(BR_TIMEZONE)
-
-        # anti duplicação por asset (G0)
-        now = time.time()
-        if gale_level == 0:
-            if asset in self.last_trade_time and now - self.last_trade_time[asset] < 60:
-                return
-            self.last_trade_time[asset] = now
-
-            minute_key = entry_dt.strftime("%Y%m%d%H%M")
-            if self.last_minute_trade.get(asset) == minute_key:
-                return
-            self.last_minute_trade[asset] = minute_key
-
-        if time.time() < self.block_until_ts:
+        # ✅ COOLDOWN CHECK (Anti-Revenge)
+        # Só bloqueia entradas normais (G0). Gale (G1+) pode operar para recuperar.
+        if gale_level == 0 and time.time() < self.asset_cooldown.get(asset, 0):
             return
 
+        entry_dt = datetime.now(BR_TIMEZONE)
+        now = time.time()
+        if gale_level == 0:
+            if asset in self.last_trade_time and now - self.last_trade_time[asset] < 60: return
+            self.last_trade_time[asset] = now
+            minute_key = entry_dt.strftime("%Y%m%d%H%M")
+            if self.last_minute_trade.get(asset) == minute_key: return
+            self.last_minute_trade[asset] = minute_key
+
+        if time.time() < self.block_until_ts: return
         with self.trade_lock:
-            if gale_level == 0 and asset in self.active_trades:
-                return
+            if gale_level == 0 and asset in self.active_trades: return
             self.active_trades.add(asset)
 
         signal_id = None
         base_amount = float(self.config["entry_value"])
-        
         amount = base_amount
         if gale_level > 0:
             multiplier = self.config.get("martingale_multiplier", 2.0)
@@ -691,153 +799,104 @@ class SimpleBot:
             if not self.check_daily_limits():
                 self.session_blocked = True
                 self.log_to_db("⛔ Limite diário atingido. Pausando.", "WARNING")
-                try:
-                    self.supabase.table("bot_config").update({"status": "PAUSED"}).eq("id", 1).execute()
-                except:
-                    pass
+                try: self.supabase.table("bot_config").update({"status": "PAUSED"}).eq("id", 1).execute()
+                except: pass
                 return
 
             tag_gale = f"::G{gale_level}"
             strategy_name = f"{strategy_key}::{strategy_label}{tag_gale}"
             signal_id = self.insert_signal(asset, direction, strategy_name, amount)
 
-            # ✅ FIX 4: Log route correto (Sempre Binária)
             route = "BINARIA"
-            self.log_to_db(
-                f"🟡 TENTANDO ENTRAR [{route}] {strategy_key} [G{gale_level}]: {asset} | {direction.upper()} | ${amount}",
-                "INFO",
-            )
+            self.log_to_db(f"🟡 TENTANDO ENTRAR [{route}] {strategy_key} [G{gale_level}]: {asset} | {direction.upper()} | ${amount}", "INFO")
 
             balance_before = 0.0
             if self.config["mode"] == "LIVE":
                 try:
                     balance_before = self.api.get_balance()
                     if balance_before <= 0:
-                        self.log_to_db("❌ Saldo inválido", "ERROR")
-                        return
-                except:
-                    return
+                        self.log_to_db("❌ Saldo inválido", "ERROR"); return
+                except: return
 
             status, trade_id = self.safe_buy(asset, amount, direction, prefer_binary=prefer_binary)
-            
             if not status or not trade_id:
                 self.log_to_db(f"❌ ORDEM RECUSADA: {asset}", "ERROR")
                 self.update_signal(signal_id, "FAILED", "FAILED", 0)
                 return
 
             self.log_to_db(f"✅ CONFIRMADA: Ordem {trade_id}. Aguardando...", "INFO")
-
             time.sleep(70)
 
-            res_str = "UNKNOWN"
-            profit = 0.0
-
+            res_str = "UNKNOWN"; profit = 0.0
             if self.config["mode"] == "OBSERVE":
                 try:
-                    candles = self.api.get_candles(asset, 60, 2, int(time.time()))
+                    # ✅ API LOCK
+                    with self.api_lock:
+                        candles = self.api.get_candles(asset, 60, 2, int(time.time()))
                     last_closed = candles[-2]
-                    is_win = (direction == "call" and last_closed["close"] > last_closed["open"]) or (
-                        direction == "put" and last_closed["close"] < last_closed["open"]
-                    )
-                    if is_win:
-                        res_str = "WIN"
-                        profit = amount * 0.87
+                    is_win = (direction == "call" and last_closed["close"] > last_closed["open"]) or (direction == "put" and last_closed["close"] < last_closed["open"])
+                    if is_win: res_str = "WIN"; profit = amount * 0.87
                     else:
-                        if abs(last_closed["close"] - last_closed["open"]) < 1e-9:
-                            res_str = "DOJI"
-                            profit = 0.0
-                        else:
-                            res_str = "LOSS"
-                            profit = -amount
-                except:
-                    res_str = "UNKNOWN"
+                        if abs(last_closed["close"] - last_closed["open"]) < 1e-9: res_str = "DOJI"; profit = 0.0
+                        else: res_str = "LOSS"; profit = -amount
+                except: res_str = "UNKNOWN"
             else:
                 try:
                     balance_after = self.api.get_balance()
                     delta = balance_after - balance_before
-                    if delta > 0.01:
-                        res_str = "WIN"
-                        profit = delta
-                    elif delta < -0.01:
-                        res_str = "LOSS"
-                        profit = delta
-                    else:
-                        res_str = "DOJI"
-                        profit = 0.0
-                except:
-                    res_str = "UNKNOWN"
+                    if delta > 0.01: res_str = "WIN"; profit = delta
+                    elif delta < -0.01: res_str = "LOSS"; profit = delta
+                    else: res_str = "DOJI"; profit = 0.0
+                except: res_str = "UNKNOWN"
 
             if res_str == "DOJI":
                 self.log_to_db("⚪ DOJI (ignorado)", "DEBUG")
-                self.update_signal(signal_id, "DOJI", "DOJI", 0)
-                return
+                self.update_signal(signal_id, "DOJI", "DOJI", 0); return
             
             if res_str in ["WIN", "LOSS"] and strategy_key in self.strategy_memory:
                  self.strategy_memory[strategy_key].append(1 if res_str == "WIN" else 0)
 
             self.daily_total += 1
             if res_str == "WIN":
-                self.daily_wins += 1
-                self.loss_streak = 0
-                if asset in self.pending_gale:
-                    del self.pending_gale[asset]
-                    
+                self.daily_wins += 1; self.loss_streak = 0
+                if asset in self.pending_gale: del self.pending_gale[asset]
             elif res_str == "LOSS":
-                self.daily_losses += 1
-                self.loss_streak += 1
+                self.daily_losses += 1; self.loss_streak += 1
                 
-                # ✅ FIX 2: GALE SINCRONIZADO PARA PRÓXIMO MINUTO E SEGUNDO CORRETO
+                # ✅ COOLDOWN: 3 minutos de geladeira no ativo após LOSS
+                self.asset_cooldown[asset] = time.time() + 180
+
                 if gale_level == 0 and self.config.get("martingale_enabled", True):
-                    # Calcula o próximo minuto com base na entrada (FIX: +1 minuto)
                     next_minute = (entry_dt + timedelta(minutes=1)).strftime("%Y%m%d%H%M")
-                    
-                    # ✅ FIX: Define o segundo alvo baseado no segundo real da entrada
-                    entry_sec = entry_dt.second
-                    
+                    # ✅ GALE SYNC: Força execução no ENTRY_SECOND fixo
+                    entry_sec = ENTRY_SECOND
                     self.log_to_db(f"🎯 GALE G1 ARMADO para {asset} (Min: {next_minute} Sec: {entry_sec})", "WARNING")
                     self.pending_gale[asset] = {
-                        'asset': asset,
-                        'direction': direction,
-                        'strategy_key': strategy_key,
-                        'strategy_label': strategy_label,
-                        'prefer_binary': True,
-                        'minute_key': next_minute,
-                        'second_key': entry_sec # ✅ Salva o segundo correto
+                        'asset': asset, 'direction': direction, 'strategy_key': strategy_key,
+                        'strategy_label': strategy_label, 'prefer_binary': True,
+                        'minute_key': next_minute, 'second_key': entry_sec
                     }
 
             if self.loss_streak >= 2:
                 self.block_until_ts = time.time() + 900
                 self.log_to_db("🛑 2 LOSSES SEGUIDOS — PAUSANDO 15 MIN (ANTI-CHOP)", "WARNING")
-                self.pending_gale = {} # Limpa gales se bloqueado
-                self.auto_candidate = None
-                self.auto_candidate_key = None
+                self.pending_gale = {}; self.auto_candidate = None; self.auto_candidate_key = None
 
             self.update_signal(signal_id, res_str, res_str, profit)
-
             log_type = "SUCCESS" if res_str == "WIN" else "ERROR"
-            self.log_to_db(
-                f"{'🏆' if res_str == 'WIN' else '🔻'} {res_str} [G{gale_level}]: {profit:.2f} ({self.daily_wins}W/{self.daily_losses}L)",
-                log_type,
-            )
-            
-            if self.config["mode"] == "LIVE":
-                self.update_balance_remote()
-
+            self.log_to_db(f"{'🏆' if res_str == 'WIN' else '🔻'} {res_str} [G{gale_level}]: {profit:.2f} ({self.daily_wins}W/{self.daily_losses}L)", log_type)
+            if self.config["mode"] == "LIVE": self.update_balance_remote()
             if not self.check_daily_limits():
                 self.log_to_db("🛑 Limite diário atingido — PAUSANDO", "WARNING")
                 self.session_blocked = True
-                try:
-                    self.supabase.table("bot_config").update({"status": "PAUSED"}).eq("id", 1).execute()
-                except:
-                    pass
-
+                try: self.supabase.table("bot_config").update({"status": "PAUSED"}).eq("id", 1).execute()
+                except: pass
         finally:
-            with self.trade_lock:
-                self.active_trades.discard(asset)
+            with self.trade_lock: self.active_trades.discard(asset)
 
     def catalog_assets(self, assets_pool):
         strat = self.config.get("strategy_mode", "AUTO")
-        if strat in ["SHOCK_REVERSAL", "TENDMAX", "AUTO"]:
+        if strat in ["SHOCK_REVERSAL", "TENDMAX", "AUTO", "TSUNAMI_FLOW", "VOLUME_REACTOR"]:
             self.log_to_db("🔥 Modo FULL ASSETS: usando TODOS os ativos", "SYSTEM")
             return assets_pool
         return assets_pool
@@ -845,7 +904,6 @@ class SimpleBot:
     def start(self):
         t_watchdog = threading.Thread(target=watchdog, daemon=True)
         t_watchdog.start()
-
         assets_pool = [
             "EURUSD-OTC", "EURGBP-OTC", "USDCHF-OTC", "EURJPY-OTC",
             "NZDUSD-OTC", "GBPUSD-OTC", "GBPJPY-OTC", "USDJPY-OTC",
@@ -857,61 +915,37 @@ class SimpleBot:
                 self.reset_daily_if_needed()
                 self.fetch_config()
                 self.check_schedule()
-
-                if self.config["status"] == "PAUSED":
-                    time.sleep(2)
-                    continue
-
-                if time.time() < self.block_until_ts:
-                    time.sleep(2)
-                    continue
+                if self.config["status"] == "PAUSED": time.sleep(2); continue
+                if time.time() < self.block_until_ts: time.sleep(2); continue
 
                 if not self.api or not self.api.check_connect():
-                    if not self.connect():
-                        time.sleep(5)
-                        continue
+                    if not self.connect(): time.sleep(5); continue
                 
-                # ✅ FIX 2B: EXECUÇÃO DE GALE SINCRONIZADA
-                # Flag para saber se houve execução de gale neste ciclo
-                executed_gale = False
+                # ✅ Verifica se precisa calibrar (Inicio ou a cada 2h)
+                if (time.time() - self.last_calibration_time) > 7200:
+                    self.calibrate_market()
 
+                # ✅ Execução de GALE
+                executed_gale = False
                 if self.pending_gale:
                     now_dt = datetime.now(BR_TIMEZONE)
                     current_key = now_dt.strftime("%Y%m%d%H%M")
                     now_sec = now_dt.second
                     assets_gale = list(self.pending_gale.keys())
-                    
                     for asset in assets_gale:
                         g = self.pending_gale.get(asset)
                         if not g: continue
-                        
-                        # Valida minuto
-                        if g.get("minute_key") != current_key:
-                            continue
-
-                        # ✅ FIX: Valida segundo com janela SIMÉTRICA (±1s)
+                        if g.get("minute_key") != current_key: continue
                         sec_target = int(g.get("second_key", ENTRY_SECOND))
-                        
-                        if not (sec_target - 1 <= now_sec <= sec_target + 1):
-                            continue
-                            
+                        if not (sec_target - 1 <= now_sec <= sec_target + 1): continue
                         del self.pending_gale[asset]
-                        
                         self.log_to_db(f"🚀 EXECUTANDO GALE G1: {asset} (SYNC {current_key} @{sec_target}s)", "INFO")
                         self.execute_trade(
-                            asset=g['asset'],
-                            direction=g['direction'],
-                            strategy_key=g['strategy_key'],
-                            strategy_label=g['strategy_label'],
-                            prefer_binary=g['prefer_binary'],
-                            gale_level=1
+                            asset=g['asset'], direction=g['direction'], strategy_key=g['strategy_key'],
+                            strategy_label=g['strategy_label'], prefer_binary=g['prefer_binary'], gale_level=1
                         )
                         executed_gale = True
-                    
-                    # ✅ FIX: Se executou Gale, não tenta operar normal neste loop
-                    if executed_gale:
-                        time.sleep(0.25)
-                        continue
+                    if executed_gale: time.sleep(0.25); continue
 
                 if not self.best_assets or (time.time() - self.last_catalog_time > 900):
                     self.best_assets = self.catalog_assets(assets_pool)
@@ -924,164 +958,116 @@ class SimpleBot:
                 if now_sec in [0, 10, 20, 30, 40, 50]:
                     self.log_to_db(f"MODE_ATIVO::{strat_mode}::{now_dt.strftime('%H:%M:%S')}::ENTRY={ENTRY_SECOND}s", "DEBUG")
 
-                # ✅ FIX 3: Reset de Candidato AUTO na virada do minuto
                 current_minute_key = now_dt.strftime("%Y%m%d%H%M")
                 if self.auto_candidate_key != current_minute_key:
                     self.auto_candidate = None
                     self.auto_candidate_key = current_minute_key
 
-                # ✅ FASE 1: SHOCK LIVE (ENTRY_SECOND)
+                # FASE 1: SHOCK LIVE
                 if ENTRY_SECOND <= now_sec <= ENTRY_SECOND + 2:
                     if strat_mode in ["AUTO", "SHOCK_REVERSAL"]:
                         random_assets = self.best_assets.copy()
                         random.shuffle(random_assets)
-
                         for asset in random_assets:
                             with self.trade_lock:
-                                if asset in self.active_trades:
-                                    continue
+                                if asset in self.active_trades: continue
                             try:
-                                # ✅ OTIMIZAÇÃO: 100 -> 60 candles
-                                candles = self.api.get_candles(asset, 60, 60, int(time.time()))
-                                if not candles:
-                                    continue
-
+                                # ✅ API LOCK
+                                with self.api_lock:
+                                    candles = self.api.get_candles(asset, 60, 60, int(time.time()))
+                                if not candles: continue
                                 sig, reason, dbg = ShockLiveDetector.detect(candles, asset)
-
-                                if strat_mode == "SHOCK_REVERSAL":
-                                    self.log_to_db(f"⚡ SHOCK_CHECK {asset}: {reason}", "DEBUG")
-
+                                if strat_mode == "SHOCK_REVERSAL": self.log_to_db(f"⚡ SHOCK_CHECK {asset}: {reason}", "DEBUG")
                                 if sig:
                                     if strat_mode == "AUTO":
                                         cand = {
                                             "asset": asset, "direction": sig, "strategy": "SHOCK_REVERSAL",
                                             "label": reason, "confidence": 0.82, 
-                                            "wr": self.get_strategy_wr("SHOCK_REVERSAL"), 
-                                            "prefer_binary": True 
+                                            "wr": self.get_strategy_wr("SHOCK_REVERSAL"), "prefer_binary": True 
                                         }
                                         cand["score"] = self.score_candidate(cand)
                                         if not self.auto_candidate or cand["score"] > self.score_candidate(self.auto_candidate):
-                                             self.auto_candidate = cand
-                                             self.auto_candidate_key = current_minute_key
+                                             self.auto_candidate = cand; self.auto_candidate_key = current_minute_key
                                         self.log_to_db(f"🤖 AUTO_CANDIDATE(SHOCK) {asset} Score={cand['score']:.2f}", "SYSTEM")
-                                     
                                     elif strat_mode == "SHOCK_REVERSAL":
-                                         self.execute_trade(
-                                             asset=asset,
-                                             direction=sig,
-                                             strategy_key="SHOCK_REVERSAL",
-                                             strategy_label=reason,
-                                             prefer_binary=True,
-                                             gale_level=0
-                                         )
+                                         self.execute_trade(asset=asset, direction=sig, strategy_key="SHOCK_REVERSAL", strategy_label=reason, prefer_binary=True, gale_level=0)
                                          break
-                            except:
-                                pass
+                            except: pass
 
-                # ✅ FASE 2: V2 TREND + TENDMAX (55-59s)
+                # FASE 2: ESTRATÉGIAS DE FECHAMENTO (55-59s)
                 if 55 <= now_sec <= 59:
-                    
-                    if strat_mode in ["AUTO", "TENDMAX"]:
+                    # MODO FORÇADO (Uma estratégia específica)
+                    if strat_mode in ["TENDMAX", "V2_TREND", "TSUNAMI_FLOW", "VOLUME_REACTOR"]:
                         trade_executed = False
                         random_assets = self.best_assets.copy()
                         random.shuffle(random_assets)
-
                         for asset in random_assets:
                             with self.trade_lock:
                                 if asset in self.active_trades: continue
                             try:
-                                # ✅ OTIMIZAÇÃO: 100 -> 60 candles
-                                candles = self.api.get_candles(asset, 60, 60, int(time.time()))
+                                # ✅ API LOCK
+                                with self.api_lock:
+                                    candles = self.api.get_candles(asset, 60, 60, int(time.time()))
                                 if not candles: continue
-
-                                sig_tm, reason_tm = TendMaxStrategy.get_signal(candles)
-                                if strat_mode == "TENDMAX":
-                                    self.log_to_db(f"📈 TENDMAX_CHECK {asset}: {reason_tm}", "DEBUG")
-
-                                if sig_tm:
-                                    if strat_mode == "TENDMAX":
-                                        self.execute_trade(asset, sig_tm, "TENDMAX", reason_tm, prefer_binary=True, gale_level=0)
-                                        trade_executed = True
-                                        break
-                                    # Em AUTO, salva candidato abaixo
+                                sig, reason = self.check_strategy_signal(strat_mode, candles)
+                                if sig:
+                                    self.execute_trade(asset, sig, strat_mode, reason, prefer_binary=True, gale_level=0)
+                                    trade_executed = True; break
                             except: pass
-                        
-                        if trade_executed:
-                            time.sleep(1)
-                            continue
+                        if trade_executed: time.sleep(1); continue
 
-                    if strat_mode in ["AUTO", "V2_TREND"]:
-                        
+                    # MODO AUTO INTELIGENTE (Usa o mapa da calibração)
+                    if strat_mode == "AUTO":
                         candidates = []
-                        if strat_mode == "AUTO" and self.auto_candidate and self.auto_candidate_key == current_minute_key:
+                        if self.auto_candidate and self.auto_candidate_key == current_minute_key:
                              candidates.append(self.auto_candidate)
 
-                        assets_to_scan = self.best_assets if self.best_assets else assets_pool
+                        # Usa chaves do mapa se disponíveis (são os ativos calibrados), senão usa pool
+                        assets_to_scan = list(self.asset_strategy_map.keys()) if self.asset_strategy_map else self.best_assets
                         random.shuffle(assets_to_scan)
 
                         for asset in assets_to_scan:
                             with self.trade_lock:
-                                if asset in self.active_trades:
-                                    continue
+                                if asset in self.active_trades: continue
                             try:
-                                # ✅ OTIMIZAÇÃO: 100 -> 60 candles
-                                candles = self.api.get_candles(asset, 60, 60, int(time.time()))
+                                # Define a estratégia alvo para este ativo (do mapa de calibração)
+                                target_info = self.asset_strategy_map.get(asset, {"strategy": "V2_TREND", "score": 1.0})
+                                target_strat = target_info["strategy"]
+                                
+                                # ✅ API LOCK
+                                with self.api_lock:
+                                    candles = self.api.get_candles(asset, 60, 60, int(time.time()))
                                 if not candles: continue
 
-                                # 1. TENDMAX (para AUTO)
-                                if strat_mode == "AUTO":
-                                     t_sig, t_reason = TendMaxStrategy.get_signal(candles)
-                                     if t_sig:
-                                          candidates.append({
-                                              "asset": asset, "direction": t_sig, "strategy": "TENDMAX",
-                                              "label": t_reason, "confidence": 0.65,
-                                              "wr": self.get_strategy_wr("TENDMAX"), 
-                                              "prefer_binary": True 
-                                          })
-
-                                # 2. V2 TREND
-                                if not TechnicalAnalysis.check_compression(candles):
-                                    sig, reason = TechnicalAnalysis.get_signal_v2(candles)
-                                    if sig:
-                                        if strat_mode == "V2_TREND":
-                                             self.execute_trade(asset, sig, "V2_TREND", reason, prefer_binary=True, gale_level=0) # ✅ V2 Agora também é Binária
-                                             break 
-                                        elif strat_mode == "AUTO":
-                                             candidates.append({
-                                                  "asset": asset, "direction": sig, "strategy": "V2_TREND",
-                                                  "label": reason, "confidence": 0.70,
-                                                  "wr": self.get_strategy_wr("V2_TREND"), 
-                                                  "prefer_binary": True # ✅ V2 Agora também é Binária
-                                             })
-                            except:
-                                pass
+                                sig, lbl = self.check_strategy_signal(target_strat, candles)
+                                if sig:
+                                     # Boost de Confiança baseado no Score da Calibração
+                                     boost = min(0.15, target_info["score"] / 10.0)
+                                     confidence = 0.70 + boost
+                                     
+                                     candidates.append({
+                                        "asset": asset, "direction": sig, "strategy": target_strat,
+                                        "label": lbl, "confidence": confidence,
+                                        "wr": self.get_strategy_wr(target_strat), 
+                                        "prefer_binary": True 
+                                    })
+                            except: pass
                         
-                        if strat_mode == "AUTO" and candidates:
+                        if candidates:
                              best = self.pick_best_candidate(candidates)
                              if best:
-                                  self.log_to_db(
-                                      f"🤖 AUTO_DECISION {best['strategy']}::{best['label']} "
-                                      f"{best['asset']} {best['direction'].upper()} "
-                                      f"(WR={best['wr']:.2f} | Score={best['priority']:.2f})",
-                                      "SYSTEM"
-                                  )
+                                  self.log_to_db(f"🤖 AUTO_DECISION {best['strategy']}::{best['label']} {best['asset']} {best['direction'].upper()}", "SYSTEM")
                                   self.execute_trade(
-                                      asset=best["asset"],
-                                      direction=best["direction"],
-                                      strategy_key=best["strategy"],
-                                      strategy_label=best["label"],
-                                      prefer_binary=best["prefer_binary"],
-                                      gale_level=0
+                                      asset=best["asset"], direction=best["direction"], strategy_key=best["strategy"],
+                                      strategy_label=best["label"], prefer_binary=best["prefer_binary"], gale_level=0
                                   )
                                   self.auto_candidate = None
                                   time.sleep(2)
 
                 time.sleep(0.25)
-
             except Exception as e:
                 self.log_to_db(f"Erro loop principal: {e}", "ERROR")
                 time.sleep(3)
-
 
 if __name__ == "__main__":
     SimpleBot().start()
