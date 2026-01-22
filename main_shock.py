@@ -17,7 +17,7 @@ try:
 except ImportError:
     print("[ERRO] Biblioteca 'exnovaapi' não instalada.")
 
-BOT_VERSION = "SHOCK_ENGINE_V37_ATOMIC_TRADES_CALIB_FULL_2026-01-22"
+BOT_VERSION = "SHOCK_ENGINE_V38_GALE_ENTRY_BASE_FIX_2026-01-22"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -735,7 +735,6 @@ class SimpleBot:
         t.start()
 
     def execute_trade(self, asset, direction, strategy_key, strategy_label, prefer_binary=False, gale_level=0):
-        # ✅ COOLDOWN CHECK (Anti-Revenge)
         if gale_level == 0 and time.time() < self.asset_cooldown.get(asset, 0): return
 
         entry_dt = datetime.now(BR_TIMEZONE)
@@ -854,10 +853,10 @@ class SimpleBot:
                 self.daily_losses += 1; self.loss_streak += 1
                 self.asset_cooldown[asset] = time.time() + 180
                 
-                # ✅ GALE TIMING FIX (Usa NOW, não entry time)
                 if gale_level == 0 and self.config.get("martingale_enabled", True):
-                    now_dt = datetime.now(BR_TIMEZONE)
-                    next_minute = (now_dt + timedelta(minutes=1)).strftime("%Y%m%d%H%M")
+                    # ✅ GALE FIX: Baseado no tempo da entrada original
+                    entry_base = entry_dt.replace(second=0, microsecond=0)
+                    next_minute = (entry_base + timedelta(minutes=1)).strftime("%Y%m%d%H%M")
                     entry_sec = ENTRY_SECOND
                     self.log_to_db(f"🎯 GALE G1 ARMADO para {asset} (Min: {next_minute} Sec: {entry_sec})", "WARNING")
                     self.pending_gale[asset] = {
