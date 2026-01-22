@@ -17,7 +17,7 @@ try:
 except ImportError:
     print("[ERRO] Biblioteca 'exnovaapi' não instalada.")
 
-BOT_VERSION = "SHOCK_ENGINE_V27_THREAD_SAFE_FINAL_2026-01-22"
+BOT_VERSION = "SHOCK_ENGINE_V29_TANK_EDITION_2026-01-22"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -372,7 +372,6 @@ class VolumeReactorStrategy:
         
         # Lógica Híbrida
         is_exhaustion = False
-        signal_type = None
         label = ""
 
         # MODO 1: Com Volume
@@ -528,74 +527,80 @@ class SimpleBot:
         t.start()
 
     def _run_calibration_task(self):
-        # (Flag já setada no caller)
+        # ✅ WRAP GERAL COM TRY/FINALLY (Garante que a flag sempre reseta)
         try:
-            strategies = ["V2_TREND", "TENDMAX", "TSUNAMI_FLOW", "VOLUME_REACTOR"]
-            
-            if not self.best_assets:
-                 assets_pool = [
-                    "EURUSD-OTC", "EURGBP-OTC", "USDCHF-OTC", "EURJPY-OTC",
-                    "NZDUSD-OTC", "GBPUSD-OTC", "GBPJPY-OTC", "USDJPY-OTC",
-                    "AUDCAD-OTC", "AUDUSD-OTC", "USDCAD-OTC", "AUDJPY-OTC"
-                ]
-                 self.best_assets = self.catalog_assets(assets_pool)
+            # ✅ CHECK SE API ESTÁ VIVA (Evita crash de thread)
+            if not self.api or not self.api.check_connect():
+                self.log_to_db("⚠️ Calibração abortada: API offline", "WARNING")
+                return
 
-            assets = self.best_assets
-            new_map = {}
-            
-            for asset in assets:
-                try:
-                    # ✅ API LOCK PARA EVITAR CONFLITO COM O LOOP PRINCIPAL
-                    with self.api_lock:
-                        candles = self.api.get_candles(asset, 60, 150, int(time.time()))
-                        
-                    if not candles or len(candles) < 100: continue
-                    
-                    scores = {s: {'wins': 0, 'total': 0} for s in strategies}
-                    
-                    for i in range(60, len(candles)-1):
-                        window = candles[i-60 : i+1]
-                        result_candle = candles[i+1]
-                        
-                        for s in strategies:
-                            sig, _ = self.check_strategy_signal(s, window)
-                            if sig:
-                                scores[s]['total'] += 1
-                                is_win = False
-                                if sig == "call" and result_candle["close"] > result_candle["open"]: is_win = True
-                                if sig == "put" and result_candle["close"] < result_candle["open"]: is_win = True
-                                
-                                if is_win: scores[s]['wins'] += 1
-                    
-                    best_s = None
-                    best_score = -1
-                    
-                    for s, stats in scores.items():
-                        total = stats['total']
-                        if total > 0:
-                            wr = stats['wins'] / total
-                            score = wr * math.sqrt(total)
-                            
-                            if total >= 8 and wr >= 0.52 and score > best_score:
-                                best_score = score
-                                best_s = s
-                    
-                    if best_s:
-                        # ✅ Salva Score junto com a estratégia
-                        new_map[asset] = {"strategy": best_s, "score": best_score}
-                        self.log_to_db(f"✅ {asset} -> {best_s} (Score: {best_score:.2f} | WR: {scores[best_s]['wins']/scores[best_s]['total']:.2f})", "DEBUG")
-                    else:
-                        new_map[asset] = {"strategy": "V2_TREND", "score": 1.0}
+            try:
+                strategies = ["V2_TREND", "TENDMAX", "TSUNAMI_FLOW", "VOLUME_REACTOR"]
                 
-                except Exception as e:
-                    pass
+                if not self.best_assets:
+                     assets_pool = [
+                        "EURUSD-OTC", "EURGBP-OTC", "USDCHF-OTC", "EURJPY-OTC",
+                        "NZDUSD-OTC", "GBPUSD-OTC", "GBPJPY-OTC", "USDJPY-OTC",
+                        "AUDCAD-OTC", "AUDUSD-OTC", "USDCAD-OTC", "AUDJPY-OTC"
+                    ]
+                     self.best_assets = self.catalog_assets(assets_pool)
+
+                assets = self.best_assets
+                new_map = {}
+                
+                for asset in assets:
+                    try:
+                        # ✅ API LOCK PARA EVITAR CONFLITO COM O LOOP PRINCIPAL
+                        with self.api_lock:
+                            candles = self.api.get_candles(asset, 60, 150, int(time.time()))
+                            
+                        if not candles or len(candles) < 100: continue
+                        
+                        scores = {s: {'wins': 0, 'total': 0} for s in strategies}
+                        
+                        for i in range(60, len(candles)-1):
+                            window = candles[i-60 : i+1]
+                            result_candle = candles[i+1]
+                            
+                            for s in strategies:
+                                sig, _ = self.check_strategy_signal(s, window)
+                                if sig:
+                                    scores[s]['total'] += 1
+                                    is_win = False
+                                    if sig == "call" and result_candle["close"] > result_candle["open"]: is_win = True
+                                    if sig == "put" and result_candle["close"] < result_candle["open"]: is_win = True
+                                    
+                                    if is_win: scores[s]['wins'] += 1
+                        
+                        best_s = None
+                        best_score = -1
+                        
+                        for s, stats in scores.items():
+                            total = stats['total']
+                            if total > 0:
+                                wr = stats['wins'] / total
+                                score = wr * math.sqrt(total)
+                                
+                                if total >= 8 and wr >= 0.52 and score > best_score:
+                                    best_score = score
+                                    best_s = s
+                        
+                        if best_s:
+                            # ✅ Salva Score junto com a estratégia
+                            new_map[asset] = {"strategy": best_s, "score": best_score}
+                            self.log_to_db(f"✅ {asset} -> {best_s} (Score: {best_score:.2f} | WR: {scores[best_s]['wins']/scores[best_s]['total']:.2f})", "DEBUG")
+                        else:
+                            new_map[asset] = {"strategy": "V2_TREND", "score": 1.0}
+                    
+                    except Exception as e:
+                        pass
+                
+                self.asset_strategy_map = new_map
+                self.last_calibration_time = time.time()
+                self.log_to_db(f"🏁 Calibração concluída. {len(new_map)} pares mapeados.", "SUCCESS")
             
-            self.asset_strategy_map = new_map
-            self.last_calibration_time = time.time()
-            self.log_to_db(f"🏁 Calibração concluída. {len(new_map)} pares mapeados.", "SUCCESS")
-        
-        except Exception as e:
-            self.log_to_db(f"❌ Erro na Thread de Calibração: {e}", "ERROR")
+            except Exception as e:
+                self.log_to_db(f"❌ Erro na Lógica de Calibração: {e}", "ERROR")
         
         finally:
             self.calibration_running = False
@@ -630,17 +635,22 @@ class SimpleBot:
             self.supabase.table("trade_signals").update({"status": status, "result": result, "profit": profit}).eq("id", signal_id).execute()
         except: pass
 
+    # ✅ CONNECT COM LOCK (Proteção total na API)
     def connect(self):
         self.log_to_db("🔌 Conectando...", "SYSTEM")
         try:
-            if self.api:
-                try: self.api.api.close()
-                except: pass
-            self.api = Exnova(EXNOVA_EMAIL, EXNOVA_PASSWORD)
-            ok, reason = self.api.connect()
+            with self.api_lock: # ✅ Lock de API
+                if self.api:
+                    try: self.api.api.close()
+                    except: pass
+                self.api = Exnova(EXNOVA_EMAIL, EXNOVA_PASSWORD)
+                ok, reason = self.api.connect()
+                if ok:
+                    self.log_to_db("✅ Conectado!", "SUCCESS")
+                    self.api.change_balance(self.config["account_type"])
+            
+            # Fora do lock para não travar
             if ok:
-                self.log_to_db("✅ Conectado!", "SUCCESS")
-                self.api.change_balance(self.config["account_type"])
                 self.update_balance_remote()
                 return True
             else:
@@ -652,7 +662,9 @@ class SimpleBot:
     def update_balance_remote(self):
         if not self.api or not self.supabase: return
         try:
-            balance = self.api.get_balance()
+            # ✅ API LOCK (Proteção Balance)
+            with self.api_lock:
+                balance = self.api.get_balance()
             self.supabase.table("bot_config").update({"current_balance": balance}).eq("id", 1).execute()
         except: pass
 
@@ -740,10 +752,13 @@ class SimpleBot:
             self.log_to_db(f"❌ Limite losses ({self.daily_losses})", "ERROR"); return False
         return True
 
+    # ✅ SAFE BUY COM LOCK (Crítico para não travar API)
     def safe_buy(self, asset, amount, direction, prefer_binary=True):
         if self.config["mode"] == "OBSERVE": return True, "VIRTUAL"
         try:
-            status, trade_id = self.api.buy(amount, asset, direction, 1)
+            with self.api_lock:
+                status, trade_id = self.api.buy(amount, asset, direction, 1)
+            
             if status and trade_id: return True, trade_id
             self.log_to_db(f"⚠️ Binária falhou (ID nulo).", "WARNING")
             return False, None
@@ -813,7 +828,9 @@ class SimpleBot:
             balance_before = 0.0
             if self.config["mode"] == "LIVE":
                 try:
-                    balance_before = self.api.get_balance()
+                    # ✅ API LOCK
+                    with self.api_lock:
+                        balance_before = self.api.get_balance()
                     if balance_before <= 0:
                         self.log_to_db("❌ Saldo inválido", "ERROR"); return
                 except: return
@@ -842,7 +859,9 @@ class SimpleBot:
                 except: res_str = "UNKNOWN"
             else:
                 try:
-                    balance_after = self.api.get_balance()
+                    # ✅ API LOCK
+                    with self.api_lock:
+                        balance_after = self.api.get_balance()
                     delta = balance_after - balance_before
                     if delta > 0.01: res_str = "WIN"; profit = delta
                     elif delta < -0.01: res_str = "LOSS"; profit = delta
@@ -912,6 +931,10 @@ class SimpleBot:
 
         while True:
             try:
+                # ✅ HEARTBEAT (evita watchdog reiniciar em pausa)
+                if int(time.time()) % 30 == 0:
+                    self.log_to_db("HEARTBEAT", "DEBUG")
+
                 self.reset_daily_if_needed()
                 self.fetch_config()
                 self.check_schedule()
@@ -995,7 +1018,8 @@ class SimpleBot:
                             except: pass
 
                 # FASE 2: ESTRATÉGIAS DE FECHAMENTO (55-59s)
-                if 55 <= now_sec <= 59:
+                # ✅ Proteção de Conflito: Não roda se a entrada do Shock for muito tarde (>=53s)
+                if 55 <= now_sec <= 59 and ENTRY_SECOND < 53:
                     # MODO FORÇADO (Uma estratégia específica)
                     if strat_mode in ["TENDMAX", "V2_TREND", "TSUNAMI_FLOW", "VOLUME_REACTOR"]:
                         trade_executed = False
