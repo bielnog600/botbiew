@@ -17,7 +17,7 @@ try:
 except ImportError:
     print("[ERRO] Biblioteca 'exnovaapi' não instalada.")
 
-BOT_VERSION = "SHOCK_ENGINE_V35_SMART_LOCK_DB_SAFE_2026-01-22"
+BOT_VERSION = "SHOCK_ENGINE_V37_ATOMIC_TRADES_CALIB_FULL_2026-01-22"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -320,6 +320,7 @@ class TendMaxStrategy:
 class TsunamiFlowStrategy:
     """
     🌊 TSUNAMI FLOW: Estratégia de seguimento de tendência e momentum.
+    Refinado: Agora verifica pavio de rejeição com wick/range para evitar falsos positivos em corpos pequenos.
     """
     @staticmethod
     def get_signal(candles):
@@ -527,7 +528,8 @@ class SimpleBot:
                         if not candles or len(candles) < 100: continue
                         
                         scores = {s: {'wins': 0, 'total': 0} for s in strategies}
-                        for i in range(60, len(candles)-1, 2):
+                        # ✅ CALIBRAGEM MAIS PRECISA (Passo 1 em 1)
+                        for i in range(60, len(candles)-1):
                             window = candles[i-60 : i+1]; result_candle = candles[i+1]
                             for s in strategies:
                                 sig, _ = self.check_strategy_signal(s, window)
@@ -733,6 +735,7 @@ class SimpleBot:
         t.start()
 
     def execute_trade(self, asset, direction, strategy_key, strategy_label, prefer_binary=False, gale_level=0):
+        # ✅ COOLDOWN CHECK (Anti-Revenge)
         if gale_level == 0 and time.time() < self.asset_cooldown.get(asset, 0): return
 
         entry_dt = datetime.now(BR_TIMEZONE)
@@ -742,25 +745,36 @@ class SimpleBot:
         global_minute = entry_dt.strftime("%Y%m%d%H%M")
         reserved_minute = False
         
-        if gale_level == 0:
-            with self.trade_lock:
-                # ✅ MAX ACTIVE TRADES CHECK (G0)
-                if len(self.active_trades) >= 1: return
-                
-                if self.last_global_minute == global_minute: return
-                reserved_minute = True
-
-        if gale_level == 0:
-            if asset in self.last_trade_time and now - self.last_trade_time[asset] < 60: return
-            self.last_trade_time[asset] = now
-            minute_key = entry_dt.strftime("%Y%m%d%H%M")
-            if self.last_minute_trade.get(asset) == minute_key: return
-            self.last_minute_trade[asset] = minute_key
-
         if time.time() < self.block_until_ts: return
+
+        # ✅ ATOMIC RESERVATION (Corrigido para evitar Race Condition)
         with self.trade_lock:
-            if gale_level == 0 and asset in self.active_trades: return
+            # Impede duplicação no mesmo ativo
+            if asset in self.active_trades: return
+
+            if gale_level == 0:
+                # Max trades check (Limite de 1 trade por vez)
+                if len(self.active_trades) >= 1: return
+                # Global minute check
+                if self.last_global_minute == global_minute: return
+                
+                # Asset specific checks in atomic block to be safe
+                # Check frequency
+                if asset in self.last_trade_time and now - self.last_trade_time[asset] < 60: return
+                
+                minute_key = entry_dt.strftime("%Y%m%d%H%M")
+                if self.last_minute_trade.get(asset) == minute_key: return
+
+                reserved_minute = True
+            
+            # Reserva o slot (Atomic)
             self.active_trades.add(asset)
+
+        # ✅ ATUALIZAÇÃO DE TRACKERS (Só chega aqui se reservou)
+        if gale_level == 0:
+            minute_key = entry_dt.strftime("%Y%m%d%H%M")
+            self.last_trade_time[asset] = now
+            self.last_minute_trade[asset] = minute_key
 
         signal_id = None
         base_amount = float(self.config["entry_value"])
@@ -803,7 +817,7 @@ class SimpleBot:
                 with self.trade_lock: self.last_global_minute = global_minute
 
             self.log_to_db(f"✅ CONFIRMADA: Ordem {trade_id}. Aguardando...", "INFO")
-            time.sleep(70)
+            time.sleep(62)
 
             res_str = "UNKNOWN"; profit = 0.0
             if self.config["mode"] == "OBSERVE":
@@ -839,8 +853,11 @@ class SimpleBot:
             elif res_str == "LOSS":
                 self.daily_losses += 1; self.loss_streak += 1
                 self.asset_cooldown[asset] = time.time() + 180
+                
+                # ✅ GALE TIMING FIX (Usa NOW, não entry time)
                 if gale_level == 0 and self.config.get("martingale_enabled", True):
-                    next_minute = (entry_dt + timedelta(minutes=1)).strftime("%Y%m%d%H%M")
+                    now_dt = datetime.now(BR_TIMEZONE)
+                    next_minute = (now_dt + timedelta(minutes=1)).strftime("%Y%m%d%H%M")
                     entry_sec = ENTRY_SECOND
                     self.log_to_db(f"🎯 GALE G1 ARMADO para {asset} (Min: {next_minute} Sec: {entry_sec})", "WARNING")
                     self.pending_gale[asset] = {
