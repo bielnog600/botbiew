@@ -17,7 +17,7 @@ try:
 except ImportError:
     print("[ERRO] Biblioteca 'exnovaapi' não instalada.")
 
-BOT_VERSION = "SHOCK_ENGINE_V31_DB_THROTTLE_FIX_2026-01-22"
+BOT_VERSION = "SHOCK_ENGINE_V32_LATE_ENTRY_FIX_2026-01-22"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -1035,6 +1035,17 @@ class SimpleBot:
                                         if not self.auto_candidate or cand["score"] > self.score_candidate(self.auto_candidate):
                                              self.auto_candidate = cand; self.auto_candidate_key = current_minute_key
                                         self.log_to_db(f"🤖 AUTO_CANDIDATE(SHOCK) {asset} Score={cand['score']:.2f}", "SYSTEM")
+                                        
+                                        # ✅ FIX: Se a entrada for tardia (>=53s), a Fase 2 não roda.
+                                        # Executa imediatamente para não perder o sinal.
+                                        if ENTRY_SECOND >= 53:
+                                            self.log_to_db(f"⚡ AUTO_EXEC (Late Entry) {asset}", "SYSTEM")
+                                            self.execute_trade(
+                                                asset=cand["asset"], direction=cand["direction"], strategy_key=cand["strategy"],
+                                                strategy_label=cand["label"], prefer_binary=cand["prefer_binary"], gale_level=0
+                                            )
+                                            self.auto_candidate = None
+
                                     elif strat_mode == "SHOCK_REVERSAL":
                                          self.execute_trade(asset=asset, direction=sig, strategy_key="SHOCK_REVERSAL", strategy_label=reason, prefer_binary=True, gale_level=0)
                                          break
