@@ -17,7 +17,7 @@ try:
 except ImportError:
     print("[ERRO] Biblioteca 'exnovaapi' não instalada.")
 
-BOT_VERSION = "SHOCK_ENGINE_V29_TANK_EDITION_2026-01-22"
+BOT_VERSION = "SHOCK_ENGINE_V30_SILENT_HEARTBEAT_MICRO_LOCK_2026-01-22"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -451,6 +451,7 @@ class SimpleBot:
         self.calibration_running = False 
         
         self.asset_cooldown = {}
+        self.last_heartbeat_ts = 0 # ✅ Novo Timer para Heartbeat seguro
 
         self.last_trade_time = {}
         self.last_minute_trade = {}
@@ -482,6 +483,11 @@ class SimpleBot:
             print("✅ Supabase conectado.")
         except Exception as e:
             print(f"❌ Erro Supabase: {e}")
+
+    # ✅ MÉTODO DE HEARTBEAT SILENCIOSO (Só atualiza a variável)
+    def touch_watchdog(self):
+        global LAST_LOG_TIME
+        LAST_LOG_TIME = time.time()
 
     def log_to_db(self, message, level="INFO"):
         global LAST_LOG_TIME
@@ -550,15 +556,21 @@ class SimpleBot:
                 
                 for asset in assets:
                     try:
-                        # ✅ API LOCK PARA EVITAR CONFLITO COM O LOOP PRINCIPAL
+                        # ✅ API LOCK COM MICRO-LOCK (Evita travar o loop principal)
+                        # Reduzido para 120 candles para performance
+                        candles = None
                         with self.api_lock:
-                            candles = self.api.get_candles(asset, 60, 150, int(time.time()))
+                            try:
+                                candles = self.api.get_candles(asset, 60, 120, int(time.time()))
+                            except:
+                                candles = None
                             
                         if not candles or len(candles) < 100: continue
                         
                         scores = {s: {'wins': 0, 'total': 0} for s in strategies}
                         
-                        for i in range(60, len(candles)-1):
+                        # ✅ Loop otimizado (passo 2) para backtest rápido
+                        for i in range(60, len(candles)-1, 2):
                             window = candles[i-60 : i+1]
                             result_candle = candles[i+1]
                             
@@ -638,6 +650,8 @@ class SimpleBot:
     # ✅ CONNECT COM LOCK (Proteção total na API)
     def connect(self):
         self.log_to_db("🔌 Conectando...", "SYSTEM")
+        ok = False
+        reason = "UNKNOWN"
         try:
             with self.api_lock: # ✅ Lock de API
                 if self.api:
@@ -931,9 +945,10 @@ class SimpleBot:
 
         while True:
             try:
-                # ✅ HEARTBEAT (evita watchdog reiniciar em pausa)
-                if int(time.time()) % 30 == 0:
-                    self.log_to_db("HEARTBEAT", "DEBUG")
+                # ✅ HEARTBEAT SAFE (1x a cada 30s, sem spam)
+                if time.time() - self.last_heartbeat_ts >= 30:
+                    self.last_heartbeat_ts = time.time()
+                    self.touch_watchdog()
 
                 self.reset_daily_if_needed()
                 self.fetch_config()
