@@ -486,12 +486,19 @@ class SimpleBot:
                 ).execute()
         except: pass
 
-    def check_strategy_signal(self, strategy_name, candles):
-        if strategy_name == "TENDMAX": return TendMaxStrategy.get_signal(candles)
+    def check_strategy_signal(self, strategy_name, candles, asset_name=""):
+        if strategy_name == "SHOCK_REVERSAL":
+            sig, reason, _ = ShockLiveDetector.detect(candles, asset_name)
+            return sig, reason
+        elif strategy_name == "TENDMAX":
+            return TendMaxStrategy.get_signal(candles)
         elif strategy_name == "V2_TREND":
-            if not TechnicalAnalysis.check_compression(candles): return TechnicalAnalysis.get_signal_v2(candles)
-        elif strategy_name == "TSUNAMI_FLOW": return TsunamiFlowStrategy.get_signal(candles)
-        elif strategy_name == "VOLUME_REACTOR": return VolumeReactorStrategy.get_signal(candles)
+            if not TechnicalAnalysis.check_compression(candles):
+                return TechnicalAnalysis.get_signal_v2(candles)
+        elif strategy_name == "TSUNAMI_FLOW":
+            return TsunamiFlowStrategy.get_signal(candles)
+        elif strategy_name == "VOLUME_REACTOR":
+            return VolumeReactorStrategy.get_signal(candles)
         return None, None
 
     def calibrate_market(self):
@@ -507,7 +514,8 @@ class SimpleBot:
                 self.log_to_db("⚠️ Calibração abortada: API offline", "WARNING"); return
 
             try:
-                strategies = ["V2_TREND", "TENDMAX", "TSUNAMI_FLOW", "VOLUME_REACTOR"]
+                # ✅ INCLUÍDO SHOCK_REVERSAL NO BACKTEST
+                strategies = ["SHOCK_REVERSAL", "V2_TREND", "TENDMAX", "TSUNAMI_FLOW", "VOLUME_REACTOR"]
                 if not self.best_assets:
                      assets_pool = [
                         "EURUSD-OTC", "EURGBP-OTC", "USDCHF-OTC", "EURJPY-OTC",
@@ -532,7 +540,7 @@ class SimpleBot:
                         for i in range(60, len(candles)-1):
                             window = candles[i-60 : i+1]; result_candle = candles[i+1]
                             for s in strategies:
-                                sig, _ = self.check_strategy_signal(s, window)
+                                sig, _ = self.check_strategy_signal(s, window, asset)
                                 if sig:
                                     scores[s]['total'] += 1
                                     is_win = (sig == "call" and result_candle["close"] > result_candle["open"]) or (sig == "put" and result_candle["close"] < result_candle["open"])
@@ -971,7 +979,8 @@ class SimpleBot:
                                     if strat_mode == "AUTO":
                                         cand = {
                                             "asset": asset, "direction": sig, "strategy": "SHOCK_REVERSAL",
-                                            "label": reason, "confidence": 0.82, 
+                                            # ✅ AJUSTE: Reduzido de 0.82 para 0.72 para permitir concorrência justa
+                                            "label": reason, "confidence": 0.72, 
                                             "wr": self.get_strategy_wr("SHOCK_REVERSAL"), "prefer_binary": True 
                                         }
                                         cand["score"] = self.score_candidate(cand)
@@ -1004,7 +1013,7 @@ class SimpleBot:
                             try:
                                 with self.api_lock: candles = self.api.get_candles(asset, 60, 60, int(time.time()))
                                 if not candles: continue
-                                sig, reason = self.check_strategy_signal(strat_mode, candles)
+                                sig, reason = self.check_strategy_signal(strat_mode, candles, asset)
                                 if sig:
                                     self.launch_trade(asset=asset, direction=sig, strategy_key=strat_mode, strategy_label=reason, prefer_binary=True, gale_level=0)
                                     trade_executed = True; break
@@ -1027,14 +1036,17 @@ class SimpleBot:
                                 target_strat = target_info["strategy"]
                                 with self.api_lock: candles = self.api.get_candles(asset, 60, 60, int(time.time()))
                                 if not candles: continue
-                                sig, lbl = self.check_strategy_signal(target_strat, candles)
+                                sig, lbl = self.check_strategy_signal(target_strat, candles, asset)
                                 if sig:
                                      boost = min(0.15, target_info["score"] / 10.0)
-                                     confidence = 0.70 + boost
+                                     # ✅ AJUSTE: Aumentado base de 0.70 para 0.76 (valoriza a estratégia calibrada)
+                                     confidence = 0.76 + boost
+                                     
                                      candidates.append({
                                         "asset": asset, "direction": sig, "strategy": target_strat,
                                         "label": lbl, "confidence": confidence,
-                                        "wr": self.get_strategy_wr(target_strat), "prefer_binary": True 
+                                        "wr": self.get_strategy_wr(target_strat), 
+                                        "prefer_binary": True 
                                     })
                             except: pass
                         
