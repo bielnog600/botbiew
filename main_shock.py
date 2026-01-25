@@ -17,7 +17,7 @@ try:
 except ImportError:
     print("[ERRO] Biblioteca 'exnovaapi' não instalada.")
 
-BOT_VERSION = "SHOCK_ENGINE_V43_GALE_PREMATURE_FIX_2026-01-25"
+BOT_VERSION = "SHOCK_ENGINE_V45_DEEP_ANALYSIS_2026-01-25"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -532,121 +532,50 @@ class SimpleBot:
         except: pass
 
     # ✅ INTEGRAÇÃO IA: CHAMADA AO GPT
-    def call_gpt_live(self, snapshot):
+    def call_gpt_strategy_selector(self, asset_data):
         if not OPENAI_API_KEY:
-            # HEURÍSTICA DE FALLBACK (Se não tiver API)
-            try:
-                avg_bodies = [x['avg_body'] for x in snapshot]
-                volatility = sum(avg_bodies) / len(avg_bodies) if avg_bodies else 0.0001
-                new_body_mult = 1.7 if volatility > 0.0005 else 1.4
-                return {
-                    "market_regime": "HIGH_VOL" if volatility > 0.0005 else "NORMAL",
-                    "shock_enabled": True, "trend_filter_enabled": True,
-                    "shock_body_mult": new_body_mult, "shock_range_mult": new_body_mult,
-                    "shock_close_pos_min": 0.85, "shock_pullback_ratio_max": 0.25,
-                    "prefer_strategy": "AUTO", "reason": "Fallback Heurístico"
-                }
-            except: return None
+            # Fallback sem API
+            return "SHOCK_REVERSAL" if asset_data['volatility'] > 1.5 else "V2_TREND"
 
         try:
             headers = {"Content-Type": "application/json", "Authorization": f"Bearer {OPENAI_API_KEY}"}
-            # ✅ MODELO ATUALIZADO PARA GPT-4o-mini
             payload = {
                 "model": "gpt-4o-mini",
                 "messages": [{"role": "user", "content": f"""
-                Você é um analista técnico especialista em OTC M1.
-                Abaixo está um snapshot AO VIVO do mercado (últimos segundos).
-                Identifique o regime e ajuste os parâmetros para máxima segurança.
-                Limites:
-                - shock_body_mult: 1.3 a 2.2
-                - prefer_strategy: AUTO|V2_TREND|TSUNAMI_FLOW|VOLUME_REACTOR|SHOCK_REVERSAL
-                JSON esperado:
-                {{
-                "market_regime":"CHOP|TREND|EXPLOSIVE",
-                "shock_enabled":true,
-                "trend_filter_enabled":true,
-                "shock_body_mult":1.4,
-                "shock_range_mult":1.4,
-                "shock_close_pos_min":0.85,
-                "shock_pullback_ratio_max":0.25,
-                "prefer_strategy":"AUTO",
-                "reason":"motivo"
-                }}
-                SNAPSHOT: {json.dumps(snapshot)}
+                Você é um analista quantitativo de OTC M1.
+                Analise os dados deste par e escolha a MELHOR estratégia.
+                Ativo: {asset_data['asset']}
+                Volatilidade (Corpo/Média): {asset_data['volatility']}x
+                Performance Recente (WinRate % / Trades):
+                - SHOCK_REVERSAL: {asset_data['scores']['SHOCK_REVERSAL']}
+                - V2_TREND: {asset_data['scores']['V2_TREND']}
+                - TENDMAX: {asset_data['scores']['TENDMAX']}
+                - TSUNAMI: {asset_data['scores']['TSUNAMI_FLOW']}
+                - REACTOR: {asset_data['scores']['VOLUME_REACTOR']}
+                
+                Regras de Decisão:
+                1. Priorize estratégias com WR > 55% e volume de sinais decente.
+                2. Se houver tendência clara e V2/TSUNAMI tiverem bom WR, escolha ELAS (Evite Shock em tendência).
+                3. Se o mercado estiver lateral ou muito volátil (>1.8x) e SHOCK tiver bom WR, escolha SHOCK.
+                4. Se REACTOR (Exaustão) estiver com WR alto (>70%), é a melhor opção para reversão.
+
+                Responda APENAS o nome da estratégia no JSON.
+
+                JSON esperado: {{"strategy": "NOME_DA_ESTRATEGIA", "reason": "motivo curto"}}
                 """}],
                 "temperature": 0.2
             }
             
-            response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload, timeout=10)
+            response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload, timeout=20)
             if response.status_code == 200:
                 content = response.json()['choices'][0]['message']['content']
                 try:
                     start = content.find('{'); end = content.rfind('}') + 1
-                    return json.loads(content[start:end])
+                    data = json.loads(content[start:end])
+                    return data
                 except: return None
         except: return None
         return None
-
-    # ✅ APLICAÇÃO SUAVE DA DECISÃO DA IA
-    def apply_gpt_decision(self, d):
-        try:
-            with self.dynamic_lock:
-                def clamp(x, a, b): return max(a, min(b, x))
-                def smooth(cur, target, step=0.05):
-                    if target > cur: return min(target, cur + step)
-                    if target < cur: return max(target, cur - step)
-                    return cur
-
-                self.dynamic["market_regime"] = d.get("market_regime", "UNKNOWN")
-                self.dynamic["shock_enabled"] = bool(d.get("shock_enabled", True))
-                self.dynamic["trend_filter_enabled"] = bool(d.get("trend_filter_enabled", True))
-                self.dynamic["prefer_strategy"] = d.get("prefer_strategy", "AUTO")
-
-                tb = clamp(float(d.get("shock_body_mult", 1.4)), 1.3, 2.2)
-                tr = clamp(float(d.get("shock_range_mult", 1.4)), 1.3, 2.2)
-                cp = clamp(float(d.get("shock_close_pos_min", 0.85)), 0.82, 0.95)
-                pr = clamp(float(d.get("shock_pullback_ratio_max", 0.25)), 0.15, 0.35)
-
-                self.dynamic["shock_body_mult"] = smooth(self.dynamic["shock_body_mult"], tb)
-                self.dynamic["shock_range_mult"] = smooth(self.dynamic["shock_range_mult"], tr)
-                self.dynamic["shock_close_pos_min"] = smooth(self.dynamic["shock_close_pos_min"], cp, step=0.01)
-                self.dynamic["shock_pullback_ratio_max"] = smooth(self.dynamic["shock_pullback_ratio_max"], pr, step=0.01)
-
-            if random.random() < 0.1:
-                self.log_to_db(f"🧠 AI TUNER: {d.get('market_regime')} | Strat: {d.get('prefer_strategy')} | ShockMult: {self.dynamic['shock_body_mult']:.2f}", "DEBUG")
-        except: pass
-
-    # ✅ LOOP DA IA (RODA EM THREAD SEPARADA)
-    def gpt_live_tuner_loop(self):
-        self.log_to_db("🧠 AI Tuner iniciado...", "SYSTEM")
-        while True:
-            try:
-                if not self.api or not self.api.check_connect(): time.sleep(10); continue
-                assets = self.best_assets[:6] if self.best_assets else ["EURUSD-OTC","GBPUSD-OTC","USDJPY-OTC"]
-                snapshot = []
-                for a in assets:
-                    try:
-                        candles = None
-                        with self.api_lock:
-                            try: candles = self.api.get_candles(a, 60, 60, int(time.time()))
-                            except: candles = None
-                        if not candles or len(candles) < 30: continue
-
-                        closed = candles[:-1]; live = candles[-1]
-                        bodies = [abs(c["close"]-c["open"]) for c in closed[-20:]]
-                        avg_body = sum(bodies)/len(bodies) if bodies else 0.00001
-                        body_live = abs(live["close"]-live["open"])
-                        snapshot.append({
-                            "asset": a, "avg_body": round(avg_body, 6), "body_live": round(body_live, 6),
-                            "volatility": round(body_live/avg_body, 2)
-                        })
-                    except: pass
-
-                if snapshot:
-                    decision = self.call_gpt_live(snapshot)
-                    if decision: self.apply_gpt_decision(decision)
-                time.sleep(60) 
-            except: time.sleep(10)
 
     def check_strategy_signal(self, strategy_name, candles, asset_name=""):
         if strategy_name == "SHOCK_REVERSAL":
@@ -663,65 +592,98 @@ class SimpleBot:
     def calibrate_market(self):
         if self.calibration_running: return
         self.calibration_running = True
-        self.log_to_db("🔬 Disparando Thread de Calibração...", "SYSTEM")
+        self.log_to_db("🔬 IA Iniciando Análise Profunda...", "SYSTEM")
         t = threading.Thread(target=self._run_calibration_task, daemon=True)
         t.start()
 
     def _run_calibration_task(self):
         try:
-            if not self.api or not self.api.check_connect():
-                self.log_to_db("⚠️ Calibração abortada: API offline", "WARNING"); return
+            if not self.api or not self.api.check_connect(): return
 
-            try:
-                strategies = ["SHOCK_REVERSAL", "V2_TREND", "TENDMAX", "TSUNAMI_FLOW", "VOLUME_REACTOR"]
-                if not self.best_assets:
-                     assets_pool = [
-                        "EURUSD-OTC", "EURGBP-OTC", "USDCHF-OTC", "EURJPY-OTC",
-                        "NZDUSD-OTC", "GBPUSD-OTC", "GBPJPY-OTC", "USDJPY-OTC",
-                        "AUDCAD-OTC", "AUDUSD-OTC", "USDCAD-OTC", "AUDJPY-OTC"
-                    ]
-                     self.best_assets = self.catalog_assets(assets_pool)
+            strategies = ["SHOCK_REVERSAL", "V2_TREND", "TENDMAX", "TSUNAMI_FLOW", "VOLUME_REACTOR"]
+            if not self.best_assets:
+                 assets_pool = [
+                    "EURUSD-OTC", "EURGBP-OTC", "USDCHF-OTC", "EURJPY-OTC",
+                    "NZDUSD-OTC", "GBPUSD-OTC", "GBPJPY-OTC", "USDJPY-OTC",
+                    "AUDCAD-OTC", "AUDUSD-OTC", "USDCAD-OTC", "AUDJPY-OTC"
+                ]
+                 self.best_assets = self.catalog_assets(assets_pool)
 
-                assets = self.best_assets
-                new_map = {}
+            assets = self.best_assets
+            new_map = {}
+            
+            for asset in assets:
+                try:
+                    # ✅ CALM MODE: Espera 3s entre ativos para não estourar API
+                    time.sleep(3) 
+                    
+                    candles = None
+                    with self.api_lock:
+                        try: candles = self.api.get_candles(asset, 60, 120, int(time.time()))
+                        except: candles = None
+                    if not candles or len(candles) < 100: continue
+                    
+                    # 1. Coleta dados matemáticos (Backtest rápido)
+                    scores = {s: {'wins': 0, 'total': 0} for s in strategies}
+                    
+                    for i in range(60, len(candles)-1):
+                        window = candles[i-60 : i+1]; result_candle = candles[i+1]
+                        for s in strategies:
+                            sig, _ = self.check_strategy_signal(s, window, asset)
+                            if sig:
+                                scores[s]['total'] += 1
+                                is_win = (sig == "call" and result_candle["close"] > result_candle["open"]) or (sig == "put" and result_candle["close"] < result_candle["open"])
+                                if is_win: scores[s]['wins'] += 1
+                    
+                    # Formata dados para o GPT
+                    formatted_scores = {}
+                    for s in strategies:
+                        t = scores[s]['total']
+                        w = scores[s]['wins']
+                        wr = int((w/t)*100) if t > 0 else 0
+                        formatted_scores[s] = f"{wr}% ({w}/{t})"
+                    
+                    # Calcula volatilidade simples
+                    bodies = [abs(c["close"]-c["open"]) for c in candles[-20:]]
+                    avg = sum(bodies)/len(bodies) if bodies else 0.0001
+                    last_body = abs(candles[-1]["close"]-candles[-1]["open"])
+                    volatility = round(last_body/avg, 2)
+
+                    asset_data = {
+                        "asset": asset,
+                        "volatility": volatility,
+                        "scores": formatted_scores
+                    }
+
+                    # 2. Pergunta ao GPT qual a melhor estratégia
+                    gpt_decision = self.call_gpt_strategy_selector(asset_data)
+                    
+                    selected_strat = "V2_TREND" # Default seguro
+                    score_val = 1.0
+
+                    if gpt_decision and gpt_decision.get("strategy") in strategies:
+                        selected_strat = gpt_decision["strategy"]
+                        # Calcula score base para o AUTO usar depois
+                        st_stats = scores[selected_strat]
+                        if st_stats['total'] > 0:
+                            wr = st_stats['wins']/st_stats['total']
+                            score_val = wr * math.sqrt(st_stats['total'])
+                        else:
+                            # Se a IA escolheu sem dados históricos (por volatilidade/contexto), dá um peso médio
+                            score_val = 1.5 
+                        
+                        # Log detalhado da escolha da IA
+                        self.log_to_db(f"🤖 GPT [{asset}] escolheu {selected_strat} ({gpt_decision.get('reason')})", "DEBUG")
+                    
+                    new_map[asset] = {"strategy": selected_strat, "score": score_val}
                 
-                for asset in assets:
-                    try:
-                        candles = None
-                        with self.api_lock:
-                            try: candles = self.api.get_candles(asset, 60, 120, int(time.time()))
-                            except: candles = None
-                        if not candles or len(candles) < 100: continue
-                        
-                        scores = {s: {'wins': 0, 'total': 0} for s in strategies}
-                        for i in range(60, len(candles)-1):
-                            window = candles[i-60 : i+1]; result_candle = candles[i+1]
-                            for s in strategies:
-                                sig, _ = self.check_strategy_signal(s, window, asset)
-                                if sig:
-                                    scores[s]['total'] += 1
-                                    is_win = (sig == "call" and result_candle["close"] > result_candle["open"]) or (sig == "put" and result_candle["close"] < result_candle["open"])
-                                    if is_win: scores[s]['wins'] += 1
-                        
-                        best_s = None; best_score = -1
-                        for s, stats in scores.items():
-                            total = stats['total']
-                            if total > 0:
-                                wr = stats['wins'] / total
-                                score = wr * math.sqrt(total)
-                                if total >= 8 and wr >= 0.52 and score > best_score:
-                                    best_score = score; best_s = s
-                        
-                        if best_s:
-                            new_map[asset] = {"strategy": best_s, "score": best_score}
-                            self.log_to_db(f"✅ {asset} -> {best_s} (Score: {best_score:.2f} | WR: {scores[best_s]['wins']/scores[best_s]['total']:.2f})", "DEBUG")
-                        else: new_map[asset] = {"strategy": "V2_TREND", "score": 1.0}
-                    except: pass
-                
-                self.asset_strategy_map = new_map
-                self.last_calibration_time = time.time()
-                self.log_to_db(f"🏁 Calibração concluída. {len(new_map)} pares mapeados.", "SUCCESS")
-            except Exception as e: self.log_to_db(f"❌ Erro na Lógica de Calibração: {e}", "ERROR")
+                except Exception as e:
+                    pass
+            
+            self.asset_strategy_map = new_map
+            self.last_calibration_time = time.time()
+            self.log_to_db(f"🏁 Análise IA concluída. Mapa atualizado.", "SUCCESS")
+        except Exception as e: self.log_to_db(f"❌ Erro Calibração IA: {e}", "ERROR")
         finally: self.calibration_running = False
 
     def insert_signal(self, asset, direction, strategy_name, amount):
