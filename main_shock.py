@@ -17,7 +17,7 @@ try:
 except ImportError:
     print("[ERRO] Biblioteca 'exnovaapi' não instalada.")
 
-BOT_VERSION = "SHOCK_ENGINE_V50_START_FIX_2026-01-25"
+BOT_VERSION = "SHOCK_ENGINE_V51_NO_GALE_STRAT_BALANCE_2026-01-25"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -36,9 +36,9 @@ BR_TIMEZONE = timezone(timedelta(hours=-3))
 # ✅ SEGUNDO DE ENTRADA
 ENTRY_SECOND = int(os.environ.get("ENTRY_SECOND", "50"))
 
-# ✅ CONFIGURAÇÃO MARTINGALE (DESATIVADO)
+# ✅ CONFIGURAÇÃO MARTINGALE (REMOVIDO)
 MARTINGALE_ENABLED = False 
-MARTINGALE_MULTIPLIER = float(os.environ.get("MARTINGALE_MULTIPLIER", "2.0"))
+MARTINGALE_MULTIPLIER = 1.0
 
 # ==============================================================================
 # LOGGING / WATCHDOG
@@ -353,7 +353,6 @@ class TendMaxStrategy:
 class TsunamiFlowStrategy:
     """
     🌊 TSUNAMI FLOW: Estratégia de seguimento de tendência e momentum.
-    Refinado: Agora verifica pavio de rejeição com wick/range para evitar falsos positivos em corpos pequenos.
     """
     @staticmethod
     def get_signal(candles):
@@ -464,7 +463,7 @@ class SimpleBot:
             "mode": "LIVE",
             "strategy_mode": "AUTO",
             "martingale_enabled": False, # ❌ DESATIVADO
-            "martingale_multiplier": MARTINGALE_MULTIPLIER,
+            "martingale_multiplier": 1.0,
         }
 
         self.current_date = datetime.now(BR_TIMEZONE).date()
@@ -865,7 +864,6 @@ class SimpleBot:
         entry_dt = datetime.now(BR_TIMEZONE)
         now = time.time()
         
-        # ✅ SMART GLOBAL LOCK: Reserva sem travar, só trava se confirmar ordem
         global_minute = entry_dt.strftime("%Y%m%d%H%M")
         reserved_minute = False
         
@@ -941,7 +939,6 @@ class SimpleBot:
                 with self.trade_lock: self.last_global_minute = global_minute
 
             self.log_to_db(f"✅ CONFIRMADA: Ordem {trade_id}. Aguardando...", "INFO")
-            
             # ✅ SLEEP OTIMIZADO (15s margem)
             wait_time = (60 - entry_dt.second) + 15
             if wait_time < 5: wait_time = 5   
@@ -997,9 +994,8 @@ class SimpleBot:
                 self.daily_losses += 1; self.loss_streak += 1
                 self.asset_cooldown[asset] = time.time() + 180
                 
-                # ❌ GALE REMOVIDO/DESATIVADO NO BLOCO DE LOSS
-                # if gale_level == 0 and self.config.get("martingale_enabled", False):
-                #    ... (código antigo removido) ...
+                # ❌ GALE REMOVIDO COMPLETAMENTE NA V51
+                self.log_to_db(f"❌ Stop Loss no par {asset}. Sem Gale.", "INFO")
 
             if self.loss_streak >= 2:
                 self.block_until_ts = time.time() + 900
@@ -1096,10 +1092,17 @@ class SimpleBot:
                             try:
                                 with self.api_lock: candles = self.api.get_candles(asset, 60, 60, int(time.time()))
                                 if not candles: continue
-                                sig, reason = self.check_strategy_signal("SHOCK_REVERSAL", candles, asset)
+                                sig, reason, dbg = ShockLiveDetector.detect(candles, asset)
                                 if strat_mode == "SHOCK_REVERSAL": self.log_to_db(f"⚡ SHOCK_CHECK {asset}: {reason}", "DEBUG")
                                 if sig:
                                     if strat_mode == "AUTO":
+                                        # ✅ NOVA LÓGICA V51: Respeitar a IA
+                                        # Se a IA escolheu outra estratégia (ex: V2_TREND) para este par,
+                                        # IGNORA o Shock para guardar o slot para a Fase 2.
+                                        target_strat = self.asset_strategy_map.get(asset, {}).get("strategy", "SHOCK_REVERSAL")
+                                        if target_strat != "SHOCK_REVERSAL":
+                                            continue # Pula Shock, espera Fase 2
+
                                         cand = {
                                             "asset": asset, "direction": sig, "strategy": "SHOCK_REVERSAL",
                                             # ✅ AJUSTE: Reduzido de 0.82 para 0.72 para permitir concorrência justa
