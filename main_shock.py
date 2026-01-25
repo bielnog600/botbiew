@@ -17,7 +17,7 @@ try:
 except ImportError:
     print("[ERRO] Biblioteca 'exnovaapi' não instalada.")
 
-BOT_VERSION = "SHOCK_ENGINE_V49_NO_GALE_GPT_ANALYSIS_2026-01-25"
+BOT_VERSION = "SHOCK_ENGINE_V50_START_FIX_2026-01-25"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -37,7 +37,7 @@ BR_TIMEZONE = timezone(timedelta(hours=-3))
 ENTRY_SECOND = int(os.environ.get("ENTRY_SECOND", "50"))
 
 # ✅ CONFIGURAÇÃO MARTINGALE (DESATIVADO)
-MARTINGALE_ENABLED = False # ❌ GALE REMOVIDO POR SEGURANÇA
+MARTINGALE_ENABLED = False 
 MARTINGALE_MULTIPLIER = float(os.environ.get("MARTINGALE_MULTIPLIER", "2.0"))
 
 # ==============================================================================
@@ -1030,9 +1030,6 @@ class SimpleBot:
         t_watchdog = threading.Thread(target=watchdog, daemon=True)
         t_watchdog.start()
         
-        # ✅ INICIA TUNER DE IA (Background)
-        threading.Thread(target=self.gpt_live_tuner_loop, daemon=True).start()
-
         assets_pool = [
             "EURUSD-OTC", "EURGBP-OTC", "USDCHF-OTC", "EURJPY-OTC",
             "NZDUSD-OTC", "GBPUSD-OTC", "GBPJPY-OTC", "USDJPY-OTC",
