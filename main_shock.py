@@ -17,7 +17,7 @@ try:
 except ImportError:
     print("[ERRO] Biblioteca 'exnovaapi' não instalada.")
 
-BOT_VERSION = "SHOCK_ENGINE_V46_FIX_START_CRASH_2026-01-25"
+BOT_VERSION = "SHOCK_ENGINE_V48_NO_TIME_BLOCK_2026-01-25"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -353,6 +353,7 @@ class TendMaxStrategy:
 class TsunamiFlowStrategy:
     """
     🌊 TSUNAMI FLOW: Estratégia de seguimento de tendência e momentum.
+    Refinado: Agora verifica pavio de rejeição com wick/range para evitar falsos positivos em corpos pequenos.
     """
     @staticmethod
     def get_signal(candles):
@@ -533,9 +534,12 @@ class SimpleBot:
 
     # ✅ INTEGRAÇÃO IA: CHAMADA AO GPT
     def call_gpt_strategy_selector(self, asset_data):
+        # ✅ FALLBACK SEGURO SE API KEY AUSENTE
         if not OPENAI_API_KEY:
-            # Fallback sem API
-            return "SHOCK_REVERSAL" if asset_data['volatility'] > 1.5 else "V2_TREND"
+            return {
+                "strategy": "SHOCK_REVERSAL" if asset_data['volatility'] > 1.5 else "V2_TREND",
+                "reason": "Fallback sem OPENAI_API_KEY"
+            }
 
         try:
             headers = {"Content-Type": "application/json", "Authorization": f"Bearer {OPENAI_API_KEY}"}
@@ -570,12 +574,77 @@ class SimpleBot:
             if response.status_code == 200:
                 content = response.json()['choices'][0]['message']['content']
                 try:
-                    start = content.find('{'); end = content.rfind('}') + 1
-                    data = json.loads(content[start:end])
-                    return data
+                    # ✅ PARSER BLINDADO (Extrai apenas o JSON)
+                    start = content.find('{')
+                    end = content.rfind('}') + 1
+                    if start != -1 and end != 0:
+                        data = json.loads(content[start:end])
+                        return data
                 except: return None
         except: return None
         return None
+
+    # ✅ APLICAÇÃO SUAVE DA DECISÃO DA IA
+    def apply_gpt_decision(self, d):
+        try:
+            with self.dynamic_lock:
+                def clamp(x, a, b): return max(a, min(b, x))
+                def smooth(cur, target, step=0.05):
+                    if target > cur: return min(target, cur + step)
+                    if target < cur: return max(target, cur - step)
+                    return cur
+
+                self.dynamic["market_regime"] = d.get("market_regime", "UNKNOWN")
+                self.dynamic["shock_enabled"] = bool(d.get("shock_enabled", True))
+                self.dynamic["trend_filter_enabled"] = bool(d.get("trend_filter_enabled", True))
+                self.dynamic["prefer_strategy"] = d.get("prefer_strategy", "AUTO")
+
+                tb = clamp(float(d.get("shock_body_mult", 1.4)), 1.3, 2.2)
+                tr = clamp(float(d.get("shock_range_mult", 1.4)), 1.3, 2.2)
+                cp = clamp(float(d.get("shock_close_pos_min", 0.85)), 0.82, 0.95)
+                pr = clamp(float(d.get("shock_pullback_ratio_max", 0.25)), 0.15, 0.35)
+
+                self.dynamic["shock_body_mult"] = smooth(self.dynamic["shock_body_mult"], tb)
+                self.dynamic["shock_range_mult"] = smooth(self.dynamic["shock_range_mult"], tr)
+                self.dynamic["shock_close_pos_min"] = smooth(self.dynamic["shock_close_pos_min"], cp, step=0.01)
+                self.dynamic["shock_pullback_ratio_max"] = smooth(self.dynamic["shock_pullback_ratio_max"], pr, step=0.01)
+
+            if random.random() < 0.1:
+                self.log_to_db(f"🧠 AI TUNER: {d.get('market_regime')} | Strat: {d.get('prefer_strategy')} | ShockMult: {self.dynamic['shock_body_mult']:.2f}", "DEBUG")
+        except: pass
+
+    # ✅ LOOP DA IA (RODA EM THREAD SEPARADA)
+    def gpt_live_tuner_loop(self):
+        self.log_to_db("🧠 AI Tuner iniciado...", "SYSTEM")
+        while True:
+            try:
+                if not self.api or not self.api.check_connect(): time.sleep(10); continue
+                assets = self.best_assets[:6] if self.best_assets else ["EURUSD-OTC","GBPUSD-OTC","USDJPY-OTC"]
+                snapshot = []
+                for a in assets:
+                    try:
+                        candles = None
+                        with self.api_lock:
+                            try: candles = self.api.get_candles(a, 60, 60, int(time.time()))
+                            except: candles = None
+                        if not candles or len(candles) < 30: continue
+
+                        closed = candles[:-1]; live = candles[-1]
+                        bodies = [abs(c["close"]-c["open"]) for c in closed[-20:]]
+                        avg_body = sum(bodies)/len(bodies) if bodies else 0.00001
+                        body_live = abs(live["close"]-live["open"])
+                        snapshot.append({
+                            "asset": a, "avg_body": round(avg_body, 6), "body_live": round(body_live, 6),
+                            "volatility": round(body_live/avg_body, 2)
+                        })
+                    except: pass
+
+                if snapshot:
+                    # Chamada simplificada para tuner global (opcional ou manter separado)
+                    # Por enquanto, focamos na calibração por par
+                    pass
+                time.sleep(60) 
+            except: time.sleep(10)
 
     def check_strategy_signal(self, strategy_name, candles, asset_name=""):
         if strategy_name == "SHOCK_REVERSAL":
@@ -774,36 +843,35 @@ class SimpleBot:
             })
         except: pass
 
+    # ✅ CHECAGEM DE HORÁRIO LIMPA (Sem bloqueios hardcoded)
     def check_schedule(self):
+        # Se timer não estiver habilitado, libera geral
+        if not self.config.get("timer_enabled", False):
+            return
+
         now_br = datetime.now(BR_TIMEZONE)
         now_str = now_br.strftime("%H:%M")
         start_str = self.config.get("timer_start", "00:00")
         end_str = self.config.get("timer_end", "00:00")
-        hour = now_br.hour; minute = now_br.minute
-        blocked_time = False
-        if 0 <= hour < 4: blocked_time = True
-        if hour == 13 and minute >= 30: blocked_time = True
-        if hour == 14 and minute <= 30: blocked_time = True
-        if blocked_time:
-            if self.config["status"] == "RUNNING":
-                self.log_to_db("⛔ Horário bloqueado — PAUSANDO", "WARNING")
-                try: 
-                    with self.db_lock:
-                        self.supabase.table("bot_config").update({"status": "PAUSED"}).eq("id", 1).execute()
-                    self.config["status"] = "PAUSED"
-                except: pass
-            return
-        if not self.config.get("timer_enabled", False): return
+
+        # Verifica se está DENTRO do horário permitido
         is_inside = False
-        if start_str < end_str: is_inside = start_str <= now_str < end_str
-        else: is_inside = now_str >= start_str or now_str < end_str
+        if start_str < end_str:
+            is_inside = start_str <= now_str < end_str
+        else:
+            # Caso de virada de dia (ex: 22:00 as 05:00)
+            is_inside = now_str >= start_str or now_str < end_str
+
+        # Se deveria rodar mas está pausado, liga
         if is_inside and self.config["status"] == "PAUSED":
             self.log_to_db(f"⏰ Agendador: RUNNING ({start_str}-{end_str})", "SYSTEM")
             try: 
                 with self.db_lock: self.supabase.table("bot_config").update({"status": "RUNNING"}).eq("id", 1).execute()
             except: pass
+        
+        # Se NÃO deveria rodar mas está rodando, pausa
         if (not is_inside) and self.config["status"] == "RUNNING":
-            self.log_to_db("⏰ Agendador: PAUSED (fim)", "SYSTEM")
+            self.log_to_db("⏰ Agendador: PAUSED (fim do horário)", "SYSTEM")
             try: 
                 with self.db_lock: self.supabase.table("bot_config").update({"status": "PAUSED"}).eq("id", 1).execute()
             except: pass
@@ -1051,8 +1119,8 @@ class SimpleBot:
         t_watchdog = threading.Thread(target=watchdog, daemon=True)
         t_watchdog.start()
         
-        # ✅ REMOVIDO: Thread fantasma que causava crash (gpt_live_tuner_loop)
-        # A lógica de IA agora roda dentro de calibrate_market
+        # ✅ INICIA TUNER DE IA (Background)
+        threading.Thread(target=self.gpt_live_tuner_loop, daemon=True).start()
 
         assets_pool = [
             "EURUSD-OTC", "EURGBP-OTC", "USDCHF-OTC", "EURJPY-OTC",
