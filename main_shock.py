@@ -17,7 +17,7 @@ try:
 except ImportError:
     print("[ERRO] Biblioteca 'exnovaapi' não instalada.")
 
-BOT_VERSION = "SHOCK_ENGINE_V48_NO_TIME_BLOCK_2026-01-25"
+BOT_VERSION = "SHOCK_ENGINE_V49_NO_GALE_GPT_ANALYSIS_2026-01-25"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -36,8 +36,8 @@ BR_TIMEZONE = timezone(timedelta(hours=-3))
 # ✅ SEGUNDO DE ENTRADA
 ENTRY_SECOND = int(os.environ.get("ENTRY_SECOND", "50"))
 
-# ✅ CONFIGURAÇÃO MARTINGALE
-MARTINGALE_ENABLED = os.environ.get("MARTINGALE_ENABLED", "1") == "1"
+# ✅ CONFIGURAÇÃO MARTINGALE (DESATIVADO)
+MARTINGALE_ENABLED = False # ❌ GALE REMOVIDO POR SEGURANÇA
 MARTINGALE_MULTIPLIER = float(os.environ.get("MARTINGALE_MULTIPLIER", "2.0"))
 
 # ==============================================================================
@@ -463,7 +463,7 @@ class SimpleBot:
             "timer_end": "00:00",
             "mode": "LIVE",
             "strategy_mode": "AUTO",
-            "martingale_enabled": MARTINGALE_ENABLED,
+            "martingale_enabled": False, # ❌ DESATIVADO
             "martingale_multiplier": MARTINGALE_MULTIPLIER,
         }
 
@@ -583,68 +583,6 @@ class SimpleBot:
                 except: return None
         except: return None
         return None
-
-    # ✅ APLICAÇÃO SUAVE DA DECISÃO DA IA
-    def apply_gpt_decision(self, d):
-        try:
-            with self.dynamic_lock:
-                def clamp(x, a, b): return max(a, min(b, x))
-                def smooth(cur, target, step=0.05):
-                    if target > cur: return min(target, cur + step)
-                    if target < cur: return max(target, cur - step)
-                    return cur
-
-                self.dynamic["market_regime"] = d.get("market_regime", "UNKNOWN")
-                self.dynamic["shock_enabled"] = bool(d.get("shock_enabled", True))
-                self.dynamic["trend_filter_enabled"] = bool(d.get("trend_filter_enabled", True))
-                self.dynamic["prefer_strategy"] = d.get("prefer_strategy", "AUTO")
-
-                tb = clamp(float(d.get("shock_body_mult", 1.4)), 1.3, 2.2)
-                tr = clamp(float(d.get("shock_range_mult", 1.4)), 1.3, 2.2)
-                cp = clamp(float(d.get("shock_close_pos_min", 0.85)), 0.82, 0.95)
-                pr = clamp(float(d.get("shock_pullback_ratio_max", 0.25)), 0.15, 0.35)
-
-                self.dynamic["shock_body_mult"] = smooth(self.dynamic["shock_body_mult"], tb)
-                self.dynamic["shock_range_mult"] = smooth(self.dynamic["shock_range_mult"], tr)
-                self.dynamic["shock_close_pos_min"] = smooth(self.dynamic["shock_close_pos_min"], cp, step=0.01)
-                self.dynamic["shock_pullback_ratio_max"] = smooth(self.dynamic["shock_pullback_ratio_max"], pr, step=0.01)
-
-            if random.random() < 0.1:
-                self.log_to_db(f"🧠 AI TUNER: {d.get('market_regime')} | Strat: {d.get('prefer_strategy')} | ShockMult: {self.dynamic['shock_body_mult']:.2f}", "DEBUG")
-        except: pass
-
-    # ✅ LOOP DA IA (RODA EM THREAD SEPARADA)
-    def gpt_live_tuner_loop(self):
-        self.log_to_db("🧠 AI Tuner iniciado...", "SYSTEM")
-        while True:
-            try:
-                if not self.api or not self.api.check_connect(): time.sleep(10); continue
-                assets = self.best_assets[:6] if self.best_assets else ["EURUSD-OTC","GBPUSD-OTC","USDJPY-OTC"]
-                snapshot = []
-                for a in assets:
-                    try:
-                        candles = None
-                        with self.api_lock:
-                            try: candles = self.api.get_candles(a, 60, 60, int(time.time()))
-                            except: candles = None
-                        if not candles or len(candles) < 30: continue
-
-                        closed = candles[:-1]; live = candles[-1]
-                        bodies = [abs(c["close"]-c["open"]) for c in closed[-20:]]
-                        avg_body = sum(bodies)/len(bodies) if bodies else 0.00001
-                        body_live = abs(live["close"]-live["open"])
-                        snapshot.append({
-                            "asset": a, "avg_body": round(avg_body, 6), "body_live": round(body_live, 6),
-                            "volatility": round(body_live/avg_body, 2)
-                        })
-                    except: pass
-
-                if snapshot:
-                    # Chamada simplificada para tuner global (opcional ou manter separado)
-                    # Por enquanto, focamos na calibração por par
-                    pass
-                time.sleep(60) 
-            except: time.sleep(10)
 
     def check_strategy_signal(self, strategy_name, candles, asset_name=""):
         if strategy_name == "SHOCK_REVERSAL":
@@ -843,35 +781,27 @@ class SimpleBot:
             })
         except: pass
 
-    # ✅ CHECAGEM DE HORÁRIO LIMPA (Sem bloqueios hardcoded)
     def check_schedule(self):
-        # Se timer não estiver habilitado, libera geral
-        if not self.config.get("timer_enabled", False):
-            return
-
         now_br = datetime.now(BR_TIMEZONE)
         now_str = now_br.strftime("%H:%M")
         start_str = self.config.get("timer_start", "00:00")
         end_str = self.config.get("timer_end", "00:00")
-
-        # Verifica se está DENTRO do horário permitido
+        hour = now_br.hour; minute = now_br.minute
+        blocked_time = False
+        
+        # ❌ REMOVIDO BLOQUEIO DE HORÁRIO RIGIDO
+        
+        if not self.config.get("timer_enabled", False): return
         is_inside = False
-        if start_str < end_str:
-            is_inside = start_str <= now_str < end_str
-        else:
-            # Caso de virada de dia (ex: 22:00 as 05:00)
-            is_inside = now_str >= start_str or now_str < end_str
-
-        # Se deveria rodar mas está pausado, liga
+        if start_str < end_str: is_inside = start_str <= now_str < end_str
+        else: is_inside = now_str >= start_str or now_str < end_str
         if is_inside and self.config["status"] == "PAUSED":
             self.log_to_db(f"⏰ Agendador: RUNNING ({start_str}-{end_str})", "SYSTEM")
             try: 
                 with self.db_lock: self.supabase.table("bot_config").update({"status": "RUNNING"}).eq("id", 1).execute()
             except: pass
-        
-        # Se NÃO deveria rodar mas está rodando, pausa
         if (not is_inside) and self.config["status"] == "RUNNING":
-            self.log_to_db("⏰ Agendador: PAUSED (fim do horário)", "SYSTEM")
+            self.log_to_db("⏰ Agendador: PAUSED (fim)", "SYSTEM")
             try: 
                 with self.db_lock: self.supabase.table("bot_config").update({"status": "PAUSED"}).eq("id", 1).execute()
             except: pass
@@ -1067,28 +997,9 @@ class SimpleBot:
                 self.daily_losses += 1; self.loss_streak += 1
                 self.asset_cooldown[asset] = time.time() + 180
                 
-                # ✅ GALE FIX V40: GALE SEQ (MINUTO SEGUINTE À ENTRADA)
-                if gale_level == 0 and self.config.get("martingale_enabled", True):
-                    # Pega a base da vela de entrada (ex: 19:36:00)
-                    entry_base = entry_dt.replace(second=0, microsecond=0)
-                    # Soma 1 minuto: Próxima vela sequencial (19:37:00)
-                    gale_dt = entry_base + timedelta(minutes=1)
-                    
-                    next_minute = gale_dt.strftime("%Y%m%d%H%M")
-                    
-                    # Validação de Futuro (Evita Gale no passado)
-                    # Se por algum motivo o processamento demorar muito e já tiver passado o minuto do gale
-                    gale_limit = gale_dt.replace(second=59)
-                    if datetime.now(BR_TIMEZONE) > gale_limit:
-                        self.log_to_db(f"⚠️ Gale ignorado (tempo expirado): {next_minute}", "WARNING")
-                    else:
-                        entry_sec = ENTRY_SECOND
-                        self.log_to_db(f"🎯 GALE G1 ARMADO para {asset} (Min: {next_minute} Sec: {entry_sec})", "WARNING")
-                        self.pending_gale[asset] = {
-                            'asset': asset, 'direction': direction, 'strategy_key': strategy_key,
-                            'strategy_label': strategy_label, 'prefer_binary': True,
-                            'minute_key': next_minute, 'second_key': entry_sec
-                        }
+                # ❌ GALE REMOVIDO/DESATIVADO NO BLOCO DE LOSS
+                # if gale_level == 0 and self.config.get("martingale_enabled", False):
+                #    ... (código antigo removido) ...
 
             if self.loss_streak >= 2:
                 self.block_until_ts = time.time() + 900
@@ -1128,6 +1039,10 @@ class SimpleBot:
             "AUDCAD-OTC", "AUDUSD-OTC", "USDCAD-OTC", "AUDJPY-OTC"
         ]
 
+        # ✅ CALIBRAGEM INICIAL IMEDIATA (Se o mapa estiver vazio)
+        # Roda numa thread separada para não travar o início
+        threading.Thread(target=self._run_calibration_task, daemon=True).start()
+
         while True:
             try:
                 if time.time() - self.last_heartbeat_ts >= 30:
@@ -1145,28 +1060,11 @@ class SimpleBot:
                 if not self.api or not self.api.check_connect():
                     if not self.connect(): time.sleep(5); continue
                 
+                # ✅ RE-CALIBRAGEM PERIÓDICA (2h)
                 if (time.time() - self.last_calibration_time) > 7200: self.calibrate_market()
 
-                executed_gale = False
-                if self.pending_gale:
-                    now_dt = datetime.now(BR_TIMEZONE)
-                    current_key = now_dt.strftime("%Y%m%d%H%M")
-                    now_sec = now_dt.second
-                    assets_gale = list(self.pending_gale.keys())
-                    for asset in assets_gale:
-                        g = self.pending_gale.get(asset)
-                        if not g: continue
-                        if g.get("minute_key") != current_key: continue
-                        sec_target = int(g.get("second_key", ENTRY_SECOND))
-                        if not (sec_target - 3 <= now_sec <= sec_target + 3): continue
-                        del self.pending_gale[asset]
-                        self.log_to_db(f"🚀 EXECUTANDO GALE G1: {asset} (SYNC {current_key} @{sec_target}s)", "INFO")
-                        self.launch_trade(
-                            asset=g['asset'], direction=g['direction'], strategy_key=g['strategy_key'],
-                            strategy_label=g['strategy_label'], prefer_binary=g['prefer_binary'], gale_level=1
-                        )
-                        executed_gale = True
-                    if executed_gale: time.sleep(0.25); continue
+                # GALE REMOVIDO DO LOOP PRINCIPAL
+                # executed_gale = False ...
 
                 if not self.best_assets or (time.time() - self.last_catalog_time > 900):
                     self.best_assets = self.catalog_assets(assets_pool)
