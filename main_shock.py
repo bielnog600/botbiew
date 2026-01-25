@@ -17,7 +17,7 @@ try:
 except ImportError:
     print("[ERRO] Biblioteca 'exnovaapi' não instalada.")
 
-BOT_VERSION = "SHOCK_ENGINE_V38_GALE_ENTRY_BASE_FIX_2026-01-22"
+BOT_VERSION = "SHOCK_ENGINE_V42_SMART_SLEEP_GPT4o_2026-01-25"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -27,6 +27,9 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://ioduahwknfsktujthfyc.supa
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 EXNOVA_EMAIL = os.environ.get("EXNOVA_EMAIL", "seu_email@exemplo.com")
 EXNOVA_PASSWORD = os.environ.get("EXNOVA_PASSWORD", "sua_senha")
+
+# Se tiver chave OpenAI, coloque aqui ou nas env vars
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 
 BR_TIMEZONE = timezone(timedelta(hours=-3))
 
@@ -205,9 +208,31 @@ class TechnicalAnalysis:
 
 class ShockLiveDetector:
     @staticmethod
-    def detect(candles, asset_name):
+    def detect(candles, asset_name, dynamic_config=None):
         if len(candles) < 30:
             return None, "Dados insuficientes", {}
+
+        # ✅ CARREGA CONFIG DINÂMICA (GPT) OU PADRÃO
+        if dynamic_config:
+            body_mult = dynamic_config.get("shock_body_mult", 1.4)
+            range_mult = dynamic_config.get("shock_range_mult", 1.4)
+            close_pos_min = dynamic_config.get("shock_close_pos_min", 0.85)
+            pullback_ratio_max = dynamic_config.get("shock_pullback_ratio_max", 0.25)
+            shock_enabled = dynamic_config.get("shock_enabled", True)
+            trend_filter = dynamic_config.get("trend_filter_enabled", True)
+        else:
+            # Padrões
+            body_mult = 1.4
+            range_mult = 1.4
+            close_pos_min = 0.85
+            pullback_ratio_max = 0.25
+            shock_enabled = True
+            trend_filter = True
+
+        debug = {"body_mult": body_mult} # Info básica
+
+        if not shock_enabled:
+            return None, "Shock DESATIVADO pelo GPT", debug
 
         live = TechnicalAnalysis.analyze_candle(candles[-1])
         # ✅ PROTEÇÃO NANO TENDÊNCIA: Analisa 2 velas anteriores
@@ -215,6 +240,12 @@ class ShockLiveDetector:
         prev2 = TechnicalAnalysis.analyze_candle(candles[-3])
 
         closed = candles[:-1]
+
+        # ✅ FILTRO DE TENDÊNCIA FORTE (EMA)
+        ema9 = TechnicalAnalysis.calculate_ema(closed, 9)
+        ema21 = TechnicalAnalysis.calculate_ema(closed, 21)
+        trend_up = ema9 > ema21
+        trend_down = ema9 < ema21
 
         bodies = [abs(c["close"] - c["open"]) for c in closed[-20:]]
         ranges = [(c["max"] - c["min"]) for c in closed[-20:]]
@@ -239,45 +270,47 @@ class ShockLiveDetector:
 
         pullback_ratio = pullback / range_live if range_live > 0 else 1.0
 
-        body_mult = 1.4
-        range_mult = 1.4
-
         min_body_abs = 0.015 if "JPY" in asset_name else 0.00015
         if body_live < min_body_abs:
             return None, "Mercado morto (live)", {}
 
-        debug = {
-            "avg_body": avg_body,
-            "avg_range": avg_range,
-            "body_live": body_live,
-            "range_live": range_live,
-            "close_pos": close_pos,
-            "pullback_ratio": pullback_ratio,
-            "color": live["color"],
-        }
-
-        # ✅ SUPER EXPLOSÃO: Permite contra-tendência se for exaustão absurda (> 2.2x)
-        super_explosive = (body_live >= avg_body * 2.2) and (range_live >= avg_range * 2.2)
+        # ✅ SUPER EXPLOSÃO: Permite contra-tendência se for exaustão absurda (> 2.2x da média, ou ajustado dinamicamente)
+        super_mult = max(2.2, body_mult + 0.8) # Garante que super seja sempre maior que o normal
+        super_explosive = (body_live >= avg_body * super_mult) and (range_live >= avg_range * super_mult)
         
+        # Usa multiplicadores dinâmicos
         explosive = (body_live >= avg_body * body_mult) and (range_live >= avg_range * range_mult)
+        
         if not explosive:
-            return None, "Sem explosão", debug
+            return None, "Sem explosão (Critério Dinâmico)", debug
+
+        # Lógica de fechamento (Close Pos) dinâmica
+        # Green: close_pos >= close_pos_min
+        # Red: close_pos <= (1 - close_pos_min)
 
         if live["color"] == "green":
-            # ✅ FILTRO INTELIGENTE: Se 3 verdes e NÃO for super explosão, aborta.
+            # ✅ FILTRO NANO TREND ALTA (3 Green)
             if prev1["color"] == "green" and prev2["color"] == "green" and not super_explosive:
                 return None, "Abortar: Nano Tendência de Alta (3 Green)", debug
+            
+            # ✅ FILTRO TREND FORTE (EMA) - Respeita config dinâmica
+            if trend_filter and trend_up and not super_explosive:
+                return None, "Abortar: Contra Trend Forte Alta (EMA9>21)", debug
 
-            if close_pos >= 0.85 and pullback_ratio <= 0.25:
+            if close_pos >= close_pos_min and pullback_ratio <= pullback_ratio_max:
                 return "put", "SHOCK_LIVE_UP", debug
             return None, "Explodiu mas não travou no topo", debug
 
         if live["color"] == "red":
-            # ✅ FILTRO INTELIGENTE: Se 3 vermelhas e NÃO for super explosão, aborta.
+            # ✅ FILTRO NANO TREND BAIXA (3 Red)
             if prev1["color"] == "red" and prev2["color"] == "red" and not super_explosive:
                 return None, "Abortar: Nano Tendência de Baixa (3 Red)", debug
+            
+            # ✅ FILTRO TREND FORTE (EMA)
+            if trend_filter and trend_down and not super_explosive:
+                return None, "Abortar: Contra Trend Forte Baixa (EMA9<21)", debug
 
-            if close_pos <= 0.15 and pullback_ratio <= 0.25:
+            if close_pos <= (1.0 - close_pos_min) and pullback_ratio <= pullback_ratio_max:
                 return "call", "SHOCK_LIVE_DOWN", debug
             return None, "Explodiu mas não travou no fundo", debug
 
@@ -320,7 +353,6 @@ class TendMaxStrategy:
 class TsunamiFlowStrategy:
     """
     🌊 TSUNAMI FLOW: Estratégia de seguimento de tendência e momentum.
-    Refinado: Agora verifica pavio de rejeição com wick/range para evitar falsos positivos em corpos pequenos.
     """
     @staticmethod
     def get_signal(candles):
@@ -405,6 +437,19 @@ class SimpleBot:
         self.db_lock = threading.RLock() # ✅ LOCK PARA DB (Thread Safety)
         self.active_trades = set()
 
+        # ✅ CONFIGURAÇÃO DINÂMICA (GPT CONTROL)
+        self.dynamic = {
+            "shock_enabled": True,
+            "shock_body_mult": 1.4,
+            "shock_range_mult": 1.4,
+            "shock_close_pos_min": 0.85,
+            "shock_pullback_ratio_max": 0.25,
+            "trend_filter_enabled": True,
+            "prefer_strategy": "AUTO",  # AUTO | V2_TREND | TSUNAMI_FLOW | VOLUME_REACTOR | SHOCK_REVERSAL
+            "market_regime": "UNKNOWN"
+        }
+        self.dynamic_lock = threading.RLock()
+
         self.config = {
             "status": "PAUSED",
             "account_type": "PRACTICE",
@@ -486,19 +531,133 @@ class SimpleBot:
                 ).execute()
         except: pass
 
+    # ✅ INTEGRAÇÃO IA: CHAMADA AO GPT
+    def call_gpt_live(self, snapshot):
+        if not OPENAI_API_KEY:
+            # HEURÍSTICA DE FALLBACK (Se não tiver API)
+            try:
+                avg_bodies = [x['avg_body'] for x in snapshot]
+                volatility = sum(avg_bodies) / len(avg_bodies) if avg_bodies else 0.0001
+                new_body_mult = 1.7 if volatility > 0.0005 else 1.4
+                return {
+                    "market_regime": "HIGH_VOL" if volatility > 0.0005 else "NORMAL",
+                    "shock_enabled": True, "trend_filter_enabled": True,
+                    "shock_body_mult": new_body_mult, "shock_range_mult": new_body_mult,
+                    "shock_close_pos_min": 0.85, "shock_pullback_ratio_max": 0.25,
+                    "prefer_strategy": "AUTO", "reason": "Fallback Heurístico"
+                }
+            except: return None
+
+        try:
+            headers = {"Content-Type": "application/json", "Authorization": f"Bearer {OPENAI_API_KEY}"}
+            # ✅ MODELO ATUALIZADO PARA GPT-4o-mini
+            payload = {
+                "model": "gpt-4o-mini",
+                "messages": [{"role": "user", "content": f"""
+                Você é um analista técnico especialista em OTC M1.
+                Abaixo está um snapshot AO VIVO do mercado (últimos segundos).
+                Identifique o regime e ajuste os parâmetros para máxima segurança.
+                Limites:
+                - shock_body_mult: 1.3 a 2.2
+                - prefer_strategy: AUTO|V2_TREND|TSUNAMI_FLOW|VOLUME_REACTOR|SHOCK_REVERSAL
+                JSON esperado:
+                {{
+                "market_regime":"CHOP|TREND|EXPLOSIVE",
+                "shock_enabled":true,
+                "trend_filter_enabled":true,
+                "shock_body_mult":1.4,
+                "shock_range_mult":1.4,
+                "shock_close_pos_min":0.85,
+                "shock_pullback_ratio_max":0.25,
+                "prefer_strategy":"AUTO",
+                "reason":"motivo"
+                }}
+                SNAPSHOT: {json.dumps(snapshot)}
+                """}],
+                "temperature": 0.2
+            }
+            
+            response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload, timeout=10)
+            if response.status_code == 200:
+                content = response.json()['choices'][0]['message']['content']
+                try:
+                    start = content.find('{'); end = content.rfind('}') + 1
+                    return json.loads(content[start:end])
+                except: return None
+        except: return None
+        return None
+
+    # ✅ APLICAÇÃO SUAVE DA DECISÃO DA IA
+    def apply_gpt_decision(self, d):
+        try:
+            with self.dynamic_lock:
+                def clamp(x, a, b): return max(a, min(b, x))
+                def smooth(cur, target, step=0.05):
+                    if target > cur: return min(target, cur + step)
+                    if target < cur: return max(target, cur - step)
+                    return cur
+
+                self.dynamic["market_regime"] = d.get("market_regime", "UNKNOWN")
+                self.dynamic["shock_enabled"] = bool(d.get("shock_enabled", True))
+                self.dynamic["trend_filter_enabled"] = bool(d.get("trend_filter_enabled", True))
+                self.dynamic["prefer_strategy"] = d.get("prefer_strategy", "AUTO")
+
+                tb = clamp(float(d.get("shock_body_mult", 1.4)), 1.3, 2.2)
+                tr = clamp(float(d.get("shock_range_mult", 1.4)), 1.3, 2.2)
+                cp = clamp(float(d.get("shock_close_pos_min", 0.85)), 0.82, 0.95)
+                pr = clamp(float(d.get("shock_pullback_ratio_max", 0.25)), 0.15, 0.35)
+
+                self.dynamic["shock_body_mult"] = smooth(self.dynamic["shock_body_mult"], tb)
+                self.dynamic["shock_range_mult"] = smooth(self.dynamic["shock_range_mult"], tr)
+                self.dynamic["shock_close_pos_min"] = smooth(self.dynamic["shock_close_pos_min"], cp, step=0.01)
+                self.dynamic["shock_pullback_ratio_max"] = smooth(self.dynamic["shock_pullback_ratio_max"], pr, step=0.01)
+
+            if random.random() < 0.1:
+                self.log_to_db(f"🧠 AI TUNER: {d.get('market_regime')} | Strat: {d.get('prefer_strategy')} | ShockMult: {self.dynamic['shock_body_mult']:.2f}", "DEBUG")
+        except: pass
+
+    # ✅ LOOP DA IA (RODA EM THREAD SEPARADA)
+    def gpt_live_tuner_loop(self):
+        self.log_to_db("🧠 AI Tuner iniciado...", "SYSTEM")
+        while True:
+            try:
+                if not self.api or not self.api.check_connect(): time.sleep(10); continue
+                assets = self.best_assets[:6] if self.best_assets else ["EURUSD-OTC","GBPUSD-OTC","USDJPY-OTC"]
+                snapshot = []
+                for a in assets:
+                    try:
+                        candles = None
+                        with self.api_lock:
+                            try: candles = self.api.get_candles(a, 60, 60, int(time.time()))
+                            except: candles = None
+                        if not candles or len(candles) < 30: continue
+
+                        closed = candles[:-1]; live = candles[-1]
+                        bodies = [abs(c["close"]-c["open"]) for c in closed[-20:]]
+                        avg_body = sum(bodies)/len(bodies) if bodies else 0.00001
+                        body_live = abs(live["close"]-live["open"])
+                        snapshot.append({
+                            "asset": a, "avg_body": round(avg_body, 6), "body_live": round(body_live, 6),
+                            "volatility": round(body_live/avg_body, 2)
+                        })
+                    except: pass
+
+                if snapshot:
+                    decision = self.call_gpt_live(snapshot)
+                    if decision: self.apply_gpt_decision(decision)
+                time.sleep(60) 
+            except: time.sleep(10)
+
     def check_strategy_signal(self, strategy_name, candles, asset_name=""):
         if strategy_name == "SHOCK_REVERSAL":
-            sig, reason, _ = ShockLiveDetector.detect(candles, asset_name)
+            with self.dynamic_lock: dyn_conf = self.dynamic.copy()
+            sig, reason, _ = ShockLiveDetector.detect(candles, asset_name, dyn_conf)
             return sig, reason
-        elif strategy_name == "TENDMAX":
-            return TendMaxStrategy.get_signal(candles)
+        elif strategy_name == "TENDMAX": return TendMaxStrategy.get_signal(candles)
         elif strategy_name == "V2_TREND":
-            if not TechnicalAnalysis.check_compression(candles):
-                return TechnicalAnalysis.get_signal_v2(candles)
-        elif strategy_name == "TSUNAMI_FLOW":
-            return TsunamiFlowStrategy.get_signal(candles)
-        elif strategy_name == "VOLUME_REACTOR":
-            return VolumeReactorStrategy.get_signal(candles)
+            if not TechnicalAnalysis.check_compression(candles): return TechnicalAnalysis.get_signal_v2(candles)
+        elif strategy_name == "TSUNAMI_FLOW": return TsunamiFlowStrategy.get_signal(candles)
+        elif strategy_name == "VOLUME_REACTOR": return VolumeReactorStrategy.get_signal(candles)
         return None, None
 
     def calibrate_market(self):
@@ -514,7 +673,6 @@ class SimpleBot:
                 self.log_to_db("⚠️ Calibração abortada: API offline", "WARNING"); return
 
             try:
-                # ✅ INCLUÍDO SHOCK_REVERSAL NO BACKTEST
                 strategies = ["SHOCK_REVERSAL", "V2_TREND", "TENDMAX", "TSUNAMI_FLOW", "VOLUME_REACTOR"]
                 if not self.best_assets:
                      assets_pool = [
@@ -536,7 +694,6 @@ class SimpleBot:
                         if not candles or len(candles) < 100: continue
                         
                         scores = {s: {'wins': 0, 'total': 0} for s in strategies}
-                        # ✅ CALIBRAGEM MAIS PRECISA (Passo 1 em 1)
                         for i in range(60, len(candles)-1):
                             window = candles[i-60 : i+1]; result_candle = candles[i+1]
                             for s in strategies:
@@ -748,36 +905,23 @@ class SimpleBot:
         entry_dt = datetime.now(BR_TIMEZONE)
         now = time.time()
         
-        # ✅ SMART GLOBAL LOCK: Reserva sem travar, só trava se confirmar ordem
         global_minute = entry_dt.strftime("%Y%m%d%H%M")
         reserved_minute = False
         
         if time.time() < self.block_until_ts: return
 
-        # ✅ ATOMIC RESERVATION (Corrigido para evitar Race Condition)
         with self.trade_lock:
-            # Impede duplicação no mesmo ativo
             if asset in self.active_trades: return
-
             if gale_level == 0:
-                # Max trades check (Limite de 1 trade por vez)
                 if len(self.active_trades) >= 1: return
-                # Global minute check
                 if self.last_global_minute == global_minute: return
-                
-                # Asset specific checks in atomic block to be safe
-                # Check frequency
                 if asset in self.last_trade_time and now - self.last_trade_time[asset] < 60: return
-                
                 minute_key = entry_dt.strftime("%Y%m%d%H%M")
                 if self.last_minute_trade.get(asset) == minute_key: return
-
                 reserved_minute = True
             
-            # Reserva o slot (Atomic)
             self.active_trades.add(asset)
 
-        # ✅ ATUALIZAÇÃO DE TRACKERS (Só chega aqui se reservou)
         if gale_level == 0:
             minute_key = entry_dt.strftime("%Y%m%d%H%M")
             self.last_trade_time[asset] = now
@@ -819,12 +963,18 @@ class SimpleBot:
                 self.update_signal(signal_id, "FAILED", "FAILED", 0)
                 return
             
-            # ✅ CONFIRM GLOBAL LOCK (Só trava se ordem entrou)
             if gale_level == 0 and reserved_minute:
                 with self.trade_lock: self.last_global_minute = global_minute
 
             self.log_to_db(f"✅ CONFIRMADA: Ordem {trade_id}. Aguardando...", "INFO")
-            time.sleep(62)
+            
+            # ✅ SLEEP OTIMIZADO (Inteligente)
+            # Espera apenas fechar a vela + buffer para resultado (ex: entra 50s, espera ~12s para acordar em 02s)
+            wait_time = (60 - entry_dt.second) + 2
+            if wait_time < 5: wait_time = 5   # Mínimo de segurança
+            if wait_time > 20: wait_time = 20 # Teto para não travar muito (embora para binária 1m, entrar em 30s é raro)
+            
+            time.sleep(wait_time)
 
             res_str = "UNKNOWN"; profit = 0.0
             if self.config["mode"] == "OBSERVE":
@@ -839,8 +989,21 @@ class SimpleBot:
                 except: res_str = "UNKNOWN"
             else:
                 try:
-                    with self.api_lock: balance_after = self.api.get_balance()
-                    delta = balance_after - balance_before
+                    # ✅ RETRY LOOP PARA SALDO (Evita delay da corretora)
+                    balance_after = balance_before
+                    delta = 0
+                    for _ in range(6): # tenta por até 6s
+                        try:
+                            with self.api_lock:
+                                balance_after = self.api.get_balance()
+                            delta = balance_after - balance_before
+
+                            if abs(delta) > 0.01:
+                                break
+                        except:
+                            pass
+                        time.sleep(1)
+
                     if delta > 0.01: res_str = "WIN"; profit = delta
                     elif delta < -0.01: res_str = "LOSS"; profit = delta
                     else: res_str = "DOJI"; profit = 0.0
@@ -861,10 +1024,14 @@ class SimpleBot:
                 self.daily_losses += 1; self.loss_streak += 1
                 self.asset_cooldown[asset] = time.time() + 180
                 
+                # ✅ GALE FIX V40: GALE SEQ (MINUTO SEGUINTE À ENTRADA)
                 if gale_level == 0 and self.config.get("martingale_enabled", True):
-                    # ✅ GALE FIX: Baseado no tempo da entrada original
+                    # Pega a base da vela de entrada (ex: 19:36:00)
                     entry_base = entry_dt.replace(second=0, microsecond=0)
-                    next_minute = (entry_base + timedelta(minutes=1)).strftime("%Y%m%d%H%M")
+                    # Soma 1 minuto: Próxima vela sequencial (19:37:00)
+                    gale_dt = entry_base + timedelta(minutes=1)
+                    
+                    next_minute = gale_dt.strftime("%Y%m%d%H%M")
                     entry_sec = ENTRY_SECOND
                     self.log_to_db(f"🎯 GALE G1 ARMADO para {asset} (Min: {next_minute} Sec: {entry_sec})", "WARNING")
                     self.pending_gale[asset] = {
@@ -901,6 +1068,10 @@ class SimpleBot:
     def start(self):
         t_watchdog = threading.Thread(target=watchdog, daemon=True)
         t_watchdog.start()
+        
+        # ✅ INICIA TUNER DE IA (Background)
+        threading.Thread(target=self.gpt_live_tuner_loop, daemon=True).start()
+
         assets_pool = [
             "EURUSD-OTC", "EURGBP-OTC", "USDCHF-OTC", "EURJPY-OTC",
             "NZDUSD-OTC", "GBPUSD-OTC", "GBPJPY-OTC", "USDJPY-OTC",
@@ -954,6 +1125,13 @@ class SimpleBot:
                 now_dt = datetime.now(BR_TIMEZONE)
                 now_sec = now_dt.second
                 strat_mode = self.config.get("strategy_mode", "AUTO")
+                
+                # ✅ MODO DINÂMICO: IA PODE SOBREPOR O AUTO
+                with self.dynamic_lock:
+                    prefer = self.dynamic.get("prefer_strategy", "AUTO")
+                
+                if strat_mode == "AUTO" and prefer != "AUTO":
+                    strat_mode = prefer
 
                 if now_sec in [0, 10, 20, 30, 40, 50]:
                     self.log_to_db(f"MODE_ATIVO::{strat_mode}::{now_dt.strftime('%H:%M:%S')}::ENTRY={ENTRY_SECOND}s", "DEBUG")
@@ -973,7 +1151,7 @@ class SimpleBot:
                             try:
                                 with self.api_lock: candles = self.api.get_candles(asset, 60, 60, int(time.time()))
                                 if not candles: continue
-                                sig, reason, dbg = ShockLiveDetector.detect(candles, asset)
+                                sig, reason = self.check_strategy_signal("SHOCK_REVERSAL", candles, asset)
                                 if strat_mode == "SHOCK_REVERSAL": self.log_to_db(f"⚡ SHOCK_CHECK {asset}: {reason}", "DEBUG")
                                 if sig:
                                     if strat_mode == "AUTO":
