@@ -17,7 +17,7 @@ try:
 except ImportError:
     print("[ERRO] Biblioteca 'exnovaapi' não instalada.")
 
-BOT_VERSION = "SHOCK_ENGINE_V45_DEEP_ANALYSIS_2026-01-25"
+BOT_VERSION = "SHOCK_ENGINE_V46_FIX_START_CRASH_2026-01-25"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -1051,8 +1051,8 @@ class SimpleBot:
         t_watchdog = threading.Thread(target=watchdog, daemon=True)
         t_watchdog.start()
         
-        # ✅ INICIA TUNER DE IA (Background)
-        threading.Thread(target=self.gpt_live_tuner_loop, daemon=True).start()
+        # ✅ REMOVIDO: Thread fantasma que causava crash (gpt_live_tuner_loop)
+        # A lógica de IA agora roda dentro de calibrate_market
 
         assets_pool = [
             "EURUSD-OTC", "EURGBP-OTC", "USDCHF-OTC", "EURJPY-OTC",
