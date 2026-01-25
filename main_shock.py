@@ -17,7 +17,7 @@ try:
 except ImportError:
     print("[ERRO] Biblioteca 'exnovaapi' não instalada.")
 
-BOT_VERSION = "SHOCK_ENGINE_V42_SMART_SLEEP_GPT4o_2026-01-25"
+BOT_VERSION = "SHOCK_ENGINE_V43_GALE_PREMATURE_FIX_2026-01-25"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -905,23 +905,36 @@ class SimpleBot:
         entry_dt = datetime.now(BR_TIMEZONE)
         now = time.time()
         
+        # ✅ SMART GLOBAL LOCK: Reserva sem travar, só trava se confirmar ordem
         global_minute = entry_dt.strftime("%Y%m%d%H%M")
         reserved_minute = False
         
         if time.time() < self.block_until_ts: return
 
+        # ✅ ATOMIC RESERVATION (Corrigido para evitar Race Condition)
         with self.trade_lock:
+            # Impede duplicação no mesmo ativo
             if asset in self.active_trades: return
+
             if gale_level == 0:
+                # Max trades check (Limite de 1 trade por vez)
                 if len(self.active_trades) >= 1: return
+                # Global minute check
                 if self.last_global_minute == global_minute: return
+                
+                # Asset specific checks in atomic block to be safe
+                # Check frequency
                 if asset in self.last_trade_time and now - self.last_trade_time[asset] < 60: return
+                
                 minute_key = entry_dt.strftime("%Y%m%d%H%M")
                 if self.last_minute_trade.get(asset) == minute_key: return
+
                 reserved_minute = True
             
+            # Reserva o slot (Atomic)
             self.active_trades.add(asset)
 
+        # ✅ ATUALIZAÇÃO DE TRACKERS (Só chega aqui se reservou)
         if gale_level == 0:
             minute_key = entry_dt.strftime("%Y%m%d%H%M")
             self.last_trade_time[asset] = now
@@ -963,16 +976,16 @@ class SimpleBot:
                 self.update_signal(signal_id, "FAILED", "FAILED", 0)
                 return
             
+            # ✅ CONFIRM GLOBAL LOCK (Só trava se ordem entrou)
             if gale_level == 0 and reserved_minute:
                 with self.trade_lock: self.last_global_minute = global_minute
 
             self.log_to_db(f"✅ CONFIRMADA: Ordem {trade_id}. Aguardando...", "INFO")
             
-            # ✅ SLEEP OTIMIZADO (Inteligente)
-            # Espera apenas fechar a vela + buffer para resultado (ex: entra 50s, espera ~12s para acordar em 02s)
-            wait_time = (60 - entry_dt.second) + 2
-            if wait_time < 5: wait_time = 5   # Mínimo de segurança
-            if wait_time > 20: wait_time = 20 # Teto para não travar muito (embora para binária 1m, entrar em 30s é raro)
+            # ✅ SLEEP OTIMIZADO (15s margem)
+            wait_time = (60 - entry_dt.second) + 15
+            if wait_time < 5: wait_time = 5   
+            if wait_time > 30: wait_time = 30 
             
             time.sleep(wait_time)
 
@@ -989,10 +1002,10 @@ class SimpleBot:
                 except: res_str = "UNKNOWN"
             else:
                 try:
-                    # ✅ RETRY LOOP PARA SALDO (Evita delay da corretora)
+                    # ✅ RETRY LOOP PARA SALDO
                     balance_after = balance_before
                     delta = 0
-                    for _ in range(6): # tenta por até 6s
+                    for _ in range(6): 
                         try:
                             with self.api_lock:
                                 balance_after = self.api.get_balance()
@@ -1032,13 +1045,20 @@ class SimpleBot:
                     gale_dt = entry_base + timedelta(minutes=1)
                     
                     next_minute = gale_dt.strftime("%Y%m%d%H%M")
-                    entry_sec = ENTRY_SECOND
-                    self.log_to_db(f"🎯 GALE G1 ARMADO para {asset} (Min: {next_minute} Sec: {entry_sec})", "WARNING")
-                    self.pending_gale[asset] = {
-                        'asset': asset, 'direction': direction, 'strategy_key': strategy_key,
-                        'strategy_label': strategy_label, 'prefer_binary': True,
-                        'minute_key': next_minute, 'second_key': entry_sec
-                    }
+                    
+                    # Validação de Futuro (Evita Gale no passado)
+                    # Se por algum motivo o processamento demorar muito e já tiver passado o minuto do gale
+                    gale_limit = gale_dt.replace(second=59)
+                    if datetime.now(BR_TIMEZONE) > gale_limit:
+                        self.log_to_db(f"⚠️ Gale ignorado (tempo expirado): {next_minute}", "WARNING")
+                    else:
+                        entry_sec = ENTRY_SECOND
+                        self.log_to_db(f"🎯 GALE G1 ARMADO para {asset} (Min: {next_minute} Sec: {entry_sec})", "WARNING")
+                        self.pending_gale[asset] = {
+                            'asset': asset, 'direction': direction, 'strategy_key': strategy_key,
+                            'strategy_label': strategy_label, 'prefer_binary': True,
+                            'minute_key': next_minute, 'second_key': entry_sec
+                        }
 
             if self.loss_streak >= 2:
                 self.block_until_ts = time.time() + 900
