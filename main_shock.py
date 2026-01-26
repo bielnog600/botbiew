@@ -17,7 +17,7 @@ try:
 except ImportError:
     print("[ERRO] Biblioteca 'exnovaapi' não instalada.")
 
-BOT_VERSION = "SHOCK_ENGINE_V56_GPT_DEBUGGER_2026-01-25"
+BOT_VERSION = "SHOCK_ENGINE_V57_DUAL_AI_CORE_2026-01-26"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -28,15 +28,22 @@ SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 EXNOVA_EMAIL = os.environ.get("EXNOVA_EMAIL", "seu_email@exemplo.com")
 EXNOVA_PASSWORD = os.environ.get("EXNOVA_PASSWORD", "sua_senha")
 
-# Se tiver chave OpenAI, coloque aqui ou nas env vars
+# CHAVES DE IA (DUAL CORE)
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
-# ✅ DIAGNÓSTICO DE KEY AO INICIAR
+# ✅ DIAGNÓSTICO DE CHAVES
+print("--- STATUS DE INTELIGÊNCIA ARTIFICIAL ---")
 if OPENAI_API_KEY:
-    masked_key = OPENAI_API_KEY[:6] + "..." + OPENAI_API_KEY[-4:]
-    print(f"✅ OPENAI_API_KEY detectada: {masked_key}")
+    print(f"✅ OPENAI (GPT-4o) detectado.")
 else:
-    print("❌ OPENAI_API_KEY não encontrada ou vazia. O bot usará Fallback (Lógica Interna).")
+    print("❌ OPENAI não configurada.")
+
+if GEMINI_API_KEY:
+    print(f"✅ GOOGLE (Gemini 1.5) detectado.")
+else:
+    print("❌ GOOGLE Gemini não configurada.")
+print("-----------------------------------------")
 
 BR_TIMEZONE = timezone(timedelta(hours=-3))
 
@@ -541,62 +548,92 @@ class SimpleBot:
                 ).execute()
         except: pass
 
-    # ✅ INTEGRAÇÃO IA: CHAMADA AO GPT
-    def call_gpt_strategy_selector(self, asset_data):
-        # ✅ FALLBACK SEGURO SE API KEY AUSENTE
-        if not OPENAI_API_KEY:
-            return {
-                "strategy": "SHOCK_REVERSAL" if asset_data['volatility'] > 1.5 else "V2_TREND",
-                "reason": "Fallback (Sem API Key)"
-            }
+    # ==========================================================================
+    # 🧠 DUAL CORE AI (OPENAI + GEMINI)
+    # ==========================================================================
 
+    def call_ai_strategy_selector(self, asset_data):
+        # 1. TENTA OPENAI (Primary)
+        if OPENAI_API_KEY:
+            decision = self.call_openai_api(asset_data)
+            if decision: return decision
+
+        # 2. TENTA GEMINI (Secondary / Failover)
+        if GEMINI_API_KEY:
+            decision = self.call_gemini_api(asset_data)
+            if decision: return decision
+        
+        # 3. FALLBACK INTERNO
+        return {
+            "strategy": "SHOCK_REVERSAL" if asset_data['volatility'] > 1.5 else "V2_TREND",
+            "reason": "Fallback (Sem AI)"
+        }
+
+    def call_openai_api(self, asset_data):
         try:
             headers = {"Content-Type": "application/json", "Authorization": f"Bearer {OPENAI_API_KEY}"}
             payload = {
                 "model": "gpt-4o-mini",
-                "messages": [{"role": "user", "content": f"""
-                Você é um analista quantitativo de OTC M1.
-                Analise os dados deste par e escolha a MELHOR estratégia.
-                Ativo: {asset_data['asset']}
-                Volatilidade (Corpo/Média): {asset_data['volatility']}x
-                Performance Recente (WinRate % / Trades):
-                - SHOCK_REVERSAL: {asset_data['scores']['SHOCK_REVERSAL']}
-                - V2_TREND: {asset_data['scores']['V2_TREND']}
-                - TENDMAX: {asset_data['scores']['TENDMAX']}
-                - TSUNAMI: {asset_data['scores']['TSUNAMI_FLOW']}
-                - REACTOR: {asset_data['scores']['VOLUME_REACTOR']}
-                
-                Regras de Decisão:
-                1. Priorize estratégias com WR > 55% e volume de sinais decente.
-                2. Se houver tendência clara e V2/TSUNAMI tiverem bom WR, escolha ELAS (Evite Shock em tendência).
-                3. Se o mercado estiver lateral ou muito volátil (>1.8x) e SHOCK tiver bom WR, escolha SHOCK.
-                4. Se REACTOR (Exaustão) estiver com WR alto (>70%), é a melhor opção para reversão.
-
-                Responda APENAS o nome da estratégia no JSON.
-
-                JSON esperado: {{"strategy": "NOME_DA_ESTRATEGIA", "reason": "motivo curto"}}
-                """}],
+                "messages": [{"role": "user", "content": self._build_prompt(asset_data)}],
                 "temperature": 0.2
             }
-            
-            response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload, timeout=20)
+            response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload, timeout=15)
             if response.status_code == 200:
                 content = response.json()['choices'][0]['message']['content']
-                try:
-                    # ✅ PARSER BLINDADO (Extrai apenas o JSON)
-                    start = content.find('{')
-                    end = content.rfind('}') + 1
-                    if start != -1 and end != 0:
-                        data = json.loads(content[start:end])
-                        return data
-                except: return None
-            else:
-                # ✅ DEBUG REAL: Mostra erro exato se API falhar
-                self.log_to_db(f"⚠️ GPT Error {response.status_code}: {response.text[:50]}", "ERROR")
-                return None
+                return self._parse_json(content)
         except Exception as e:
-            self.log_to_db(f"⚠️ GPT Request Failed: {e}", "ERROR")
-            return None
+            self.log_to_db(f"⚠️ OpenAI Fail: {e}", "DEBUG")
+        return None
+
+    def call_gemini_api(self, asset_data):
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+            payload = {
+                "contents": [{
+                    "parts": [{"text": self._build_prompt(asset_data)}]
+                }]
+            }
+            response = requests.post(url, json=payload, timeout=15)
+            if response.status_code == 200:
+                data = response.json()
+                content = data.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', '')
+                return self._parse_json(content)
+            else:
+                 self.log_to_db(f"⚠️ Gemini Error: {response.text[:50]}", "DEBUG")
+        except Exception as e:
+            self.log_to_db(f"⚠️ Gemini Fail: {e}", "DEBUG")
+        return None
+
+    def _build_prompt(self, asset_data):
+        return f"""
+        Você é um analista quantitativo de OTC M1.
+        Analise os dados deste par e escolha a MELHOR estratégia.
+        Ativo: {asset_data['asset']}
+        Volatilidade (Corpo/Média): {asset_data['volatility']}x
+        Performance Recente (WinRate % / Trades):
+        - SHOCK_REVERSAL: {asset_data['scores']['SHOCK_REVERSAL']}
+        - V2_TREND: {asset_data['scores']['V2_TREND']}
+        - TENDMAX: {asset_data['scores']['TENDMAX']}
+        - TSUNAMI: {asset_data['scores']['TSUNAMI_FLOW']}
+        - REACTOR: {asset_data['scores']['VOLUME_REACTOR']}
+        
+        Regras de Decisão:
+        1. Priorize estratégias com WR > 55% e volume de sinais decente.
+        2. Se houver tendência clara e V2/TSUNAMI tiverem bom WR, escolha ELAS.
+        3. Se o mercado estiver lateral ou muito volátil (>1.8x) e SHOCK tiver bom WR, escolha SHOCK.
+        4. Se REACTOR (Exaustão) estiver com WR alto (>70%), é a melhor opção.
+
+        Responda APENAS o JSON.
+        JSON esperado: {{"strategy": "NOME_DA_ESTRATEGIA", "reason": "motivo curto"}}
+        """
+
+    def _parse_json(self, content):
+        try:
+            start = content.find('{')
+            end = content.rfind('}') + 1
+            if start != -1 and end != 0:
+                return json.loads(content[start:end])
+        except: pass
         return None
 
     def check_strategy_signal(self, strategy_name, candles, asset_name=""):
@@ -633,16 +670,10 @@ class SimpleBot:
 
             assets = self.best_assets
             new_map = {}
-            
             map_log = []
-            
-            # ✅ VERIFICA KEY ANTES DE COMEÇAR (Avisa usuário)
-            if not OPENAI_API_KEY:
-                self.log_to_db("⚠️ OPENAI_API_KEY não configurada. Usando lógica interna.", "WARNING")
 
             for asset in assets:
                 try:
-                    # ✅ CALM MODE: Espera 3s entre ativos para não estourar API
                     time.sleep(3) 
                     
                     candles = None
@@ -651,7 +682,6 @@ class SimpleBot:
                         except: candles = None
                     if not candles or len(candles) < 100: continue
                     
-                    # 1. Coleta dados matemáticos (Backtest rápido)
                     scores = {s: {'wins': 0, 'total': 0} for s in strategies}
                     
                     for i in range(60, len(candles)-1):
@@ -663,7 +693,6 @@ class SimpleBot:
                                 is_win = (sig == "call" and result_candle["close"] > result_candle["open"]) or (sig == "put" and result_candle["close"] < result_candle["open"])
                                 if is_win: scores[s]['wins'] += 1
                     
-                    # Formata dados para o GPT
                     formatted_scores = {}
                     for s in strategies:
                         t = scores[s]['total']
@@ -671,7 +700,6 @@ class SimpleBot:
                         wr = int((w/t)*100) if t > 0 else 0
                         formatted_scores[s] = f"{wr}% ({w}/{t})"
                     
-                    # Calcula volatilidade simples
                     bodies = [abs(c["close"]-c["open"]) for c in candles[-20:]]
                     avg = sum(bodies)/len(bodies) if bodies else 0.0001
                     last_body = abs(candles[-1]["close"]-candles[-1]["open"])
@@ -683,10 +711,10 @@ class SimpleBot:
                         "scores": formatted_scores
                     }
 
-                    # 2. Pergunta ao GPT qual a melhor estratégia
-                    gpt_decision = self.call_gpt_strategy_selector(asset_data)
+                    # ✅ CHAMA A IA (DUAL CORE)
+                    gpt_decision = self.call_ai_strategy_selector(asset_data)
                     
-                    selected_strat = "SHOCK_REVERSAL" # Default se IA falhar
+                    selected_strat = "SHOCK_REVERSAL"
                     score_val = 1.0
 
                     if gpt_decision and gpt_decision.get("strategy") in strategies:
@@ -710,9 +738,8 @@ class SimpleBot:
             self.asset_strategy_map = new_map
             self.last_calibration_time = time.time()
             self.log_to_db(f"🏁 Análise IA concluída.", "SUCCESS")
-            # Log do mapa (em chunks para não estourar DB)
             if map_log:
-                self.log_to_db(f"📊 MAPA (Padrão/Fallback): {', '.join(map_log[:4])}...", "INFO")
+                self.log_to_db(f"📊 MAPA: {', '.join(map_log[:4])}...", "INFO")
 
         except Exception as e: self.log_to_db(f"❌ Erro Calibração IA: {e}", "ERROR")
         finally: self.calibration_running = False
@@ -812,8 +839,6 @@ class SimpleBot:
         end_str = self.config.get("timer_end", "00:00")
         hour = now_br.hour; minute = now_br.minute
         blocked_time = False
-        
-        # ❌ REMOVIDO BLOQUEIO DE HORÁRIO RIGIDO
         
         if not self.config.get("timer_enabled", False): return
         is_inside = False
@@ -930,7 +955,7 @@ class SimpleBot:
                 except: pass
                 return
 
-            tag_gale = f"::G{gale_level}"
+            tag_gale = f"::G{gale_level}" if gale_level > 0 else ""
             strategy_name = f"{strategy_key}::{strategy_label}{tag_gale}"
             signal_id = self.insert_signal(asset, direction, strategy_name, amount)
 
@@ -987,8 +1012,11 @@ class SimpleBot:
                             with self.api_lock:
                                 balance_after = self.api.get_balance()
                             delta = balance_after - balance_before
-                            if abs(delta) > 0.01: break
-                        except: pass
+
+                            if abs(delta) > 0.01:
+                                break
+                        except:
+                            pass
                         time.sleep(1)
 
                     if delta > 0.01: res_str = "WIN"; profit = delta
@@ -1011,6 +1039,7 @@ class SimpleBot:
                 self.daily_losses += 1; self.loss_streak += 1
                 self.asset_cooldown[asset] = time.time() + 180
                 self.log_to_db(f"🚫 Loss no par {asset}. Cooldown de 3min.", "INFO")
+                # ❌ SEM GALE
 
             if self.loss_streak >= 2:
                 self.block_until_ts = time.time() + 900
