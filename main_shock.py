@@ -17,7 +17,7 @@ try:
 except ImportError:
     print("[ERRO] Biblioteca 'exnovaapi' não instalada.")
 
-BOT_VERSION = "SHOCK_ENGINE_V55_RESULT_WAIT_FIX_2026-01-26"
+BOT_VERSION = "SHOCK_ENGINE_V58_NEURAL_LINK_FIX_2026-01-26"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -257,7 +257,8 @@ class ShockLiveDetector:
         range_live = live["range"]
 
         if range_live <= 0:
-            return None, "Doji", {}
+            # ✅ LOG CORRETO PARA MERCADO MORTO
+            return None, "Range inválido (live)", debug
 
         close_pos = (live["close"] - live["min"]) / range_live 
 
@@ -353,6 +354,7 @@ class TendMaxStrategy:
 class TsunamiFlowStrategy:
     """
     🌊 TSUNAMI FLOW: Estratégia de seguimento de tendência e momentum.
+    Refinado: Agora verifica pavio de rejeição com wick/range para evitar falsos positivos em corpos pequenos.
     """
     @staticmethod
     def get_signal(candles):
@@ -626,7 +628,8 @@ class SimpleBot:
             return sig, reason
         elif strategy_name == "TENDMAX": return TendMaxStrategy.get_signal(candles)
         elif strategy_name == "V2_TREND":
-            if not TechnicalAnalysis.check_compression(candles): return TechnicalAnalysis.get_signal_v2(candles)
+            if TechnicalAnalysis.check_compression(candles): return None, "Compressão detectada"
+            return TechnicalAnalysis.get_signal_v2(candles)
         elif strategy_name == "TSUNAMI_FLOW": return TsunamiFlowStrategy.get_signal(candles)
         elif strategy_name == "VOLUME_REACTOR": return VolumeReactorStrategy.get_signal(candles)
         return None, None
@@ -1015,11 +1018,11 @@ class SimpleBot:
             # Se a entrada for nos últimos 30s, a expiração joga para o próximo minuto.
             # Precisamos esperar a vela atual fechar + a próxima vela inteira.
             if entry_dt.second >= 30:
-                # Ex: Entrou aos 50s. Faltam 10s pra virar + 60s da vela da operação + 4s margem = 74s
-                wait_time = (60 - entry_dt.second) + 60 + 4
+                # Ex: Entrou aos 50s. Faltam 10s pra virar + 60s da vela da operação + 6s margem = 76s
+                wait_time = (60 - entry_dt.second) + 60 + 6
             else:
-                # Ex: Entrou aos 10s. Faltam 50s pra virar + 4s margem = 54s
-                wait_time = (60 - entry_dt.second) + 4
+                # Ex: Entrou aos 10s. Faltam 50s pra virar + 6s margem = 56s
+                wait_time = (60 - entry_dt.second) + 6
             
             self.log_to_db(f"⏳ Aguardando fechamento ({wait_time}s)...", "DEBUG")
             time.sleep(wait_time)
@@ -1169,7 +1172,11 @@ class SimpleBot:
                             try:
                                 with self.api_lock: candles = self.api.get_candles(asset, 60, 60, int(time.time()))
                                 if not candles: continue
-                                sig, reason, dbg = ShockLiveDetector.detect(candles, asset)
+                                
+                                # ✅ CORREÇÃO V58: Shock usa config dinâmica
+                                with self.dynamic_lock: dyn_conf = self.dynamic.copy()
+                                sig, reason, dbg = ShockLiveDetector.detect(candles, asset, dyn_conf)
+                                
                                 if strat_mode == "SHOCK_REVERSAL": self.log_to_db(f"⚡ SHOCK_CHECK {asset}: {reason}", "DEBUG")
                                 if sig:
                                     if strat_mode == "AUTO":
@@ -1240,20 +1247,26 @@ class SimpleBot:
                                 if not candles: continue
                                 
                                 # ✅ 1. TENTA A ESTRATÉGIA PREFERIDA (IA)
+                                real_strat = target_strat
                                 sig, lbl = self.check_strategy_signal(target_strat, candles, asset)
                                 
                                 # ✅ 2. FALLBACK: Se falhou e não era Shock, tenta Shock como backup
                                 if not sig and target_strat != "SHOCK_REVERSAL":
                                      sig, lbl = self.check_strategy_signal("SHOCK_REVERSAL", candles, asset)
-                                     if sig: lbl += " (Backup)"
+                                     if sig: 
+                                         lbl += " (Backup)"
+                                         # ✅ FIX: CORRIGE NOME DA ESTRATÉGIA PARA O BANCO DE DADOS
+                                         real_strat = "SHOCK_REVERSAL"
 
                                 if sig:
                                      boost = min(0.15, target_info["score"] / 10.0)
+                                     # ✅ AJUSTE: Aumentado base de 0.70 para 0.76 (valoriza a estratégia calibrada)
                                      confidence = 0.76 + boost
+                                     
                                      candidates.append({
-                                        "asset": asset, "direction": sig, "strategy": target_strat,
+                                        "asset": asset, "direction": sig, "strategy": real_strat, # ✅ USA O REAL
                                         "label": lbl, "confidence": confidence,
-                                        "wr": self.get_strategy_wr(target_strat), 
+                                        "wr": self.get_strategy_wr(real_strat), 
                                         "prefer_binary": True 
                                     })
                             except: pass
