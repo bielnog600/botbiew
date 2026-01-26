@@ -17,7 +17,7 @@ try:
 except ImportError:
     print("[ERRO] Biblioteca 'exnovaapi' não instalada.")
 
-BOT_VERSION = "SHOCK_ENGINE_V54_GLOBAL_COOLDOWN_2026-01-25"
+BOT_VERSION = "SHOCK_ENGINE_V55_SMART_WAIT_FIX_2026-01-25"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -353,6 +353,7 @@ class TendMaxStrategy:
 class TsunamiFlowStrategy:
     """
     🌊 TSUNAMI FLOW: Estratégia de seguimento de tendência e momentum.
+    Refinado: Agora verifica pavio de rejeição com wick/range para evitar falsos positivos em corpos pequenos.
     """
     @staticmethod
     def get_signal(candles):
@@ -538,8 +539,12 @@ class SimpleBot:
         # ✅ FALLBACK SEGURO SE API KEY AUSENTE
         if not OPENAI_API_KEY:
             # Fallback aprimorado: Se volátil, prefere Shock. Se não, diversifica.
+            # Adicionei uma lógica básica para variar se não tiver API key
+            strat = "SHOCK_REVERSAL"
+            if asset_data['volatility'] < 1.3: strat = "V2_TREND"
+            
             return {
-                "strategy": "SHOCK_REVERSAL" if asset_data['volatility'] > 1.5 else "V2_TREND",
+                "strategy": strat,
                 "reason": "Fallback (Sem API Key)"
             }
 
@@ -900,9 +905,7 @@ class SimpleBot:
         signal_id = None
         base_amount = float(self.config["entry_value"])
         amount = base_amount
-        if gale_level > 0:
-            multiplier = self.config.get("martingale_multiplier", 2.0)
-            amount = round(base_amount * (multiplier ** gale_level), 2)
+        # Sem Gale multiplier
 
         try:
             if not self.check_daily_limits():
@@ -942,10 +945,14 @@ class SimpleBot:
             self.last_activity_ts = time.time()
             self.log_to_db(f"✅ CONFIRMADA: Ordem {trade_id}. Aguardando...", "INFO")
             
-            wait_time = (60 - entry_dt.second) + 15
-            if wait_time < 5: wait_time = 5   
-            if wait_time > 30: wait_time = 30 
+            # ✅ SMART WAIT: (60 - sec) + 60 + 4s (Se > 30s)
+            seconds_left = 60 - entry_dt.second
+            wait_time = seconds_left + 4
+            if entry_dt.second >= 30: wait_time += 60 # Para garantir vela cheia
             
+            if wait_time < 10: wait_time = 10 
+            
+            self.log_to_db(f"⏳ Aguardando fechamento ({wait_time}s)...", "DEBUG")
             time.sleep(wait_time)
 
             res_str = "UNKNOWN"; profit = 0.0
@@ -961,6 +968,7 @@ class SimpleBot:
                 except: res_str = "UNKNOWN"
             else:
                 try:
+                    # ✅ RETRY LOOP PARA SALDO
                     balance_after = balance_before
                     delta = 0
                     for _ in range(6): 
@@ -987,11 +995,11 @@ class SimpleBot:
             self.daily_total += 1
             if res_str == "WIN":
                 self.daily_wins += 1; self.loss_streak = 0
-                if asset in self.pending_gale: del self.pending_gale[asset]
             elif res_str == "LOSS":
                 self.daily_losses += 1; self.loss_streak += 1
                 self.asset_cooldown[asset] = time.time() + 180
                 self.log_to_db(f"🚫 Loss no par {asset}. Cooldown de 3min.", "INFO")
+                # ❌ SEM GALE
 
             if self.loss_streak >= 2:
                 self.block_until_ts = time.time() + 900
@@ -1028,6 +1036,7 @@ class SimpleBot:
             "AUDCAD-OTC", "AUDUSD-OTC", "USDCAD-OTC", "AUDJPY-OTC"
         ]
 
+        # ✅ CALIBRAGEM INICIAL IMEDIATA
         threading.Thread(target=self._run_calibration_task, daemon=True).start()
 
         while True:
@@ -1047,6 +1056,7 @@ class SimpleBot:
                 if not self.api or not self.api.check_connect():
                     if not self.connect(): time.sleep(5); continue
                 
+                # ✅ RE-CALIBRAGEM PERIÓDICA (2h)
                 if (time.time() - self.last_calibration_time) > 7200: self.calibrate_market()
 
                 # ✅ MONITOR DE INATIVIDADE
@@ -1094,6 +1104,7 @@ class SimpleBot:
                                 if strat_mode == "SHOCK_REVERSAL": self.log_to_db(f"⚡ SHOCK_CHECK {asset}: {reason}", "DEBUG")
                                 if sig:
                                     if strat_mode == "AUTO":
+                                        # ✅ V52: Se a IA escolheu outra estratégia para este par, PULA O SHOCK
                                         target_strat = self.asset_strategy_map.get(asset, {}).get("strategy", "SHOCK_REVERSAL")
                                         if target_strat != "SHOCK_REVERSAL":
                                             continue 
