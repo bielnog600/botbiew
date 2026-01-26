@@ -780,16 +780,21 @@ class SimpleBot:
         strategies_pool = ["V2_TREND", "TSUNAMI_FLOW", "VOLUME_REACTOR", "TENDMAX", "SHOCK_REVERSAL"]
         candidates = []
         scan_info = []
+        
+        # Estatísticas de falha para debug detalhado
+        stats = {"CD": 0, "NO_TRADE": 0, "NO_DATA": 0, "NOSIG": 0, "LOWCONF": 0, "ERR": 0, "TIMEOUT": 0}
 
         # LOOP PROTEGIDO: Pára se sair da janela de análise (58-59s)
         for asset in assets:
             current_second = datetime.now(BR_TIMEZONE).second
             if current_second not in RESERVE_SECONDS:
-                self.log_to_db("⚠️ SCAN: Tempo limite excedido, parando scan.", "WARNING")
+                self.log_to_db(f"⚠️ SCAN: Tempo limite excedido (sec={current_second}). Parando scan.", "WARNING")
+                stats["TIMEOUT"] += 1
                 break
 
             if time.time() < self.asset_cooldown.get(asset, 0):
-                scan_info.append(f"{asset}:CD")
+                # Omitido do log detalhado para reduzir ruído
+                stats["CD"] += 1
                 continue
 
             mapped = self.asset_strategy_map.get(asset)
@@ -797,7 +802,8 @@ class SimpleBot:
             mapped_conf = float(mapped["confidence"]) if mapped else 0.0
 
             if mapped_strat == "NO_TRADE":
-                scan_info.append(f"{asset}:NO")
+                # Omitido do log detalhado
+                stats["NO_TRADE"] += 1
                 continue
 
             target_list = []
@@ -812,6 +818,7 @@ class SimpleBot:
                     candles = self.api.get_candles(asset, 60, 60, int(time.time()))
                 if not candles:
                     scan_info.append(f"{asset}:NO_DATA")
+                    stats["NO_DATA"] += 1
                     continue
 
                 best_local = None
@@ -837,14 +844,26 @@ class SimpleBot:
                         candidates.append(best_local)
                         scan_info.append(f"{asset}:OK({best_local['strategy']})")
                     else:
-                        scan_info.append(f"{asset}:LOWCONF")
+                        # LOG CRUCIAL: Mostra o valor calculado vs o mínimo
+                        scan_info.append(f"{asset}:LOWCONF({best_local['confidence']:.2f}<{min_conf})")
+                        stats["LOWCONF"] += 1
                 else:
-                    scan_info.append(f"{asset}:NOSIG")
-            except:
-                scan_info.append(f"{asset}:ERR")
+                    # stats["NOSIG"] += 1
+                    # Opcional: não poluir scan_info com NOSIG de todos ativos
+                    pass
+            except Exception as e:
+                scan_info.append(f"{asset}:ERR({str(e)})")
+                stats["ERR"] += 1
 
         if not candidates:
-            self.log_to_db("⛔ SKIP: nenhum candidato bom", "INFO")
+            # Log rico para entender o motivo
+            fail_summary = ", ".join([f"{k}:{v}" for k,v in stats.items() if v > 0])
+            self.log_to_db(f"⛔ SKIP: Nenhum candidato. Resumo: {fail_summary}", "INFO")
+            
+            # Mostra detalhes apenas de erros ou confiança baixa (ignora o resto)
+            details = [s for s in scan_info if "LOWCONF" in s or "ERR" in s or "OK" in s]
+            if details:
+                self.log_to_db(f"🔍 DETALHES (Rejeitados): {', '.join(details[:10])}", "DEBUG")
             return
 
         candidates.sort(key=lambda x: x["score"], reverse=True)
