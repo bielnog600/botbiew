@@ -17,7 +17,7 @@ try:
 except ImportError:
     print("[ERRO] Biblioteca 'exnovaapi' não instalada.")
 
-BOT_VERSION = "SHOCK_ENGINE_V51_NO_GALE_STRAT_BALANCE_2026-01-25"
+BOT_VERSION = "SHOCK_ENGINE_V52_AUTO_BACKUP_SYSTEM_2026-01-25"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -618,6 +618,8 @@ class SimpleBot:
             assets = self.best_assets
             new_map = {}
             
+            map_log = []
+
             for asset in assets:
                 try:
                     # ✅ CALM MODE: Espera 3s entre ativos para não estourar API
@@ -669,17 +671,14 @@ class SimpleBot:
 
                     if gpt_decision and gpt_decision.get("strategy") in strategies:
                         selected_strat = gpt_decision["strategy"]
-                        # Calcula score base para o AUTO usar depois
                         st_stats = scores[selected_strat]
                         if st_stats['total'] > 0:
                             wr = st_stats['wins']/st_stats['total']
                             score_val = wr * math.sqrt(st_stats['total'])
                         else:
-                            # Se a IA escolheu sem dados históricos (por volatilidade/contexto), dá um peso médio
                             score_val = 1.5 
                         
-                        # Log detalhado da escolha da IA
-                        self.log_to_db(f"🤖 GPT [{asset}] escolheu {selected_strat} ({gpt_decision.get('reason')})", "DEBUG")
+                        map_log.append(f"{asset}={selected_strat}")
                     
                     new_map[asset] = {"strategy": selected_strat, "score": score_val}
                 
@@ -688,7 +687,11 @@ class SimpleBot:
             
             self.asset_strategy_map = new_map
             self.last_calibration_time = time.time()
-            self.log_to_db(f"🏁 Análise IA concluída. Mapa atualizado.", "SUCCESS")
+            self.log_to_db(f"🏁 Análise IA concluída.", "SUCCESS")
+            # Log do mapa (em chunks para não estourar DB)
+            if map_log:
+                self.log_to_db(f"📊 MAPA: {', '.join(map_log[:3])}...", "INFO")
+
         except Exception as e: self.log_to_db(f"❌ Erro Calibração IA: {e}", "ERROR")
         finally: self.calibration_running = False
 
@@ -869,30 +872,19 @@ class SimpleBot:
         
         if time.time() < self.block_until_ts: return
 
-        # ✅ ATOMIC RESERVATION (Corrigido para evitar Race Condition)
+        # ✅ ATOMIC RESERVATION
         with self.trade_lock:
-            # Impede duplicação no mesmo ativo
             if asset in self.active_trades: return
-
             if gale_level == 0:
-                # Max trades check (Limite de 1 trade por vez)
                 if len(self.active_trades) >= 1: return
-                # Global minute check
                 if self.last_global_minute == global_minute: return
-                
-                # Asset specific checks in atomic block to be safe
-                # Check frequency
                 if asset in self.last_trade_time and now - self.last_trade_time[asset] < 60: return
-                
                 minute_key = entry_dt.strftime("%Y%m%d%H%M")
                 if self.last_minute_trade.get(asset) == minute_key: return
-
                 reserved_minute = True
             
-            # Reserva o slot (Atomic)
             self.active_trades.add(asset)
 
-        # ✅ ATUALIZAÇÃO DE TRACKERS (Só chega aqui se reservou)
         if gale_level == 0:
             minute_key = entry_dt.strftime("%Y%m%d%H%M")
             self.last_trade_time[asset] = now
@@ -901,9 +893,7 @@ class SimpleBot:
         signal_id = None
         base_amount = float(self.config["entry_value"])
         amount = base_amount
-        if gale_level > 0:
-            multiplier = self.config.get("martingale_multiplier", 2.0)
-            amount = round(base_amount * (multiplier ** gale_level), 2)
+        # Sem Gale multiplier pois GALE_ENABLED = False
 
         try:
             if not self.check_daily_limits():
@@ -914,12 +904,11 @@ class SimpleBot:
                 except: pass
                 return
 
-            tag_gale = f"::G{gale_level}"
-            strategy_name = f"{strategy_key}::{strategy_label}{tag_gale}"
+            strategy_name = f"{strategy_key}::{strategy_label}"
             signal_id = self.insert_signal(asset, direction, strategy_name, amount)
 
             route = "BINARIA"
-            self.log_to_db(f"🟡 TENTANDO ENTRAR [{route}] {strategy_key} [G{gale_level}]: {asset} | {direction.upper()} | ${amount}", "INFO")
+            self.log_to_db(f"🟡 TENTANDO ENTRAR [{route}] {strategy_key}: {asset} | {direction.upper()} | ${amount}", "INFO")
 
             balance_before = 0.0
             if self.config["mode"] == "LIVE":
@@ -934,11 +923,11 @@ class SimpleBot:
                 self.update_signal(signal_id, "FAILED", "FAILED", 0)
                 return
             
-            # ✅ CONFIRM GLOBAL LOCK (Só trava se ordem entrou)
             if gale_level == 0 and reserved_minute:
                 with self.trade_lock: self.last_global_minute = global_minute
 
             self.log_to_db(f"✅ CONFIRMADA: Ordem {trade_id}. Aguardando...", "INFO")
+            
             # ✅ SLEEP OTIMIZADO (15s margem)
             wait_time = (60 - entry_dt.second) + 15
             if wait_time < 5: wait_time = 5   
@@ -989,13 +978,10 @@ class SimpleBot:
             self.daily_total += 1
             if res_str == "WIN":
                 self.daily_wins += 1; self.loss_streak = 0
-                if asset in self.pending_gale: del self.pending_gale[asset]
             elif res_str == "LOSS":
                 self.daily_losses += 1; self.loss_streak += 1
                 self.asset_cooldown[asset] = time.time() + 180
-                
-                # ❌ GALE REMOVIDO COMPLETAMENTE NA V51
-                self.log_to_db(f"❌ Stop Loss no par {asset}. Sem Gale.", "INFO")
+                self.log_to_db(f"🚫 Loss no par {asset}. Cooldown de 3min.", "INFO")
 
             if self.loss_streak >= 2:
                 self.block_until_ts = time.time() + 900
@@ -1004,7 +990,7 @@ class SimpleBot:
 
             self.update_signal(signal_id, res_str, res_str, profit)
             log_type = "SUCCESS" if res_str == "WIN" else "ERROR"
-            self.log_to_db(f"{'🏆' if res_str == 'WIN' else '🔻'} {res_str} [G{gale_level}]: {profit:.2f} ({self.daily_wins}W/{self.daily_losses}L)", log_type)
+            self.log_to_db(f"{'🏆' if res_str == 'WIN' else '🔻'} {res_str}: {profit:.2f} ({self.daily_wins}W/{self.daily_losses}L)", log_type)
             if self.config["mode"] == "LIVE": self.update_balance_remote()
             if not self.check_daily_limits():
                 self.log_to_db("🛑 Limite diário atingido — PAUSANDO", "WARNING")
@@ -1032,8 +1018,7 @@ class SimpleBot:
             "AUDCAD-OTC", "AUDUSD-OTC", "USDCAD-OTC", "AUDJPY-OTC"
         ]
 
-        # ✅ CALIBRAGEM INICIAL IMEDIATA (Se o mapa estiver vazio)
-        # Roda numa thread separada para não travar o início
+        # ✅ CALIBRAGEM INICIAL IMEDIATA
         threading.Thread(target=self._run_calibration_task, daemon=True).start()
 
         while True:
@@ -1056,9 +1041,6 @@ class SimpleBot:
                 # ✅ RE-CALIBRAGEM PERIÓDICA (2h)
                 if (time.time() - self.last_calibration_time) > 7200: self.calibrate_market()
 
-                # GALE REMOVIDO DO LOOP PRINCIPAL
-                # executed_gale = False ...
-
                 if not self.best_assets or (time.time() - self.last_catalog_time > 900):
                     self.best_assets = self.catalog_assets(assets_pool)
                     self.last_catalog_time = time.time()
@@ -1067,7 +1049,6 @@ class SimpleBot:
                 now_sec = now_dt.second
                 strat_mode = self.config.get("strategy_mode", "AUTO")
                 
-                # ✅ MODO DINÂMICO: IA PODE SOBREPOR O AUTO
                 with self.dynamic_lock:
                     prefer = self.dynamic.get("prefer_strategy", "AUTO")
                 
@@ -1096,16 +1077,13 @@ class SimpleBot:
                                 if strat_mode == "SHOCK_REVERSAL": self.log_to_db(f"⚡ SHOCK_CHECK {asset}: {reason}", "DEBUG")
                                 if sig:
                                     if strat_mode == "AUTO":
-                                        # ✅ NOVA LÓGICA V51: Respeitar a IA
-                                        # Se a IA escolheu outra estratégia (ex: V2_TREND) para este par,
-                                        # IGNORA o Shock para guardar o slot para a Fase 2.
+                                        # ✅ V52: Se a IA escolheu outra estratégia para este par, PULA O SHOCK
                                         target_strat = self.asset_strategy_map.get(asset, {}).get("strategy", "SHOCK_REVERSAL")
                                         if target_strat != "SHOCK_REVERSAL":
-                                            continue # Pula Shock, espera Fase 2
+                                            continue 
 
                                         cand = {
                                             "asset": asset, "direction": sig, "strategy": "SHOCK_REVERSAL",
-                                            # ✅ AJUSTE: Reduzido de 0.82 para 0.72 para permitir concorrência justa
                                             "label": reason, "confidence": 0.72, 
                                             "wr": self.get_strategy_wr("SHOCK_REVERSAL"), "prefer_binary": True 
                                         }
@@ -1162,12 +1140,18 @@ class SimpleBot:
                                 target_strat = target_info["strategy"]
                                 with self.api_lock: candles = self.api.get_candles(asset, 60, 60, int(time.time()))
                                 if not candles: continue
+                                
+                                # ✅ 1. TENTA A ESTRATÉGIA PREFERIDA (IA)
                                 sig, lbl = self.check_strategy_signal(target_strat, candles, asset)
+                                
+                                # ✅ 2. FALLBACK: Se falhou e não era Shock, tenta Shock como backup
+                                if not sig and target_strat != "SHOCK_REVERSAL":
+                                     sig, lbl = self.check_strategy_signal("SHOCK_REVERSAL", candles, asset)
+                                     if sig: lbl += " (Backup)"
+
                                 if sig:
                                      boost = min(0.15, target_info["score"] / 10.0)
-                                     # ✅ AJUSTE: Aumentado base de 0.70 para 0.76 (valoriza a estratégia calibrada)
                                      confidence = 0.76 + boost
-                                     
                                      candidates.append({
                                         "asset": asset, "direction": sig, "strategy": target_strat,
                                         "label": lbl, "confidence": confidence,
