@@ -44,7 +44,7 @@ except ImportError:
         sys.exit(1)
 
 
-BOT_VERSION = "SHOCK_ENGINE_V56_CONFIDENCE_TUNED_2026-01-26"
+BOT_VERSION = "SHOCK_ENGINE_V56_AI_LOSS_ANALYST_2026-01-26"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -367,6 +367,26 @@ class AICommander:
         Dados: {json.dumps(asset_data, ensure_ascii=False)}
         Estratégias: SHOCK_REVERSAL, V2_TREND, TENDMAX, TSUNAMI_FLOW, VOLUME_REACTOR, NO_TRADE
         JSON: {{"strategy":"NOME","confidence":0.0-1.0,"reason":"curto"}}
+        """
+        return self.call(prompt)
+
+    def analyze_loss(self, context_data):
+        prompt = f"""
+        ANÁLISE DE LOSS IMEDIATA. O bot acabou de perder um trade.
+        Contexto: {json.dumps(context_data, ensure_ascii=False)}
+        
+        Ação desejada: Analise as velas e diga por que falhou.
+        Motivos possíveis:
+        1. REVERSAO_BRUSCA (Contra tendência forte)
+        2. LATERALIZACAO (Doji, pavio longo, mercado parado)
+        3. RUIDO_OTC (Movimento sem lógica técnica)
+        
+        JSON Obrigatório:
+        {{
+            "reason": "LATERALIZACAO/RUIDO/REVERSAO",
+            "explanation": "Pequena frase explicando",
+            "action": "HOLD_TRADING" ou "INCREASE_CONFIDENCE" ou "CONTINUE"
+        }}
         """
         return self.call(prompt)
 
@@ -982,18 +1002,27 @@ class SimpleBot:
             self.last_activity_ts = time.time()
             self.log_to_db(f"✅ ABERTA: {trade_id}", "INFO")
             
-            # Aguarda resultado
+            # Aguarda resultado (vela M1 + margem)
             time.sleep(64)
+            
+            # --- COLETA DE RESULTADO ---
             res_str = "UNKNOWN"
             profit = 0.0
+            candles_after = [] # Para análise de loss
+
+            try:
+                # Sempre pega velas recentes para saber o que aconteceu
+                with self.api_lock:
+                    candles_after = self.api.get_candles(asset, 60, 2, int(time.time()))
+            except:
+                pass
 
             if self.config["mode"] == "OBSERVE":
-                with self.api_lock:
-                    candles = self.api.get_candles(asset, 60, 2, int(time.time()))
-                last = candles[-2]
-                win = (direction == "call" and last["close"] > last["open"]) or (direction == "put" and last["close"] < last["open"])
-                res_str = "WIN" if win else "LOSS"
-                profit = (amount * 0.87) if win else -amount
+                if len(candles_after) >= 2:
+                    last = candles_after[-2] # A vela operada
+                    win = (direction == "call" and last["close"] > last["open"]) or (direction == "put" and last["close"] < last["open"])
+                    res_str = "WIN" if win else "LOSS"
+                    profit = (amount * 0.87) if win else -amount
             else:
                 # Checagem por saldo (Fallback robusto)
                 bal_after = balance_before
@@ -1017,9 +1046,11 @@ class SimpleBot:
                     res_str = "DOJI"
                     profit = 0.0
 
+            # Atualiza memórias
             if res_str in ["WIN", "LOSS"] and strategy_key in self.strategy_memory:
                 self.strategy_memory[strategy_key].append(1 if res_str == "WIN" else 0)
 
+            # Contabiliza
             if res_str != "DOJI":
                 self.daily_total += 1
                 if res_str == "WIN":
@@ -1032,6 +1063,33 @@ class SimpleBot:
                     self.win_streak = 0
                     self.asset_cooldown[asset] = time.time() + ASSET_LOSS_COOLDOWN_SECONDS
                     self.log_to_db(f"🚫 Cooldown no ativo {asset} por {ASSET_LOSS_COOLDOWN_SECONDS}s", "INFO")
+                    
+                    # --- AI LOSS ANALYST ---
+                    # Aciona a análise se for LOSS
+                    if candles_after:
+                        # Prepara dados para IA
+                        c_data = [
+                            {"o": c["open"], "c": c["close"], "h": c["max"], "l": c["min"]} 
+                            for c in candles_after
+                        ]
+                        
+                        analysis = self.commander.analyze_loss({
+                            "asset": asset, "strategy": strategy_key,
+                            "direction": direction, "candles": c_data
+                        })
+                        
+                        if analysis:
+                            reason = analysis.get("reason", "UNKNOWN")
+                            action = analysis.get("action", "CONTINUE")
+                            self.log_to_db(f"🕵️ LOSS ANALYST: {reason} -> {action}", "WARNING")
+                            
+                            # Ajuste dinâmico baseado na análise
+                            if action == "INCREASE_CONFIDENCE":
+                                with self.dynamic_lock:
+                                    old = self.dynamic.get("min_confidence", 0.70)
+                                    new_conf = min(0.90, old + 0.05)
+                                    self.dynamic["min_confidence"] = new_conf
+                                self.log_to_db(f"🛡️ Defesa Ativada: Confiança subiu para {new_conf:.2f}", "SYSTEM")
 
             # Pause Logic
             with self.dynamic_lock:
