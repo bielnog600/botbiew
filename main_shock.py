@@ -17,7 +17,7 @@ try:
 except ImportError:
     print("[ERRO] Biblioteca 'exnovaapi' não instalada.")
 
-BOT_VERSION = "SHOCK_ENGINE_V54_AI_COMMANDER_2026-01-26"
+BOT_VERSION = "SHOCK_ENGINE_V55_RESULT_WAIT_FIX_2026-01-26"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -481,8 +481,8 @@ class SimpleBot:
         self.last_heartbeat_ts = 0 
         self.last_config_ts = 0 
         self.last_global_minute = None
-        self.last_global_trade_ts = 0
-        self.last_activity_ts = time.time()
+        self.last_global_trade_ts = 0 # ✅ GLOBAL COOLDOWN (Segundos)
+        self.last_activity_ts = time.time() # Monitor de Inatividade 
 
         self.last_trade_time = {}
         self.last_minute_trade = {}
@@ -534,60 +534,90 @@ class SimpleBot:
         except: pass
 
     # ✅ INTEGRAÇÃO IA: CHAMADA AO GPT
-    def call_gpt_completion(self, system_msg, user_msg):
+    def call_gpt_strategy_selector(self, asset_data):
+        # ✅ FALLBACK SEGURO SE API KEY AUSENTE
+        if not OPENAI_API_KEY:
+            return {
+                "strategy": "SHOCK_REVERSAL" if asset_data['volatility'] > 1.5 else "V2_TREND",
+                "reason": "Fallback (Sem API Key)"
+            }
+
+        try:
+            headers = {"Content-Type": "application/json", "Authorization": f"Bearer {OPENAI_API_KEY}"}
+            payload = {
+                "model": "gpt-4o-mini",
+                "messages": [{"role": "user", "content": f"""
+                Você é um analista quantitativo de OTC M1.
+                Analise os dados deste par e escolha a MELHOR estratégia.
+                Ativo: {asset_data['asset']}
+                Volatilidade (Corpo/Média): {asset_data['volatility']}x
+                Performance Recente (WinRate % / Trades):
+                - SHOCK_REVERSAL: {asset_data['scores']['SHOCK_REVERSAL']}
+                - V2_TREND: {asset_data['scores']['V2_TREND']}
+                - TENDMAX: {asset_data['scores']['TENDMAX']}
+                - TSUNAMI: {asset_data['scores']['TSUNAMI_FLOW']}
+                - REACTOR: {asset_data['scores']['VOLUME_REACTOR']}
+                
+                Regras de Decisão:
+                1. Priorize estratégias com WR > 55% e volume de sinais decente.
+                2. Se houver tendência clara e V2/TSUNAMI tiverem bom WR, escolha ELAS (Evite Shock em tendência).
+                3. Se o mercado estiver lateral ou muito volátil (>1.8x) e SHOCK tiver bom WR, escolha SHOCK.
+                4. Se REACTOR (Exaustão) estiver com WR alto (>70%), é a melhor opção para reversão.
+
+                Responda APENAS o nome da estratégia no JSON.
+
+                JSON esperado: {{"strategy": "NOME_DA_ESTRATEGIA", "reason": "motivo curto"}}
+                """}],
+                "temperature": 0.2
+            }
+            
+            response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload, timeout=20)
+            if response.status_code == 200:
+                content = response.json()['choices'][0]['message']['content']
+                try:
+                    # ✅ PARSER BLINDADO (Extrai apenas o JSON)
+                    start = content.find('{')
+                    end = content.rfind('}') + 1
+                    if start != -1 and end != 0:
+                        data = json.loads(content[start:end])
+                        return data
+                except: return None
+        except: return None
+        return None
+
+    # 2. TUNER GLOBAL (Configuração do Bot)
+    def call_gpt_global_tuner(self, market_summary):
         if not OPENAI_API_KEY: return None
         try:
             headers = {"Content-Type": "application/json", "Authorization": f"Bearer {OPENAI_API_KEY}"}
             payload = {
                 "model": "gpt-4o-mini",
-                "messages": [{"role": "system", "content": system_msg}, {"role": "user", "content": user_msg}],
+                "messages": [{"role": "user", "content": f"""
+                Você é o 'Commander' de um robô de trading. Ajuste os filtros globais baseados no estado do mercado.
+                Estado do Mercado:
+                - Volatilidade Média Global: {market_summary['avg_volatility']}x
+                - WinRate Médio Geral: {market_summary['avg_wr']}%
+                - Estratégia Dominante: {market_summary['dominant_strat']}
+                
+                Ajuste os parâmetros:
+                - shock_body_mult (1.3 a 2.2): Aumente se mercado muito volátil/perigoso.
+                - trend_filter_enabled (true/false): Ative se houver tendência clara.
+                - shock_pullback_ratio_max (0.15 a 0.35): Reduza se houver muita rejeição (pavio).
+
+                Responda JSON: {{"shock_body_mult": 1.4, "trend_filter_enabled": true, "shock_pullback_ratio_max": 0.25, "reason": "motivo"}}
+                """}],
                 "temperature": 0.2
             }
-            response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload, timeout=25)
+            
+            response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload, timeout=20)
             if response.status_code == 200:
                 content = response.json()['choices'][0]['message']['content']
-                start = content.find('{'); end = content.rfind('}') + 1
-                if start != -1 and end != 0: return json.loads(content[start:end])
-        except Exception as e:
-            self.log_to_db(f"⚠️ GPT Request Error: {e}", "DEBUG")
+                try:
+                    start = content.find('{'); end = content.rfind('}') + 1
+                    if start != -1 and end != 0: return json.loads(content[start:end])
+                except: return None
+        except: return None
         return None
-
-    # 1. SELETOR DE ESTRATÉGIA (Por Par)
-    def call_gpt_strategy_selector(self, asset_data):
-        system_msg = "Você é um estrategista quantitativo de Opções Binárias."
-        user_msg = f"""
-        Analise o par {asset_data['asset']}.
-        Volatilidade: {asset_data['volatility']}x (Média/Corpo)
-        WinRates Recentes: {json.dumps(asset_data['scores'])}
-
-        Escolha a MELHOR estratégia.
-        Regras:
-        - Se Volatilidade > 1.8 e SHOCK > 50% WR -> SHOCK.
-        - Se Tendência clara e V2/TSUNAMI > 55% WR -> V2/TSUNAMI.
-        - Se REACTOR > 70% WR -> REACTOR.
-        
-        Responda JSON: {{"strategy": "NOME", "reason": "motivo curto"}}
-        """
-        fallback = {"strategy": "SHOCK_REVERSAL" if asset_data['volatility'] > 1.5 else "V2_TREND", "reason": "Fallback"}
-        return self.call_gpt_completion(system_msg, user_msg) or fallback
-
-    # 2. TUNER GLOBAL (Configuração do Bot)
-    def call_gpt_global_tuner(self, market_summary):
-        system_msg = "Você é o 'Commander' de um robô de trading. Ajuste os filtros globais baseados no estado do mercado."
-        user_msg = f"""
-        Estado do Mercado:
-        - Volatilidade Média Global: {market_summary['avg_volatility']}x
-        - WinRate Médio Geral: {market_summary['avg_wr']}%
-        - Estratégia Dominante: {market_summary['dominant_strat']}
-        
-        Ajuste os parâmetros:
-        - shock_body_mult (1.3 a 2.2): Aumente se mercado muito volátil/perigoso.
-        - trend_filter_enabled (true/false): Ative se houver tendência clara.
-        - shock_pullback_ratio_max (0.15 a 0.35): Reduza se houver muita rejeição (pavio).
-
-        Responda JSON: {{"shock_body_mult": 1.4, "trend_filter_enabled": true, "shock_pullback_ratio_max": 0.25, "reason": "motivo"}}
-        """
-        return self.call_gpt_completion(system_msg, user_msg)
 
     def check_strategy_signal(self, strategy_name, candles, asset_name=""):
         if strategy_name == "SHOCK_REVERSAL":
@@ -633,6 +663,7 @@ class SimpleBot:
 
             for asset in assets:
                 try:
+                    # ✅ CALM MODE: Espera 3s entre ativos para não estourar API
                     time.sleep(3) 
                     
                     candles = None
@@ -641,6 +672,7 @@ class SimpleBot:
                         except: candles = None
                     if not candles or len(candles) < 100: continue
                     
+                    # 1. Coleta dados matemáticos (Backtest rápido)
                     scores = {s: {'wins': 0, 'total': 0} for s in strategies}
                     
                     for i in range(60, len(candles)-1):
@@ -655,6 +687,7 @@ class SimpleBot:
                                     scores[s]['wins'] += 1
                                     total_wins += 1
                     
+                    # Formata dados para o GPT
                     formatted_scores = {}
                     best_local_wr = 0
                     best_local_strat = ""
@@ -682,27 +715,31 @@ class SimpleBot:
                         "scores": formatted_scores
                     }
 
-                    # 1. IA ESCOLHE ESTRATÉGIA DO PAR
+                    # 2. Pergunta ao GPT qual a melhor estratégia
                     gpt_decision = self.call_gpt_strategy_selector(asset_data)
-                    selected_strat = gpt_decision.get("strategy", "V2_TREND")
-                    reason = gpt_decision.get("reason", "")
                     
-                    # Score
-                    st_stats = scores.get(selected_strat, {'wins':0, 'total':0})
+                    selected_strat = "SHOCK_REVERSAL" # Default se IA falhar
                     score_val = 1.0
-                    if st_stats['total'] > 0:
-                        wr = st_stats['wins']/st_stats['total']
-                        score_val = wr * math.sqrt(st_stats['total'])
-                    else: score_val = 1.5 
+
+                    if gpt_decision and gpt_decision.get("strategy") in strategies:
+                        selected_strat = gpt_decision["strategy"]
+                        st_stats = scores[selected_strat]
+                        if st_stats['total'] > 0:
+                            wr = st_stats['wins']/st_stats['total']
+                            score_val = wr * math.sqrt(st_stats['total'])
+                        else:
+                            score_val = 1.5 
+                        
+                        map_log.append(f"{asset}={selected_strat}")
+                    else:
+                        map_log.append(f"{asset}=SHOCK(FB)")
                     
-                    self.log_to_db(f"🤖 GPT [{asset}]: {selected_strat} ({reason})", "DEBUG")
-                    map_log.append(f"{asset}={selected_strat}")
                     new_map[asset] = {"strategy": selected_strat, "score": score_val}
                 
                 except Exception as e:
                     pass
             
-            # 2. IA CONFIGURA PARÂMETROS GLOBAIS (TUNER)
+            # 3. IA CONFIGURA PARÂMETROS GLOBAIS (TUNER)
             try:
                 avg_vol = total_volatility / len(assets) if assets else 1.0
                 avg_wr = int((total_wins / total_trades) * 100) if total_trades > 0 else 0
@@ -725,6 +762,7 @@ class SimpleBot:
             self.asset_strategy_map = new_map
             self.last_calibration_time = time.time()
             self.log_to_db(f"🏁 Análise IA concluída.", "SUCCESS")
+            # Log do mapa (em chunks para não estourar DB)
             if map_log:
                 self.log_to_db(f"📊 MAPA: {', '.join(map_log[:4])}...", "INFO")
 
@@ -931,7 +969,9 @@ class SimpleBot:
         signal_id = None
         base_amount = float(self.config["entry_value"])
         amount = base_amount
-        # Sem Gale multiplier
+        if gale_level > 0:
+            multiplier = self.config.get("martingale_multiplier", 2.0)
+            amount = round(base_amount * (multiplier ** gale_level), 2)
 
         try:
             if not self.check_daily_limits():
@@ -971,11 +1011,17 @@ class SimpleBot:
             self.last_activity_ts = time.time()
             self.log_to_db(f"✅ CONFIRMADA: Ordem {trade_id}. Aguardando...", "INFO")
             
-            # ✅ SLEEP OTIMIZADO (15s margem)
-            wait_time = (60 - entry_dt.second) + 15
-            if wait_time < 5: wait_time = 5   
-            if wait_time > 30: wait_time = 30 
+            # ✅ SLEEP INTELIGENTE (Correção para M1)
+            # Se a entrada for nos últimos 30s, a expiração joga para o próximo minuto.
+            # Precisamos esperar a vela atual fechar + a próxima vela inteira.
+            if entry_dt.second >= 30:
+                # Ex: Entrou aos 50s. Faltam 10s pra virar + 60s da vela da operação + 4s margem = 74s
+                wait_time = (60 - entry_dt.second) + 60 + 4
+            else:
+                # Ex: Entrou aos 10s. Faltam 50s pra virar + 4s margem = 54s
+                wait_time = (60 - entry_dt.second) + 4
             
+            self.log_to_db(f"⏳ Aguardando fechamento ({wait_time}s)...", "DEBUG")
             time.sleep(wait_time)
 
             res_str = "UNKNOWN"; profit = 0.0
