@@ -394,6 +394,7 @@ class SimpleBot:
         self.next_trade_key = None
         self.asset_cooldown = {}
         self.last_global_trade_ts = 0
+        self.last_scan_ts = 0 # Controle de scan
 
         self.current_date = datetime.now(BR_TIMEZONE).date()
         self.daily_wins = 0
@@ -761,8 +762,15 @@ class SimpleBot:
 
     # -------------------- SCAN & RESERVE (58-59s) --------------------
     def scan_and_reserve(self):
+        # Proteção contra loop no mesmo segundo
+        if time.time() - self.last_scan_ts < 40:
+            return
+        
+        # Só atualiza o TS se for realmente escanear
         if self.next_trade_plan or not self.check_daily_limits():
             return
+            
+        self.last_scan_ts = time.time()
 
         with self.dynamic_lock:
             allow_trading = bool(self.dynamic.get("allow_trading", True))
@@ -856,6 +864,11 @@ class SimpleBot:
                 stats["ERR"] += 1
 
         if not candidates:
+            # Avisa se a calibração ainda estiver vazia
+            if stats["NO_TRADE"] >= len(assets) * 0.9 and self.calibration_running:
+                 self.log_to_db(f"⏳ Aguardando Commander calibrar {stats['NO_TRADE']} ativos...", "INFO")
+                 return
+
             # Log rico para entender o motivo
             fail_summary = ", ".join([f"{k}:{v}" for k,v in stats.items() if v > 0])
             self.log_to_db(f"⛔ SKIP: Nenhum candidato. Resumo: {fail_summary}", "INFO")
