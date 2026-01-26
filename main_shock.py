@@ -6,32 +6,61 @@ import threading
 import os
 import random
 import math
-import requests
+import subprocess
 from datetime import datetime, timedelta, timezone
 from collections import deque
-from supabase import create_client
 
-# --- IMPORTAÇÃO EXNOVA ---
+# --- AUTO-INSTALAÇÃO DE DEPENDÊNCIAS ---
+def install_package(package):
+    try:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", package])
+    except Exception as e:
+        print(f"[SYSTEM] Erro ao instalar {package}: {e}")
+
+try:
+    from supabase import create_client
+except ImportError:
+    print("[SYSTEM] Instalando supabase...")
+    install_package("supabase")
+    from supabase import create_client
+
+try:
+    import requests
+except ImportError:
+    print("[SYSTEM] Instalando requests...")
+    install_package("requests")
+    import requests
+
+# Tenta importar Exnova API, se falhar instala
 try:
     from exnovaapi.stable_api import Exnova
 except ImportError:
-    print("[ERRO] Biblioteca 'exnovaapi' não instalada.")
+    print("[SYSTEM] Biblioteca 'exnovaapi' não encontrada. Instalando...")
+    install_package("exnovaapi")
+    try:
+        from exnovaapi.stable_api import Exnova
+    except ImportError:
+        print("[ERRO CRÍTICO] Falha ao carregar 'exnovaapi'. Verifique a instalação.")
+        sys.exit(1)
 
 
-BOT_VERSION = "SHOCK_ENGINE_V56_NEXT_CANDLE_COMMANDER_GPT_GEMINI_2026-01-26"
+BOT_VERSION = "SHOCK_ENGINE_V56_OPTIMIZED_2026-01-26"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
-# CONFIG
+# CONFIGURAÇÃO E AMBIENTE
 # ==============================================================================
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://ioduahwknfsktujthfyc.supabase.co")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
-EXNOVA_EMAIL = os.environ.get("EXNOVA_EMAIL", "seu_email@exemplo.com")
-EXNOVA_PASSWORD = os.environ.get("EXNOVA_PASSWORD", "sua_senha")
+# Tenta pegar do ambiente, se não tiver, usa valores placeholder (mas avisa)
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
+
+EXNOVA_EMAIL = os.environ.get("EXNOVA_EMAIL", "")
+EXNOVA_PASSWORD = os.environ.get("EXNOVA_PASSWORD", "")
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
+# Fuso Horário (Ajuste conforme necessário)
 BR_TIMEZONE = timezone(timedelta(hours=-3))
 
 # Entrada na próxima vela: reserva 58-59s e executa 00-01s
@@ -42,28 +71,33 @@ RESERVE_SECONDS = [58, 59]
 GLOBAL_COOLDOWN_SECONDS = 50
 ASSET_LOSS_COOLDOWN_SECONDS = 180
 
+# Validação básica de credenciais
+if not EXNOVA_EMAIL or not EXNOVA_PASSWORD:
+    print("⚠️ AVISO: EXNOVA_EMAIL ou EXNOVA_PASSWORD não configurados nas variáveis de ambiente.")
+
 # ==============================================================================
 # LOGGING
 # ==============================================================================
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
+# Silenciar logs ruidosos da API e bibliotecas
 for logger_name in ["websocket", "exnovaapi", "iqoptionapi", "urllib3", "iqoptionapi.websocket.client"]:
     logging.getLogger(logger_name).setLevel(logging.CRITICAL)
 
 LAST_LOG_TIME = time.time()
 
-
 def watchdog():
+    """Monitora se o bot travou e reinicia se necessário"""
     global LAST_LOG_TIME
     print("[WATCHDOG] Monitoramento iniciado.")
     while True:
         time.sleep(60)
+        # Se passar 5 minutos (300s) sem log, considera travado
         if time.time() - LAST_LOG_TIME > 300:
-            print("[WATCHDOG] ⚠️ Silêncio > 5min, reiniciando...")
+            print("[WATCHDOG] ⚠️ Silêncio > 5min, forçando reinício...")
             os._exit(1)
 
-
 # ==============================================================================
-# UTIL
+# UTILITÁRIOS
 # ==============================================================================
 def safe_json_extract(text: str):
     if not text:
@@ -77,13 +111,11 @@ def safe_json_extract(text: str):
         pass
     return None
 
-
 def clamp(v, a, b):
     return max(a, min(b, v))
 
-
 # ==============================================================================
-# TÉCNICA
+# ANÁLISE TÉCNICA
 # ==============================================================================
 class TechnicalAnalysis:
     @staticmethod
@@ -112,30 +144,23 @@ class TechnicalAnalysis:
         lower = min(o, c) - l
 
         return {
-            "open": o,
-            "close": c,
-            "max": h,
-            "min": l,
-            "body": body,
-            "range": rng,
-            "upper_wick": upper,
-            "lower_wick": lower,
-            "color": color,
-            "volume": candle.get("volume", 0)
+            "open": o, "close": c, "max": h, "min": l,
+            "body": body, "range": rng,
+            "upper_wick": upper, "lower_wick": lower,
+            "color": color, "volume": candle.get("volume", 0)
         }
 
     @staticmethod
     def check_compression(candles):
         if len(candles) < 20:
             return False
-
         closed = candles[:-1]
         ema9 = TechnicalAnalysis.calculate_ema(closed, 9)
         ema21 = TechnicalAnalysis.calculate_ema(closed, 21)
-
+        
         bodies = [abs(c["close"] - c["open"]) for c in closed[-10:]]
         avg_body = sum(bodies) / len(bodies) if bodies else 0.00001
-
+        
         spread = abs(ema9 - ema21)
         return spread < (avg_body * 0.15)
 
@@ -158,14 +183,12 @@ class TechnicalAnalysis:
         if ema9 > ema21 and slope > 0:
             if c_reject["color"] == "red" and c_confirm["color"] == "green":
                 return "call", "V2_CALL"
-
         # Baixa
         if ema9 < ema21 and slope < 0:
             if c_reject["color"] == "green" and c_confirm["color"] == "red":
                 return "put", "V2_PUT"
-
+        
         return None, "Sem V2"
-
 
 class ShockLiveDetector:
     @staticmethod
@@ -174,9 +197,7 @@ class ShockLiveDetector:
             return None, "Dados insuficientes", {}
 
         dyn = dynamic_config or {}
-
-        shock_enabled = bool(dyn.get("shock_enabled", True))
-        if not shock_enabled:
+        if not bool(dyn.get("shock_enabled", True)):
             return None, "Shock OFF", {}
 
         body_mult = float(dyn.get("shock_body_mult", 1.5))
@@ -195,7 +216,6 @@ class ShockLiveDetector:
 
         bodies = [abs(c["close"] - c["open"]) for c in closed[-20:]]
         ranges = [(c["max"] - c["min"]) for c in closed[-20:]]
-
         avg_body = (sum(bodies) / len(bodies)) if bodies else 0.00001
         avg_range = (sum(ranges) / len(ranges)) if ranges else 0.00001
 
@@ -206,62 +226,53 @@ class ShockLiveDetector:
         if not explosive:
             return None, "Sem explosão", {"body_mult": body_mult}
 
-        # Exaustão absurda pode quebrar tendência
         super_mult = max(2.2, body_mult + 0.8)
         super_explosive = (body_live >= avg_body * super_mult) and (range_live >= avg_range * super_mult)
 
         close_pos = (live["close"] - live["min"]) / range_live
-
-        # pullback ratio
+        
+        # Pullback check
+        pullback = 0
         if live["color"] == "green":
             pullback = live["max"] - live["close"]
         elif live["color"] == "red":
             pullback = live["close"] - live["min"]
-        else:
-            pullback = range_live * 0.5
-
+        
         pullback_ratio = pullback / range_live
 
-        # Contra tendência: shock é reversão
+        # Lógica de Reversão (Shock)
         if live["color"] == "green":
             if trend_filter and trend_up and not super_explosive:
                 return None, "Contra trend alta", {}
             if close_pos >= close_pos_min and pullback_ratio <= pullback_ratio_max:
                 return "put", "SHOCK_UP", {}
-            return None, "Explodiu mas não travou topo", {}
-
+        
         if live["color"] == "red":
             if trend_filter and trend_down and not super_explosive:
                 return None, "Contra trend baixa", {}
             if close_pos <= (1.0 - close_pos_min) and pullback_ratio <= pullback_ratio_max:
                 return "call", "SHOCK_DOWN", {}
-            return None, "Explodiu mas não travou fundo", {}
 
         return None, "Sem padrão", {}
-
 
 class TendMaxStrategy:
     @staticmethod
     def get_signal(candles):
         if len(candles) < 50:
             return None, "Dados insuficientes"
-
         ema5 = TechnicalAnalysis.calculate_ema(candles[:-1], 5)
         ema10 = TechnicalAnalysis.calculate_ema(candles[:-1], 10)
-
         if ema5 > ema10:
             return "call", "TENDMAX_CALL"
         if ema5 < ema10:
             return "put", "TENDMAX_PUT"
         return None, "Sem cruzamento"
 
-
 class TsunamiFlowStrategy:
     @staticmethod
     def get_signal(candles):
         if len(candles) < 6:
             return None, "Dados insuficientes"
-
         c1 = TechnicalAnalysis.analyze_candle(candles[-2])
         c2 = TechnicalAnalysis.analyze_candle(candles[-3])
         c3 = TechnicalAnalysis.analyze_candle(candles[-4])
@@ -269,36 +280,29 @@ class TsunamiFlowStrategy:
         if c1["color"] == "green" and c2["color"] == "green" and c3["color"] == "green":
             if c1["body"] > c2["body"]:
                 return "call", "TSUNAMI_UP"
-
         if c1["color"] == "red" and c2["color"] == "red" and c3["color"] == "red":
             if c1["body"] > c2["body"]:
                 return "put", "TSUNAMI_DOWN"
-
         return None, "Sem fluxo"
-
 
 class VolumeReactorStrategy:
     @staticmethod
     def get_signal(candles):
         if len(candles) < 30:
             return None, "Dados insuficientes"
-
         c1 = TechnicalAnalysis.analyze_candle(candles[-2])
-
         bodies = [abs(c["close"] - c["open"]) for c in candles[-22:-2]]
         avg_body = sum(bodies) / len(bodies) if bodies else 0.00001
-
+        
         if c1["body"] > avg_body * 2.5:
             if c1["color"] == "green":
                 return "put", "REACTOR_TOP"
             if c1["color"] == "red":
                 return "call", "REACTOR_BOTTOM"
-
         return None, "Sem reactor"
 
-
 # ==============================================================================
-# IA COMMANDER (GPT + GEMINI)
+# IA COMMANDER
 # ==============================================================================
 class AICommander:
     def __init__(self, log_fn):
@@ -313,7 +317,6 @@ class AICommander:
     def _call_openai(self, prompt):
         if not OPENAI_API_KEY:
             return None
-
         try:
             headers = {"Content-Type": "application/json", "Authorization": f"Bearer {OPENAI_API_KEY}"}
             payload = {
@@ -325,16 +328,13 @@ class AICommander:
             if r.status_code == 200:
                 content = r.json()["choices"][0]["message"]["content"]
                 return safe_json_extract(content)
-            self.log(f"⚠️ OPENAI_HTTP_{r.status_code}::{r.text[:120]}", "WARNING")
         except Exception as e:
             self.log(f"⚠️ OPENAI_EX::{e}", "ERROR")
-
         return None
 
     def _call_gemini(self, prompt):
         if not GEMINI_API_KEY:
             return None
-
         try:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
             payload = {"contents": [{"parts": [{"text": prompt}]}]}
@@ -342,14 +342,11 @@ class AICommander:
             if r.status_code == 200:
                 text = r.json()["candidates"][0]["content"]["parts"][0]["text"]
                 return safe_json_extract(text)
-            self.log(f"⚠️ GEMINI_HTTP_{r.status_code}::{r.text[:120]}", "WARNING")
         except Exception as e:
             self.log(f"⚠️ GEMINI_EX::{e}", "ERROR")
-
         return None
 
     def call(self, prompt):
-        # Primeiro OpenAI, depois Gemini
         out = self._call_openai(prompt)
         if out:
             out["provider"] = "OPENAI"
@@ -362,61 +359,25 @@ class AICommander:
 
     def choose_strategy(self, asset_data):
         prompt = f"""
-Você é o Commander de um robô OTC M1.
-Escolha a MELHOR estratégia para este ativo.
-Se estiver ruim ou confuso, responda NO_TRADE.
-
-Dados do ativo:
-{json.dumps(asset_data, ensure_ascii=False)}
-
-Estratégias disponíveis:
-SHOCK_REVERSAL, V2_TREND, TENDMAX, TSUNAMI_FLOW, VOLUME_REACTOR, NO_TRADE
-
-Regras:
-- Tendência clara: V2_TREND ou TSUNAMI_FLOW
-- Lateral explosivo e reversão: VOLUME_REACTOR ou SHOCK_REVERSAL
-- Se não tiver confiança: NO_TRADE
-
-Responda apenas JSON:
-{{"strategy":"NOME","confidence":0.0-1.0,"reason":"curto"}}
-"""
+        Você é o Commander de um robô OTC M1.
+        Escolha a MELHOR estratégia para este ativo.
+        Se estiver ruim ou confuso, responda NO_TRADE.
+        Dados: {json.dumps(asset_data, ensure_ascii=False)}
+        Estratégias: SHOCK_REVERSAL, V2_TREND, TENDMAX, TSUNAMI_FLOW, VOLUME_REACTOR, NO_TRADE
+        JSON: {{"strategy":"NOME","confidence":0.0-1.0,"reason":"curto"}}
+        """
         return self.call(prompt)
 
     def global_tune(self, market_summary):
         prompt = f"""
-Você é o Commander Global do robô OTC M1.
-Ajuste o comportamento global de forma conservadora e consistente.
-
-Resumo:
-{json.dumps(market_summary, ensure_ascii=False)}
-
-Responda apenas JSON:
-{{
-  "allow_trading": true,
-  "prefer_strategy": "AUTO",
-  "min_confidence": 0.75,
-
-  "pause_win_streak": 2,
-  "pause_win_seconds": 180,
-
-  "pause_loss_streak": 2,
-  "pause_loss_seconds": 900,
-
-  "shock_enabled": true,
-  "shock_body_mult": 1.5,
-  "shock_range_mult": 1.4,
-  "shock_close_pos_min": 0.85,
-  "shock_pullback_ratio_max": 0.25,
-  "trend_filter_enabled": true,
-
-  "reason": "curto"
-}}
-"""
+        Você é o Commander Global. Ajuste o comportamento.
+        Resumo: {json.dumps(market_summary, ensure_ascii=False)}
+        JSON: {{ "allow_trading": true, "prefer_strategy": "AUTO", "min_confidence": 0.75, "pause_win_streak": 2, "pause_win_seconds": 180, "pause_loss_streak": 2, "pause_loss_seconds": 900, "shock_enabled": true, "reason": "curto" }}
+        """
         return self.call(prompt)
 
-
 # ==============================================================================
-# BOT
+# BOT PRINCIPAL
 # ==============================================================================
 class SimpleBot:
     def __init__(self):
@@ -429,10 +390,8 @@ class SimpleBot:
         self.dynamic_lock = threading.RLock()
 
         self.active_trades = set()
-
         self.next_trade_plan = None
         self.next_trade_key = None
-
         self.asset_cooldown = {}
         self.last_global_trade_ts = 0
 
@@ -440,7 +399,6 @@ class SimpleBot:
         self.daily_wins = 0
         self.daily_losses = 0
         self.daily_total = 0
-
         self.win_streak = 0
         self.loss_streak = 0
         self.pause_until_ts = 0
@@ -460,21 +418,11 @@ class SimpleBot:
         }
 
         self.dynamic = {
-            "allow_trading": True,
-            "prefer_strategy": "AUTO",
-            "min_confidence": 0.75,
-
-            "pause_win_streak": 2,
-            "pause_win_seconds": 180,
-
-            "pause_loss_streak": 2,
-            "pause_loss_seconds": 900,
-
-            "shock_enabled": True,
-            "shock_body_mult": 1.5,
-            "shock_range_mult": 1.4,
-            "shock_close_pos_min": 0.85,
-            "shock_pullback_ratio_max": 0.25,
+            "allow_trading": True, "prefer_strategy": "AUTO", "min_confidence": 0.75,
+            "pause_win_streak": 2, "pause_win_seconds": 180,
+            "pause_loss_streak": 2, "pause_loss_seconds": 900,
+            "shock_enabled": True, "shock_body_mult": 1.5, "shock_range_mult": 1.4,
+            "shock_close_pos_min": 0.85, "shock_pullback_ratio_max": 0.25,
             "trend_filter_enabled": True,
         }
 
@@ -490,26 +438,26 @@ class SimpleBot:
             "status": "PAUSED",
             "account_type": "PRACTICE",
             "entry_value": 1.0,
-            "max_trades_per_day": 0,
-            "max_wins_per_day": 0,
-            "max_losses_per_day": 0,
-            "mode": "LIVE",
-            "strategy_mode": "AUTO"
+            "max_trades_per_day": 0, "max_wins_per_day": 0, "max_losses_per_day": 0,
+            "mode": "LIVE", "strategy_mode": "AUTO"
         }
 
         self.init_supabase()
         self.commander = AICommander(self.log_to_db)
 
-    # -------------------- infra --------------------
+    # -------------------- INFRAESTRUTURA --------------------
     def touch_watchdog(self):
         global LAST_LOG_TIME
         LAST_LOG_TIME = time.time()
 
     def init_supabase(self):
         try:
-            if not SUPABASE_KEY:
-                print("⚠️ SUPABASE_KEY vazia")
-            self.supabase = create_client(SUPABASE_URL, SUPABASE_KEY or "invalid_key")
+            if not SUPABASE_URL or not SUPABASE_KEY:
+                print("⚠️ Supabase: Credenciais incompletas. Logs remotos desativados.")
+                self.supabase = None
+                return
+
+            self.supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
             print("✅ Supabase conectado.")
         except Exception as e:
             print(f"❌ Erro Supabase: {e}")
@@ -519,9 +467,7 @@ class SimpleBot:
         self.touch_watchdog()
         print(f"[{level}] {message}")
 
-        if level == "DEBUG":
-            return
-        if not self.supabase:
+        if level == "DEBUG" or not self.supabase:
             return
 
         try:
@@ -539,19 +485,14 @@ class SimpleBot:
             s = str(payload)
         self.log_to_db(f"{tag}::{s}", level)
 
-    # -------------------- DB signals --------------------
+    # -------------------- DB SIGNALS --------------------
     def insert_signal(self, asset, direction, strategy, amount, status="PENDING", result="PENDING", profit=0.0):
         if not self.supabase:
             return None
         payload = {
-            "pair": asset,
-            "direction": direction,
-            "strategy": strategy,
-            "status": status,
-            "result": result,
-            "profit": profit,
-            "amount": float(amount),
-            "created_at": datetime.now(timezone.utc).isoformat()
+            "pair": asset, "direction": direction, "strategy": strategy,
+            "status": status, "result": result, "profit": profit,
+            "amount": float(amount), "created_at": datetime.now(timezone.utc).isoformat()
         }
         try:
             with self.db_lock:
@@ -573,7 +514,7 @@ class SimpleBot:
         except:
             pass
 
-    # -------------------- Exnova --------------------
+    # -------------------- EXNOVA CONEXÃO --------------------
     def connect(self):
         self.log_to_db("🔌 Conectando Exnova...", "SYSTEM")
         try:
@@ -583,7 +524,8 @@ class SimpleBot:
                         self.api.api.close()
                     except:
                         pass
-
+                
+                # Instância da API
                 self.api = Exnova(EXNOVA_EMAIL, EXNOVA_PASSWORD)
                 ok, reason = self.api.connect()
 
@@ -618,7 +560,7 @@ class SimpleBot:
         except:
             pass
 
-    # -------------------- Limits / daily --------------------
+    # -------------------- LIMITES DIÁRIOS --------------------
     def reset_daily_if_needed(self):
         today = datetime.now(BR_TIMEZONE).date()
         if today != self.current_date:
@@ -645,38 +587,32 @@ class SimpleBot:
             return False
         return True
 
-    # -------------------- Strategy WR --------------------
     def get_wr(self, strategy):
         mem = self.strategy_memory.get(strategy)
         if not mem:
             return 0.55
         return sum(mem) / len(mem)
 
-    # -------------------- Strategy signal --------------------
+    # -------------------- VERIFICADOR DE SINAL --------------------
     def check_strategy_signal(self, strategy_name, candles, asset_name=""):
         if strategy_name == "SHOCK_REVERSAL":
             with self.dynamic_lock:
                 dyn = self.dynamic.copy()
             sig, lbl, _ = ShockLiveDetector.detect(candles, asset_name, dyn)
             return sig, lbl
-
         if strategy_name == "V2_TREND":
             if TechnicalAnalysis.check_compression(candles):
                 return None, "Compressão"
             return TechnicalAnalysis.get_signal_v2(candles)
-
         if strategy_name == "TENDMAX":
             return TendMaxStrategy.get_signal(candles)
-
         if strategy_name == "TSUNAMI_FLOW":
             return TsunamiFlowStrategy.get_signal(candles)
-
         if strategy_name == "VOLUME_REACTOR":
             return VolumeReactorStrategy.get_signal(candles)
-
         return None, "Estratégia inválida"
 
-    # -------------------- CALIBRATION (Commander) --------------------
+    # -------------------- CALIBRATION (COMMANDER) --------------------
     def calibrate_market(self):
         if self.calibration_running:
             return
@@ -690,10 +626,8 @@ class SimpleBot:
                 return
 
             strategies = ["SHOCK_REVERSAL", "V2_TREND", "TENDMAX", "TSUNAMI_FLOW", "VOLUME_REACTOR"]
-
             new_map = {}
             map_log = []
-
             total_trades = 0
             total_wins = 0
             total_vol = 0.0
@@ -702,20 +636,17 @@ class SimpleBot:
             for asset in self.best_assets:
                 try:
                     time.sleep(2)
-
                     with self.api_lock:
                         candles = self.api.get_candles(asset, 60, 120, int(time.time()))
                     if not candles or len(candles) < 100:
                         map_log.append(f"{asset}=NO_DATA")
                         continue
 
-                    # backtest rápido
+                    # Mini Backtest
                     scores = {s: {"wins": 0, "total": 0} for s in strategies}
-
                     for i in range(60, len(candles) - 2):
                         window = candles[i - 60: i + 1]
                         result = candles[i + 1]
-
                         for s in strategies:
                             sig, _ = self.check_strategy_signal(s, window, asset)
                             if sig:
@@ -725,7 +656,7 @@ class SimpleBot:
                                 if win:
                                     scores[s]["wins"] += 1
                                     total_wins += 1
-
+                    
                     bodies = [abs(c["close"] - c["open"]) for c in candles[-20:]]
                     avg_body = sum(bodies) / len(bodies) if bodies else 0.0001
                     last_body = abs(candles[-1]["close"] - candles[-1]["open"])
@@ -739,18 +670,13 @@ class SimpleBot:
                         wr = int((w / t) * 100) if t > 0 else 0
                         formatted_scores[s] = f"{wr}% ({w}/{t})"
 
-                    asset_data = {
-                        "asset": asset,
-                        "volatility": volatility,
-                        "scores": formatted_scores,
-                    }
-
+                    asset_data = {"asset": asset, "volatility": volatility, "scores": formatted_scores}
                     decision = self.commander.choose_strategy(asset_data)
 
-                    # sem IA: o normal é NO_TRADE (não entra no escuro)
                     strat = "NO_TRADE"
                     conf = 0.0
                     reason = "sem IA"
+                    provider = "AI"
 
                     if decision:
                         strat = str(decision.get("strategy", "NO_TRADE")).strip().upper()
@@ -769,47 +695,35 @@ class SimpleBot:
                 except Exception as e:
                     self.log_to_db(f"⚠️ Calib asset erro {asset}: {e}", "DEBUG")
 
-            # tune global
+            # Tune global
             avg_vol = round(total_vol / len(self.best_assets), 2) if self.best_assets else 1.0
             avg_wr = int((total_wins / total_trades) * 100) if total_trades > 0 else 0
             dominant = max(strat_counts, key=strat_counts.get) if any(strat_counts.values()) else "MIXED"
 
             tune = self.commander.global_tune({
-                "avg_volatility": avg_vol,
-                "avg_wr": avg_wr,
-                "dominant_strat": dominant
+                "avg_volatility": avg_vol, "avg_wr": avg_wr, "dominant_strat": dominant
             })
 
             if tune:
-                # aplica só chaves válidas
                 allowed = set(self.dynamic.keys())
                 clean = {}
                 for k, v in tune.items():
-                    if k in allowed:
-                        clean[k] = v
-
+                    if k in allowed: clean[k] = v
                 with self.dynamic_lock:
                     self.dynamic.update(clean)
-
                 self.log_to_db(f"🧠 GLOBAL::{tune.get('provider','AI')} -> {tune.get('reason','ok')}", "SYSTEM")
                 self.log_json("GLOBAL_DYNAMIC", self.dynamic, "DEBUG")
 
             self.asset_strategy_map = new_map
             self.last_calibration_time = time.time()
-
             self.log_to_db("🏁 Commander: mapa atualizado", "SUCCESS")
-            if map_log:
-                self.log_to_db(f"📊 MAPA: {', '.join(map_log[:6])}...", "INFO")
 
         finally:
             self.calibration_running = False
 
     # -------------------- SCAN & RESERVE (58-59s) --------------------
     def scan_and_reserve(self):
-        if self.next_trade_plan:
-            return
-
-        if not self.check_daily_limits():
+        if self.next_trade_plan or not self.check_daily_limits():
             return
 
         with self.dynamic_lock:
@@ -818,50 +732,42 @@ class SimpleBot:
             min_conf = float(self.dynamic.get("min_confidence", 0.75))
 
         if not allow_trading:
-            self.log_to_db("🧠 IA BLOQUEOU: allow_trading=false", "SYSTEM")
             return
 
-        # global cooldown
         if time.time() - self.last_global_trade_ts < GLOBAL_COOLDOWN_SECONDS:
-            self.log_to_db("⏳ SKIP: cooldown global ativo", "DEBUG")
             return
 
         assets = self.best_assets[:]
         random.shuffle(assets)
-
         strategies_pool = ["V2_TREND", "TSUNAMI_FLOW", "VOLUME_REACTOR", "TENDMAX", "SHOCK_REVERSAL"]
-
         candidates = []
         scan_info = []
 
+        # LOOP PROTEGIDO: Pára se sair da janela de análise (58-59s)
         for asset in assets:
+            current_second = datetime.now(BR_TIMEZONE).second
+            if current_second not in RESERVE_SECONDS:
+                self.log_to_db("⚠️ SCAN: Tempo limite excedido, parando scan.", "WARNING")
+                break
+
             if time.time() < self.asset_cooldown.get(asset, 0):
                 scan_info.append(f"{asset}:CD")
                 continue
 
-            # estratégia do mapa
             mapped = self.asset_strategy_map.get(asset)
             mapped_strat = mapped["strategy"] if mapped else "NO_TRADE"
             mapped_conf = float(mapped["confidence"]) if mapped else 0.0
 
-            # se IA marcou NO_TRADE, respeita
             if mapped_strat == "NO_TRADE":
                 scan_info.append(f"{asset}:NO")
                 continue
 
-            # prioridade da IA por ativo
             target_list = []
-            if mapped_strat != "NO_TRADE":
-                target_list.append(mapped_strat)
-
-            # prefer_strategy global pode forçar (quando não é AUTO)
+            if mapped_strat != "NO_TRADE": target_list.append(mapped_strat)
             if prefer_strategy != "AUTO" and prefer_strategy in strategies_pool and prefer_strategy not in target_list:
                 target_list.insert(0, prefer_strategy)
-
-            # completa com o resto, mas sem repetir
             for s in strategies_pool:
-                if s not in target_list:
-                    target_list.append(s)
+                if s not in target_list: target_list.append(s)
 
             try:
                 with self.api_lock:
@@ -871,29 +777,20 @@ class SimpleBot:
                     continue
 
                 best_local = None
-
                 for strat in target_list:
                     sig, lbl = self.check_strategy_signal(strat, candles, asset)
-                    if not sig:
-                        continue
+                    if not sig: continue
 
                     wr = self.get_wr(strat)
                     base_conf = mapped_conf if strat == mapped_strat else 0.70
                     conf = clamp((base_conf * 0.65) + (wr * 0.35), 0.0, 0.95)
-
-                    # score final
                     score = (wr * 0.7) + (conf * 0.3)
-
+                    
                     cand = {
-                        "asset": asset,
-                        "direction": sig,
-                        "strategy": strat,
-                        "label": lbl,
-                        "wr": round(wr, 3),
-                        "confidence": round(conf, 3),
+                        "asset": asset, "direction": sig, "strategy": strat,
+                        "label": lbl, "wr": round(wr, 3), "confidence": round(conf, 3),
                         "score": round(score, 3),
                     }
-
                     if (best_local is None) or (cand["score"] > best_local["score"]):
                         best_local = cand
 
@@ -905,48 +802,31 @@ class SimpleBot:
                         scan_info.append(f"{asset}:LOWCONF")
                 else:
                     scan_info.append(f"{asset}:NOSIG")
-
             except:
                 scan_info.append(f"{asset}:ERR")
 
         if not candidates:
             self.log_to_db("⛔ SKIP: nenhum candidato bom", "INFO")
-            self.log_to_db(f"SCAN::{', '.join(scan_info[:8])}...", "DEBUG")
             return
 
         candidates.sort(key=lambda x: x["score"], reverse=True)
         best = candidates[0]
-
         self.next_trade_plan = best
         self.next_trade_key = datetime.now(BR_TIMEZONE).strftime("%Y%m%d%H%M")
-
-        self.log_json("CANDIDATES_TOP", candidates[:3], "DEBUG")
         self.log_to_db(f"🧠 RESERVADO_NEXT: {best['asset']} {best['direction'].upper()} {best['strategy']} conf={best['confidence']}", "SYSTEM")
 
-    # -------------------- EXECUTE RESERVED (00-01s) --------------------
+    # -------------------- EXECUTE RESERVED --------------------
     def execute_reserved(self):
-        if not self.next_trade_plan:
-            return
-
-        # trava por pausa
-        if time.time() < self.pause_until_ts:
-            return
-
-        # daily limits
-        if not self.check_daily_limits():
+        if not self.next_trade_plan or time.time() < self.pause_until_ts or not self.check_daily_limits():
             self.next_trade_plan = None
             return
 
         plan = self.next_trade_plan
         self.next_trade_plan = None
-
         self.log_to_db(f"🚀 EXEC_NEXT: {plan['asset']} {plan['direction'].upper()} {plan['strategy']} ({plan['label']})", "SYSTEM")
-
         self.launch_trade(
-            asset=plan["asset"],
-            direction=plan["direction"],
-            strategy_key=plan["strategy"],
-            strategy_label=plan["label"]
+            asset=plan["asset"], direction=plan["direction"],
+            strategy_key=plan["strategy"], strategy_label=plan["label"]
         )
 
     # -------------------- TRADE THREAD --------------------
@@ -956,25 +836,18 @@ class SimpleBot:
 
     def _trade_thread(self, asset, direction, strategy_key, strategy_label):
         now = time.time()
-
-        # global cooldown
         if now - self.last_global_trade_ts < GLOBAL_COOLDOWN_SECONDS:
-            self.log_to_db("⛔ ABORT: cooldown global", "DEBUG")
             return
 
         with self.trade_lock:
             if asset in self.active_trades:
-                self.log_to_db(f"⛔ ABORT: ativo já em trade {asset}", "DEBUG")
                 return
             self.active_trades.add(asset)
 
         signal_id = None
-
         try:
             amount = float(self.config["entry_value"])
             strat_name = f"{strategy_key}::{strategy_label}"
-
-            # cria sinal PENDING
             signal_id = self.insert_signal(asset, direction, strat_name, amount, status="PENDING", result="PENDING", profit=0.0)
 
             balance_before = 0.0
@@ -985,7 +858,6 @@ class SimpleBot:
                 except:
                     pass
 
-            # compra
             self.log_to_db(f"🟡 BUY: {asset} {direction.upper()} ${amount} [{strat_name}]", "INFO")
 
             if self.config["mode"] == "OBSERVE":
@@ -1001,12 +873,10 @@ class SimpleBot:
 
             self.last_global_trade_ts = time.time()
             self.last_activity_ts = time.time()
-
             self.log_to_db(f"✅ ABERTA: {trade_id}", "INFO")
-
-            # Espera vela fechar (1 min) + margem
+            
+            # Aguarda resultado
             time.sleep(64)
-
             res_str = "UNKNOWN"
             profit = 0.0
 
@@ -1018,7 +888,7 @@ class SimpleBot:
                 res_str = "WIN" if win else "LOSS"
                 profit = (amount * 0.87) if win else -amount
             else:
-                # tenta pegar delta no saldo
+                # Checagem por saldo (Fallback robusto)
                 bal_after = balance_before
                 delta = 0.0
                 for _ in range(7):
@@ -1026,10 +896,8 @@ class SimpleBot:
                         with self.api_lock:
                             bal_after = self.api.get_balance()
                         delta = bal_after - balance_before
-                        if abs(delta) > 0.01:
-                            break
-                    except:
-                        pass
+                        if abs(delta) > 0.01: break
+                    except: pass
                     time.sleep(1)
 
                 if delta > 0.01:
@@ -1042,27 +910,23 @@ class SimpleBot:
                     res_str = "DOJI"
                     profit = 0.0
 
-            # atualiza memória da estratégia (ignora doji)
             if res_str in ["WIN", "LOSS"] and strategy_key in self.strategy_memory:
                 self.strategy_memory[strategy_key].append(1 if res_str == "WIN" else 0)
 
-            # atualiza contadores
             if res_str != "DOJI":
                 self.daily_total += 1
+                if res_str == "WIN":
+                    self.daily_wins += 1
+                    self.win_streak += 1
+                    self.loss_streak = 0
+                elif res_str == "LOSS":
+                    self.daily_losses += 1
+                    self.loss_streak += 1
+                    self.win_streak = 0
+                    self.asset_cooldown[asset] = time.time() + ASSET_LOSS_COOLDOWN_SECONDS
+                    self.log_to_db(f"🚫 Cooldown no ativo {asset} por {ASSET_LOSS_COOLDOWN_SECONDS}s", "INFO")
 
-            if res_str == "WIN":
-                self.daily_wins += 1
-                self.win_streak += 1
-                self.loss_streak = 0
-
-            elif res_str == "LOSS":
-                self.daily_losses += 1
-                self.loss_streak += 1
-                self.win_streak = 0
-                self.asset_cooldown[asset] = time.time() + ASSET_LOSS_COOLDOWN_SECONDS
-                self.log_to_db(f"🚫 Cooldown no ativo {asset} por {ASSET_LOSS_COOLDOWN_SECONDS}s", "INFO")
-
-            # pausas controladas pela IA (dynamic)
+            # Pause Logic
             with self.dynamic_lock:
                 pause_win_streak = int(self.dynamic.get("pause_win_streak", 2))
                 pause_win_seconds = int(self.dynamic.get("pause_win_seconds", 180))
@@ -1073,18 +937,14 @@ class SimpleBot:
                 self.pause_until_ts = time.time() + pause_win_seconds
                 self.log_to_db(f"😴 PAUSA WIN: {pause_win_streak} wins -> {pause_win_seconds}s", "SYSTEM")
                 self.win_streak = 0
-
             if self.loss_streak >= pause_loss_streak:
                 self.pause_until_ts = time.time() + pause_loss_seconds
                 self.log_to_db(f"🛑 PAUSA LOSS: {pause_loss_streak} losses -> {pause_loss_seconds}s", "WARNING")
 
-            # salva DB
             if res_str == "DOJI":
                 self.update_signal(signal_id, "DOJI", "DOJI", 0.0)
-                self.log_to_db("⚪ DOJI: ignorado", "DEBUG")
-                return
-
-            self.update_signal(signal_id, res_str, res_str, float(profit))
+            else:
+                self.update_signal(signal_id, res_str, res_str, float(profit))
 
             level = "SUCCESS" if res_str == "WIN" else "ERROR"
             self.log_to_db(f"{'🏆' if res_str=='WIN' else '🔻'} {res_str}: {profit:.2f} | {self.daily_wins}W/{self.daily_losses}L", level)
@@ -1093,68 +953,51 @@ class SimpleBot:
             with self.trade_lock:
                 self.active_trades.discard(asset)
 
-    # -------------------- MAIN LOOP --------------------
+    # -------------------- START --------------------
     def start(self):
         threading.Thread(target=watchdog, daemon=True).start()
-
-        # calibração inicial
-        self.log_to_db("🧠 Calibração inicial...", "SYSTEM")
+        self.log_to_db("🧠 Inicializando Bot...", "SYSTEM")
 
         if not self.api or not self.connect():
             time.sleep(3)
-
+        
+        # Inicia calibração
         threading.Thread(target=self._run_calibration_task, daemon=True).start()
 
         while True:
             try:
-                # heartbeat
                 if time.time() - self.last_heartbeat_ts >= 30:
                     self.last_heartbeat_ts = time.time()
                     self.touch_watchdog()
 
                 self.reset_daily_if_needed()
 
-                # config refresh
                 if time.time() - self.last_config_ts >= 5:
                     self.fetch_config()
                     self.last_config_ts = time.time()
 
-                # garante conexão
                 if not self.api or not self.api.check_connect():
                     if not self.connect():
                         time.sleep(5)
                         continue
 
-                # bot pausado manualmente
-                if self.config["status"] == "PAUSED":
+                if self.config["status"] == "PAUSED" or time.time() < self.pause_until_ts:
                     time.sleep(1)
                     continue
 
-                # pausa inteligente
-                if time.time() < self.pause_until_ts:
-                    self.log_to_db("⏸️ PAUSADO: cooldown inteligente", "DEBUG")
-                    time.sleep(1)
-                    continue
-
-                # recalibra 2h
                 if (time.time() - self.last_calibration_time) > 7200:
                     self.calibrate_market()
-
-                # inatividade 5 min
+                
                 if time.time() - self.last_activity_ts > 300:
-                    self.log_to_db("⚠️ 5min sem trade, recalibrando...", "WARNING")
                     self.last_activity_ts = time.time()
                     self.calibrate_market()
 
                 now_dt = datetime.now(BR_TIMEZONE)
                 sec = now_dt.second
 
-                # reserva
                 if sec in RESERVE_SECONDS:
-                    self.log_to_db(f"🔎 SCAN_MINUTO::{now_dt.strftime('%H:%M:%S')}", "DEBUG")
                     self.scan_and_reserve()
-
-                # executa próxima vela
+                
                 if sec in NEXT_CANDLE_EXEC_SECONDS:
                     self.execute_reserved()
 
@@ -1163,7 +1006,6 @@ class SimpleBot:
             except Exception as e:
                 self.log_to_db(f"❌ Main loop error: {e}", "ERROR")
                 time.sleep(3)
-
 
 if __name__ == "__main__":
     SimpleBot().start()
