@@ -17,7 +17,7 @@ try:
 except ImportError:
     print("[ERRO] Biblioteca 'exnovaapi' não instalada.")
 
-BOT_VERSION = "SHOCK_ENGINE_V55_SMART_WAIT_FIX_2026-01-25"
+BOT_VERSION = "SHOCK_ENGINE_V56_GPT_DEBUGGER_2026-01-25"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -30,6 +30,13 @@ EXNOVA_PASSWORD = os.environ.get("EXNOVA_PASSWORD", "sua_senha")
 
 # Se tiver chave OpenAI, coloque aqui ou nas env vars
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+
+# ✅ DIAGNÓSTICO DE KEY AO INICIAR
+if OPENAI_API_KEY:
+    masked_key = OPENAI_API_KEY[:6] + "..." + OPENAI_API_KEY[-4:]
+    print(f"✅ OPENAI_API_KEY detectada: {masked_key}")
+else:
+    print("❌ OPENAI_API_KEY não encontrada ou vazia. O bot usará Fallback (Lógica Interna).")
 
 BR_TIMEZONE = timezone(timedelta(hours=-3))
 
@@ -538,13 +545,8 @@ class SimpleBot:
     def call_gpt_strategy_selector(self, asset_data):
         # ✅ FALLBACK SEGURO SE API KEY AUSENTE
         if not OPENAI_API_KEY:
-            # Fallback aprimorado: Se volátil, prefere Shock. Se não, diversifica.
-            # Adicionei uma lógica básica para variar se não tiver API key
-            strat = "SHOCK_REVERSAL"
-            if asset_data['volatility'] < 1.3: strat = "V2_TREND"
-            
             return {
-                "strategy": strat,
+                "strategy": "SHOCK_REVERSAL" if asset_data['volatility'] > 1.5 else "V2_TREND",
                 "reason": "Fallback (Sem API Key)"
             }
 
@@ -588,7 +590,13 @@ class SimpleBot:
                         data = json.loads(content[start:end])
                         return data
                 except: return None
-        except: return None
+            else:
+                # ✅ DEBUG REAL: Mostra erro exato se API falhar
+                self.log_to_db(f"⚠️ GPT Error {response.status_code}: {response.text[:50]}", "ERROR")
+                return None
+        except Exception as e:
+            self.log_to_db(f"⚠️ GPT Request Failed: {e}", "ERROR")
+            return None
         return None
 
     def check_strategy_signal(self, strategy_name, candles, asset_name=""):
@@ -627,6 +635,10 @@ class SimpleBot:
             new_map = {}
             
             map_log = []
+            
+            # ✅ VERIFICA KEY ANTES DE COMEÇAR (Avisa usuário)
+            if not OPENAI_API_KEY:
+                self.log_to_db("⚠️ OPENAI_API_KEY não configurada. Usando lógica interna.", "WARNING")
 
             for asset in assets:
                 try:
@@ -905,7 +917,9 @@ class SimpleBot:
         signal_id = None
         base_amount = float(self.config["entry_value"])
         amount = base_amount
-        # Sem Gale multiplier
+        if gale_level > 0:
+            multiplier = self.config.get("martingale_multiplier", 2.0)
+            amount = round(base_amount * (multiplier ** gale_level), 2)
 
         try:
             if not self.check_daily_limits():
@@ -945,14 +959,11 @@ class SimpleBot:
             self.last_activity_ts = time.time()
             self.log_to_db(f"✅ CONFIRMADA: Ordem {trade_id}. Aguardando...", "INFO")
             
-            # ✅ SMART WAIT: (60 - sec) + 60 + 4s (Se > 30s)
-            seconds_left = 60 - entry_dt.second
-            wait_time = seconds_left + 4
-            if entry_dt.second >= 30: wait_time += 60 # Para garantir vela cheia
+            # ✅ SLEEP OTIMIZADO (15s margem)
+            wait_time = (60 - entry_dt.second) + 15
+            if wait_time < 5: wait_time = 5   
+            if wait_time > 30: wait_time = 30 
             
-            if wait_time < 10: wait_time = 10 
-            
-            self.log_to_db(f"⏳ Aguardando fechamento ({wait_time}s)...", "DEBUG")
             time.sleep(wait_time)
 
             res_str = "UNKNOWN"; profit = 0.0
@@ -995,11 +1006,11 @@ class SimpleBot:
             self.daily_total += 1
             if res_str == "WIN":
                 self.daily_wins += 1; self.loss_streak = 0
+                if asset in self.pending_gale: del self.pending_gale[asset]
             elif res_str == "LOSS":
                 self.daily_losses += 1; self.loss_streak += 1
                 self.asset_cooldown[asset] = time.time() + 180
                 self.log_to_db(f"🚫 Loss no par {asset}. Cooldown de 3min.", "INFO")
-                # ❌ SEM GALE
 
             if self.loss_streak >= 2:
                 self.block_until_ts = time.time() + 900
