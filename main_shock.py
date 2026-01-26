@@ -17,7 +17,7 @@ try:
 except ImportError:
     print("[ERRO] Biblioteca 'exnovaapi' não instalada.")
 
-BOT_VERSION = "SHOCK_ENGINE_V52_AUTO_BACKUP_SYSTEM_2026-01-25"
+BOT_VERSION = "SHOCK_ENGINE_V53_ACTIVITY_MONITOR_2026-01-26"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -480,7 +480,8 @@ class SimpleBot:
         self.asset_cooldown = {}
         self.last_heartbeat_ts = 0 
         self.last_config_ts = 0 
-        self.last_global_minute = None 
+        self.last_global_minute = None
+        self.last_activity_ts = time.time() # ✅ Monitor de Inatividade 
 
         self.last_trade_time = {}
         self.last_minute_trade = {}
@@ -666,7 +667,7 @@ class SimpleBot:
                     # 2. Pergunta ao GPT qual a melhor estratégia
                     gpt_decision = self.call_gpt_strategy_selector(asset_data)
                     
-                    selected_strat = "V2_TREND" # Default seguro
+                    selected_strat = "SHOCK_REVERSAL" # Default se IA falhar
                     score_val = 1.0
 
                     if gpt_decision and gpt_decision.get("strategy") in strategies:
@@ -679,6 +680,8 @@ class SimpleBot:
                             score_val = 1.5 
                         
                         map_log.append(f"{asset}={selected_strat}")
+                    else:
+                        map_log.append(f"{asset}=SHOCK(FB)")
                     
                     new_map[asset] = {"strategy": selected_strat, "score": score_val}
                 
@@ -690,7 +693,7 @@ class SimpleBot:
             self.log_to_db(f"🏁 Análise IA concluída.", "SUCCESS")
             # Log do mapa (em chunks para não estourar DB)
             if map_log:
-                self.log_to_db(f"📊 MAPA: {', '.join(map_log[:3])}...", "INFO")
+                self.log_to_db(f"📊 MAPA (Padrão/Fallback): {', '.join(map_log[:4])}...", "INFO")
 
         except Exception as e: self.log_to_db(f"❌ Erro Calibração IA: {e}", "ERROR")
         finally: self.calibration_running = False
@@ -867,24 +870,36 @@ class SimpleBot:
         entry_dt = datetime.now(BR_TIMEZONE)
         now = time.time()
         
+        # ✅ SMART GLOBAL LOCK: Reserva sem travar, só trava se confirmar ordem
         global_minute = entry_dt.strftime("%Y%m%d%H%M")
         reserved_minute = False
         
         if time.time() < self.block_until_ts: return
 
-        # ✅ ATOMIC RESERVATION
+        # ✅ ATOMIC RESERVATION (Corrigido para evitar Race Condition)
         with self.trade_lock:
+            # Impede duplicação no mesmo ativo
             if asset in self.active_trades: return
+
             if gale_level == 0:
+                # Max trades check (Limite de 1 trade por vez)
                 if len(self.active_trades) >= 1: return
+                # Global minute check
                 if self.last_global_minute == global_minute: return
+                
+                # Asset specific checks in atomic block to be safe
+                # Check frequency
                 if asset in self.last_trade_time and now - self.last_trade_time[asset] < 60: return
+                
                 minute_key = entry_dt.strftime("%Y%m%d%H%M")
                 if self.last_minute_trade.get(asset) == minute_key: return
+
                 reserved_minute = True
             
+            # Reserva o slot (Atomic)
             self.active_trades.add(asset)
 
+        # ✅ ATUALIZAÇÃO DE TRACKERS (Só chega aqui se reservou)
         if gale_level == 0:
             minute_key = entry_dt.strftime("%Y%m%d%H%M")
             self.last_trade_time[asset] = now
@@ -893,7 +908,9 @@ class SimpleBot:
         signal_id = None
         base_amount = float(self.config["entry_value"])
         amount = base_amount
-        # Sem Gale multiplier pois GALE_ENABLED = False
+        if gale_level > 0:
+            multiplier = self.config.get("martingale_multiplier", 2.0)
+            amount = round(base_amount * (multiplier ** gale_level), 2)
 
         try:
             if not self.check_daily_limits():
@@ -904,7 +921,8 @@ class SimpleBot:
                 except: pass
                 return
 
-            strategy_name = f"{strategy_key}::{strategy_label}"
+            tag_gale = f"::G{gale_level}"
+            strategy_name = f"{strategy_key}::{strategy_label}{tag_gale}"
             signal_id = self.insert_signal(asset, direction, strategy_name, amount)
 
             route = "BINARIA"
@@ -923,8 +941,12 @@ class SimpleBot:
                 self.update_signal(signal_id, "FAILED", "FAILED", 0)
                 return
             
+            # ✅ CONFIRM GLOBAL LOCK (Só trava se ordem entrou)
             if gale_level == 0 and reserved_minute:
                 with self.trade_lock: self.last_global_minute = global_minute
+            
+            # ✅ ATUALIZAÇÃO DA ATIVIDADE
+            self.last_activity_ts = time.time()
 
             self.log_to_db(f"✅ CONFIRMADA: Ordem {trade_id}. Aguardando...", "INFO")
             
@@ -978,10 +1000,12 @@ class SimpleBot:
             self.daily_total += 1
             if res_str == "WIN":
                 self.daily_wins += 1; self.loss_streak = 0
+                if asset in self.pending_gale: del self.pending_gale[asset]
             elif res_str == "LOSS":
                 self.daily_losses += 1; self.loss_streak += 1
                 self.asset_cooldown[asset] = time.time() + 180
                 self.log_to_db(f"🚫 Loss no par {asset}. Cooldown de 3min.", "INFO")
+                # ❌ GALE REMOVIDO COMPLETAMENTE
 
             if self.loss_streak >= 2:
                 self.block_until_ts = time.time() + 900
@@ -1041,6 +1065,12 @@ class SimpleBot:
                 # ✅ RE-CALIBRAGEM PERIÓDICA (2h)
                 if (time.time() - self.last_calibration_time) > 7200: self.calibrate_market()
 
+                # ✅ MONITOR DE INATIVIDADE (5 MIN SEM TRADE -> RECALIBRA)
+                if time.time() - self.last_activity_ts > 300: # 300s = 5min
+                    self.log_to_db("⚠️ 5 min sem operações. Mercado lento ou filtros altos. Recalibrando...", "WARNING")
+                    self.last_activity_ts = time.time() # Reseta para não spammar
+                    threading.Thread(target=self._run_calibration_task, daemon=True).start()
+
                 if not self.best_assets or (time.time() - self.last_catalog_time > 900):
                     self.best_assets = self.catalog_assets(assets_pool)
                     self.last_catalog_time = time.time()
@@ -1057,6 +1087,10 @@ class SimpleBot:
 
                 if now_sec in [0, 10, 20, 30, 40, 50]:
                     self.log_to_db(f"MODE_ATIVO::{strat_mode}::{now_dt.strftime('%H:%M:%S')}::ENTRY={ENTRY_SECOND}s", "DEBUG")
+                
+                # ✅ FEEDBACK VISUAL DE SCANNING (Para não parecer travado)
+                if now_sec == 59 and strat_mode == "AUTO":
+                     self.log_to_db("🔎 Escaneando mercado...", "DEBUG")
 
                 current_minute_key = now_dt.strftime("%Y%m%d%H%M")
                 if self.auto_candidate_key != current_minute_key:
@@ -1084,6 +1118,7 @@ class SimpleBot:
 
                                         cand = {
                                             "asset": asset, "direction": sig, "strategy": "SHOCK_REVERSAL",
+                                            # ✅ AJUSTE: Reduzido de 0.82 para 0.72 para permitir concorrência justa
                                             "label": reason, "confidence": 0.72, 
                                             "wr": self.get_strategy_wr("SHOCK_REVERSAL"), "prefer_binary": True 
                                         }
