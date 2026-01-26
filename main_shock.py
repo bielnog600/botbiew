@@ -17,7 +17,7 @@ try:
 except ImportError:
     print("[ERRO] Biblioteca 'exnovaapi' não instalada.")
 
-BOT_VERSION = "SHOCK_ENGINE_V57_DUAL_AI_CORE_2026-01-26"
+BOT_VERSION = "SHOCK_ENGINE_V54_AI_COMMANDER_2026-01-26"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -28,22 +28,8 @@ SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 EXNOVA_EMAIL = os.environ.get("EXNOVA_EMAIL", "seu_email@exemplo.com")
 EXNOVA_PASSWORD = os.environ.get("EXNOVA_PASSWORD", "sua_senha")
 
-# CHAVES DE IA (DUAL CORE)
+# Se tiver chave OpenAI, coloque aqui ou nas env vars
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-
-# ✅ DIAGNÓSTICO DE CHAVES
-print("--- STATUS DE INTELIGÊNCIA ARTIFICIAL ---")
-if OPENAI_API_KEY:
-    print(f"✅ OPENAI (GPT-4o) detectado.")
-else:
-    print("❌ OPENAI não configurada.")
-
-if GEMINI_API_KEY:
-    print(f"✅ GOOGLE (Gemini 1.5) detectado.")
-else:
-    print("❌ GOOGLE Gemini não configurada.")
-print("-----------------------------------------")
 
 BR_TIMEZONE = timezone(timedelta(hours=-3))
 
@@ -367,7 +353,6 @@ class TendMaxStrategy:
 class TsunamiFlowStrategy:
     """
     🌊 TSUNAMI FLOW: Estratégia de seguimento de tendência e momentum.
-    Refinado: Agora verifica pavio de rejeição com wick/range para evitar falsos positivos em corpos pequenos.
     """
     @staticmethod
     def get_signal(candles):
@@ -496,8 +481,8 @@ class SimpleBot:
         self.last_heartbeat_ts = 0 
         self.last_config_ts = 0 
         self.last_global_minute = None
-        self.last_global_trade_ts = 0 # ✅ GLOBAL COOLDOWN (Segundos)
-        self.last_activity_ts = time.time() # Monitor de Inatividade 
+        self.last_global_trade_ts = 0
+        self.last_activity_ts = time.time()
 
         self.last_trade_time = {}
         self.last_minute_trade = {}
@@ -548,93 +533,61 @@ class SimpleBot:
                 ).execute()
         except: pass
 
-    # ==========================================================================
-    # 🧠 DUAL CORE AI (OPENAI + GEMINI)
-    # ==========================================================================
-
-    def call_ai_strategy_selector(self, asset_data):
-        # 1. TENTA OPENAI (Primary)
-        if OPENAI_API_KEY:
-            decision = self.call_openai_api(asset_data)
-            if decision: return decision
-
-        # 2. TENTA GEMINI (Secondary / Failover)
-        if GEMINI_API_KEY:
-            decision = self.call_gemini_api(asset_data)
-            if decision: return decision
-        
-        # 3. FALLBACK INTERNO
-        return {
-            "strategy": "SHOCK_REVERSAL" if asset_data['volatility'] > 1.5 else "V2_TREND",
-            "reason": "Fallback (Sem AI)"
-        }
-
-    def call_openai_api(self, asset_data):
+    # ✅ INTEGRAÇÃO IA: CHAMADA AO GPT
+    def call_gpt_completion(self, system_msg, user_msg):
+        if not OPENAI_API_KEY: return None
         try:
             headers = {"Content-Type": "application/json", "Authorization": f"Bearer {OPENAI_API_KEY}"}
             payload = {
                 "model": "gpt-4o-mini",
-                "messages": [{"role": "user", "content": self._build_prompt(asset_data)}],
+                "messages": [{"role": "system", "content": system_msg}, {"role": "user", "content": user_msg}],
                 "temperature": 0.2
             }
-            response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload, timeout=15)
+            response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload, timeout=25)
             if response.status_code == 200:
                 content = response.json()['choices'][0]['message']['content']
-                return self._parse_json(content)
+                start = content.find('{'); end = content.rfind('}') + 1
+                if start != -1 and end != 0: return json.loads(content[start:end])
         except Exception as e:
-            self.log_to_db(f"⚠️ OpenAI Fail: {e}", "DEBUG")
+            self.log_to_db(f"⚠️ GPT Request Error: {e}", "DEBUG")
         return None
 
-    def call_gemini_api(self, asset_data):
-        try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
-            payload = {
-                "contents": [{
-                    "parts": [{"text": self._build_prompt(asset_data)}]
-                }]
-            }
-            response = requests.post(url, json=payload, timeout=15)
-            if response.status_code == 200:
-                data = response.json()
-                content = data.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', '')
-                return self._parse_json(content)
-            else:
-                 self.log_to_db(f"⚠️ Gemini Error: {response.text[:50]}", "DEBUG")
-        except Exception as e:
-            self.log_to_db(f"⚠️ Gemini Fail: {e}", "DEBUG")
-        return None
+    # 1. SELETOR DE ESTRATÉGIA (Por Par)
+    def call_gpt_strategy_selector(self, asset_data):
+        system_msg = "Você é um estrategista quantitativo de Opções Binárias."
+        user_msg = f"""
+        Analise o par {asset_data['asset']}.
+        Volatilidade: {asset_data['volatility']}x (Média/Corpo)
+        WinRates Recentes: {json.dumps(asset_data['scores'])}
 
-    def _build_prompt(self, asset_data):
-        return f"""
-        Você é um analista quantitativo de OTC M1.
-        Analise os dados deste par e escolha a MELHOR estratégia.
-        Ativo: {asset_data['asset']}
-        Volatilidade (Corpo/Média): {asset_data['volatility']}x
-        Performance Recente (WinRate % / Trades):
-        - SHOCK_REVERSAL: {asset_data['scores']['SHOCK_REVERSAL']}
-        - V2_TREND: {asset_data['scores']['V2_TREND']}
-        - TENDMAX: {asset_data['scores']['TENDMAX']}
-        - TSUNAMI: {asset_data['scores']['TSUNAMI_FLOW']}
-        - REACTOR: {asset_data['scores']['VOLUME_REACTOR']}
+        Escolha a MELHOR estratégia.
+        Regras:
+        - Se Volatilidade > 1.8 e SHOCK > 50% WR -> SHOCK.
+        - Se Tendência clara e V2/TSUNAMI > 55% WR -> V2/TSUNAMI.
+        - Se REACTOR > 70% WR -> REACTOR.
         
-        Regras de Decisão:
-        1. Priorize estratégias com WR > 55% e volume de sinais decente.
-        2. Se houver tendência clara e V2/TSUNAMI tiverem bom WR, escolha ELAS.
-        3. Se o mercado estiver lateral ou muito volátil (>1.8x) e SHOCK tiver bom WR, escolha SHOCK.
-        4. Se REACTOR (Exaustão) estiver com WR alto (>70%), é a melhor opção.
-
-        Responda APENAS o JSON.
-        JSON esperado: {{"strategy": "NOME_DA_ESTRATEGIA", "reason": "motivo curto"}}
+        Responda JSON: {{"strategy": "NOME", "reason": "motivo curto"}}
         """
+        fallback = {"strategy": "SHOCK_REVERSAL" if asset_data['volatility'] > 1.5 else "V2_TREND", "reason": "Fallback"}
+        return self.call_gpt_completion(system_msg, user_msg) or fallback
 
-    def _parse_json(self, content):
-        try:
-            start = content.find('{')
-            end = content.rfind('}') + 1
-            if start != -1 and end != 0:
-                return json.loads(content[start:end])
-        except: pass
-        return None
+    # 2. TUNER GLOBAL (Configuração do Bot)
+    def call_gpt_global_tuner(self, market_summary):
+        system_msg = "Você é o 'Commander' de um robô de trading. Ajuste os filtros globais baseados no estado do mercado."
+        user_msg = f"""
+        Estado do Mercado:
+        - Volatilidade Média Global: {market_summary['avg_volatility']}x
+        - WinRate Médio Geral: {market_summary['avg_wr']}%
+        - Estratégia Dominante: {market_summary['dominant_strat']}
+        
+        Ajuste os parâmetros:
+        - shock_body_mult (1.3 a 2.2): Aumente se mercado muito volátil/perigoso.
+        - trend_filter_enabled (true/false): Ative se houver tendência clara.
+        - shock_pullback_ratio_max (0.15 a 0.35): Reduza se houver muita rejeição (pavio).
+
+        Responda JSON: {{"shock_body_mult": 1.4, "trend_filter_enabled": true, "shock_pullback_ratio_max": 0.25, "reason": "motivo"}}
+        """
+        return self.call_gpt_completion(system_msg, user_msg)
 
     def check_strategy_signal(self, strategy_name, candles, asset_name=""):
         if strategy_name == "SHOCK_REVERSAL":
@@ -671,6 +624,12 @@ class SimpleBot:
             assets = self.best_assets
             new_map = {}
             map_log = []
+            
+            # Dados para Tuner Global
+            total_volatility = 0
+            total_wins = 0
+            total_trades = 0
+            strat_counts = {s: 0 for s in strategies}
 
             for asset in assets:
                 try:
@@ -690,20 +649,32 @@ class SimpleBot:
                             sig, _ = self.check_strategy_signal(s, window, asset)
                             if sig:
                                 scores[s]['total'] += 1
+                                total_trades += 1
                                 is_win = (sig == "call" and result_candle["close"] > result_candle["open"]) or (sig == "put" and result_candle["close"] < result_candle["open"])
-                                if is_win: scores[s]['wins'] += 1
+                                if is_win: 
+                                    scores[s]['wins'] += 1
+                                    total_wins += 1
                     
                     formatted_scores = {}
+                    best_local_wr = 0
+                    best_local_strat = ""
+
                     for s in strategies:
                         t = scores[s]['total']
                         w = scores[s]['wins']
                         wr = int((w/t)*100) if t > 0 else 0
                         formatted_scores[s] = f"{wr}% ({w}/{t})"
+                        if wr > best_local_wr:
+                            best_local_wr = wr
+                            best_local_strat = s
                     
+                    if best_local_strat: strat_counts[best_local_strat] += 1
+
                     bodies = [abs(c["close"]-c["open"]) for c in candles[-20:]]
                     avg = sum(bodies)/len(bodies) if bodies else 0.0001
                     last_body = abs(candles[-1]["close"]-candles[-1]["open"])
                     volatility = round(last_body/avg, 2)
+                    total_volatility += volatility
 
                     asset_data = {
                         "asset": asset,
@@ -711,30 +682,46 @@ class SimpleBot:
                         "scores": formatted_scores
                     }
 
-                    # ✅ CHAMA A IA (DUAL CORE)
-                    gpt_decision = self.call_ai_strategy_selector(asset_data)
+                    # 1. IA ESCOLHE ESTRATÉGIA DO PAR
+                    gpt_decision = self.call_gpt_strategy_selector(asset_data)
+                    selected_strat = gpt_decision.get("strategy", "V2_TREND")
+                    reason = gpt_decision.get("reason", "")
                     
-                    selected_strat = "SHOCK_REVERSAL"
+                    # Score
+                    st_stats = scores.get(selected_strat, {'wins':0, 'total':0})
                     score_val = 1.0
-
-                    if gpt_decision and gpt_decision.get("strategy") in strategies:
-                        selected_strat = gpt_decision["strategy"]
-                        st_stats = scores[selected_strat]
-                        if st_stats['total'] > 0:
-                            wr = st_stats['wins']/st_stats['total']
-                            score_val = wr * math.sqrt(st_stats['total'])
-                        else:
-                            score_val = 1.5 
-                        
-                        map_log.append(f"{asset}={selected_strat}")
-                    else:
-                        map_log.append(f"{asset}=SHOCK(FB)")
+                    if st_stats['total'] > 0:
+                        wr = st_stats['wins']/st_stats['total']
+                        score_val = wr * math.sqrt(st_stats['total'])
+                    else: score_val = 1.5 
                     
+                    self.log_to_db(f"🤖 GPT [{asset}]: {selected_strat} ({reason})", "DEBUG")
+                    map_log.append(f"{asset}={selected_strat}")
                     new_map[asset] = {"strategy": selected_strat, "score": score_val}
                 
                 except Exception as e:
                     pass
             
+            # 2. IA CONFIGURA PARÂMETROS GLOBAIS (TUNER)
+            try:
+                avg_vol = total_volatility / len(assets) if assets else 1.0
+                avg_wr = int((total_wins / total_trades) * 100) if total_trades > 0 else 0
+                dominant = max(strat_counts, key=strat_counts.get) if any(strat_counts.values()) else "SHOCK_REVERSAL"
+                
+                summary = {"avg_volatility": round(avg_vol, 2), "avg_wr": avg_wr, "dominant_strat": dominant}
+                
+                tuner_decision = self.call_gpt_global_tuner(summary)
+                
+                if tuner_decision:
+                    with self.dynamic_lock:
+                        self.dynamic["shock_body_mult"] = float(tuner_decision.get("shock_body_mult", 1.4))
+                        self.dynamic["trend_filter_enabled"] = bool(tuner_decision.get("trend_filter_enabled", True))
+                        self.dynamic["shock_pullback_ratio_max"] = float(tuner_decision.get("shock_pullback_ratio_max", 0.25))
+                    
+                    self.log_to_db(f"🧠 IA GLOBAL: {tuner_decision.get('reason')} -> BodyMult: {self.dynamic['shock_body_mult']}", "SYSTEM")
+            except Exception as e:
+                self.log_to_db(f"⚠️ Erro Tuner Global: {e}", "DEBUG")
+
             self.asset_strategy_map = new_map
             self.last_calibration_time = time.time()
             self.log_to_db(f"🏁 Análise IA concluída.", "SUCCESS")
@@ -840,6 +827,8 @@ class SimpleBot:
         hour = now_br.hour; minute = now_br.minute
         blocked_time = False
         
+        # ❌ REMOVIDO BLOQUEIO DE HORÁRIO RIGIDO
+        
         if not self.config.get("timer_enabled", False): return
         is_inside = False
         if start_str < end_str: is_inside = start_str <= now_str < end_str
@@ -942,9 +931,7 @@ class SimpleBot:
         signal_id = None
         base_amount = float(self.config["entry_value"])
         amount = base_amount
-        if gale_level > 0:
-            multiplier = self.config.get("martingale_multiplier", 2.0)
-            amount = round(base_amount * (multiplier ** gale_level), 2)
+        # Sem Gale multiplier
 
         try:
             if not self.check_daily_limits():
@@ -1012,11 +999,8 @@ class SimpleBot:
                             with self.api_lock:
                                 balance_after = self.api.get_balance()
                             delta = balance_after - balance_before
-
-                            if abs(delta) > 0.01:
-                                break
-                        except:
-                            pass
+                            if abs(delta) > 0.01: break
+                        except: pass
                         time.sleep(1)
 
                     if delta > 0.01: res_str = "WIN"; profit = delta
@@ -1039,7 +1023,6 @@ class SimpleBot:
                 self.daily_losses += 1; self.loss_streak += 1
                 self.asset_cooldown[asset] = time.time() + 180
                 self.log_to_db(f"🚫 Loss no par {asset}. Cooldown de 3min.", "INFO")
-                # ❌ SEM GALE
 
             if self.loss_streak >= 2:
                 self.block_until_ts = time.time() + 900
