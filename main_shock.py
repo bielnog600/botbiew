@@ -44,7 +44,7 @@ except ImportError:
         sys.exit(1)
 
 
-BOT_VERSION = "SHOCK_ENGINE_V56_OPTIMIZED_2026-01-26"
+BOT_VERSION = "SHOCK_ENGINE_V56_MECHANICAL_FALLBACK_2026-01-26"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -703,11 +703,21 @@ class SimpleBot:
                     total_vol += volatility
 
                     formatted_scores = {}
+                    
+                    # Cálculo da melhor estratégia MECÂNICA (fallback caso a IA falhe)
+                    best_mech_strat = "NO_TRADE"
+                    best_mech_wr = 0.0
+                    
                     for s in strategies:
                         t = scores[s]["total"]
                         w = scores[s]["wins"]
                         wr = int((w / t) * 100) if t > 0 else 0
                         formatted_scores[s] = f"{wr}% ({w}/{t})"
+                        
+                        # Regra mecânica: Mínimo 2 trades e WR >= 60%
+                        if t >= 2 and wr >= 60 and wr > best_mech_wr:
+                            best_mech_wr = wr
+                            best_mech_strat = s
 
                     asset_data = {"asset": asset, "volatility": volatility, "scores": formatted_scores}
                     decision = self.commander.choose_strategy(asset_data)
@@ -723,6 +733,14 @@ class SimpleBot:
                         reason = decision.get("reason", "n/a")
                         provider = decision.get("provider", "AI")
                         self.log_to_db(f"🤖 {provider}::{asset} -> {strat} ({reason})", "DEBUG")
+                    else:
+                        # FALLBACK MECÂNICO: Se não tem IA, usa o cálculo local
+                        if best_mech_strat != "NO_TRADE":
+                            strat = best_mech_strat
+                            conf = 0.75 # Confiança padrão para mecânico
+                            reason = f"Fallback Mecânico (WR {best_mech_wr}%)"
+                            provider = "MECH"
+                            self.log_to_db(f"⚙️ {provider}::{asset} -> {strat} ({reason})", "DEBUG")
 
                     if strat in strategies and conf >= 0.55:
                         new_map[asset] = {"strategy": strat, "confidence": conf}
