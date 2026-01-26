@@ -44,7 +44,7 @@ except ImportError:
         sys.exit(1)
 
 
-BOT_VERSION = "SHOCK_ENGINE_V56_BALANCED_MATH_2026-01-26"
+BOT_VERSION = "SHOCK_ENGINE_V56_UNLOCKED_MARKET_2026-01-26"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -381,9 +381,9 @@ class SimpleBot:
             "TSUNAMI_FLOW": deque(maxlen=30), "VOLUME_REACTOR": deque(maxlen=30),
         }
 
-        # AJUSTE FINO: Reduzido de 0.80 para 0.74 (Desbloqueia trades bons)
+        # AJUSTE FINO: 0.68 desbloqueia o bot em mercados 'travados'
         self.dynamic = {
-            "allow_trading": True, "prefer_strategy": "AUTO", "min_confidence": 0.74,
+            "allow_trading": True, "prefer_strategy": "AUTO", "min_confidence": 0.68,
             "pause_win_streak": 2, "pause_win_seconds": 180,
             "pause_loss_streak": 2, "pause_loss_seconds": 900,
             "shock_enabled": True, "shock_body_mult": 1.5, "shock_range_mult": 1.4,
@@ -607,7 +607,7 @@ class SimpleBot:
         with self.dynamic_lock:
             allow_trading = bool(self.dynamic.get("allow_trading", True))
             prefer_strategy = str(self.dynamic.get("prefer_strategy", "AUTO")).strip().upper()
-            min_conf = float(self.dynamic.get("min_confidence", 0.74)) # Valor Padrão
+            min_conf = float(self.dynamic.get("min_confidence", 0.68))
 
         if not allow_trading or (time.time() - self.last_global_trade_ts < GLOBAL_COOLDOWN_SECONDS): return
 
