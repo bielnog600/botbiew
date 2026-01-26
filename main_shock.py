@@ -44,7 +44,7 @@ except ImportError:
         sys.exit(1)
 
 
-BOT_VERSION = "SHOCK_ENGINE_V56_MECHANICAL_FALLBACK_2026-01-26"
+BOT_VERSION = "SHOCK_ENGINE_V56_SPEED_OPTIMIZED_2026-01-26"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -801,8 +801,23 @@ class SimpleBot:
         if time.time() - self.last_global_trade_ts < GLOBAL_COOLDOWN_SECONDS:
             return
 
-        assets = self.best_assets[:]
-        random.shuffle(assets)
+        # --- OTIMIZAÇÃO CRÍTICA DE VELOCIDADE ---
+        # 1. Filtra apenas ativos que passaram na calibração (não são NO_TRADE)
+        active_assets = [
+            a for a in self.best_assets 
+            if self.asset_strategy_map.get(a, {}).get("strategy", "NO_TRADE") != "NO_TRADE"
+        ]
+
+        # 2. Se a lista estiver vazia (calibração falhou total), usa fallback total, mas randomizado
+        if not active_assets:
+             active_assets = self.best_assets[:]
+        
+        random.shuffle(active_assets)
+
+        # 3. LIMITADOR DE SCAN: Analisa no máximo 15 ativos por vez para não estourar os 2 segundos
+        # Isso garante que ele checa 15 ativos BONS com profundidade, em vez de 136 correndo.
+        assets_to_scan = active_assets[:15]
+
         strategies_pool = ["V2_TREND", "TSUNAMI_FLOW", "VOLUME_REACTOR", "TENDMAX", "SHOCK_REVERSAL"]
         candidates = []
         scan_info = []
@@ -810,8 +825,8 @@ class SimpleBot:
         # Estatísticas de falha para debug detalhado
         stats = {"CD": 0, "NO_TRADE": 0, "NO_DATA": 0, "NOSIG": 0, "LOWCONF": 0, "ERR": 0, "TIMEOUT": 0}
 
-        # LOOP PROTEGIDO: Pára se sair da janela de análise (58-59s)
-        for asset in assets:
+        # LOOP PROTEGIDO
+        for asset in assets_to_scan:
             current_second = datetime.now(BR_TIMEZONE).second
             if current_second not in RESERVE_SECONDS:
                 self.log_to_db(f"⚠️ SCAN: Tempo limite excedido (sec={current_second}). Parando scan.", "WARNING")
@@ -883,7 +898,7 @@ class SimpleBot:
 
         if not candidates:
             # Avisa se a calibração ainda estiver vazia
-            if stats["NO_TRADE"] >= len(assets) * 0.9 and self.calibration_running:
+            if stats["NO_TRADE"] >= len(assets_to_scan) * 0.9 and self.calibration_running:
                  self.log_to_db(f"⏳ Aguardando Commander calibrar {stats['NO_TRADE']} ativos...", "INFO")
                  return
 
