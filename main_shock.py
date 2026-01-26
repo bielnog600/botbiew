@@ -44,7 +44,7 @@ except ImportError:
         sys.exit(1)
 
 
-BOT_VERSION = "SHOCK_ENGINE_V56_SECURITY_HARDENED_2026-01-26"
+BOT_VERSION = "SHOCK_ENGINE_V56_STARTUP_FIX_2026-01-26"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -537,7 +537,8 @@ class SimpleBot:
 
             for asset in self.best_assets:
                 try:
-                    time.sleep(2)
+                    # Reduzido de 2s para 0.5s para calibração rápida
+                    time.sleep(0.5) 
                     with self.api_lock: candles = self.api.get_candles(asset, 60, 120, int(time.time()))
                     if not candles or len(candles) < 100: continue
 
@@ -606,14 +607,31 @@ class SimpleBot:
         with self.dynamic_lock:
             allow_trading = bool(self.dynamic.get("allow_trading", True))
             prefer_strategy = str(self.dynamic.get("prefer_strategy", "AUTO")).strip().upper()
-            min_conf = float(self.dynamic.get("min_confidence", 0.80)) # AQUI!
+            min_conf = float(self.dynamic.get("min_confidence", 0.80))
 
         if not allow_trading or (time.time() - self.last_global_trade_ts < GLOBAL_COOLDOWN_SECONDS): return
 
-        active_assets = [a for a in self.best_assets if self.asset_strategy_map.get(a, {}).get("strategy", "NO_TRADE") != "NO_TRADE"]
-        if not active_assets: active_assets = self.best_assets[:]
+        # 1. Filtra ativos válidos
+        map_is_empty = not bool(self.asset_strategy_map)
+        
+        # LÓGICA DE INICIALIZAÇÃO CORRIGIDA
+        if map_is_empty:
+             active_assets = self.best_assets[:] # Se mapa vazio, libera tudo
+        else:
+             active_assets = [
+                a for a in self.best_assets 
+                if self.asset_strategy_map.get(a, {}).get("strategy", "NO_TRADE") != "NO_TRADE"
+            ]
+
+        # Se mesmo depois de calibrado, tudo for NO_TRADE (mercado ruim), força fallback
+        using_fallback = False
+        if not active_assets:
+             active_assets = self.best_assets[:]
+             using_fallback = True
+        
         random.shuffle(active_assets)
         assets_to_scan = active_assets[:15]
+
         strategies_pool = ["V2_TREND", "TSUNAMI_FLOW", "VOLUME_REACTOR", "TENDMAX", "SHOCK_REVERSAL"]
         candidates = []
         scan_info = []
@@ -627,7 +645,10 @@ class SimpleBot:
             mapped = self.asset_strategy_map.get(asset)
             mapped_strat = mapped["strategy"] if mapped else "NO_TRADE"
             mapped_conf = float(mapped["confidence"]) if mapped else 0.0
-            if mapped_strat == "NO_TRADE": stats["NO_TRADE"] += 1; continue
+            
+            # IGNORA BLOQUEIO NO_TRADE SE O MAPA ESTIVER VAZIO OU EM FALLBACK
+            if not map_is_empty and not using_fallback and mapped_strat == "NO_TRADE":
+                 stats["NO_TRADE"] += 1; continue
 
             target_list = []
             if mapped_strat != "NO_TRADE": target_list.append(mapped_strat)
@@ -658,10 +679,14 @@ class SimpleBot:
             except: stats["ERR"] += 1
 
         if not candidates:
-            fail_summary = ", ".join([f"{k}:{v}" for k,v in stats.items() if v > 0])
-            self.log_to_db(f"⛔ SKIP: Resumo: {fail_summary}", "INFO")
-            details = [s for s in scan_info if "LOWCONF" in s]
-            if details: self.log_to_db(f"🔍 REJEITADOS: {', '.join(details[:6])}", "DEBUG")
+            # Avisa se é inicialização
+            if map_is_empty and self.calibration_running:
+                 self.log_to_db("⏳ Modo Inicialização: Escaneando enquanto calibra...", "INFO")
+            else:
+                fail_summary = ", ".join([f"{k}:{v}" for k,v in stats.items() if v > 0])
+                self.log_to_db(f"⛔ SKIP: Resumo: {fail_summary}", "INFO")
+                details = [s for s in scan_info if "LOWCONF" in s]
+                if details: self.log_to_db(f"🔍 REJEITADOS: {', '.join(details[:6])}", "DEBUG")
             return
 
         candidates.sort(key=lambda x: x["score"], reverse=True)
