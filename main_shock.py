@@ -44,7 +44,7 @@ except ImportError:
         sys.exit(1)
 
 
-BOT_VERSION = "SHOCK_ENGINE_V56_STARTUP_FIX_2026-01-26"
+BOT_VERSION = "SHOCK_ENGINE_V56_BALANCED_MATH_2026-01-26"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -381,9 +381,9 @@ class SimpleBot:
             "TSUNAMI_FLOW": deque(maxlen=30), "VOLUME_REACTOR": deque(maxlen=30),
         }
 
-        # AUMENTADO MIN_CONFIDENCE PARA 0.80 (Mais seguro)
+        # AJUSTE FINO: Reduzido de 0.80 para 0.74 (Desbloqueia trades bons)
         self.dynamic = {
-            "allow_trading": True, "prefer_strategy": "AUTO", "min_confidence": 0.80,
+            "allow_trading": True, "prefer_strategy": "AUTO", "min_confidence": 0.74,
             "pause_win_streak": 2, "pause_win_seconds": 180,
             "pause_loss_streak": 2, "pause_loss_seconds": 900,
             "shock_enabled": True, "shock_body_mult": 1.5, "shock_range_mult": 1.4,
@@ -607,7 +607,7 @@ class SimpleBot:
         with self.dynamic_lock:
             allow_trading = bool(self.dynamic.get("allow_trading", True))
             prefer_strategy = str(self.dynamic.get("prefer_strategy", "AUTO")).strip().upper()
-            min_conf = float(self.dynamic.get("min_confidence", 0.80))
+            min_conf = float(self.dynamic.get("min_confidence", 0.74)) # Valor Padrão
 
         if not allow_trading or (time.time() - self.last_global_trade_ts < GLOBAL_COOLDOWN_SECONDS): return
 
@@ -666,7 +666,12 @@ class SimpleBot:
                     if not sig: continue
                     wr = self.get_wr(strat)
                     base_conf = mapped_conf if strat == mapped_strat else 0.70
-                    conf = clamp((base_conf * 0.65) + (wr * 0.35), 0.0, 0.95)
+                    
+                    # NOVA FÓRMULA DE CONFIANÇA (PESO MAIOR PARA WINRATE)
+                    # Antes: (base * 0.65) + (wr * 0.35)
+                    # Agora: (base * 0.60) + (wr * 0.40) -> Valoriza mais a performance real
+                    conf = clamp((base_conf * 0.60) + (wr * 0.40), 0.0, 0.95)
+                    
                     score = (wr * 0.7) + (conf * 0.3)
                     cand = {"asset": asset, "direction": sig, "strategy": strat, "label": lbl, "wr": wr, "confidence": conf, "score": score}
                     if (best_local is None) or (cand["score"] > best_local["score"]): best_local = cand
