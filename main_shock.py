@@ -44,7 +44,7 @@ except ImportError:
         sys.exit(1)
 
 
-BOT_VERSION = "SHOCK_ENGINE_V56_SPEED_OPTIMIZED_2026-01-26"
+BOT_VERSION = "SHOCK_ENGINE_V56_CONFIDENCE_TUNED_2026-01-26"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -324,7 +324,8 @@ class AICommander:
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.2
             }
-            r = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload, timeout=20)
+            # Timeout reduzido para 10s para falhar mais rápido
+            r = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload, timeout=10)
             if r.status_code == 200:
                 content = r.json()["choices"][0]["message"]["content"]
                 return safe_json_extract(content)
@@ -338,7 +339,8 @@ class AICommander:
         try:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
             payload = {"contents": [{"parts": [{"text": prompt}]}]}
-            r = requests.post(url, json=payload, timeout=20)
+            # Timeout reduzido para 10s para falhar mais rápido
+            r = requests.post(url, json=payload, timeout=10)
             if r.status_code == 200:
                 text = r.json()["candidates"][0]["content"]["parts"][0]["text"]
                 return safe_json_extract(text)
@@ -457,7 +459,8 @@ class SimpleBot:
         }
 
         self.dynamic = {
-            "allow_trading": True, "prefer_strategy": "AUTO", "min_confidence": 0.75,
+            "allow_trading": True, "prefer_strategy": "AUTO", 
+            "min_confidence": 0.70, # REDUZIDO DE 0.75 PARA 0.70
             "pause_win_streak": 2, "pause_win_seconds": 180,
             "pause_loss_streak": 2, "pause_loss_seconds": 900,
             "shock_enabled": True, "shock_body_mult": 1.5, "shock_range_mult": 1.4,
@@ -737,7 +740,8 @@ class SimpleBot:
                         # FALLBACK MECÂNICO: Se não tem IA, usa o cálculo local
                         if best_mech_strat != "NO_TRADE":
                             strat = best_mech_strat
-                            conf = 0.75 # Confiança padrão para mecânico
+                            # AUMENTADO DE 0.75 PARA 0.85 PARA GARANTIR SCAN
+                            conf = 0.85 
                             reason = f"Fallback Mecânico (WR {best_mech_wr}%)"
                             provider = "MECH"
                             self.log_to_db(f"⚙️ {provider}::{asset} -> {strat} ({reason})", "DEBUG")
