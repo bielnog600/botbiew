@@ -44,7 +44,7 @@ except ImportError:
         sys.exit(1)
 
 
-BOT_VERSION = "SHOCK_ENGINE_V56_UNLOCKED_MARKET_2026-01-26"
+BOT_VERSION = "SHOCK_ENGINE_V56_AI_DEFENSE_2026-01-27"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -260,6 +260,7 @@ class VolumeReactorStrategy:
 class AICommander:
     def __init__(self, log_fn):
         self.log_fn = log_fn
+        self.ai_active = False
 
     def log(self, msg, level="DEBUG"):
         try:
@@ -267,12 +268,24 @@ class AICommander:
         except:
             pass
 
+    def check_connection(self):
+        self.log("🤖 Testando conectividade da IA...", "SYSTEM")
+        res = self.call("Teste de conexão. Responda apenas 'OK'.")
+        if res:
+            self.ai_active = True
+            self.log("✅ IA Operacional e Pronta.", "SUCCESS")
+            return True
+        else:
+            self.ai_active = False
+            self.log("⚠️ IA FALHOU ou DESATIVADA. Entrando em MODO MECÂNICO (Rigoroso).", "WARNING")
+            return False
+
     def _call_openai(self, prompt):
         if not OPENAI_API_KEY: return None
         try:
             headers = {"Content-Type": "application/json", "Authorization": f"Bearer {OPENAI_API_KEY}"}
             payload = {"model": "gpt-4o-mini", "messages": [{"role": "user", "content": prompt}], "temperature": 0.2}
-            r = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload, timeout=15)
+            r = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload, timeout=10)
             if r.status_code == 200:
                 return safe_json_extract(r.json()["choices"][0]["message"]["content"])
         except Exception as e:
@@ -284,7 +297,7 @@ class AICommander:
         try:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
             payload = {"contents": [{"parts": [{"text": prompt}]}]}
-            r = requests.post(url, json=payload, timeout=15)
+            r = requests.post(url, json=payload, timeout=10)
             if r.status_code == 200:
                 return safe_json_extract(r.json()["candidates"][0]["content"]["parts"][0]["text"])
         except Exception as e:
@@ -304,8 +317,9 @@ class AICommander:
 
     def choose_strategy(self, asset_data):
         prompt = f"""
-        Você é o Commander. Escolha a MELHOR estratégia para este ativo OTC M1.
-        Se estiver ruim, NO_TRADE.
+        Você é o Commander de um robô OTC M1.
+        Escolha a MELHOR estratégia para este ativo.
+        Se estiver ruim, responda NO_TRADE.
         Dados: {json.dumps(asset_data, ensure_ascii=False)}
         Estratégias: SHOCK_REVERSAL, V2_TREND, TENDMAX, TSUNAMI_FLOW, VOLUME_REACTOR, NO_TRADE
         JSON: {{"strategy":"NOME","confidence":0.0-1.0,"reason":"curto"}}
@@ -381,9 +395,8 @@ class SimpleBot:
             "TSUNAMI_FLOW": deque(maxlen=30), "VOLUME_REACTOR": deque(maxlen=30),
         }
 
-        # AJUSTE FINO: 0.68 desbloqueia o bot em mercados 'travados'
         self.dynamic = {
-            "allow_trading": True, "prefer_strategy": "AUTO", "min_confidence": 0.68,
+            "allow_trading": True, "prefer_strategy": "AUTO", "min_confidence": 0.70, # Confiança inicial
             "pause_win_streak": 2, "pause_win_seconds": 180,
             "pause_loss_streak": 2, "pause_loss_seconds": 900,
             "shock_enabled": True, "shock_body_mult": 1.5, "shock_range_mult": 1.4,
@@ -537,7 +550,6 @@ class SimpleBot:
 
             for asset in self.best_assets:
                 try:
-                    # Reduzido de 2s para 0.5s para calibração rápida
                     time.sleep(0.5) 
                     with self.api_lock: candles = self.api.get_candles(asset, 60, 120, int(time.time()))
                     if not candles or len(candles) < 100: continue
@@ -564,7 +576,8 @@ class SimpleBot:
                         t = scores[s]["total"]; w = scores[s]["wins"]
                         wr = int((w / t) * 100) if t > 0 else 0
                         formatted_scores[s] = f"{wr}% ({w}/{t})"
-                        if t >= 2 and wr >= 60 and wr > best_mech_wr: best_mech_wr = wr; best_mech_strat = s
+                        # CRITÉRIO MECÂNICO RIGOROSO: >70% de acerto
+                        if t >= 2 and wr >= 70 and wr > best_mech_wr: best_mech_wr = wr; best_mech_strat = s
 
                     asset_data = {"asset": asset, "volatility": volatility, "scores": formatted_scores}
                     decision = self.commander.choose_strategy(asset_data)
@@ -582,17 +595,18 @@ class SimpleBot:
                         strat_counts[strat] += 1
                 except Exception as e: self.log_to_db(f"⚠️ Calib {asset}: {e}", "DEBUG")
 
-            avg_vol = round(total_vol / len(self.best_assets), 2) if self.best_assets else 1.0
-            avg_wr = int((total_wins / total_trades) * 100) if total_trades > 0 else 0
-            dominant = max(strat_counts, key=strat_counts.get) if any(strat_counts.values()) else "MIXED"
-            tune = self.commander.global_tune({"avg_volatility": avg_vol, "avg_wr": avg_wr, "dominant_strat": dominant})
-            
-            if tune:
-                allowed = set(self.dynamic.keys()); clean = {}
-                for k, v in tune.items():
-                    if k in allowed: clean[k] = v
-                with self.dynamic_lock: self.dynamic.update(clean)
-                self.log_to_db(f"🧠 GLOBAL TUNED: {tune.get('reason','ok')}", "SYSTEM")
+            # Só roda global tune se IA estiver ativa
+            if self.commander.ai_active:
+                avg_vol = round(total_vol / len(self.best_assets), 2) if self.best_assets else 1.0
+                avg_wr = int((total_wins / total_trades) * 100) if total_trades > 0 else 0
+                dominant = max(strat_counts, key=strat_counts.get) if any(strat_counts.values()) else "MIXED"
+                tune = self.commander.global_tune({"avg_volatility": avg_vol, "avg_wr": avg_wr, "dominant_strat": dominant})
+                if tune:
+                    allowed = set(self.dynamic.keys()); clean = {}
+                    for k, v in tune.items():
+                        if k in allowed: clean[k] = v
+                    with self.dynamic_lock: self.dynamic.update(clean)
+                    self.log_to_db(f"🧠 GLOBAL TUNED: {tune.get('reason','ok')}", "SYSTEM")
 
             self.asset_strategy_map = new_map
             self.last_calibration_time = time.time()
@@ -607,23 +621,20 @@ class SimpleBot:
         with self.dynamic_lock:
             allow_trading = bool(self.dynamic.get("allow_trading", True))
             prefer_strategy = str(self.dynamic.get("prefer_strategy", "AUTO")).strip().upper()
-            min_conf = float(self.dynamic.get("min_confidence", 0.68))
+            min_conf = float(self.dynamic.get("min_confidence", 0.70))
 
         if not allow_trading or (time.time() - self.last_global_trade_ts < GLOBAL_COOLDOWN_SECONDS): return
 
-        # 1. Filtra ativos válidos
         map_is_empty = not bool(self.asset_strategy_map)
         
-        # LÓGICA DE INICIALIZAÇÃO CORRIGIDA
         if map_is_empty:
-             active_assets = self.best_assets[:] # Se mapa vazio, libera tudo
+             active_assets = self.best_assets[:] 
         else:
              active_assets = [
                 a for a in self.best_assets 
                 if self.asset_strategy_map.get(a, {}).get("strategy", "NO_TRADE") != "NO_TRADE"
             ]
 
-        # Se mesmo depois de calibrado, tudo for NO_TRADE (mercado ruim), força fallback
         using_fallback = False
         if not active_assets:
              active_assets = self.best_assets[:]
@@ -646,7 +657,6 @@ class SimpleBot:
             mapped_strat = mapped["strategy"] if mapped else "NO_TRADE"
             mapped_conf = float(mapped["confidence"]) if mapped else 0.0
             
-            # IGNORA BLOQUEIO NO_TRADE SE O MAPA ESTIVER VAZIO OU EM FALLBACK
             if not map_is_empty and not using_fallback and mapped_strat == "NO_TRADE":
                  stats["NO_TRADE"] += 1; continue
 
@@ -667,9 +677,7 @@ class SimpleBot:
                     wr = self.get_wr(strat)
                     base_conf = mapped_conf if strat == mapped_strat else 0.70
                     
-                    # NOVA FÓRMULA DE CONFIANÇA (PESO MAIOR PARA WINRATE)
-                    # Antes: (base * 0.65) + (wr * 0.35)
-                    # Agora: (base * 0.60) + (wr * 0.40) -> Valoriza mais a performance real
+                    # FÓRMULA DE CONFIANÇA EQUILIBRADA
                     conf = clamp((base_conf * 0.60) + (wr * 0.40), 0.0, 0.95)
                     
                     score = (wr * 0.7) + (conf * 0.3)
@@ -684,7 +692,6 @@ class SimpleBot:
             except: stats["ERR"] += 1
 
         if not candidates:
-            # Avisa se é inicialização
             if map_is_empty and self.calibration_running:
                  self.log_to_db("⏳ Modo Inicialização: Escaneando enquanto calibra...", "INFO")
             else:
@@ -740,7 +747,6 @@ class SimpleBot:
             # COLETA RESULTADO E VELAS
             res_str = "UNKNOWN"; profit = 0.0; candles_after = []
             try:
-                # Tenta pegar velas 2 vezes
                 for _ in range(2):
                     with self.api_lock: candles_after = self.api.get_candles(asset, 60, 3, int(time.time()))
                     if candles_after: break
@@ -762,7 +768,6 @@ class SimpleBot:
                     except: pass
                     time.sleep(1)
                 
-                # Correção de leitura de profit
                 if delta > 0.01: res_str = "WIN"; profit = delta
                 elif delta < -0.01: res_str = "LOSS"; profit = delta
                 else: res_str = "DOJI"
@@ -778,24 +783,11 @@ class SimpleBot:
                     self.asset_cooldown[asset] = time.time() + ASSET_LOSS_COOLDOWN_SECONDS
                     self.log_to_db(f"🚫 Cooldown: {asset}", "INFO")
                     
-                    # --- AI LOSS ANALYST (RETRY) ---
-                    if candles_after:
-                        c_data = [{"o": c["open"], "c": c["close"], "h": c["max"], "l": c["min"]} for c in candles_after]
-                        analysis = self.commander.analyze_loss({"asset": asset, "strategy": strategy_key, "candles": c_data})
-                        # Retry se falhar
-                        if not analysis:
-                            time.sleep(2)
-                            analysis = self.commander.analyze_loss({"asset": asset, "retry": True, "candles": c_data})
-                        
-                        if analysis:
-                            self.log_to_db(f"🕵️ LOSS ANALYST: {analysis.get('reason')} -> {analysis.get('action')}", "WARNING")
-                            if analysis.get("action") == "INCREASE_CONFIDENCE":
-                                with self.dynamic_lock: self.dynamic["min_confidence"] = min(0.90, self.dynamic["min_confidence"] + 0.05)
-                                self.log_to_db(f"🛡️ Defesa: Confiança -> {self.dynamic['min_confidence']:.2f}", "SYSTEM")
-                        else:
-                            self.log_to_db("⚠️ Loss Analyst falhou (API Timeout)", "DEBUG")
-                    else:
-                        self.log_to_db("⚠️ Loss Analyst pulado (sem velas)", "DEBUG")
+                    # --- AUTO-DEFESA (SEM IA) ---
+                    # Se perder, sobe a régua imediatamente
+                    with self.dynamic_lock: 
+                        self.dynamic["min_confidence"] = min(0.90, self.dynamic["min_confidence"] + 0.04)
+                    self.log_to_db(f"🛡️ Auto-Defesa Ativada: Confiança subiu para {self.dynamic['min_confidence']:.2f}", "WARNING")
 
             with self.dynamic_lock:
                 pause_win = int(self.dynamic.get("pause_win_streak", 2)); pause_win_s = int(self.dynamic.get("pause_win_seconds", 180))
@@ -815,6 +807,10 @@ class SimpleBot:
     def start(self):
         threading.Thread(target=watchdog, daemon=True).start()
         self.log_to_db("🧠 Inicializando Bot...", "SYSTEM")
+        
+        # Teste de IA
+        self.commander.check_connection()
+
         if not self.api or not self.connect(): time.sleep(3)
         threading.Thread(target=self._run_calibration_task, daemon=True).start()
         while True:
