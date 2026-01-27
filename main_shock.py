@@ -24,13 +24,6 @@ except ImportError:
     install_package("supabase")
     from supabase import create_client
 
-try:
-    import requests
-except ImportError:
-    print("[SYSTEM] Instalando requests...")
-    install_package("requests")
-    import requests
-
 # Tenta importar Exnova API, se falhar instala
 try:
     from exnovaapi.stable_api import Exnova
@@ -44,7 +37,7 @@ except ImportError:
         sys.exit(1)
 
 
-BOT_VERSION = "SHOCK_ENGINE_V59_FIXED_CLASS_DEF_2026-01-27"
+BOT_VERSION = "SHOCK_ENGINE_V60_PURE_MECHANICAL_2026-01-27"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -56,10 +49,7 @@ SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
 EXNOVA_EMAIL = os.environ.get("EXNOVA_EMAIL", "")
 EXNOVA_PASSWORD = os.environ.get("EXNOVA_PASSWORD", "")
 
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-
-# Ajustes finos de Pipeline (Batch baixo para estabilidade)
+# Ajustes finos de Pipeline
 SCAN_BATCH = int(os.environ.get("SCAN_BATCH", "1")) 
 SCAN_TTL = float(os.environ.get("SCAN_TTL", "3.0")) 
 
@@ -97,18 +87,6 @@ def watchdog():
 # ==============================================================================
 # UTILITÁRIOS
 # ==============================================================================
-def safe_json_extract(text: str):
-    if not text:
-        return None
-    try:
-        s = text.find("{")
-        e = text.rfind("}") + 1
-        if s != -1 and e > s:
-            return json.loads(text[s:e])
-    except:
-        pass
-    return None
-
 def clamp(v, a, b):
     return max(a, min(b, v))
 
@@ -245,135 +223,6 @@ class VolumeReactorStrategy:
         return None, "Sem reactor"
 
 # ==============================================================================
-# IA COMMANDER
-# ==============================================================================
-class AICommander:
-    def __init__(self, log_fn):
-        self.log_fn = log_fn
-        self.ai_active = False
-
-    def log(self, msg, level="DEBUG"):
-        try:
-            self.log_fn(msg, level)
-        except:
-            pass
-
-    def _call_openai_text(self, prompt):
-        if not OPENAI_API_KEY:
-            return None
-        try:
-            headers = {"Content-Type": "application/json", "Authorization": f"Bearer {OPENAI_API_KEY}"}
-            payload = {
-                "model": "gpt-4o-mini",
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.0
-            }
-            r = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload, timeout=8)
-            if r.status_code == 200:
-                return (r.json()["choices"][0]["message"]["content"] or "").strip()
-        except Exception as e:
-            self.log(f"⚠️ OPENAI_TEXT_EX::{e}", "ERROR")
-        return None
-
-    def _call_gemini_text(self, prompt):
-        if not GEMINI_API_KEY:
-            return None
-        try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
-            payload = {"contents": [{"parts": [{"text": prompt}]}]}
-            r = requests.post(url, json=payload, timeout=8)
-            if r.status_code == 200:
-                text = r.json()["candidates"][0]["content"]["parts"][0]["text"]
-                return (text or "").strip()
-        except Exception as e:
-            self.log(f"⚠️ GEMINI_TEXT_EX::{e}", "ERROR")
-        return None
-
-    def check_connection(self):
-        self.log("🤖 Testando conectividade da IA...", "SYSTEM")
-
-        if not OPENAI_API_KEY and not GEMINI_API_KEY:
-            self.log("⚠️ Nenhuma chave de IA configurada. Modo mecânico.", "WARNING")
-            self.ai_active = False
-            return False
-
-        probe = "Responda apenas com a palavra OK."
-        ok_text = self._call_openai_text(probe)
-        if not ok_text:
-            ok_text = self._call_gemini_text(probe)
-
-        if ok_text:
-            self.ai_active = True
-            self.log(f"✅ IA ativa. Probe='{ok_text[:30]}'", "SUCCESS")
-            return True
-
-        self.ai_active = False
-        self.log("⚠️ IA não respondeu. Vai de mecânico.", "WARNING")
-        return False
-
-    def _call_openai(self, prompt):
-        if not OPENAI_API_KEY: return None
-        try:
-            headers = {"Content-Type": "application/json", "Authorization": f"Bearer {OPENAI_API_KEY}"}
-            payload = {"model": "gpt-4o-mini", "messages": [{"role": "user", "content": prompt}], "temperature": 0.2}
-            r = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload, timeout=10)
-            if r.status_code == 200:
-                return safe_json_extract(r.json()["choices"][0]["message"]["content"])
-        except Exception as e:
-            self.log(f"⚠️ OPENAI_EX::{e}", "ERROR")
-        return None
-
-    def _call_gemini(self, prompt):
-        if not GEMINI_API_KEY: return None
-        try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
-            payload = {"contents": [{"parts": [{"text": prompt}]}]}
-            r = requests.post(url, json=payload, timeout=10)
-            if r.status_code == 200:
-                return safe_json_extract(r.json()["candidates"][0]["content"]["parts"][0]["text"])
-        except Exception as e:
-            self.log(f"⚠️ GEMINI_EX::{e}", "ERROR")
-        return None
-
-    def call(self, prompt):
-        out = self._call_openai(prompt)
-        if out:
-            out["provider"] = "OPENAI"
-            return out
-        out = self._call_gemini(prompt)
-        if out:
-            out["provider"] = "GEMINI"
-            return out
-        return None
-
-    def choose_strategy(self, asset_data):
-        prompt = f"""
-        Você é o Commander de um robô OTC M1.
-        Escolha a MELHOR estratégia para este ativo.
-        Se estiver ruim, responda NO_TRADE.
-        Dados: {json.dumps(asset_data, ensure_ascii=False)}
-        Estratégias: SHOCK_REVERSAL, V2_TREND, TENDMAX, TSUNAMI_FLOW, VOLUME_REACTOR, NO_TRADE
-        JSON: {{"strategy":"NOME","confidence":0.0-1.0,"reason":"curto"}}
-        """
-        return self.call(prompt)
-
-    def analyze_loss(self, context_data):
-        prompt = f"""
-        ANÁLISE DE LOSS. O bot perdeu. Analise as velas e diga o motivo.
-        Contexto: {json.dumps(context_data, ensure_ascii=False)}
-        JSON: {{ "reason": "LATERALIZACAO/RUIDO/REVERSAO", "explanation": "frase curta", "action": "INCREASE_CONFIDENCE" ou "CONTINUE" }}
-        """
-        return self.call(prompt)
-
-    def global_tune(self, market_summary):
-        prompt = f"""
-        Ajuste global do bot.
-        Resumo: {json.dumps(market_summary, ensure_ascii=False)}
-        JSON: {{ "allow_trading": true, "prefer_strategy": "AUTO", "min_confidence": 0.80, "pause_win_streak": 2, "pause_win_seconds": 180, "pause_loss_streak": 2, "pause_loss_seconds": 900, "shock_enabled": true }}
-        """
-        return self.call(prompt)
-
-# ==============================================================================
 # STRATEGY BRAIN (NÚCLEO MECÂNICO)
 # ==============================================================================
 class StrategyBrain:
@@ -381,9 +230,7 @@ class StrategyBrain:
         self.log_fn = log_fn
         self.min_samples = int(min_samples)
         self.decay = float(decay)
-        # stats[(asset, dow, hour)][strategy] = {"w": float, "t": float}
-        self.stats = {}
-        # mapa final já escolhido
+        self.stats = {} # stats[(asset, dow, hour)][strategy] = {"w": float, "t": float}
         self.map = {} 
 
     def _key(self, asset, dt):
@@ -489,6 +336,7 @@ class SimpleBot:
         self.asset_cooldown = {}
         self.last_global_trade_ts = 0
         self.last_recalibrate_ts = 0
+        self.last_balance_push_ts = 0
 
         self.current_date = datetime.now(BR_TIMEZONE).date()
         self.daily_wins = 0
@@ -525,7 +373,6 @@ class SimpleBot:
             "US2000-OTC", "TRUMPvsHARRIS-OTC"
         ]
 
-        # RESTAURADO!
         self.asset_strategy_map = {}
         self.last_calibration_time = 0
         self.calibration_running = False
@@ -546,7 +393,6 @@ class SimpleBot:
         }
 
         self.init_supabase()
-        self.commander = AICommander(self.log_to_db)
 
     def touch_watchdog(self):
         global LAST_LOG_TIME
@@ -656,15 +502,18 @@ class SimpleBot:
             self.log_to_db("❌ Limite de losses atingido", "ERROR"); return False
         return True
 
-    def get_wr(self, strategy):
-        mem = self.strategy_memory.get(strategy)
-        if not mem: return 0.55
-        return sum(mem) / len(mem)
-
     def get_wr_pair(self, asset, strategy):
         mem = self.pair_strategy_memory.get((asset, strategy))
         if not mem or len(mem) < 6: return 0.55
         return sum(mem) / len(mem)
+
+    def get_wr_hour(self, asset, dt, strategy):
+        bucket = self.brain.get_bucket(asset, dt) or {}
+        v = bucket.get(strategy)
+        if not v or v.get("t", 0) <= 0: return 0.55, 0
+        t = float(v["t"])
+        w = float(v["w"])
+        return (w / t), int(t)
 
     def get_dynamic_amount(self, base_amount, plan_confidence):
         if len(self.session_memory) < 5: wr = 0.50
@@ -686,7 +535,7 @@ class SimpleBot:
         if strategy_name == "VOLUME_REACTOR": return VolumeReactorStrategy.get_signal(candles)
         return None, "Estratégia inválida"
 
-    # --- NOVO MÉTODO: HELPERS PARA VELAS ---
+    # --- HELPER: Velas ---
     def _candle_ts(self, c):
         try: return int(c.get("from", 0))
         except: return 0
@@ -716,11 +565,10 @@ class SimpleBot:
             return candles
         except: return None
 
-    # --- RECALIBRAÇÃO MECÂNICA (SEM IA) ---
+    # --- RECALIBRAÇÃO MECÂNICA ---
     def recalibrate_current_hour(self, assets_limit=25, backtest_steps=40):
         if not self.api or not self.api.check_connect(): return
         self.log_to_db("⚙️ Brain: Recalibrando hora atual...", "SYSTEM")
-        
         now_dt = datetime.now(BR_TIMEZONE)
         sample_assets = self.best_assets[:]
         random.shuffle(sample_assets)
@@ -729,9 +577,7 @@ class SimpleBot:
         for asset in sample_assets:
             try:
                 time.sleep(0.1) 
-                with self.api_lock: 
-                    candles = self.api.get_candles(asset, 60, 120, int(time.time()))
-                
+                with self.api_lock: candles = self.api.get_candles(asset, 60, 120, int(time.time()))
                 if not candles or len(candles) < 90: continue
 
                 for s in self.strategies_pool:
@@ -751,16 +597,15 @@ class SimpleBot:
                         self.brain.stats[k][s]["w"] += float(wins)
                         self.brain.stats[k][s]["t"] += float(total)
                         self.brain.rebuild_key(asset, now_dt)
-
-            except Exception as e:
-                self.log_to_db(f"⚠️ Brain Recalib Erro {asset}: {e}", "DEBUG")
+            except Exception as e: self.log_to_db(f"⚠️ Brain Recalib Erro {asset}: {e}", "DEBUG")
 
         self.last_recalibrate_ts = time.time()
         self.log_to_db("🧠 Brain: Recalibração concluída.", "SUCCESS")
 
     def pre_scan_window(self):
         sec = datetime.now(BR_TIMEZONE).second
-        if sec < 30 or sec > 55: return
+        # Janela de scan ampliada: 30 a 57
+        if sec < 30 or sec > 57: return
         if self.last_scan_second == sec: return
         self.last_scan_second = sec
 
@@ -792,18 +637,20 @@ class SimpleBot:
                 if not sig: continue
                 
                 wr_pair = self.get_wr_pair(asset, strat)
-                wr_window = wr_hint if strat == chosen and samples > 0 else 0.55
-                mapped = self.asset_strategy_map.get(asset, {})
-                mapped_conf = float(mapped.get("confidence", 0.0))
-
-                base = 0.70
-                conf = clamp((wr_pair * 0.70) + (mapped_conf * 0.30), 0.0, 0.95)
-                score = (wr_pair * 0.75) + (conf * 0.25)
+                # Pega WR da hora
+                wr_hour, hour_samples = self.get_wr_hour(asset, now_dt, strat)
+                # Fator de amostra
+                sample_factor = clamp(hour_samples / 12.0, 0.0, 1.0)
+                
+                # Fórmula Híbrida: Pair + Hour + Sample
+                conf = clamp((wr_pair * 0.55) + (wr_hour * 0.35) + (sample_factor * 0.10), 0.0, 0.95)
+                # Score prioriza acerto real
+                score = (wr_pair * 0.55) + (wr_hour * 0.35) + (sample_factor * 0.10)
                 
                 cand = {
                     "asset": asset, "direction": sig, "strategy": strat, "label": lbl, 
-                    "wr": wr_pair, "confidence": conf, "score": score,
-                    "brain_src": src, "wr_window": wr_window
+                    "wr_pair": wr_pair, "wr_hour": wr_hour, "hour_samples": hour_samples,
+                    "confidence": conf, "score": score, "brain_src": src
                 }
                 if (best_local is None) or (cand["score"] > best_local["score"]): best_local = cand
 
@@ -815,7 +662,7 @@ class SimpleBot:
 
     def reserve_best_candidate(self):
         sec = datetime.now(BR_TIMEZONE).second
-        if sec < 56 or sec > 59: return
+        if sec < 58 or sec > 59: return # Reserva apenas 58-59
         if self.next_trade_plan or not self.check_daily_limits(): return
 
         with self.trade_lock:
@@ -831,7 +678,7 @@ class SimpleBot:
         
         self.log_to_db(
             f"🧠 RESERVADO_FINAL: {best['asset']} {best['direction'].upper()} {best['strategy']} "
-            f"conf={best['confidence']:.2f} score={best['score']:.3f}",
+            f"conf={best['confidence']:.2f} score={best['score']:.3f} src={best.get('brain_src')}",
             "SYSTEM"
         )
 
@@ -941,38 +788,43 @@ class SimpleBot:
 
     def start(self):
         threading.Thread(target=watchdog, daemon=True).start()
-        self.log_to_db("🧠 Inicializando Bot (Mechanical Brain)...", "SYSTEM")
+        self.log_to_db("🧠 Inicializando Bot (Pure Mechanical)...", "SYSTEM")
         
+        # Blindagem
         if not hasattr(self, "last_heartbeat_ts"): self.last_heartbeat_ts = 0
         if not hasattr(self, "last_config_ts"): self.last_config_ts = 0
         if not hasattr(self, "last_activity_ts"): self.last_activity_ts = time.time()
-
-        # Teste de IA
-        self.commander.check_connection()
+        if not hasattr(self, "last_balance_push_ts"): self.last_balance_push_ts = 0
 
         if not self.api or not self.connect(): time.sleep(3)
         
+        # Primeira recalibração
         self.recalibrate_current_hour()
 
         with self.trade_lock: self.minute_candidates = []
 
         while True:
             try:
-                if time.time() - self.last_heartbeat_ts >= 30: self.last_heartbeat_ts = time.time(); self.touch_watchdog()
+                now = time.time()
+                if now - self.last_heartbeat_ts >= 30: self.last_heartbeat_ts = now; self.touch_watchdog()
                 
-                if int(time.time()) % 10 == 0: self.push_balance_to_front()
+                # Sync saldo a cada 10s (não a cada tick)
+                if now - self.last_balance_push_ts >= 10:
+                    self.last_balance_push_ts = now
+                    self.push_balance_to_front()
 
                 self.reset_daily_if_needed()
-                if time.time() - self.last_config_ts >= 5: self.fetch_config(); self.last_config_ts = time.time()
+                if now - self.last_config_ts >= 5: self.fetch_config(); self.last_config_ts = now
                 if not self.api or not self.api.check_connect():
                     if not self.connect(): time.sleep(5); continue
-                if self.config["status"] == "PAUSED" or time.time() < self.pause_until_ts: time.sleep(1); continue
+                if self.config["status"] == "PAUSED" or now < self.pause_until_ts: time.sleep(1); continue
                 
-                if (time.time() - self.last_recalibrate_ts) > 1800: self.recalibrate_current_hour()
+                if (now - self.last_recalibrate_ts) > 1800: self.recalibrate_current_hour()
                 
                 sec = datetime.now(BR_TIMEZONE).second
-                if 30 <= sec <= 55: self.pre_scan_window()
-                elif 56 <= sec <= 59: self.reserve_best_candidate()
+                # --- PIPELINE FLUX ---
+                if 30 <= sec <= 57: self.pre_scan_window()
+                elif 58 <= sec <= 59: self.reserve_best_candidate()
                 elif sec in NEXT_CANDLE_EXEC_SECONDS: self.execute_reserved()
                 
                 if sec == 2:
