@@ -8,7 +8,7 @@ import random
 import math
 import subprocess
 from datetime import datetime, timedelta, timezone
-from collections import deque
+from collections import deque, defaultdict
 
 # --- AUTO-INSTALAÇÃO DE DEPENDÊNCIAS ---
 def install_package(package):
@@ -24,6 +24,13 @@ except ImportError:
     install_package("supabase")
     from supabase import create_client
 
+try:
+    import requests
+except ImportError:
+    print("[SYSTEM] Instalando requests...")
+    install_package("requests")
+    import requests
+
 # Tenta importar Exnova API, se falhar instala
 try:
     from exnovaapi.stable_api import Exnova
@@ -37,7 +44,7 @@ except ImportError:
         sys.exit(1)
 
 
-BOT_VERSION = "SHOCK_ENGINE_V58_MECHANICAL_BRAIN_2026-01-27_FIXED"
+BOT_VERSION = "SHOCK_ENGINE_V59_PRECISION_STAKE_2026-01-27"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -233,7 +240,7 @@ class StrategyBrain:
         # stats[(asset, dow, hour)][strategy] = {"w": float, "t": float}
         self.stats = {}
         # mapa final já escolhido
-        self.map = {} # key=(asset,dow,hour) -> {"strategy": str, "wr": float, "samples": int}
+        self.map = {} 
 
     def _key(self, asset, dt):
         dow = dt.weekday() # 0=segunda
@@ -276,7 +283,6 @@ class StrategyBrain:
             t = v["t"]
             if t <= 0: continue
             wr = v["w"] / t
-            # score dá preferência pra quem tem amostra e wr melhor
             score = (wr * 0.8) + (min(t, 30.0) / 30.0 * 0.2)
             cand = {"strategy": strat, "wr": wr, "samples": int(t), "score": score}
             if (best is None) or (cand["score"] > best["score"]): best = cand
@@ -288,13 +294,10 @@ class StrategyBrain:
 
     def choose_strategy(self, asset, dt, allowed_strategies):
         k = self._key(asset, dt)
-        
-        # 1. Mapa consolidado
         m = self.map.get(k)
         if m and m["strategy"] in allowed_strategies:
             return m["strategy"], float(m["wr"]), int(m["samples"]), "HOUR_MAP"
 
-        # 2. Fallback: Melhor do bucket (mesmo com pouca amostra)
         bucket = self.get_bucket(asset, dt)
         best = None
         for s in allowed_strategies:
@@ -328,9 +331,14 @@ class SimpleBot:
         self.scan_cursor = 0
         self.last_scan_second = -1
 
-        # Brain
-        self.brain = StrategyBrain(self.log_to_db, min_samples=4, decay=0.92) # Min sample baixo para aprender rápido
+        # Brain e Memórias
+        self.brain = StrategyBrain(self.log_to_db, min_samples=4, decay=0.92) 
         self.strategies_pool = ["V2_TREND", "TSUNAMI_FLOW", "VOLUME_REACTOR", "TENDMAX", "SHOCK_REVERSAL"]
+        
+        # Memória granular (Par, Estratégia)
+        self.pair_strategy_memory = defaultdict(lambda: deque(maxlen=40))
+        # Memória da sessão (Win/Loss recente) para stake dinâmica
+        self.session_memory = deque(maxlen=20)
 
         self.active_trades = set()
         self.next_trade_plan = None
@@ -372,8 +380,6 @@ class SimpleBot:
             "EU50-OTC", "JP225-OTC", "US30/JP225-OTC", "US100/JP225-OTC", "US500/JP225-OTC", "XAU/XAG-OTC", "GER30/UK100-OTC", 
             "US2000-OTC", "TRUMPvsHARRIS-OTC"
         ]
-
-        self.strategy_memory = {k: deque(maxlen=30) for k in self.strategies_pool}
 
         self.dynamic = {
             "allow_trading": True, "prefer_strategy": "AUTO", "min_confidence": 0.68, 
@@ -439,6 +445,17 @@ class SimpleBot:
                 self.supabase.table("trade_signals").update({"status": status, "result": result, "profit": profit}).eq("id", signal_id).execute()
         except: pass
 
+    def push_balance_to_front(self):
+        if not self.supabase or not self.api: return
+        try:
+            with self.api_lock: bal = self.api.get_balance()
+            with self.db_lock:
+                self.supabase.table("bot_config").update({
+                    "current_balance": float(bal),
+                    "updated_at": datetime.now(timezone.utc).isoformat()
+                }).eq("id", 1).execute()
+        except: pass
+
     def connect(self):
         self.log_to_db("🔌 Conectando Exnova...", "SYSTEM")
         try:
@@ -489,10 +506,23 @@ class SimpleBot:
             self.log_to_db("❌ Limite de losses atingido", "ERROR"); return False
         return True
 
-    def get_wr(self, strategy):
-        mem = self.strategy_memory.get(strategy)
-        if not mem: return 0.55
+    def get_wr_pair(self, asset, strategy):
+        mem = self.pair_strategy_memory.get((asset, strategy))
+        if not mem or len(mem) < 6: return 0.55
         return sum(mem) / len(mem)
+
+    def get_dynamic_amount(self, base_amount, plan_confidence):
+        if len(self.session_memory) < 5: wr = 0.50
+        else: wr = sum(self.session_memory) / len(self.session_memory)
+        
+        # 0.50 -> 50% da entrada
+        # 0.65 -> 100% da entrada
+        mult = 0.50 + 0.50 * clamp((wr - 0.50) / 0.15, 0.0, 1.0)
+        
+        # Ajuste fino pela confiança do sinal
+        mult = mult * clamp(plan_confidence / 0.80, 0.80, 1.05)
+        
+        return round(base_amount * clamp(mult, 0.50, 1.0), 2)
 
     def check_strategy_signal(self, strategy_name, candles, asset_name=""):
         if strategy_name == "SHOCK_REVERSAL":
@@ -615,12 +645,9 @@ class SimpleBot:
             # PERGUNTA AO CÉREBRO
             chosen, wr_hint, samples, src = self.brain.choose_strategy(asset, now_dt, self.strategies_pool)
             
-            target_list = []
-            if chosen != "NO_TRADE": target_list.append(chosen)
-            # Sempre adiciona 1 ou 2 aleatórios do pool para "descoberta"
-            for s in self.strategies_pool:
-                if s not in target_list: target_list.append(s)
-                if len(target_list) >= 3: break
+            # Testa TODAS as estratégias para não perder oportunidade
+            # Mas usa o "chosen" do cérebro apenas como dica de peso
+            target_list = self.strategies_pool[:]
 
             candles = self.fetch_candles_cached(asset, need=60, ttl=SCAN_TTL)
             if not candles: continue
@@ -630,19 +657,24 @@ class SimpleBot:
                 sig, lbl = self.check_strategy_signal(strat, candles, asset)
                 if not sig: continue
                 
-                wr = self.get_wr(strat)
+                # WR do PAR específico (Precision)
+                wr_pair = self.get_wr_pair(asset, strat)
+                
                 # Confiança do Brain (Window WR)
                 wr_window = wr_hint if strat == chosen and samples > 0 else 0.55
                 
+                mapped = self.asset_strategy_map.get(asset, {})
+                mapped_conf = float(mapped.get("confidence", 0.0))
+
                 base = 0.70
-                # Fórmula Híbrida: Base + Memória Geral + Memória da Hora
-                conf = clamp((base * 0.55) + (wr * 0.25) + (wr_window * 0.20), 0.0, 0.95)
-                score = (wr * 0.5) + (conf * 0.3) + (wr_window * 0.2)
+                # Fórmula de precisão
+                conf = clamp((wr_pair * 0.70) + (mapped_conf * 0.30), 0.0, 0.95)
+                score = (wr_pair * 0.75) + (conf * 0.25)
                 
                 cand = {
                     "asset": asset, "direction": sig, "strategy": strat, "label": lbl, 
-                    "wr": wr, "confidence": conf, "score": score,
-                    "brain_src": src, "wr_window": wr_window, "samples": samples
+                    "wr": wr_pair, "confidence": conf, "score": score,
+                    "brain_src": src, "wr_window": wr_window
                 }
                 if (best_local is None) or (cand["score"] > best_local["score"]): best_local = cand
 
@@ -667,18 +699,23 @@ class SimpleBot:
         
         self.next_trade_plan = best
         self.next_trade_key = datetime.now(BR_TIMEZONE).strftime("%Y%m%d%H%M")
-        self.log_to_db(f"🧠 RESERVADO_FINAL: {best['asset']} {best['direction'].upper()} {best['strategy']} conf={best['confidence']:.2f}", "SYSTEM")
+        
+        self.log_to_db(
+            f"🧠 RESERVADO_FINAL: {best['asset']} {best['direction'].upper()} {best['strategy']} "
+            f"conf={best['confidence']:.2f} score={best['score']:.3f}",
+            "SYSTEM"
+        )
 
     def execute_reserved(self):
         if not self.next_trade_plan or time.time() < self.pause_until_ts or not self.check_daily_limits(): self.next_trade_plan = None; return
         plan = self.next_trade_plan; self.next_trade_plan = None
         self.log_to_db(f"🚀 EXEC: {plan['asset']} {plan['direction'].upper()} {plan['strategy']}", "SYSTEM")
-        self.launch_trade(asset=plan["asset"], direction=plan["direction"], strategy_key=plan["strategy"], strategy_label=plan["label"])
+        self.launch_trade(asset=plan["asset"], direction=plan["direction"], strategy_key=plan["strategy"], strategy_label=plan["label"], plan=plan)
 
     def launch_trade(self, **kwargs):
         t = threading.Thread(target=self._trade_thread, kwargs=kwargs, daemon=True); t.start()
 
-    def _trade_thread(self, asset, direction, strategy_key, strategy_label):
+    def _trade_thread(self, asset, direction, strategy_key, strategy_label, plan):
         if time.time() - self.last_global_trade_ts < GLOBAL_COOLDOWN_SECONDS: return
         with self.trade_lock:
             if asset in self.active_trades: return
@@ -686,7 +723,11 @@ class SimpleBot:
 
         signal_id = None
         try:
-            amount = float(self.config["entry_value"])
+            base_amount = float(self.config["entry_value"])
+            # STAKE DINÂMICA
+            amount = self.get_dynamic_amount(base_amount, plan.get("confidence", 0.70))
+            self.log_to_db(f"💰 Stake: base={base_amount} usado={amount}", "SYSTEM")
+
             signal_id = self.insert_signal(asset, direction, f"{strategy_key}::{strategy_label}", amount)
             balance_before = 0.0
             if self.config["mode"] == "LIVE":
@@ -704,6 +745,10 @@ class SimpleBot:
 
             self.last_global_trade_ts = time.time(); self.last_activity_ts = time.time()
             self.log_to_db(f"✅ ABERTA: {trade_id}", "INFO")
+            
+            # Sync balance após compra
+            self.push_balance_to_front()
+            
             time.sleep(64)
 
             # COLETA RESULTADO E VELAS
@@ -730,13 +775,18 @@ class SimpleBot:
                         if abs(delta) > 0.01: break
                     except: pass
                     time.sleep(1)
+                
                 if delta > 0.01: res_str = "WIN"; profit = delta
                 elif delta < -0.01: res_str = "LOSS"; profit = delta
                 else: res_str = "DOJI"
 
+            # ATUALIZA MEMÓRIAS
             if res_str in ["WIN", "LOSS"]:
-                if strategy_key in self.strategy_memory: self.strategy_memory[strategy_key].append(1 if res_str == "WIN" else 0)
-                # ATUALIZA O CÉREBRO DA HORA ATUAL
+                # Memória por par/estrategia
+                self.pair_strategy_memory[(asset, strategy_key)].append(1 if res_str == "WIN" else 0)
+                # Memória da sessão (Stake)
+                self.session_memory.append(1 if res_str == "WIN" else 0)
+                # Cérebro horário
                 self.brain.update_result(asset, datetime.now(BR_TIMEZONE), strategy_key, res_str == "WIN")
 
             if res_str != "DOJI":
@@ -760,6 +810,9 @@ class SimpleBot:
                 self.pause_until_ts = time.time() + pause_loss_s; self.log_to_db(f"🛑 PAUSA LOSS: {pause_loss} losses", "WARNING")
 
             self.update_signal(signal_id, res_str, res_str, float(profit))
+            # Sync balance após resultado
+            self.push_balance_to_front()
+            
             lvl = "SUCCESS" if res_str == "WIN" else "ERROR"
             self.log_to_db(f"{'🏆' if res_str=='WIN' else '🔻'} {res_str}: {profit:.2f} | {self.daily_wins}W/{self.daily_losses}L", lvl)
         finally:
@@ -769,32 +822,30 @@ class SimpleBot:
         threading.Thread(target=watchdog, daemon=True).start()
         self.log_to_db("🧠 Inicializando Bot (Mechanical Brain)...", "SYSTEM")
         
-        # Blindagem contra variáveis esquecidas no __init__
         if not hasattr(self, "last_heartbeat_ts"): self.last_heartbeat_ts = 0
         if not hasattr(self, "last_config_ts"): self.last_config_ts = 0
         if not hasattr(self, "last_activity_ts"): self.last_activity_ts = time.time()
 
         if not self.api or not self.connect(): time.sleep(3)
-        
-        # Recalibra já na entrada para ter dados
         self.recalibrate_current_hour()
-
         with self.trade_lock: self.minute_candidates = []
 
         while True:
             try:
                 if time.time() - self.last_heartbeat_ts >= 30: self.last_heartbeat_ts = time.time(); self.touch_watchdog()
+                
+                # Sync periódico do saldo (a cada 10s)
+                if int(time.time()) % 10 == 0: self.push_balance_to_front()
+
                 self.reset_daily_if_needed()
                 if time.time() - self.last_config_ts >= 5: self.fetch_config(); self.last_config_ts = time.time()
                 if not self.api or not self.api.check_connect():
                     if not self.connect(): time.sleep(5); continue
                 if self.config["status"] == "PAUSED" or time.time() < self.pause_until_ts: time.sleep(1); continue
                 
-                # Recalibra a cada 30min
                 if (time.time() - self.last_recalibrate_ts) > 1800: self.recalibrate_current_hour()
                 
                 sec = datetime.now(BR_TIMEZONE).second
-                # --- PIPELINE FLUX ---
                 if 30 <= sec <= 55: self.pre_scan_window()
                 elif 56 <= sec <= 59: self.reserve_best_candidate()
                 elif sec in NEXT_CANDLE_EXEC_SECONDS: self.execute_reserved()
