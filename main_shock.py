@@ -44,7 +44,7 @@ except ImportError:
         sys.exit(1)
 
 
-BOT_VERSION = "SHOCK_ENGINE_V59_FIXED_INIT_2026-01-27"
+BOT_VERSION = "SHOCK_ENGINE_V59_FIXED_CLASS_DEF_2026-01-27"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -55,6 +55,9 @@ SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
 
 EXNOVA_EMAIL = os.environ.get("EXNOVA_EMAIL", "")
 EXNOVA_PASSWORD = os.environ.get("EXNOVA_PASSWORD", "")
+
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
 # Ajustes finos de Pipeline (Batch baixo para estabilidade)
 SCAN_BATCH = int(os.environ.get("SCAN_BATCH", "1")) 
@@ -94,6 +97,18 @@ def watchdog():
 # ==============================================================================
 # UTILITÁRIOS
 # ==============================================================================
+def safe_json_extract(text: str):
+    if not text:
+        return None
+    try:
+        s = text.find("{")
+        e = text.rfind("}") + 1
+        if s != -1 and e > s:
+            return json.loads(text[s:e])
+    except:
+        pass
+    return None
+
 def clamp(v, a, b):
     return max(a, min(b, v))
 
@@ -228,6 +243,135 @@ class VolumeReactorStrategy:
             if c1["color"] == "green": return "put", "REACTOR_TOP"
             if c1["color"] == "red": return "call", "REACTOR_BOTTOM"
         return None, "Sem reactor"
+
+# ==============================================================================
+# IA COMMANDER
+# ==============================================================================
+class AICommander:
+    def __init__(self, log_fn):
+        self.log_fn = log_fn
+        self.ai_active = False
+
+    def log(self, msg, level="DEBUG"):
+        try:
+            self.log_fn(msg, level)
+        except:
+            pass
+
+    def _call_openai_text(self, prompt):
+        if not OPENAI_API_KEY:
+            return None
+        try:
+            headers = {"Content-Type": "application/json", "Authorization": f"Bearer {OPENAI_API_KEY}"}
+            payload = {
+                "model": "gpt-4o-mini",
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.0
+            }
+            r = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload, timeout=8)
+            if r.status_code == 200:
+                return (r.json()["choices"][0]["message"]["content"] or "").strip()
+        except Exception as e:
+            self.log(f"⚠️ OPENAI_TEXT_EX::{e}", "ERROR")
+        return None
+
+    def _call_gemini_text(self, prompt):
+        if not GEMINI_API_KEY:
+            return None
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+            payload = {"contents": [{"parts": [{"text": prompt}]}]}
+            r = requests.post(url, json=payload, timeout=8)
+            if r.status_code == 200:
+                text = r.json()["candidates"][0]["content"]["parts"][0]["text"]
+                return (text or "").strip()
+        except Exception as e:
+            self.log(f"⚠️ GEMINI_TEXT_EX::{e}", "ERROR")
+        return None
+
+    def check_connection(self):
+        self.log("🤖 Testando conectividade da IA...", "SYSTEM")
+
+        if not OPENAI_API_KEY and not GEMINI_API_KEY:
+            self.log("⚠️ Nenhuma chave de IA configurada. Modo mecânico.", "WARNING")
+            self.ai_active = False
+            return False
+
+        probe = "Responda apenas com a palavra OK."
+        ok_text = self._call_openai_text(probe)
+        if not ok_text:
+            ok_text = self._call_gemini_text(probe)
+
+        if ok_text:
+            self.ai_active = True
+            self.log(f"✅ IA ativa. Probe='{ok_text[:30]}'", "SUCCESS")
+            return True
+
+        self.ai_active = False
+        self.log("⚠️ IA não respondeu. Vai de mecânico.", "WARNING")
+        return False
+
+    def _call_openai(self, prompt):
+        if not OPENAI_API_KEY: return None
+        try:
+            headers = {"Content-Type": "application/json", "Authorization": f"Bearer {OPENAI_API_KEY}"}
+            payload = {"model": "gpt-4o-mini", "messages": [{"role": "user", "content": prompt}], "temperature": 0.2}
+            r = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload, timeout=10)
+            if r.status_code == 200:
+                return safe_json_extract(r.json()["choices"][0]["message"]["content"])
+        except Exception as e:
+            self.log(f"⚠️ OPENAI_EX::{e}", "ERROR")
+        return None
+
+    def _call_gemini(self, prompt):
+        if not GEMINI_API_KEY: return None
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+            payload = {"contents": [{"parts": [{"text": prompt}]}]}
+            r = requests.post(url, json=payload, timeout=10)
+            if r.status_code == 200:
+                return safe_json_extract(r.json()["candidates"][0]["content"]["parts"][0]["text"])
+        except Exception as e:
+            self.log(f"⚠️ GEMINI_EX::{e}", "ERROR")
+        return None
+
+    def call(self, prompt):
+        out = self._call_openai(prompt)
+        if out:
+            out["provider"] = "OPENAI"
+            return out
+        out = self._call_gemini(prompt)
+        if out:
+            out["provider"] = "GEMINI"
+            return out
+        return None
+
+    def choose_strategy(self, asset_data):
+        prompt = f"""
+        Você é o Commander de um robô OTC M1.
+        Escolha a MELHOR estratégia para este ativo.
+        Se estiver ruim, responda NO_TRADE.
+        Dados: {json.dumps(asset_data, ensure_ascii=False)}
+        Estratégias: SHOCK_REVERSAL, V2_TREND, TENDMAX, TSUNAMI_FLOW, VOLUME_REACTOR, NO_TRADE
+        JSON: {{"strategy":"NOME","confidence":0.0-1.0,"reason":"curto"}}
+        """
+        return self.call(prompt)
+
+    def analyze_loss(self, context_data):
+        prompt = f"""
+        ANÁLISE DE LOSS. O bot perdeu. Analise as velas e diga o motivo.
+        Contexto: {json.dumps(context_data, ensure_ascii=False)}
+        JSON: {{ "reason": "LATERALIZACAO/RUIDO/REVERSAO", "explanation": "frase curta", "action": "INCREASE_CONFIDENCE" ou "CONTINUE" }}
+        """
+        return self.call(prompt)
+
+    def global_tune(self, market_summary):
+        prompt = f"""
+        Ajuste global do bot.
+        Resumo: {json.dumps(market_summary, ensure_ascii=False)}
+        JSON: {{ "allow_trading": true, "prefer_strategy": "AUTO", "min_confidence": 0.80, "pause_win_streak": 2, "pause_win_seconds": 180, "pause_loss_streak": 2, "pause_loss_seconds": 900, "shock_enabled": true }}
+        """
+        return self.call(prompt)
 
 # ==============================================================================
 # STRATEGY BRAIN (NÚCLEO MECÂNICO)
