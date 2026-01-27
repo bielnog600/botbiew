@@ -44,7 +44,7 @@ except ImportError:
         sys.exit(1)
 
 
-BOT_VERSION = "SHOCK_ENGINE_V56_AI_DEFENSE_2026-01-27"
+BOT_VERSION = "SHOCK_ENGINE_V57_STABLE_PATCH_2026-01-27"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -59,11 +59,17 @@ EXNOVA_PASSWORD = os.environ.get("EXNOVA_PASSWORD", "")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
+# Ajustes finos de Pipeline (Batch reduzido para 1 para evitar engasgo)
+SCAN_BATCH = int(os.environ.get("SCAN_BATCH", "1")) # Ativos por tick
+SCAN_TTL = float(os.environ.get("SCAN_TTL", "3.0")) # Cache de velas (segundos)
+
 BR_TIMEZONE = timezone(timedelta(hours=-3))
 
-# Entrada na próxima vela: reserva 58-59s e executa 00-01s
+# Janelas de Tempo (Pipeline)
+# 30-55: Coleta e Análise (Rede Pesada)
+# 56-59: Reserva (Lógica Leve)
+# 00-01: Execução
 NEXT_CANDLE_EXEC_SECONDS = [0, 1]
-RESERVE_SECONDS = [58, 59]
 
 # Cooldowns
 GLOBAL_COOLDOWN_SECONDS = 50
@@ -255,7 +261,7 @@ class VolumeReactorStrategy:
         return None, "Sem reactor"
 
 # ==============================================================================
-# IA COMMANDER
+# IA COMMANDER (CORRIGIDO PARA TEXTO)
 # ==============================================================================
 class AICommander:
     def __init__(self, log_fn):
@@ -268,17 +274,58 @@ class AICommander:
         except:
             pass
 
+    def _call_openai_text(self, prompt):
+        if not OPENAI_API_KEY:
+            return None
+        try:
+            headers = {"Content-Type": "application/json", "Authorization": f"Bearer {OPENAI_API_KEY}"}
+            payload = {
+                "model": "gpt-4o-mini",
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.0
+            }
+            r = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload, timeout=8)
+            if r.status_code == 200:
+                return (r.json()["choices"][0]["message"]["content"] or "").strip()
+        except Exception as e:
+            self.log(f"⚠️ OPENAI_TEXT_EX::{e}", "ERROR")
+        return None
+
+    def _call_gemini_text(self, prompt):
+        if not GEMINI_API_KEY:
+            return None
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+            payload = {"contents": [{"parts": [{"text": prompt}]}]}
+            r = requests.post(url, json=payload, timeout=8)
+            if r.status_code == 200:
+                text = r.json()["candidates"][0]["content"]["parts"][0]["text"]
+                return (text or "").strip()
+        except Exception as e:
+            self.log(f"⚠️ GEMINI_TEXT_EX::{e}", "ERROR")
+        return None
+
     def check_connection(self):
         self.log("🤖 Testando conectividade da IA...", "SYSTEM")
-        res = self.call("Teste de conexão. Responda apenas 'OK'.")
-        if res:
-            self.ai_active = True
-            self.log("✅ IA Operacional e Pronta.", "SUCCESS")
-            return True
-        else:
+
+        if not OPENAI_API_KEY and not GEMINI_API_KEY:
+            self.log("⚠️ Nenhuma chave de IA configurada. Modo mecânico.", "WARNING")
             self.ai_active = False
-            self.log("⚠️ IA FALHOU ou DESATIVADA. Entrando em MODO MECÂNICO (Rigoroso).", "WARNING")
             return False
+
+        probe = "Responda apenas com a palavra OK."
+        ok_text = self._call_openai_text(probe)
+        if not ok_text:
+            ok_text = self._call_gemini_text(probe)
+
+        if ok_text:
+            self.ai_active = True
+            self.log(f"✅ IA ativa. Probe='{ok_text[:30]}'", "SUCCESS")
+            return True
+
+        self.ai_active = False
+        self.log("⚠️ IA não respondeu. Vai de mecânico.", "WARNING")
+        return False
 
     def _call_openai(self, prompt):
         if not OPENAI_API_KEY: return None
@@ -353,12 +400,18 @@ class SimpleBot:
         self.api_lock = threading.RLock()
         self.db_lock = threading.RLock()
         self.dynamic_lock = threading.RLock()
+        
+        # Pipeline Vars
+        self.candles_cache = {} # asset -> {"ts": time, "candles": []}
+        self.candles_lock = threading.RLock()
+        self.minute_candidates = []
+        self.scan_cursor = 0
+        self.last_scan_second = -1
 
         self.active_trades = set()
         self.next_trade_plan = None
         self.asset_cooldown = {}
         self.last_global_trade_ts = 0
-        self.last_scan_ts = 0
 
         self.current_date = datetime.now(BR_TIMEZONE).date()
         self.daily_wins = 0
@@ -396,7 +449,7 @@ class SimpleBot:
         }
 
         self.dynamic = {
-            "allow_trading": True, "prefer_strategy": "AUTO", "min_confidence": 0.70, # Confiança inicial
+            "allow_trading": True, "prefer_strategy": "AUTO", "min_confidence": 0.68, 
             "pause_win_streak": 2, "pause_win_seconds": 180,
             "pause_loss_streak": 2, "pause_loss_seconds": 900,
             "shock_enabled": True, "shock_body_mult": 1.5, "shock_range_mult": 1.4,
@@ -576,8 +629,7 @@ class SimpleBot:
                         t = scores[s]["total"]; w = scores[s]["wins"]
                         wr = int((w / t) * 100) if t > 0 else 0
                         formatted_scores[s] = f"{wr}% ({w}/{t})"
-                        # CRITÉRIO MECÂNICO RIGOROSO: >70% de acerto
-                        if t >= 2 and wr >= 70 and wr > best_mech_wr: best_mech_wr = wr; best_mech_strat = s
+                        if t >= 2 and wr >= 65 and wr > best_mech_wr: best_mech_wr = wr; best_mech_strat = s
 
                     asset_data = {"asset": asset, "volatility": volatility, "scores": formatted_scores}
                     decision = self.commander.choose_strategy(asset_data)
@@ -595,7 +647,6 @@ class SimpleBot:
                         strat_counts[strat] += 1
                 except Exception as e: self.log_to_db(f"⚠️ Calib {asset}: {e}", "DEBUG")
 
-            # Só roda global tune se IA estiver ativa
             if self.commander.ai_active:
                 avg_vol = round(total_vol / len(self.best_assets), 2) if self.best_assets else 1.0
                 avg_wr = int((total_wins / total_trades) * 100) if total_trades > 0 else 0
@@ -613,99 +664,149 @@ class SimpleBot:
             self.log_to_db("🏁 Commander: mapa atualizado", "SUCCESS")
         finally: self.calibration_running = False
 
-    def scan_and_reserve(self):
-        if time.time() - self.last_scan_ts < 40: return
-        if self.next_trade_plan or not self.check_daily_limits(): return
-        self.last_scan_ts = time.time()
+    # --- NOVO MÉTODO: HELPERS PARA VELAS ---
+    def _candle_ts(self, c):
+        # Exnova costuma ter "from" (epoch). Se não tiver, retorna 0
+        try:
+            return int(c.get("from", 0))
+        except:
+            return 0
+
+    def get_last_closed_candle(self, candles, now_ts=None):
+        """
+        Retorna a última vela fechada com mais segurança.
+        Se existir candle "from", usa tempo para decidir.
+        """
+        if not candles:
+            return None
+        if now_ts is None:
+            now_ts = int(time.time())
+
+        # Se tem timestamp, assumimos que vela com "from" muito recente pode ser a vela atual aberta
+        # Uma vela aberta normalmente tem 'from' >= now-60
+        try:
+            last = candles[-1]
+            last_ts = self._candle_ts(last)
+
+            if last_ts > 0:
+                # Se o último candle começou nos últimos 55s, é provável que seja o candle atual ainda formando
+                if last_ts >= (now_ts - 55):
+                    # então o fechado é o penúltimo, se existir
+                    return candles[-2] if len(candles) >= 2 else last
+                return last
+
+            # sem timestamp, fallback mais seguro: usa -2 quando tiver 2+
+            return candles[-2] if len(candles) >= 2 else candles[-1]
+        except:
+            return candles[-2] if len(candles) >= 2 else candles[-1]
+
+    # --- PIPELINE METHODS ---
+    def fetch_candles_cached(self, asset, need=60, ttl=3.0):
+        now = time.time()
+        with self.candles_lock:
+            item = self.candles_cache.get(asset)
+            if item and (now - item["ts"] <= ttl) and len(item["candles"]) >= need:
+                return item["candles"]
+
+        try:
+            with self.api_lock:
+                candles = self.api.get_candles(asset, 60, max(need, 60), int(time.time()))
+            if candles:
+                with self.candles_lock:
+                    self.candles_cache[asset] = {"ts": now, "candles": candles}
+            return candles
+        except:
+            return None
+
+    def pre_scan_window(self):
+        sec = datetime.now(BR_TIMEZONE).second
+        if sec < 30 or sec > 55: return
+
+        # Controle de execução por segundo para evitar spam no mesmo segundo
+        if self.last_scan_second == sec: return
+        self.last_scan_second = sec
 
         with self.dynamic_lock:
             allow_trading = bool(self.dynamic.get("allow_trading", True))
             prefer_strategy = str(self.dynamic.get("prefer_strategy", "AUTO")).strip().upper()
-            min_conf = float(self.dynamic.get("min_confidence", 0.70))
+            min_conf = float(self.dynamic.get("min_confidence", 0.68))
 
         if not allow_trading or (time.time() - self.last_global_trade_ts < GLOBAL_COOLDOWN_SECONDS): return
 
+        # Filtragem ativa
         map_is_empty = not bool(self.asset_strategy_map)
-        
         if map_is_empty:
              active_assets = self.best_assets[:] 
         else:
-             active_assets = [
-                a for a in self.best_assets 
-                if self.asset_strategy_map.get(a, {}).get("strategy", "NO_TRADE") != "NO_TRADE"
-            ]
-
+             active_assets = [a for a in self.best_assets if self.asset_strategy_map.get(a, {}).get("strategy", "NO_TRADE") != "NO_TRADE"]
+        
         using_fallback = False
         if not active_assets:
              active_assets = self.best_assets[:]
              using_fallback = True
+
+        batch_size = SCAN_BATCH
+        local_candidates = []
         
-        random.shuffle(active_assets)
-        assets_to_scan = active_assets[:15]
-
-        strategies_pool = ["V2_TREND", "TSUNAMI_FLOW", "VOLUME_REACTOR", "TENDMAX", "SHOCK_REVERSAL"]
-        candidates = []
-        scan_info = []
-        stats = {"CD": 0, "NO_TRADE": 0, "NO_DATA": 0, "NOSIG": 0, "LOWCONF": 0, "ERR": 0, "TIMEOUT": 0}
-
-        for asset in assets_to_scan:
-            if datetime.now(BR_TIMEZONE).second not in RESERVE_SECONDS:
-                self.log_to_db("⚠️ SCAN: Timeout.", "WARNING"); stats["TIMEOUT"] += 1; break
-            if time.time() < self.asset_cooldown.get(asset, 0): stats["CD"] += 1; continue
-
-            mapped = self.asset_strategy_map.get(asset)
-            mapped_strat = mapped["strategy"] if mapped else "NO_TRADE"
-            mapped_conf = float(mapped["confidence"]) if mapped else 0.0
+        # Seleciona lote circular
+        for _ in range(batch_size):
+            asset = active_assets[self.scan_cursor % len(active_assets)]
+            self.scan_cursor += 1
             
-            if not map_is_empty and not using_fallback and mapped_strat == "NO_TRADE":
-                 stats["NO_TRADE"] += 1; continue
+            if time.time() < self.asset_cooldown.get(asset, 0): continue
+
+            mapped = self.asset_strategy_map.get(asset, {})
+            mapped_strat = mapped.get("strategy", "NO_TRADE")
+            mapped_conf = float(mapped.get("confidence", 0.0))
+
+            if not map_is_empty and not using_fallback and mapped_strat == "NO_TRADE": continue
 
             target_list = []
+            strategies_pool = ["V2_TREND", "TSUNAMI_FLOW", "VOLUME_REACTOR", "TENDMAX", "SHOCK_REVERSAL"]
             if mapped_strat != "NO_TRADE": target_list.append(mapped_strat)
             if prefer_strategy != "AUTO" and prefer_strategy in strategies_pool and prefer_strategy not in target_list: target_list.insert(0, prefer_strategy)
             for s in strategies_pool:
                 if s not in target_list: target_list.append(s)
 
-            try:
-                with self.api_lock: candles = self.api.get_candles(asset, 60, 60, int(time.time()))
-                if not candles: stats["NO_DATA"] += 1; continue
+            candles = self.fetch_candles_cached(asset, need=60, ttl=SCAN_TTL)
+            if not candles: continue
 
-                best_local = None
-                for strat in target_list:
-                    sig, lbl = self.check_strategy_signal(strat, candles, asset)
-                    if not sig: continue
-                    wr = self.get_wr(strat)
-                    base_conf = mapped_conf if strat == mapped_strat else 0.70
-                    
-                    # FÓRMULA DE CONFIANÇA EQUILIBRADA
-                    conf = clamp((base_conf * 0.60) + (wr * 0.40), 0.0, 0.95)
-                    
-                    score = (wr * 0.7) + (conf * 0.3)
-                    cand = {"asset": asset, "direction": sig, "strategy": strat, "label": lbl, "wr": wr, "confidence": conf, "score": score}
-                    if (best_local is None) or (cand["score"] > best_local["score"]): best_local = cand
+            best_local = None
+            for strat in target_list:
+                sig, lbl = self.check_strategy_signal(strat, candles, asset)
+                if not sig: continue
+                wr = self.get_wr(strat)
+                base_conf = mapped_conf if strat == mapped_strat else 0.70
+                conf = clamp((base_conf * 0.60) + (wr * 0.40), 0.0, 0.95)
+                score = (wr * 0.7) + (conf * 0.3)
+                cand = {"asset": asset, "direction": sig, "strategy": strat, "label": lbl, "wr": wr, "confidence": conf, "score": score}
+                if (best_local is None) or (cand["score"] > best_local["score"]): best_local = cand
 
-                if best_local:
-                    if best_local["confidence"] >= min_conf:
-                        candidates.append(best_local); scan_info.append(f"{asset}:OK")
-                    else:
-                        scan_info.append(f"{asset}:LOWCONF({best_local['confidence']:.2f}<{min_conf})"); stats["LOWCONF"] += 1
-            except: stats["ERR"] += 1
+            if best_local and best_local["confidence"] >= min_conf:
+                local_candidates.append(best_local)
 
-        if not candidates:
-            if map_is_empty and self.calibration_running:
-                 self.log_to_db("⏳ Modo Inicialização: Escaneando enquanto calibra...", "INFO")
-            else:
-                fail_summary = ", ".join([f"{k}:{v}" for k,v in stats.items() if v > 0])
-                self.log_to_db(f"⛔ SKIP: Resumo: {fail_summary}", "INFO")
-                details = [s for s in scan_info if "LOWCONF" in s]
-                if details: self.log_to_db(f"🔍 REJEITADOS: {', '.join(details[:6])}", "DEBUG")
-            return
+        if local_candidates:
+            with self.trade_lock:
+                self.minute_candidates.extend(local_candidates)
 
-        candidates.sort(key=lambda x: x["score"], reverse=True)
-        best = candidates[0]
+    def reserve_best_candidate(self):
+        sec = datetime.now(BR_TIMEZONE).second
+        if sec < 56 or sec > 59: return
+        if self.next_trade_plan or not self.check_daily_limits(): return
+
+        with self.trade_lock:
+            cands = list(self.minute_candidates)
+            self.minute_candidates = [] # Limpa para o próximo minuto
+
+        if not cands: return
+
+        # Ordena pelo melhor score
+        cands.sort(key=lambda x: x["score"], reverse=True)
+        best = cands[0]
+        
         self.next_trade_plan = best
         self.next_trade_key = datetime.now(BR_TIMEZONE).strftime("%Y%m%d%H%M")
-        self.log_to_db(f"🧠 RESERVADO_NEXT: {best['asset']} {best['direction'].upper()} {best['strategy']} conf={best['confidence']:.2f}", "SYSTEM")
+        self.log_to_db(f"🧠 RESERVADO_FINAL: {best['asset']} {best['direction'].upper()} {best['strategy']} conf={best['confidence']:.2f}", "SYSTEM")
 
     def execute_reserved(self):
         if not self.next_trade_plan or time.time() < self.pause_until_ts or not self.check_daily_limits(): self.next_trade_plan = None; return
@@ -754,10 +855,13 @@ class SimpleBot:
             except: pass
 
             if self.config["mode"] == "OBSERVE":
-                if len(candles_after) >= 2:
-                    last = candles_after[-2]
+                # Usando o helper corrigido para pegar vela fechada
+                last = self.get_last_closed_candle(candles_after, now_ts=int(time.time()))
+                if last:
                     win = (direction == "call" and last["close"] > last["open"]) or (direction == "put" and last["close"] < last["open"])
                     res_str = "WIN" if win else "LOSS"; profit = (amount * 0.87) if win else -amount
+                else:
+                    res_str = "UNKNOWN"; profit = 0.0
             else:
                 bal_after = balance_before; delta = 0.0
                 for _ in range(7):
@@ -813,6 +917,10 @@ class SimpleBot:
 
         if not self.api or not self.connect(): time.sleep(3)
         threading.Thread(target=self._run_calibration_task, daemon=True).start()
+        
+        # Limpa candidatos no início
+        with self.trade_lock: self.minute_candidates = []
+
         while True:
             try:
                 if time.time() - self.last_heartbeat_ts >= 30: self.last_heartbeat_ts = time.time(); self.touch_watchdog()
@@ -825,8 +933,20 @@ class SimpleBot:
                 if time.time() - self.last_activity_ts > 300: self.last_activity_ts = time.time(); self.calibrate_market()
                 
                 sec = datetime.now(BR_TIMEZONE).second
-                if sec in RESERVE_SECONDS: self.scan_and_reserve()
-                if sec in NEXT_CANDLE_EXEC_SECONDS: self.execute_reserved()
+                
+                # --- PIPELINE FLUX ---
+                if 30 <= sec <= 55:
+                    self.pre_scan_window()
+                elif 56 <= sec <= 59:
+                    self.reserve_best_candidate()
+                elif sec in NEXT_CANDLE_EXEC_SECONDS:
+                    self.execute_reserved()
+                
+                # Limpeza de segurança no segundo 02
+                if sec == 2:
+                    with self.trade_lock:
+                        if self.minute_candidates: self.minute_candidates = []
+
                 time.sleep(0.1)
             except Exception as e: self.log_to_db(f"❌ Loop: {e}", "ERROR"); time.sleep(3)
 
