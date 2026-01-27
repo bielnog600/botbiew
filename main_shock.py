@@ -37,7 +37,7 @@ except ImportError:
         sys.exit(1)
 
 
-BOT_VERSION = "SHOCK_ENGINE_V58_MECHANICAL_BRAIN_2026-01-27"
+BOT_VERSION = "SHOCK_ENGINE_V58_MECHANICAL_BRAIN_2026-01-27_FIXED"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -345,6 +345,11 @@ class SimpleBot:
         self.win_streak = 0
         self.loss_streak = 0
         self.pause_until_ts = 0
+        
+        # Variáveis de controle de tempo (Garantia no __init__)
+        self.last_heartbeat_ts = 0
+        self.last_config_ts = 0
+        self.last_activity_ts = time.time()
 
         self.best_assets = [
             "EURUSD-OTC", "EURGBP-OTC", "USDCHF-OTC", "EURJPY-OTC", "NZDUSD-OTC", "GBPUSD-OTC", "GBPJPY-OTC", "USDJPY-OTC",
@@ -662,13 +667,7 @@ class SimpleBot:
         
         self.next_trade_plan = best
         self.next_trade_key = datetime.now(BR_TIMEZONE).strftime("%Y%m%d%H%M")
-        
-        # Log rico com dados do cérebro
-        self.log_to_db(
-            f"🧠 RESERVADO: {best['asset']} {best['direction'].upper()} {best['strategy']} "
-            f"conf={best['confidence']:.2f} src={best.get('brain_src')} wrH={best.get('wr_window',0):.2f} n={best.get('samples',0)}",
-            "SYSTEM"
-        )
+        self.log_to_db(f"🧠 RESERVADO_FINAL: {best['asset']} {best['direction'].upper()} {best['strategy']} conf={best['confidence']:.2f}", "SYSTEM")
 
     def execute_reserved(self):
         if not self.next_trade_plan or time.time() < self.pause_until_ts or not self.check_daily_limits(): self.next_trade_plan = None; return
@@ -769,6 +768,12 @@ class SimpleBot:
     def start(self):
         threading.Thread(target=watchdog, daemon=True).start()
         self.log_to_db("🧠 Inicializando Bot (Mechanical Brain)...", "SYSTEM")
+        
+        # Blindagem contra variáveis esquecidas no __init__
+        if not hasattr(self, "last_heartbeat_ts"): self.last_heartbeat_ts = 0
+        if not hasattr(self, "last_config_ts"): self.last_config_ts = 0
+        if not hasattr(self, "last_activity_ts"): self.last_activity_ts = time.time()
+
         if not self.api or not self.connect(): time.sleep(3)
         
         # Recalibra já na entrada para ter dados
