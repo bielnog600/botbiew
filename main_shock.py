@@ -44,7 +44,7 @@ except ImportError:
         sys.exit(1)
 
 
-BOT_VERSION = "SHOCK_ENGINE_V59_PRECISION_STAKE_2026-01-27"
+BOT_VERSION = "SHOCK_ENGINE_V59_FIXED_INIT_2026-01-27"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -381,6 +381,11 @@ class SimpleBot:
             "US2000-OTC", "TRUMPvsHARRIS-OTC"
         ]
 
+        # RESTAURADO!
+        self.asset_strategy_map = {}
+        self.last_calibration_time = 0
+        self.calibration_running = False
+
         self.dynamic = {
             "allow_trading": True, "prefer_strategy": "AUTO", "min_confidence": 0.68, 
             "pause_win_streak": 2, "pause_win_seconds": 180,
@@ -397,6 +402,7 @@ class SimpleBot:
         }
 
         self.init_supabase()
+        self.commander = AICommander(self.log_to_db)
 
     def touch_watchdog(self):
         global LAST_LOG_TIME
@@ -506,6 +512,11 @@ class SimpleBot:
             self.log_to_db("❌ Limite de losses atingido", "ERROR"); return False
         return True
 
+    def get_wr(self, strategy):
+        mem = self.strategy_memory.get(strategy)
+        if not mem: return 0.55
+        return sum(mem) / len(mem)
+
     def get_wr_pair(self, asset, strategy):
         mem = self.pair_strategy_memory.get((asset, strategy))
         if not mem or len(mem) < 6: return 0.55
@@ -514,14 +525,8 @@ class SimpleBot:
     def get_dynamic_amount(self, base_amount, plan_confidence):
         if len(self.session_memory) < 5: wr = 0.50
         else: wr = sum(self.session_memory) / len(self.session_memory)
-        
-        # 0.50 -> 50% da entrada
-        # 0.65 -> 100% da entrada
         mult = 0.50 + 0.50 * clamp((wr - 0.50) / 0.15, 0.0, 1.0)
-        
-        # Ajuste fino pela confiança do sinal
         mult = mult * clamp(plan_confidence / 0.80, 0.80, 1.05)
-        
         return round(base_amount * clamp(mult, 0.50, 1.0), 2)
 
     def check_strategy_signal(self, strategy_name, candles, asset_name=""):
@@ -573,21 +578,18 @@ class SimpleBot:
         self.log_to_db("⚙️ Brain: Recalibrando hora atual...", "SYSTEM")
         
         now_dt = datetime.now(BR_TIMEZONE)
-        # Randomiza para não viciar sempre nos mesmos primeiros
         sample_assets = self.best_assets[:]
         random.shuffle(sample_assets)
         sample_assets = sample_assets[:assets_limit]
 
         for asset in sample_assets:
             try:
-                # Pequeno delay para não sobrecarregar
                 time.sleep(0.1) 
                 with self.api_lock: 
                     candles = self.api.get_candles(asset, 60, 120, int(time.time()))
                 
                 if not candles or len(candles) < 90: continue
 
-                # Backtest rápido
                 for s in self.strategies_pool:
                     wins = 0; total = 0
                     for i in range(len(candles) - backtest_steps - 2, len(candles) - 2):
@@ -598,13 +600,10 @@ class SimpleBot:
                         win = (sig == "call" and result["close"] > result["open"]) or (sig == "put" and result["close"] < result["open"])
                         if win: wins += 1
 
-                    # Se a estratégia teve atividade recente, atualiza o cérebro
                     if total >= 3:
                         k = (asset, now_dt.weekday(), now_dt.hour)
                         if k not in self.brain.stats: self.brain.stats[k] = {}
                         if s not in self.brain.stats[k]: self.brain.stats[k][s] = {"w": 0.0, "t": 0.0}
-                        
-                        # Injeta dados (weighted)
                         self.brain.stats[k][s]["w"] += float(wins)
                         self.brain.stats[k][s]["t"] += float(total)
                         self.brain.rebuild_key(asset, now_dt)
@@ -627,14 +626,9 @@ class SimpleBot:
 
         if not allow_trading or (time.time() - self.last_global_trade_ts < GLOBAL_COOLDOWN_SECONDS): return
 
-        # Agora usamos o Brain para filtrar o que olhar
         now_dt = datetime.now(BR_TIMEZONE)
-        
-        # Pega lote para scan
         batch_size = SCAN_BATCH
         local_candidates = []
-        
-        # Randomiza a lista de scan para não viciar na ordem
         active_pool = self.best_assets[:]
         
         for _ in range(batch_size):
@@ -642,11 +636,7 @@ class SimpleBot:
             self.scan_cursor += 1
             if time.time() < self.asset_cooldown.get(asset, 0): continue
 
-            # PERGUNTA AO CÉREBRO
             chosen, wr_hint, samples, src = self.brain.choose_strategy(asset, now_dt, self.strategies_pool)
-            
-            # Testa TODAS as estratégias para não perder oportunidade
-            # Mas usa o "chosen" do cérebro apenas como dica de peso
             target_list = self.strategies_pool[:]
 
             candles = self.fetch_candles_cached(asset, need=60, ttl=SCAN_TTL)
@@ -657,17 +647,12 @@ class SimpleBot:
                 sig, lbl = self.check_strategy_signal(strat, candles, asset)
                 if not sig: continue
                 
-                # WR do PAR específico (Precision)
                 wr_pair = self.get_wr_pair(asset, strat)
-                
-                # Confiança do Brain (Window WR)
                 wr_window = wr_hint if strat == chosen and samples > 0 else 0.55
-                
                 mapped = self.asset_strategy_map.get(asset, {})
                 mapped_conf = float(mapped.get("confidence", 0.0))
 
                 base = 0.70
-                # Fórmula de precisão
                 conf = clamp((wr_pair * 0.70) + (mapped_conf * 0.30), 0.0, 0.95)
                 score = (wr_pair * 0.75) + (conf * 0.25)
                 
@@ -724,7 +709,6 @@ class SimpleBot:
         signal_id = None
         try:
             base_amount = float(self.config["entry_value"])
-            # STAKE DINÂMICA
             amount = self.get_dynamic_amount(base_amount, plan.get("confidence", 0.70))
             self.log_to_db(f"💰 Stake: base={base_amount} usado={amount}", "SYSTEM")
 
@@ -746,12 +730,10 @@ class SimpleBot:
             self.last_global_trade_ts = time.time(); self.last_activity_ts = time.time()
             self.log_to_db(f"✅ ABERTA: {trade_id}", "INFO")
             
-            # Sync balance após compra
             self.push_balance_to_front()
             
             time.sleep(64)
 
-            # COLETA RESULTADO E VELAS
             res_str = "UNKNOWN"; profit = 0.0; candles_after = []
             try:
                 for _ in range(2):
@@ -780,13 +762,9 @@ class SimpleBot:
                 elif delta < -0.01: res_str = "LOSS"; profit = delta
                 else: res_str = "DOJI"
 
-            # ATUALIZA MEMÓRIAS
             if res_str in ["WIN", "LOSS"]:
-                # Memória por par/estrategia
                 self.pair_strategy_memory[(asset, strategy_key)].append(1 if res_str == "WIN" else 0)
-                # Memória da sessão (Stake)
                 self.session_memory.append(1 if res_str == "WIN" else 0)
-                # Cérebro horário
                 self.brain.update_result(asset, datetime.now(BR_TIMEZONE), strategy_key, res_str == "WIN")
 
             if res_str != "DOJI":
@@ -810,7 +788,6 @@ class SimpleBot:
                 self.pause_until_ts = time.time() + pause_loss_s; self.log_to_db(f"🛑 PAUSA LOSS: {pause_loss} losses", "WARNING")
 
             self.update_signal(signal_id, res_str, res_str, float(profit))
-            # Sync balance após resultado
             self.push_balance_to_front()
             
             lvl = "SUCCESS" if res_str == "WIN" else "ERROR"
@@ -826,15 +803,19 @@ class SimpleBot:
         if not hasattr(self, "last_config_ts"): self.last_config_ts = 0
         if not hasattr(self, "last_activity_ts"): self.last_activity_ts = time.time()
 
+        # Teste de IA
+        self.commander.check_connection()
+
         if not self.api or not self.connect(): time.sleep(3)
+        
         self.recalibrate_current_hour()
+
         with self.trade_lock: self.minute_candidates = []
 
         while True:
             try:
                 if time.time() - self.last_heartbeat_ts >= 30: self.last_heartbeat_ts = time.time(); self.touch_watchdog()
                 
-                # Sync periódico do saldo (a cada 10s)
                 if int(time.time()) % 10 == 0: self.push_balance_to_front()
 
                 self.reset_daily_if_needed()
