@@ -37,7 +37,7 @@ except ImportError:
         sys.exit(1)
 
 
-BOT_VERSION = "SHOCK_ENGINE_V60_PURE_MECHANICAL_2026-01-27"
+BOT_VERSION = "SHOCK_ENGINE_V60_DIAGNOSTIC_MODE_2026-01-27"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -49,8 +49,8 @@ SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
 EXNOVA_EMAIL = os.environ.get("EXNOVA_EMAIL", "")
 EXNOVA_PASSWORD = os.environ.get("EXNOVA_PASSWORD", "")
 
-# Ajustes finos de Pipeline
-SCAN_BATCH = int(os.environ.get("SCAN_BATCH", "1")) 
+# Ajustes finos de Pipeline (Aumentado para 2 para acelerar scan)
+SCAN_BATCH = int(os.environ.get("SCAN_BATCH", "2")) 
 SCAN_TTL = float(os.environ.get("SCAN_TTL", "3.0")) 
 
 BR_TIMEZONE = timezone(timedelta(hours=-3))
@@ -337,6 +337,7 @@ class SimpleBot:
         self.last_global_trade_ts = 0
         self.last_recalibrate_ts = 0
         self.last_balance_push_ts = 0
+        self.last_alive_log_ts = 0 # NOVO: Para log ALIVE
 
         self.current_date = datetime.now(BR_TIMEZONE).date()
         self.daily_wins = 0
@@ -373,12 +374,13 @@ class SimpleBot:
             "US2000-OTC", "TRUMPvsHARRIS-OTC"
         ]
 
+        # RESTAURADO!
         self.asset_strategy_map = {}
         self.last_calibration_time = 0
         self.calibration_running = False
 
         self.dynamic = {
-            "allow_trading": True, "prefer_strategy": "AUTO", "min_confidence": 0.68, 
+            "allow_trading": True, "prefer_strategy": "AUTO", "min_confidence": 0.60, # BAIXADO PARA TESTE
             "pause_win_streak": 2, "pause_win_seconds": 180,
             "pause_loss_streak": 2, "pause_loss_seconds": 900,
             "shock_enabled": True, "shock_body_mult": 1.5, "shock_range_mult": 1.4,
@@ -502,6 +504,11 @@ class SimpleBot:
             self.log_to_db("❌ Limite de losses atingido", "ERROR"); return False
         return True
 
+    def get_wr(self, strategy):
+        mem = self.strategy_memory.get(strategy)
+        if not mem: return 0.55
+        return sum(mem) / len(mem)
+
     def get_wr_pair(self, asset, strategy):
         mem = self.pair_strategy_memory.get((asset, strategy))
         if not mem or len(mem) < 6: return 0.55
@@ -565,7 +572,7 @@ class SimpleBot:
             return candles
         except: return None
 
-    # --- RECALIBRAÇÃO MECÂNICA ---
+    # --- RECALIBRAÇÃO MECÂNICA (SEM IA) ---
     def recalibrate_current_hour(self, assets_limit=25, backtest_steps=40):
         if not self.api or not self.api.check_connect(): return
         self.log_to_db("⚙️ Brain: Recalibrando hora atual...", "SYSTEM")
@@ -611,7 +618,7 @@ class SimpleBot:
 
         with self.dynamic_lock:
             allow_trading = bool(self.dynamic.get("allow_trading", True))
-            min_conf = float(self.dynamic.get("min_confidence", 0.68))
+            min_conf = float(self.dynamic.get("min_confidence", 0.60)) # Baixado para 0.60
 
         if not allow_trading or (time.time() - self.last_global_trade_ts < GLOBAL_COOLDOWN_SECONDS): return
 
@@ -637,11 +644,12 @@ class SimpleBot:
                 if not sig: continue
                 
                 wr_pair = self.get_wr_pair(asset, strat)
-                # Pega WR da hora
                 wr_hour, hour_samples = self.get_wr_hour(asset, now_dt, strat)
-                # Fator de amostra
                 sample_factor = clamp(hour_samples / 12.0, 0.0, 1.0)
-                
+                mapped = self.asset_strategy_map.get(asset, {})
+                mapped_conf = float(mapped.get("confidence", 0.0))
+
+                base = 0.70
                 # Fórmula Híbrida: Pair + Hour + Sample
                 conf = clamp((wr_pair * 0.55) + (wr_hour * 0.35) + (sample_factor * 0.10), 0.0, 0.95)
                 # Score prioriza acerto real
@@ -788,17 +796,19 @@ class SimpleBot:
 
     def start(self):
         threading.Thread(target=watchdog, daemon=True).start()
-        self.log_to_db("🧠 Inicializando Bot (Pure Mechanical)...", "SYSTEM")
+        self.log_to_db("🧠 Inicializando Bot (Mechanical Brain)...", "SYSTEM")
         
         # Blindagem
         if not hasattr(self, "last_heartbeat_ts"): self.last_heartbeat_ts = 0
         if not hasattr(self, "last_config_ts"): self.last_config_ts = 0
         if not hasattr(self, "last_activity_ts"): self.last_activity_ts = time.time()
         if not hasattr(self, "last_balance_push_ts"): self.last_balance_push_ts = 0
+        
+        # Variável para log ALIVE
+        if not hasattr(self, "last_alive_log_ts"): self.last_alive_log_ts = 0
 
         if not self.api or not self.connect(): time.sleep(3)
         
-        # Primeira recalibração
         self.recalibrate_current_hour()
 
         with self.trade_lock: self.minute_candidates = []
@@ -808,6 +818,15 @@ class SimpleBot:
                 now = time.time()
                 if now - self.last_heartbeat_ts >= 30: self.last_heartbeat_ts = now; self.touch_watchdog()
                 
+                # --- HEARTBEAT VISUAL (ALIVE) ---
+                if now - self.last_alive_log_ts >= 15:
+                    self.last_alive_log_ts = now
+                    cands_count = len(self.minute_candidates)
+                    status_msg = f"❤️ ALIVE status={self.config.get('status')} mode={self.config.get('mode')} min_conf={self.dynamic.get('min_confidence')} cand={cands_count}"
+                    if self.pause_until_ts > now:
+                        status_msg += f" PAUSED={(self.pause_until_ts - now):.0f}s"
+                    self.log_to_db(status_msg, "SYSTEM")
+
                 # Sync saldo a cada 10s (não a cada tick)
                 if now - self.last_balance_push_ts >= 10:
                     self.last_balance_push_ts = now
