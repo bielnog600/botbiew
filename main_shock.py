@@ -37,7 +37,7 @@ except ImportError:
         sys.exit(1)
 
 
-BOT_VERSION = "SHOCK_ENGINE_V61_ASSET_RISK_2026-01-27"
+BOT_VERSION = "SHOCK_ENGINE_V61_SORTED_CANDLES_2026-01-27"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -192,6 +192,8 @@ class TendMaxStrategy:
     @staticmethod
     def get_signal(candles):
         if len(candles) < 50: return None, "Dados insuficientes"
+        # OBS: candles[:-1] aqui remove a última vela fechada se candles for só fechadas
+        # Isso significa que TENDMAX olha confirmação de 1 vela atrás.
         ema5 = TechnicalAnalysis.calculate_ema(candles[:-1], 5)
         ema10 = TechnicalAnalysis.calculate_ema(candles[:-1], 10)
         if ema5 > ema10: return "call", "TENDMAX_CALL"
@@ -386,6 +388,7 @@ class SimpleBot:
             "US2000-OTC", "TRUMPvsHARRIS-OTC"
         ]
 
+        # RESTAURADO!
         self.asset_strategy_map = {}
         self.last_calibration_time = 0
         self.calibration_running = False
@@ -408,6 +411,7 @@ class SimpleBot:
         }
 
         self.init_supabase()
+        # Sem AICommander aqui (removido para pure mechanical)
 
     def touch_watchdog(self):
         global LAST_LOG_TIME
@@ -562,6 +566,17 @@ class SimpleBot:
         
         return round(base_amount * clamp(mult, 0.50, 1.0), 2)
 
+    def debug_tendmax(self, candles, asset):
+        try:
+            # TENDMAX usa candles[:-1], entao debuga as mesmas velas
+            closed = candles[:-1]
+            if len(closed) < 50: return
+            ema5 = TechnicalAnalysis.calculate_ema(closed, 5)
+            ema10 = TechnicalAnalysis.calculate_ema(closed, 10)
+            direction = 'CALL' if ema5 > ema10 else 'PUT' if ema5 < ema10 else 'FLAT'
+            # self.log_to_db(f"EMA_DEBUG {asset} e5={ema5:.5f} e10={ema10:.5f} -> {direction}", "DEBUG")
+        except: pass
+
     def check_strategy_signal(self, strategy_name, candles, asset_name=""):
         if strategy_name == "SHOCK_REVERSAL":
             with self.dynamic_lock: dyn = self.dynamic.copy()
@@ -570,7 +585,10 @@ class SimpleBot:
         if strategy_name == "V2_TREND":
             if TechnicalAnalysis.check_compression(candles): return None, "Compressão"
             return TechnicalAnalysis.get_signal_v2(candles)
-        if strategy_name == "TENDMAX": return TendMaxStrategy.get_signal(candles)
+        if strategy_name == "TENDMAX":
+            sig, lbl = TendMaxStrategy.get_signal(candles)
+            if sig: self.debug_tendmax(candles, asset_name)
+            return sig, lbl
         if strategy_name == "TSUNAMI_FLOW": return TsunamiFlowStrategy.get_signal(candles)
         if strategy_name == "VOLUME_REACTOR": return VolumeReactorStrategy.get_signal(candles)
         return None, "Estratégia inválida"
@@ -580,17 +598,19 @@ class SimpleBot:
         try: return int(c.get("from", 0))
         except: return 0
 
+    def normalize_candles(self, candles):
+        """ CORREÇÃO CRÍTICA: Ordena velas por timestamp crescente """
+        return sorted(candles, key=lambda c: int(c.get("from", 0)))
+
     def normalize_closed_candles(self, candles):
         """ Garante que só tenhamos velas FECHADAS na análise """
         if not candles or len(candles) < 3:
             return candles
         
         now_ts = int(time.time())
-        # Tenta pegar 'from' do último candle
         last_ts = self._candle_ts(candles[-1])
         
-        # Se a última vela começou há menos de 55s, ela ainda está aberta/piscando.
-        # Removemos ela da lista para a estratégia ver apenas o passado consolidado.
+        # Se a última vela começou há menos de 55s, remove
         if last_ts > 0 and last_ts >= (now_ts - 55):
             return candles[:-1]
             
@@ -613,11 +633,11 @@ class SimpleBot:
         with self.candles_lock:
             item = self.candles_cache.get(asset)
             if item and (now - item["ts"] <= ttl) and len(item["candles"]) >= need:
-                # Normaliza aqui também para garantir consistência
                 return self.normalize_closed_candles(item["candles"])
         try:
             with self.api_lock: candles = self.api.get_candles(asset, 60, max(need, 60), int(time.time()))
             if candles:
+                candles = self.normalize_candles(candles) # Ordena primeiro!
                 with self.candles_lock: self.candles_cache[asset] = {"ts": now, "candles": candles}
                 return self.normalize_closed_candles(candles)
             return None
@@ -638,7 +658,8 @@ class SimpleBot:
                 with self.api_lock: candles = self.api.get_candles(asset, 60, 120, int(time.time()))
                 if not candles or len(candles) < 90: continue
                 
-                # Normaliza para backtest também
+                # Normaliza e Ordena
+                candles = self.normalize_candles(candles)
                 candles = self.normalize_closed_candles(candles)
 
                 for s in self.strategies_pool:
@@ -683,9 +704,8 @@ class SimpleBot:
             asset = active_pool[self.scan_cursor % len(active_pool)]
             self.scan_cursor += 1
             
-            # --- RISCO POR ATIVO ---
             risk = self.asset_risk[asset]
-            if time.time() < risk["cooldown_until"]: continue # Respeita cooldown do ativo
+            if time.time() < risk["cooldown_until"]: continue
             
             min_conf_asset = float(risk["min_conf"])
 
@@ -717,7 +737,6 @@ class SimpleBot:
                 }
                 if (best_local is None) or (cand["score"] > best_local["score"]): best_local = cand
 
-            # Compara com a régua do ATIVO, não global
             if best_local and best_local["confidence"] >= min_conf_asset:
                 local_candidates.append(best_local)
 
@@ -740,7 +759,6 @@ class SimpleBot:
         self.next_trade_plan = best
         self.next_trade_key = datetime.now(BR_TIMEZONE).strftime("%Y%m%d%H%M")
         
-        # Log rico com dados de risco do par
         risk = self.asset_risk[best["asset"]]
         self.log_to_db(
             f"🧠 RESERVADO_FINAL: {best['asset']} {best['direction'].upper()} {best['strategy']} "
@@ -766,7 +784,6 @@ class SimpleBot:
         signal_id = None
         try:
             base_amount = float(self.config["entry_value"])
-            # STAKE MISTA
             amount = self.get_dynamic_amount(asset, strategy_key, base_amount, plan.get("confidence", 0.70))
             self.log_to_db(f"💰 Stake: base={base_amount} usado={amount}", "SYSTEM")
 
@@ -794,7 +811,9 @@ class SimpleBot:
             try:
                 for _ in range(2):
                     with self.api_lock: candles_after = self.api.get_candles(asset, 60, 3, int(time.time()))
-                    if candles_after: break
+                    if candles_after: 
+                        candles_after = self.normalize_candles(candles_after) # Ordena aqui também!
+                        break
                     time.sleep(1)
             except: pass
 
@@ -818,13 +837,11 @@ class SimpleBot:
                 elif delta < -0.01: res_str = "LOSS"; profit = delta
                 else: res_str = "DOJI"
 
-            # --- GESTÃO DE RISCO POR PAR + MEMÓRIAS ---
             risk = self.asset_risk[asset]
 
             if res_str in ["WIN", "LOSS"]:
-                # Memórias
                 self.pair_strategy_memory[(asset, strategy_key)].append(1 if res_str == "WIN" else 0)
-                self.strategy_memory[strategy_key].append(1 if res_str == "WIN" else 0) # Global (Fixed)
+                self.strategy_memory[strategy_key].append(1 if res_str == "WIN" else 0) 
                 self.session_memory.append(1 if res_str == "WIN" else 0)
                 self.brain.update_result(asset, datetime.now(BR_TIMEZONE), strategy_key, res_str == "WIN")
 
@@ -832,8 +849,6 @@ class SimpleBot:
                 self.daily_total += 1
                 if res_str == "WIN":
                     self.daily_wins += 1; self.win_streak += 1; self.loss_streak = 0
-                    
-                    # LOGICA WIN: Baixa min_conf do par (recompensa)
                     risk["win_streak"] += 1
                     risk["loss_streak"] = 0
                     risk["min_conf"] = max(self.base_min_conf, float(risk["min_conf"]) - 0.02)
@@ -841,17 +856,13 @@ class SimpleBot:
 
                 elif res_str == "LOSS":
                     self.daily_losses += 1; self.loss_streak += 1; self.win_streak = 0
-                    
-                    # LOGICA LOSS: Sobe min_conf do par (punição) + Cooldown progressivo
                     risk["loss_streak"] += 1
                     risk["win_streak"] = 0
                     risk["min_conf"] = min(0.90, float(risk["min_conf"]) + 0.03)
-                    
                     extra = 0
                     if risk["loss_streak"] >= 2: extra = 120
                     if risk["loss_streak"] >= 3: extra = 240
                     risk["cooldown_until"] = time.time() + ASSET_LOSS_COOLDOWN_SECONDS + extra
-                    
                     self.log_to_db(f"🧱 DEFESA_PAIR: {asset} min_conf={risk['min_conf']:.2f} loss_seq={risk['loss_streak']}", "WARNING")
 
             with self.dynamic_lock:
