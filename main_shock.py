@@ -37,7 +37,7 @@ except ImportError:
         sys.exit(1)
 
 
-BOT_VERSION = "SHOCK_ENGINE_V61_GAP_TRADER_2026-01-27"
+BOT_VERSION = "SHOCK_ENGINE_V61_GAP_INVERTED_TIMING_FIX_2026-01-27"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -250,14 +250,14 @@ class GapTraderStrategy:
         wma_prev = TechnicalAnalysis.calculate_wma(buffer1_series[1:-1], 5)
         line_prev = buffer1_series[-2]
         
-        # Lógica de Cruzamento
-        # Cruzamento para CIMA (Compra)
+        # Lógica de Cruzamento INVERTIDA
+        # Cruzamento para CIMA -> PUT (VENDA)
         if line_curr > wma_curr and line_prev < wma_prev:
-            return "call", "GAP_CALL"
-            
-        # Cruzamento para BAIXO (Venda)
-        if line_curr < wma_curr and line_prev > wma_prev:
             return "put", "GAP_PUT"
+            
+        # Cruzamento para BAIXO -> CALL (COMPRA)
+        if line_curr < wma_curr and line_prev > wma_prev:
+            return "call", "GAP_CALL"
             
         return None, "Sem sinal"
 
@@ -651,16 +651,22 @@ class SimpleBot:
         return sorted(candles, key=lambda c: int(c.get("from", 0)))
 
     def normalize_closed_candles(self, candles):
-        """ Garante que só tenhamos velas FECHADAS na análise """
+        """ 
+        AJUSTE DE TIMING:
+        Para operar na próxima vela (M1), precisamos analisar a vela ATUAL em formação.
+        Se filtrarmos a vela atual, operamos com atraso de 1 minuto.
+        Apenas removemos se for uma vela 'fantasma' muito recente (menos de 2s de vida).
+        """
         if not candles or len(candles) < 3:
             return candles
         
         now_ts = int(time.time())
         last_ts = self._candle_ts(candles[-1])
         
-        # Se a última vela começou há menos de 55s, remove
-        if last_ts > 0 and last_ts >= (now_ts - 55):
-            return candles[:-1]
+        # Se a última vela começou agora (menos de 2s), pode estar sem dados confiaveis
+        # Mas mantemos velas de 30s, 40s, 50s para análise da estratégia GAP_TRADER
+        if last_ts > 0 and (now_ts - last_ts) < 2:
+             return candles[:-1]
             
         return candles
 
