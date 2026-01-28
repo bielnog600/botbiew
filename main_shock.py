@@ -37,7 +37,7 @@ except ImportError:
         sys.exit(1)
 
 
-BOT_VERSION = "SHOCK_ENGINE_V61_SORTED_CANDLES_2026-01-27"
+BOT_VERSION = "SHOCK_ENGINE_V61_GAP_TRADER_2026-01-27"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -103,6 +103,24 @@ class TechnicalAnalysis:
         for price in prices[period:]:
             ema = (price * k) + (ema * (1 - k))
         return ema
+
+    @staticmethod
+    def calculate_sma(data, period):
+        """ Média Móvel Simples """
+        if len(data) < period: return 0
+        return sum(data[-period:]) / period
+
+    @staticmethod
+    def calculate_wma(data, period):
+        """ Média Móvel Ponderada """
+        if len(data) < period: return 0
+        weighted_sum = 0
+        weight_sum = 0
+        for i in range(period):
+            weight = i + 1
+            weighted_sum += data[-(period-i)] * weight
+            weight_sum += weight
+        return weighted_sum / weight_sum
 
     @staticmethod
     def analyze_candle(candle):
@@ -188,17 +206,60 @@ class ShockLiveDetector:
             if close_pos <= (1.0 - close_pos_min) and pullback_ratio <= pullback_ratio_max: return "call", "SHOCK_DOWN", {}
         return None, "Sem padrão", {}
 
-class TendMaxStrategy:
+class GapTraderStrategy:
+    """
+    Estratégia baseada no script 'GAP TRADER'.
+    Linha 1 (Value) = Close - SMA(34)
+    Linha 2 (Signal) = WMA(Linha 1, 5)
+    Sinal = Cruzamento das linhas
+    """
     @staticmethod
     def get_signal(candles):
-        if len(candles) < 50: return None, "Dados insuficientes"
-        # OBS: candles[:-1] aqui remove a última vela fechada se candles for só fechadas
-        # Isso significa que TENDMAX olha confirmação de 1 vela atrás.
-        ema5 = TechnicalAnalysis.calculate_ema(candles[:-1], 5)
-        ema10 = TechnicalAnalysis.calculate_ema(candles[:-1], 10)
-        if ema5 > ema10: return "call", "TENDMAX_CALL"
-        if ema5 < ema10: return "put", "TENDMAX_PUT"
-        return None, "Sem cruzamento"
+        # Precisa de histórico para SMA34 + WMA5
+        if len(candles) < 45: return None, "Dados insuficientes"
+        
+        closes = [c["close"] for c in candles]
+        
+        # Função auxiliar para pegar SMA34 em um ponto histórico
+        def get_sma34(arr, idx):
+            # idx relativo ao fim da lista. Ex: -1 é o último
+            end = len(arr) + idx + 1 if idx < 0 else idx + 1
+            start = end - 34
+            if start < 0: return 0
+            return sum(arr[start:end]) / 34
+
+        # Gera série Buffer1 (Value) para os últimos 7 candles
+        # Buffer1 = Close - SMA34
+        buffer1_series = []
+        for i in range(7):
+            idx = -7 + i # -7 ... -1
+            sma = get_sma34(closes, idx)
+            val = closes[idx] - sma
+            buffer1_series.append(val)
+            
+        # Buffer1 Series tem índices 0..6
+        # Candle Atual (-1) -> buffer1_series[6]
+        # Candle Anterior (-2) -> buffer1_series[5]
+        
+        # Calcula Buffer2 (Signal) = WMA(Buffer1, 5)
+        # WMA Atual (usa índices 2,3,4,5,6)
+        wma_curr = TechnicalAnalysis.calculate_wma(buffer1_series[2:], 5)
+        line_curr = buffer1_series[-1]
+        
+        # WMA Anterior (usa índices 1,2,3,4,5)
+        wma_prev = TechnicalAnalysis.calculate_wma(buffer1_series[1:-1], 5)
+        line_prev = buffer1_series[-2]
+        
+        # Lógica de Cruzamento
+        # Cruzamento para CIMA (Compra)
+        if line_curr > wma_curr and line_prev < wma_prev:
+            return "call", "GAP_CALL"
+            
+        # Cruzamento para BAIXO (Venda)
+        if line_curr < wma_curr and line_prev > wma_prev:
+            return "put", "GAP_PUT"
+            
+        return None, "Sem sinal"
 
 class TsunamiFlowStrategy:
     @staticmethod
@@ -327,7 +388,8 @@ class SimpleBot:
 
         # Brain e Memórias
         self.brain = StrategyBrain(self.log_to_db, min_samples=4, decay=0.92) 
-        self.strategies_pool = ["V2_TREND", "TSUNAMI_FLOW", "VOLUME_REACTOR", "TENDMAX", "SHOCK_REVERSAL"]
+        # TROCADO TENDMAX POR GAP_TRADER
+        self.strategies_pool = ["V2_TREND", "TSUNAMI_FLOW", "VOLUME_REACTOR", "GAP_TRADER", "SHOCK_REVERSAL"]
         
         # Memória granular (Par, Estratégia)
         self.pair_strategy_memory = defaultdict(lambda: deque(maxlen=40))
@@ -566,17 +628,6 @@ class SimpleBot:
         
         return round(base_amount * clamp(mult, 0.50, 1.0), 2)
 
-    def debug_tendmax(self, candles, asset):
-        try:
-            # TENDMAX usa candles[:-1], entao debuga as mesmas velas
-            closed = candles[:-1]
-            if len(closed) < 50: return
-            ema5 = TechnicalAnalysis.calculate_ema(closed, 5)
-            ema10 = TechnicalAnalysis.calculate_ema(closed, 10)
-            direction = 'CALL' if ema5 > ema10 else 'PUT' if ema5 < ema10 else 'FLAT'
-            # self.log_to_db(f"EMA_DEBUG {asset} e5={ema5:.5f} e10={ema10:.5f} -> {direction}", "DEBUG")
-        except: pass
-
     def check_strategy_signal(self, strategy_name, candles, asset_name=""):
         if strategy_name == "SHOCK_REVERSAL":
             with self.dynamic_lock: dyn = self.dynamic.copy()
@@ -585,10 +636,7 @@ class SimpleBot:
         if strategy_name == "V2_TREND":
             if TechnicalAnalysis.check_compression(candles): return None, "Compressão"
             return TechnicalAnalysis.get_signal_v2(candles)
-        if strategy_name == "TENDMAX":
-            sig, lbl = TendMaxStrategy.get_signal(candles)
-            if sig: self.debug_tendmax(candles, asset_name)
-            return sig, lbl
+        if strategy_name == "GAP_TRADER": return GapTraderStrategy.get_signal(candles)
         if strategy_name == "TSUNAMI_FLOW": return TsunamiFlowStrategy.get_signal(candles)
         if strategy_name == "VOLUME_REACTOR": return VolumeReactorStrategy.get_signal(candles)
         return None, "Estratégia inválida"
@@ -692,7 +740,8 @@ class SimpleBot:
 
         with self.dynamic_lock:
             allow_trading = bool(self.dynamic.get("allow_trading", True))
-            
+            min_conf = float(self.dynamic.get("min_confidence", 0.68))
+
         if not allow_trading or (time.time() - self.last_global_trade_ts < GLOBAL_COOLDOWN_SECONDS): return
 
         now_dt = datetime.now(BR_TIMEZONE)
