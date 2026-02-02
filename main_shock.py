@@ -37,7 +37,7 @@ except ImportError:
         sys.exit(1)
 
 
-BOT_VERSION = "SHOCK_ENGINE_V62_SERIAL_MODE_2026-01-27"
+BOT_VERSION = "SHOCK_ENGINE_V63_STRATEGY_FREEZER_2026-01-27"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -366,18 +366,23 @@ class SimpleBot:
         self.db_lock = threading.RLock()
         self.dynamic_lock = threading.RLock()
         
+        # Pipeline Vars
         self.candles_cache = {} 
         self.candles_lock = threading.RLock()
         self.minute_candidates = []
         self.scan_cursor = 0
         self.last_scan_second = -1
 
+        # Brain e Memórias
         self.brain = StrategyBrain(self.log_to_db, min_samples=4, decay=0.92) 
         self.strategies_pool = ["V2_TREND", "TSUNAMI_FLOW", "VOLUME_REACTOR", "GAP_TRADER", "SHOCK_REVERSAL"]
         
         self.pair_strategy_memory = defaultdict(lambda: deque(maxlen=40))
         self.strategy_memory = defaultdict(lambda: deque(maxlen=40))
         self.session_memory = deque(maxlen=20)
+        
+        # FREEZER: Congela estratégia no par por 1h
+        self.strategy_cooldowns = {} # key=(asset, strat) -> timestamp
 
         self.base_min_conf = 0.60
         self.asset_risk = defaultdict(lambda: {
@@ -429,10 +434,12 @@ class SimpleBot:
             "US2000-OTC", "TRUMPvsHARRIS-OTC"
         ]
 
+        # RESTAURADO!
         self.asset_strategy_map = {}
         self.last_calibration_time = 0
         self.calibration_running = False
 
+        # Config Global (apenas flags, sem min_confidence global)
         self.dynamic = {
             "allow_trading": True, 
             "prefer_strategy": "AUTO",
@@ -450,6 +457,7 @@ class SimpleBot:
         }
 
         self.init_supabase()
+        # Sem AICommander aqui (removido para pure mechanical)
 
     def touch_watchdog(self):
         global LAST_LOG_TIME
@@ -550,15 +558,16 @@ class SimpleBot:
             self.win_streak = 0; self.loss_streak = 0; self.pause_until_ts = 0; self.next_trade_plan = None
             self.asset_cooldown = {}
             
-            # Reset de risco diário
+            # Reset de risco diário e Freezes
             self.asset_risk = defaultdict(lambda: {
                 "min_conf": self.base_min_conf,
                 "loss_streak": 0,
                 "win_streak": 0,
                 "cooldown_until": 0.0
             })
+            self.strategy_cooldowns = {} # Reseta freezes do dia anterior
             
-            self.log_to_db("🚀 Nova sessão diária (Risk Reset)", "SYSTEM")
+            self.log_to_db("🚀 Nova sessão diária (Risk & Strategy Reset)", "SYSTEM")
 
     def check_daily_limits(self):
         if self.config["max_trades_per_day"] > 0 and self.daily_total >= self.config["max_trades_per_day"]:
@@ -588,6 +597,7 @@ class SimpleBot:
         return (w / t), int(t)
 
     def get_dynamic_amount(self, asset, strategy_key, base_amount, plan_confidence):
+        # MISTURA INTELIGENTE: Sessão Global + Performance do Par
         if len(self.session_memory) < 5: 
             wr_session = 0.50
         else: 
@@ -595,6 +605,7 @@ class SimpleBot:
             
         wr_pair = self.get_wr_pair(asset, strategy_key)
         
+        # Weighted Mix
         wr_mix = (wr_session * 0.5) + (wr_pair * 0.5)
         
         mult = 0.50 + 0.50 * clamp((wr_mix - 0.50) / 0.15, 0.0, 1.0)
@@ -656,7 +667,7 @@ class SimpleBot:
         try:
             with self.api_lock: candles = self.api.get_candles(asset, 60, max(need, 60), int(time.time()))
             if candles:
-                candles = self.normalize_candles(candles)
+                candles = self.normalize_candles(candles) # Ordena primeiro!
                 with self.candles_lock: self.candles_cache[asset] = {"ts": now, "candles": candles}
                 return self.normalize_closed_candles(candles)
             return None
@@ -741,6 +752,10 @@ class SimpleBot:
 
             best_local = None
             for strat in target_list:
+                # Checa se estratégia está congelada
+                blocked_until = self.strategy_cooldowns.get((asset, strat), 0)
+                if time.time() < blocked_until: continue # Pula estratégia congelada
+
                 sig, lbl = self.check_strategy_signal(strat, candles, asset)
                 if not sig: continue
                 
@@ -808,8 +823,7 @@ class SimpleBot:
         t = threading.Thread(target=self._trade_thread, kwargs=kwargs, daemon=True); t.start()
 
     def _trade_thread(self, asset, direction, strategy_key, strategy_label, plan):
-        # Aqui nao checamos cooldown global porque ja estamos no "serial mode"
-        # Mas mantemos active_trades para bloqueio
+        if time.time() - self.last_global_trade_ts < GLOBAL_COOLDOWN_SECONDS: return
         with self.trade_lock:
             if asset in self.active_trades: return
             self.active_trades.add(asset)
@@ -907,10 +921,16 @@ class SimpleBot:
                     risk["loss_streak"] += 1
                     risk["win_streak"] = 0
                     risk["min_conf"] = min(0.90, float(risk["min_conf"]) + 0.03)
+                    
                     extra = 0
                     if risk["loss_streak"] >= 2: extra = 120
                     if risk["loss_streak"] >= 3: extra = 240
                     risk["cooldown_until"] = time.time() + ASSET_LOSS_COOLDOWN_SECONDS + extra
+                    
+                    # ❄️ STRATEGY FREEZER: 1H DE GELO NA ESTRATÉGIA RUIM ❄️
+                    self.strategy_cooldowns[(asset, strategy_key)] = time.time() + 3600
+                    self.log_to_db(f"❄️ FREEZE: {strategy_key} em {asset} por 1H (Loss)", "WARNING")
+                    
                     self.log_to_db(f"🧱 DEFESA_PAIR: {asset} min_conf={risk['min_conf']:.2f} loss_seq={risk['loss_streak']}", "WARNING")
 
             with self.dynamic_lock:
@@ -932,7 +952,7 @@ class SimpleBot:
 
     def start(self):
         threading.Thread(target=watchdog, daemon=True).start()
-        self.log_to_db("🧠 Inicializando Bot (Mechanical Brain V62)...", "SYSTEM")
+        self.log_to_db("🧠 Inicializando Bot (Mechanical Brain V63)...", "SYSTEM")
         
         if not hasattr(self, "last_heartbeat_ts"): self.last_heartbeat_ts = 0
         if not hasattr(self, "last_config_ts"): self.last_config_ts = 0
