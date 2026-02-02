@@ -37,7 +37,7 @@ except ImportError:
         sys.exit(1)
 
 
-BOT_VERSION = "SHOCK_ENGINE_V61_GAP_INVERTED_TIMING_FIX_2026-01-27"
+BOT_VERSION = "SHOCK_ENGINE_V61_HYBRID_EXECUTION_2026-01-27"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -135,7 +135,8 @@ class TechnicalAnalysis:
 
     @staticmethod
     def check_compression(candles):
-        if len(candles) < 20: return False
+        if len(candles) < 20:
+            return False
         closed = candles[:-1]
         ema9 = TechnicalAnalysis.calculate_ema(closed, 9)
         ema21 = TechnicalAnalysis.calculate_ema(closed, 21)
@@ -850,9 +851,29 @@ class SimpleBot:
                 except: pass
 
             self.log_to_db(f"🟡 BUY: {asset} {direction.upper()} ${amount}", "INFO")
-            if self.config["mode"] == "OBSERVE": status, trade_id = True, "VIRTUAL"
+            
+            status = False
+            trade_id = None
+            
+            if self.config["mode"] == "OBSERVE": 
+                status, trade_id = True, "VIRTUAL"
             else:
-                with self.api_lock: status, trade_id = self.api.buy(amount, asset, direction, 1)
+                # Tenta Binária
+                with self.api_lock: 
+                    status, trade_id = self.api.buy(amount, asset, direction, 1)
+                
+                # Se falhar, Tenta Digital (Hybrid Execution)
+                if not status or not trade_id:
+                    with self.api_lock:
+                        try:
+                            # Tenta buy_digital_spot padrão
+                            self.api.subscribe_strike_list(asset, 1)
+                            trade_id = self.api.buy_digital_spot(asset, amount, direction, 1)
+                            if trade_id and isinstance(trade_id, int):
+                                status = True
+                        except: 
+                            # Debug silencioso
+                            pass
 
             if not status or not trade_id:
                 self.log_to_db(f"❌ RECUSADA: {asset}", "ERROR"); self.update_signal(signal_id, "FAILED", "FAILED", 0.0); return
@@ -867,7 +888,7 @@ class SimpleBot:
                 for _ in range(2):
                     with self.api_lock: candles_after = self.api.get_candles(asset, 60, 3, int(time.time()))
                     if candles_after: 
-                        candles_after = self.normalize_candles(candles_after) # Ordena aqui também!
+                        candles_after = self.normalize_candles(candles_after) 
                         break
                     time.sleep(1)
             except: pass
