@@ -37,7 +37,7 @@ except ImportError:
         sys.exit(1)
 
 
-BOT_VERSION = "SHOCK_ENGINE_V61_HYBRID_EXECUTION_2026-01-27"
+BOT_VERSION = "SHOCK_ENGINE_V62_SERIAL_MODE_2026-01-27"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -135,8 +135,7 @@ class TechnicalAnalysis:
 
     @staticmethod
     def check_compression(candles):
-        if len(candles) < 20:
-            return False
+        if len(candles) < 20: return False
         closed = candles[:-1]
         ema9 = TechnicalAnalysis.calculate_ema(closed, 9)
         ema21 = TechnicalAnalysis.calculate_ema(closed, 21)
@@ -216,42 +215,29 @@ class GapTraderStrategy:
     """
     @staticmethod
     def get_signal(candles):
-        # Precisa de histórico para SMA34 + WMA5
         if len(candles) < 45: return None, "Dados insuficientes"
         
         closes = [c["close"] for c in candles]
         
-        # Função auxiliar para pegar SMA34 em um ponto histórico
         def get_sma34(arr, idx):
-            # idx relativo ao fim da lista. Ex: -1 é o último
             end = len(arr) + idx + 1 if idx < 0 else idx + 1
             start = end - 34
             if start < 0: return 0
             return sum(arr[start:end]) / 34
 
-        # Gera série Buffer1 (Value) para os últimos 7 candles
-        # Buffer1 = Close - SMA34
         buffer1_series = []
         for i in range(7):
-            idx = -7 + i # -7 ... -1
+            idx = -7 + i 
             sma = get_sma34(closes, idx)
             val = closes[idx] - sma
             buffer1_series.append(val)
             
-        # Buffer1 Series tem índices 0..6
-        # Candle Atual (-1) -> buffer1_series[6]
-        # Candle Anterior (-2) -> buffer1_series[5]
-        
-        # Calcula Buffer2 (Signal) = WMA(Buffer1, 5)
-        # WMA Atual (usa índices 2,3,4,5,6)
         wma_curr = TechnicalAnalysis.calculate_wma(buffer1_series[2:], 5)
         line_curr = buffer1_series[-1]
         
-        # WMA Anterior (usa índices 1,2,3,4,5)
         wma_prev = TechnicalAnalysis.calculate_wma(buffer1_series[1:-1], 5)
         line_prev = buffer1_series[-2]
         
-        # Lógica de Cruzamento INVERTIDA
         # Cruzamento para CIMA -> PUT (VENDA)
         if line_curr > wma_curr and line_prev < wma_prev:
             return "put", "GAP_PUT"
@@ -380,29 +366,22 @@ class SimpleBot:
         self.db_lock = threading.RLock()
         self.dynamic_lock = threading.RLock()
         
-        # Pipeline Vars
         self.candles_cache = {} 
         self.candles_lock = threading.RLock()
         self.minute_candidates = []
         self.scan_cursor = 0
         self.last_scan_second = -1
 
-        # Brain e Memórias
         self.brain = StrategyBrain(self.log_to_db, min_samples=4, decay=0.92) 
-        # TROCADO TENDMAX POR GAP_TRADER
         self.strategies_pool = ["V2_TREND", "TSUNAMI_FLOW", "VOLUME_REACTOR", "GAP_TRADER", "SHOCK_REVERSAL"]
         
-        # Memória granular (Par, Estratégia)
         self.pair_strategy_memory = defaultdict(lambda: deque(maxlen=40))
-        # Memória global da estratégia (correção de bug)
         self.strategy_memory = defaultdict(lambda: deque(maxlen=40))
-        # Memória da sessão (Win/Loss recente) para stake dinâmica
         self.session_memory = deque(maxlen=20)
 
-        # Gestão de Risco por Ativo
         self.base_min_conf = 0.60
         self.asset_risk = defaultdict(lambda: {
-            "min_conf": 0.60, # Igual ao base_min_conf
+            "min_conf": 0.60,
             "loss_streak": 0,
             "win_streak": 0,
             "cooldown_until": 0.0
@@ -410,7 +389,7 @@ class SimpleBot:
 
         self.active_trades = set()
         self.next_trade_plan = None
-        self.asset_cooldown = {} # Cooldown simples antigo (mantido por compatibilidade)
+        self.asset_cooldown = {}
         self.last_global_trade_ts = 0
         self.last_recalibrate_ts = 0
         self.last_balance_push_ts = 0
@@ -424,7 +403,6 @@ class SimpleBot:
         self.loss_streak = 0
         self.pause_until_ts = 0
         
-        # Variáveis de controle de tempo (Garantia no __init__)
         self.last_heartbeat_ts = 0
         self.last_config_ts = 0
         self.last_activity_ts = time.time()
@@ -451,12 +429,10 @@ class SimpleBot:
             "US2000-OTC", "TRUMPvsHARRIS-OTC"
         ]
 
-        # RESTAURADO!
         self.asset_strategy_map = {}
         self.last_calibration_time = 0
         self.calibration_running = False
 
-        # Config Global (apenas flags, sem min_confidence global)
         self.dynamic = {
             "allow_trading": True, 
             "prefer_strategy": "AUTO",
@@ -474,7 +450,6 @@ class SimpleBot:
         }
 
         self.init_supabase()
-        # Sem AICommander aqui (removido para pure mechanical)
 
     def touch_watchdog(self):
         global LAST_LOG_TIME
@@ -613,7 +588,6 @@ class SimpleBot:
         return (w / t), int(t)
 
     def get_dynamic_amount(self, asset, strategy_key, base_amount, plan_confidence):
-        # MISTURA INTELIGENTE: Sessão Global + Performance do Par
         if len(self.session_memory) < 5: 
             wr_session = 0.50
         else: 
@@ -621,7 +595,6 @@ class SimpleBot:
             
         wr_pair = self.get_wr_pair(asset, strategy_key)
         
-        # Weighted Mix
         wr_mix = (wr_session * 0.5) + (wr_pair * 0.5)
         
         mult = 0.50 + 0.50 * clamp((wr_mix - 0.50) / 0.15, 0.0, 1.0)
@@ -648,24 +621,15 @@ class SimpleBot:
         except: return 0
 
     def normalize_candles(self, candles):
-        """ CORREÇÃO CRÍTICA: Ordena velas por timestamp crescente """
         return sorted(candles, key=lambda c: int(c.get("from", 0)))
 
     def normalize_closed_candles(self, candles):
-        """ 
-        AJUSTE DE TIMING:
-        Para operar na próxima vela (M1), precisamos analisar a vela ATUAL em formação.
-        Se filtrarmos a vela atual, operamos com atraso de 1 minuto.
-        Apenas removemos se for uma vela 'fantasma' muito recente (menos de 2s de vida).
-        """
         if not candles or len(candles) < 3:
             return candles
         
         now_ts = int(time.time())
         last_ts = self._candle_ts(candles[-1])
         
-        # Se a última vela começou agora (menos de 2s), pode estar sem dados confiaveis
-        # Mas mantemos velas de 30s, 40s, 50s para análise da estratégia GAP_TRADER
         if last_ts > 0 and (now_ts - last_ts) < 2:
              return candles[:-1]
             
@@ -692,7 +656,7 @@ class SimpleBot:
         try:
             with self.api_lock: candles = self.api.get_candles(asset, 60, max(need, 60), int(time.time()))
             if candles:
-                candles = self.normalize_candles(candles) # Ordena primeiro!
+                candles = self.normalize_candles(candles)
                 with self.candles_lock: self.candles_cache[asset] = {"ts": now, "candles": candles}
                 return self.normalize_closed_candles(candles)
             return None
@@ -713,7 +677,6 @@ class SimpleBot:
                 with self.api_lock: candles = self.api.get_candles(asset, 60, 120, int(time.time()))
                 if not candles or len(candles) < 90: continue
                 
-                # Normaliza e Ordena
                 candles = self.normalize_candles(candles)
                 candles = self.normalize_closed_candles(candles)
 
@@ -750,6 +713,11 @@ class SimpleBot:
             min_conf = float(self.dynamic.get("min_confidence", 0.68))
 
         if not allow_trading or (time.time() - self.last_global_trade_ts < GLOBAL_COOLDOWN_SECONDS): return
+
+        # --- SERIAL LOCK: Bloqueia scan se tiver trade aberto ---
+        with self.trade_lock:
+            if self.active_trades:
+                return 
 
         now_dt = datetime.now(BR_TIMEZONE)
         batch_size = SCAN_BATCH
@@ -801,10 +769,13 @@ class SimpleBot:
 
     def reserve_best_candidate(self):
         sec = datetime.now(BR_TIMEZONE).second
-        if sec < 58 or sec > 59: return
+        if sec < 58 or sec > 59: return 
         if self.next_trade_plan or not self.check_daily_limits(): return
 
+        # --- SERIAL LOCK: Bloqueia reserva se tiver trade aberto ---
         with self.trade_lock:
+            if self.active_trades:
+                return
             cands = list(self.minute_candidates)
             self.minute_candidates = [] 
 
@@ -824,6 +795,11 @@ class SimpleBot:
 
     def execute_reserved(self):
         if not self.next_trade_plan or time.time() < self.pause_until_ts or not self.check_daily_limits(): self.next_trade_plan = None; return
+        
+        # Double check lock
+        with self.trade_lock:
+             if self.active_trades: return
+        
         plan = self.next_trade_plan; self.next_trade_plan = None
         self.log_to_db(f"🚀 EXEC: {plan['asset']} {plan['direction'].upper()} {plan['strategy']}", "SYSTEM")
         self.launch_trade(asset=plan["asset"], direction=plan["direction"], strategy_key=plan["strategy"], strategy_label=plan["label"], plan=plan)
@@ -832,7 +808,8 @@ class SimpleBot:
         t = threading.Thread(target=self._trade_thread, kwargs=kwargs, daemon=True); t.start()
 
     def _trade_thread(self, asset, direction, strategy_key, strategy_label, plan):
-        if time.time() - self.last_global_trade_ts < GLOBAL_COOLDOWN_SECONDS: return
+        # Aqui nao checamos cooldown global porque ja estamos no "serial mode"
+        # Mas mantemos active_trades para bloqueio
         with self.trade_lock:
             if asset in self.active_trades: return
             self.active_trades.add(asset)
@@ -858,22 +835,17 @@ class SimpleBot:
             if self.config["mode"] == "OBSERVE": 
                 status, trade_id = True, "VIRTUAL"
             else:
-                # Tenta Binária
                 with self.api_lock: 
                     status, trade_id = self.api.buy(amount, asset, direction, 1)
                 
-                # Se falhar, Tenta Digital (Hybrid Execution)
                 if not status or not trade_id:
                     with self.api_lock:
                         try:
-                            # Tenta buy_digital_spot padrão
                             self.api.subscribe_strike_list(asset, 1)
                             trade_id = self.api.buy_digital_spot(asset, amount, direction, 1)
                             if trade_id and isinstance(trade_id, int):
                                 status = True
-                        except: 
-                            # Debug silencioso
-                            pass
+                        except: pass
 
             if not status or not trade_id:
                 self.log_to_db(f"❌ RECUSADA: {asset}", "ERROR"); self.update_signal(signal_id, "FAILED", "FAILED", 0.0); return
@@ -960,7 +932,7 @@ class SimpleBot:
 
     def start(self):
         threading.Thread(target=watchdog, daemon=True).start()
-        self.log_to_db("🧠 Inicializando Bot (Mechanical Brain V61)...", "SYSTEM")
+        self.log_to_db("🧠 Inicializando Bot (Mechanical Brain V62)...", "SYSTEM")
         
         if not hasattr(self, "last_heartbeat_ts"): self.last_heartbeat_ts = 0
         if not hasattr(self, "last_config_ts"): self.last_config_ts = 0
@@ -980,7 +952,8 @@ class SimpleBot:
                 if now - self.last_alive_log_ts >= 15:
                     self.last_alive_log_ts = now
                     cands = len(self.minute_candidates)
-                    self.log_to_db(f"❤️ ALIVE cand={cands} next={'YES' if self.next_trade_plan else 'NO'}", "SYSTEM")
+                    lock_status = "LOCKED" if self.active_trades else "OPEN"
+                    self.log_to_db(f"❤️ ALIVE cand={cands} next={'YES' if self.next_trade_plan else 'NO'} lock={lock_status}", "SYSTEM")
 
                 if int(now) % 10 == 0: self.push_balance_to_front()
 
