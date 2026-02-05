@@ -37,7 +37,7 @@ except ImportError:
         sys.exit(1)
 
 
-BOT_VERSION = "SHOCK_ENGINE_V67_ADAPTIVE_CONTROL_2026-02-05"
+BOT_VERSION = "SHOCK_ENGINE_V68_BB_REENTRY_2026-02-05"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -118,6 +118,26 @@ class TechnicalAnalysis:
             tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
             trs.append(tr)
         return sum(trs) / len(trs) if trs else 0.0
+
+    @staticmethod
+    def calculate_rsi(closes, period=14):
+        if not closes or len(closes) < period + 1:
+            return 50.0
+        gains = 0.0
+        losses = 0.0
+        # Media simples inicial
+        for i in range(-period, 0):
+            diff = closes[i] - closes[i-1]
+            if diff > 0:
+                gains += diff
+            else:
+                losses += abs(diff)
+        
+        if losses == 0:
+            return 100.0
+        
+        rs = gains / max(losses, 1e-12)
+        return 100.0 - (100.0 / (1.0 + rs))
 
     @staticmethod
     def calculate_ema(candles, period):
@@ -226,33 +246,56 @@ class ShockLiveDetector:
             if close_pos <= (1.0 - close_pos_min) and pullback_ratio <= pullback_ratio_max: return "call", "SHOCK_DOWN", {}
         return None, "Sem padrão", {}
 
-class GapTraderStrategy:
+class BollingerReentryStrategy:
     @staticmethod
-    def get_signal(candles):
-        if len(candles) < 45: return None, "Dados insuficientes"
-        closes = [c["close"] for c in candles]
-        
-        def get_sma34(arr, idx):
-            end = len(arr) + idx + 1 if idx < 0 else idx + 1
-            start = end - 34
-            if start < 0: return 0
-            return sum(arr[start:end]) / 34
+    def get_signal(candles, period=20, std_mult=2.0):
+        if not candles or len(candles) < period + 5:
+            return None, "Dados insuficientes"
 
-        buffer1_series = []
-        for i in range(7):
-            idx = -7 + i 
-            sma = get_sma34(closes, idx)
-            val = closes[idx] - sma
-            buffer1_series.append(val)
-            
-        wma_curr = TechnicalAnalysis.calculate_wma(buffer1_series[2:], 5)
-        line_curr = buffer1_series[-1]
-        wma_prev = TechnicalAnalysis.calculate_wma(buffer1_series[1:-1], 5)
-        line_prev = buffer1_series[-2]
-        
-        if line_curr > wma_curr and line_prev < wma_prev: return "put", "GAP_PUT"
-        if line_curr < wma_curr and line_prev > wma_prev: return "call", "GAP_CALL"
-        return None, "Sem sinal"
+        # filtro de range (evita tendência forte se abrindo)
+        if not TechnicalAnalysis.check_compression(candles[-30:]):
+            return None, "Sem range (Tendencia detectada)"
+
+        closes = [float(c["close"]) for c in candles]
+
+        def band_at(idx):
+            # idx relativo ao fim da lista completa
+            window = closes[idx - period + 1: idx + 1]
+            if len(window) < period: return 0, 0, 0
+            sma = sum(window) / period
+            var = sum((x - sma) ** 2 for x in window) / period
+            std = var ** 0.5
+            upper = sma + std_mult * std
+            lower = sma - std_mult * std
+            return sma, upper, lower
+
+        # Índices: -1 é fechado atual, -2 é anterior
+        prev_idx = len(candles) - 2
+        curr_idx = len(candles) - 1
+
+        _, up_prev, lo_prev = band_at(prev_idx)
+        _, up_curr, lo_curr = band_at(curr_idx)
+
+        prev_close = closes[-2]
+        curr_close = closes[-1]
+
+        rsi = TechnicalAnalysis.calculate_rsi(closes, 14)
+
+        # CALL: 
+        # Anterior fechou ABAIXO da banda inferior
+        # Atual fechou DENTRO da banda (acima da inferior)
+        if prev_close < lo_prev and curr_close > lo_curr:
+            if rsi <= 35: # Sobrevendido
+                return "call", "BB_REENTRY_CALL"
+
+        # PUT:
+        # Anterior fechou ACIMA da banda superior
+        # Atual fechou DENTRO da banda (abaixo da superior)
+        if prev_close > up_prev and curr_close < up_curr:
+            if rsi >= 65: # Sobrecomprado
+                return "put", "BB_REENTRY_PUT"
+
+        return None, "Sem BB"
 
 class TsunamiFlowStrategy:
     @staticmethod
@@ -366,14 +409,17 @@ class SimpleBot:
         self.db_lock = threading.RLock()
         self.dynamic_lock = threading.RLock()
         
+        # Pipeline Vars
         self.candles_cache = {} 
         self.candles_lock = threading.RLock()
         self.minute_candidates = []
         self.scan_cursor = 0
         self.last_scan_second = -1
 
+        # Brain e Memórias
         self.brain = StrategyBrain(self.log_to_db, min_samples=4, decay=0.92) 
-        self.strategies_pool = ["V2_TREND", "TSUNAMI_FLOW", "VOLUME_REACTOR", "GAP_TRADER", "SHOCK_REVERSAL"]
+        # ESTRATÉGIAS ATUALIZADAS
+        self.strategies_pool = ["V2_TREND", "TSUNAMI_FLOW", "VOLUME_REACTOR", "BB_REENTRY", "SHOCK_REVERSAL"]
         
         self.pair_strategy_memory = defaultdict(lambda: deque(maxlen=40))
         self.strategy_memory = defaultdict(lambda: deque(maxlen=40))
@@ -568,6 +614,8 @@ class SimpleBot:
             self.current_date = today; self.daily_wins = 0; self.daily_losses = 0; self.daily_total = 0
             self.win_streak = 0; self.loss_streak = 0; self.pause_until_ts = 0; self.next_trade_plan = None
             self.asset_cooldown = {}
+            
+            # Reset de risco diário
             self.asset_risk = defaultdict(lambda: {
                 "min_conf": self.base_min_conf,
                 "loss_streak": 0,
@@ -624,7 +672,7 @@ class SimpleBot:
         if strategy_name == "V2_TREND":
             if TechnicalAnalysis.check_compression(candles): return None, "Compressão"
             return TechnicalAnalysis.get_signal_v2(candles)
-        if strategy_name == "GAP_TRADER": return GapTraderStrategy.get_signal(candles)
+        if strategy_name == "BB_REENTRY": return BollingerReentryStrategy.get_signal(candles)
         if strategy_name == "TSUNAMI_FLOW": return TsunamiFlowStrategy.get_signal(candles)
         if strategy_name == "VOLUME_REACTOR": return VolumeReactorStrategy.get_signal(candles)
         return None, "Estratégia inválida"
@@ -788,11 +836,9 @@ class SimpleBot:
                 if vol_enabled and vol_metrics and vol_metrics["state"] == "READY":
                     curr = vol_metrics["current"]
                     low = vol_metrics["low"]
-                    # Se for SHOCK, usa limite maior
                     high = vol_metrics["high_shock"] if strat == "SHOCK_REVERSAL" else vol_metrics["high"]
                     
                     if not (low <= curr <= high):
-                         # Log throttled
                          k = (asset, datetime.now(BR_TIMEZONE).strftime("%Y%m%d%H%M"))
                          if not self.vol_last_log.get(k):
                              self.vol_last_log[k] = True
@@ -980,7 +1026,7 @@ class SimpleBot:
 
     def start(self):
         threading.Thread(target=watchdog, daemon=True).start()
-        self.log_to_db("🧠 Inicializando Bot (Adaptive Control V67)...", "SYSTEM")
+        self.log_to_db("🧠 Inicializando Bot (Mechanical Brain V68 - BB Reentry)...", "SYSTEM")
         if not hasattr(self, "last_heartbeat_ts"): self.last_heartbeat_ts = 0
         if not hasattr(self, "last_config_ts"): self.last_config_ts = 0
         if not hasattr(self, "last_activity_ts"): self.last_activity_ts = time.time()
