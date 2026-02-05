@@ -37,7 +37,7 @@ except ImportError:
         sys.exit(1)
 
 
-BOT_VERSION = "SHOCK_ENGINE_V63_STRATEGY_FREEZER_2026-01-27"
+BOT_VERSION = "SHOCK_ENGINE_V65_PRECISION_FINAL_2026-01-27"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -49,8 +49,8 @@ SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
 EXNOVA_EMAIL = os.environ.get("EXNOVA_EMAIL", "")
 EXNOVA_PASSWORD = os.environ.get("EXNOVA_PASSWORD", "")
 
-# Ajustes finos de Pipeline
-SCAN_BATCH = int(os.environ.get("SCAN_BATCH", "1")) 
+# Ajustes finos de Pipeline (Batch 3 = Equilíbrio)
+SCAN_BATCH = int(os.environ.get("SCAN_BATCH", "3")) 
 SCAN_TTL = float(os.environ.get("SCAN_TTL", "3.0")) 
 
 BR_TIMEZONE = timezone(timedelta(hours=-3))
@@ -106,13 +106,11 @@ class TechnicalAnalysis:
 
     @staticmethod
     def calculate_sma(data, period):
-        """ Média Móvel Simples """
         if len(data) < period: return 0
         return sum(data[-period:]) / period
 
     @staticmethod
     def calculate_wma(data, period):
-        """ Média Móvel Ponderada """
         if len(data) < period: return 0
         weighted_sum = 0
         weight_sum = 0
@@ -136,23 +134,29 @@ class TechnicalAnalysis:
     @staticmethod
     def check_compression(candles):
         if len(candles) < 20: return False
-        closed = candles[:-1]
-        ema9 = TechnicalAnalysis.calculate_ema(closed, 9)
-        ema21 = TechnicalAnalysis.calculate_ema(closed, 21)
+        # Considera candles FECHADOS
+        ema9 = TechnicalAnalysis.calculate_ema(candles, 9)
+        ema21 = TechnicalAnalysis.calculate_ema(candles, 21)
         spread = abs(ema9 - ema21)
-        bodies = [abs(c["close"] - c["open"]) for c in closed[-10:]]
+        bodies = [abs(c["close"] - c["open"]) for c in candles[-10:]]
         avg_body = sum(bodies) / len(bodies) if bodies else 0.00001
         return spread < (avg_body * 0.15)
 
     @staticmethod
     def get_signal_v2(candles):
+        # Candles JÁ SÃO FECHADOS (normalizados)
         if len(candles) < 60: return None, "Dados insuficientes"
-        closed = candles[:-1]
-        ema9 = TechnicalAnalysis.calculate_ema(closed, 9)
-        ema21 = TechnicalAnalysis.calculate_ema(closed, 21)
-        ema21_prev = TechnicalAnalysis.calculate_ema(closed[:-1], 21)
-        c_confirm = TechnicalAnalysis.analyze_candle(candles[-2])
-        c_reject = TechnicalAnalysis.analyze_candle(candles[-3])
+        
+        # Último fechado = -1
+        # Penúltimo fechado = -2
+        
+        ema9 = TechnicalAnalysis.calculate_ema(candles, 9)
+        ema21 = TechnicalAnalysis.calculate_ema(candles, 21)
+        ema21_prev = TechnicalAnalysis.calculate_ema(candles[:-1], 21)
+
+        c_confirm = TechnicalAnalysis.analyze_candle(candles[-1]) # Confirmação
+        c_reject = TechnicalAnalysis.analyze_candle(candles[-2])  # Rejeição
+
         slope = ema21 - ema21_prev
         
         if ema9 > ema21 and slope > 0:
@@ -174,15 +178,17 @@ class ShockLiveDetector:
         pullback_ratio_max = float(dyn.get("shock_pullback_ratio_max", 0.25))
         trend_filter = bool(dyn.get("trend_filter_enabled", True))
 
-        # OBS: Agora recebe candles normalizados (fechados), então -1 é a última vela fechada.
+        # candles[-1] é a vela de explosão (última fechada)
         live = TechnicalAnalysis.analyze_candle(candles[-1])
-        closed = candles[:-1]
-        ema9 = TechnicalAnalysis.calculate_ema(closed, 9)
-        ema21 = TechnicalAnalysis.calculate_ema(closed, 21)
+        # candles[:-1] é o histórico anterior para média
+        history = candles[:-1]
+
+        ema9 = TechnicalAnalysis.calculate_ema(history, 9)
+        ema21 = TechnicalAnalysis.calculate_ema(history, 21)
         trend_up = ema9 > ema21; trend_down = ema9 < ema21
 
-        bodies = [abs(c["close"] - c["open"]) for c in closed[-20:]]
-        ranges = [(c["max"] - c["min"]) for c in closed[-20:]]
+        bodies = [abs(c["close"] - c["open"]) for c in history[-20:]]
+        ranges = [(c["max"] - c["min"]) for c in history[-20:]]
         avg_body = (sum(bodies) / len(bodies)) if bodies else 0.00001
         avg_range = (sum(ranges) / len(ranges)) if ranges else 0.00001
 
@@ -207,16 +213,9 @@ class ShockLiveDetector:
         return None, "Sem padrão", {}
 
 class GapTraderStrategy:
-    """
-    Estratégia baseada no script 'GAP TRADER'.
-    Linha 1 (Value) = Close - SMA(34)
-    Linha 2 (Signal) = WMA(Linha 1, 5)
-    Sinal = Cruzamento das linhas
-    """
     @staticmethod
     def get_signal(candles):
         if len(candles) < 45: return None, "Dados insuficientes"
-        
         closes = [c["close"] for c in candles]
         
         def get_sma34(arr, idx):
@@ -238,11 +237,11 @@ class GapTraderStrategy:
         wma_prev = TechnicalAnalysis.calculate_wma(buffer1_series[1:-1], 5)
         line_prev = buffer1_series[-2]
         
-        # Cruzamento para CIMA -> PUT (VENDA)
+        # Cruzamento para CIMA -> PUT (VENDA - Invertido)
         if line_curr > wma_curr and line_prev < wma_prev:
             return "put", "GAP_PUT"
             
-        # Cruzamento para BAIXO -> CALL (COMPRA)
+        # Cruzamento para BAIXO -> CALL (COMPRA - Invertido)
         if line_curr < wma_curr and line_prev > wma_prev:
             return "call", "GAP_CALL"
             
@@ -251,10 +250,11 @@ class GapTraderStrategy:
 class TsunamiFlowStrategy:
     @staticmethod
     def get_signal(candles):
-        if len(candles) < 6: return None, "Dados insuficientes"
-        c1 = TechnicalAnalysis.analyze_candle(candles[-2])
-        c2 = TechnicalAnalysis.analyze_candle(candles[-3])
-        c3 = TechnicalAnalysis.analyze_candle(candles[-4])
+        if len(candles) < 4: return None, "Dados insuficientes"
+        c1 = TechnicalAnalysis.analyze_candle(candles[-1]) # Última fechada
+        c2 = TechnicalAnalysis.analyze_candle(candles[-2])
+        c3 = TechnicalAnalysis.analyze_candle(candles[-3])
+        
         if c1["color"] == "green" and c2["color"] == "green" and c3["color"] == "green":
             if c1["body"] > c2["body"]: return "call", "TSUNAMI_UP"
         if c1["color"] == "red" and c2["color"] == "red" and c3["color"] == "red":
@@ -265,9 +265,12 @@ class VolumeReactorStrategy:
     @staticmethod
     def get_signal(candles):
         if len(candles) < 30: return None, "Dados insuficientes"
-        c1 = TechnicalAnalysis.analyze_candle(candles[-2])
-        bodies = [abs(c["close"] - c["open"]) for c in candles[-22:-2]]
+        
+        c1 = TechnicalAnalysis.analyze_candle(candles[-1]) # Última fechada
+        
+        bodies = [abs(c["close"] - c["open"]) for c in candles[-21:-1]]
         avg_body = sum(bodies) / len(bodies) if bodies else 0.00001
+        
         if c1["body"] > avg_body * 2.5:
             if c1["color"] == "green": return "put", "REACTOR_TOP"
             if c1["color"] == "red": return "call", "REACTOR_BOTTOM"
@@ -366,14 +369,12 @@ class SimpleBot:
         self.db_lock = threading.RLock()
         self.dynamic_lock = threading.RLock()
         
-        # Pipeline Vars
         self.candles_cache = {} 
         self.candles_lock = threading.RLock()
         self.minute_candidates = []
         self.scan_cursor = 0
         self.last_scan_second = -1
 
-        # Brain e Memórias
         self.brain = StrategyBrain(self.log_to_db, min_samples=4, decay=0.92) 
         self.strategies_pool = ["V2_TREND", "TSUNAMI_FLOW", "VOLUME_REACTOR", "GAP_TRADER", "SHOCK_REVERSAL"]
         
@@ -381,12 +382,11 @@ class SimpleBot:
         self.strategy_memory = defaultdict(lambda: deque(maxlen=40))
         self.session_memory = deque(maxlen=20)
         
-        # FREEZER: Congela estratégia no par por 1h
-        self.strategy_cooldowns = {} # key=(asset, strat) -> timestamp
+        self.strategy_cooldowns = {} 
 
-        self.base_min_conf = 0.60
+        self.base_min_conf = 0.55
         self.asset_risk = defaultdict(lambda: {
-            "min_conf": 0.60,
+            "min_conf": 0.55,
             "loss_streak": 0,
             "win_streak": 0,
             "cooldown_until": 0.0
@@ -394,7 +394,7 @@ class SimpleBot:
 
         self.active_trades = set()
         self.next_trade_plan = None
-        self.asset_cooldown = {}
+        self.asset_cooldown = {} 
         self.last_global_trade_ts = 0
         self.last_recalibrate_ts = 0
         self.last_balance_push_ts = 0
@@ -418,7 +418,7 @@ class SimpleBot:
             "CHFJPY-OTC", "CADCHF-OTC", "EURAUD-OTC", "USDNOK-OTC", "EURNZD-OTC", "USDSEK-OTC", "USDTRY-OTC", "USDPLN-OTC", 
             "AUDCHF-OTC", "AUDNZD-OTC", "EURCHF-OTC", "GBPNZD-OTC", "CADJPY-OTC", "NZDCAD-OTC", "NZDJPY-OTC", "CHFNOK-OTC", 
             "NOKJPY-OTC", "NZDCHF-OTC", "EURTHB-OTC", "USDTHB-OTC", "JPYTHB-OTC", "EURGBP_GS",
-            "GOOGLE-OTC", "AMAZON-OTC", "TESLA-OTC", "FB-OTC", "APPLE-OTC", "Reddit", "AMZN/ALIBABA-OTC", "AMZN/EBAY-OTC", 
+            "GOOGLE-OTC", "AMAZON-OTC", "TESLA-OTC", "FB-OTC", "APPLE-OTC", "AMZN/ALIBABA-OTC", "AMZN/EBAY-OTC", 
             "NVDA/AMD-OTC", "GOOGLE/MSFT-OTC", "TESLA/FORD-OTC", "MSFT/AAPL-OTC", "INTEL/IBM-OTC", "NFLX/AMZN-OTC", 
             "META/GOOGLE-OTC", "BIDU-OTC", "INTEL-OTC", "MSFT-OTC", "CITI-OTC", "COKE-OTC", "JPM-OTC", "MCDON-OTC", 
             "MORSTAN-OTC", "NIKE-OTC", "ALIBABA-OTC", "AIG-OTC", "GS-OTC", "SNAP-OTC",
@@ -434,12 +434,10 @@ class SimpleBot:
             "US2000-OTC", "TRUMPvsHARRIS-OTC"
         ]
 
-        # RESTAURADO!
         self.asset_strategy_map = {}
         self.last_calibration_time = 0
         self.calibration_running = False
 
-        # Config Global (apenas flags, sem min_confidence global)
         self.dynamic = {
             "allow_trading": True, 
             "prefer_strategy": "AUTO",
@@ -457,7 +455,6 @@ class SimpleBot:
         }
 
         self.init_supabase()
-        # Sem AICommander aqui (removido para pure mechanical)
 
     def touch_watchdog(self):
         global LAST_LOG_TIME
@@ -558,15 +555,14 @@ class SimpleBot:
             self.win_streak = 0; self.loss_streak = 0; self.pause_until_ts = 0; self.next_trade_plan = None
             self.asset_cooldown = {}
             
-            # Reset de risco diário e Freezes
+            # Reset de risco diário
             self.asset_risk = defaultdict(lambda: {
                 "min_conf": self.base_min_conf,
                 "loss_streak": 0,
                 "win_streak": 0,
                 "cooldown_until": 0.0
             })
-            self.strategy_cooldowns = {} # Reseta freezes do dia anterior
-            
+            self.strategy_cooldowns = {}
             self.log_to_db("🚀 Nova sessão diária (Risk & Strategy Reset)", "SYSTEM")
 
     def check_daily_limits(self):
@@ -634,16 +630,15 @@ class SimpleBot:
     def normalize_candles(self, candles):
         return sorted(candles, key=lambda c: int(c.get("from", 0)))
 
-    def normalize_closed_candles(self, candles):
-        if not candles or len(candles) < 3:
-            return candles
-        
+    def normalize_closed_candles(self, candles, tf_sec=60):
+        if not candles or len(candles) < 3: return candles
+        candles = self.normalize_candles(candles)
         now_ts = int(time.time())
         last_ts = self._candle_ts(candles[-1])
-        
-        if last_ts > 0 and (now_ts - last_ts) < 2:
-             return candles[:-1]
-            
+        # CORREÇÃO CRÍTICA: Só remove se o minuto da vela AINDA NÃO ACABOU.
+        # last_ts é o inicio do candle. Ele fecha em last_ts + 60.
+        if last_ts > 0 and now_ts < (last_ts + tf_sec):
+            return candles[:-1]
         return candles
 
     def get_last_closed_candle(self, candles, now_ts=None):
@@ -662,14 +657,23 @@ class SimpleBot:
         now = time.time()
         with self.candles_lock:
             item = self.candles_cache.get(asset)
-            if item and (now - item["ts"] <= ttl) and len(item["candles"]) >= need:
-                return self.normalize_closed_candles(item["candles"])
+            if item and (now - item["ts"] <= ttl):
+                closed = self.normalize_closed_candles(item["candles"])
+                if closed and len(closed) >= need:
+                    return closed
+
         try:
-            with self.api_lock: candles = self.api.get_candles(asset, 60, max(need, 60), int(time.time()))
+            count = max(need + 2, 60) # Pede sobra para não faltar
+            with self.api_lock:
+                candles = self.api.get_candles(asset, 60, count, int(time.time()))
             if candles:
-                candles = self.normalize_candles(candles) # Ordena primeiro!
-                with self.candles_lock: self.candles_cache[asset] = {"ts": now, "candles": candles}
-                return self.normalize_closed_candles(candles)
+                candles = self.normalize_candles(candles)
+                with self.candles_lock:
+                    self.candles_cache[asset] = {"ts": now, "candles": candles}
+                
+                closed = self.normalize_closed_candles(candles)
+                if closed and len(closed) >= need:
+                    return closed
             return None
         except: return None
 
@@ -688,6 +692,7 @@ class SimpleBot:
                 with self.api_lock: candles = self.api.get_candles(asset, 60, 120, int(time.time()))
                 if not candles or len(candles) < 90: continue
                 
+                # Normaliza e Ordena
                 candles = self.normalize_candles(candles)
                 candles = self.normalize_closed_candles(candles)
 
@@ -721,7 +726,7 @@ class SimpleBot:
 
         with self.dynamic_lock:
             allow_trading = bool(self.dynamic.get("allow_trading", True))
-            min_conf = float(self.dynamic.get("min_confidence", 0.68))
+            min_conf = float(self.dynamic.get("min_confidence", 0.55))
 
         if not allow_trading or (time.time() - self.last_global_trade_ts < GLOBAL_COOLDOWN_SECONDS): return
 
@@ -745,16 +750,20 @@ class SimpleBot:
             min_conf_asset = float(risk["min_conf"])
 
             chosen, wr_hint, samples, src = self.brain.choose_strategy(asset, now_dt, self.strategies_pool)
-            target_list = self.strategies_pool[:]
+            
+            target_list = []
+            if chosen != "NO_TRADE":
+                target_list = [chosen] # Prioridade absoluta do cérebro
+            else:
+                target_list = self.strategies_pool[:]
 
             candles = self.fetch_candles_cached(asset, need=60, ttl=SCAN_TTL)
             if not candles: continue
 
             best_local = None
             for strat in target_list:
-                # Checa se estratégia está congelada
                 blocked_until = self.strategy_cooldowns.get((asset, strat), 0)
-                if time.time() < blocked_until: continue # Pula estratégia congelada
+                if time.time() < blocked_until: continue 
 
                 sig, lbl = self.check_strategy_signal(strat, candles, asset)
                 if not sig: continue
@@ -776,7 +785,13 @@ class SimpleBot:
                 }
                 if (best_local is None) or (cand["score"] > best_local["score"]): best_local = cand
 
-            if best_local and best_local["confidence"] >= min_conf_asset:
+            # LÓGICA DE CONTROLE DO PAINEL REAL:
+            # Se tiver histórico forte, usa o risco do ativo. Se não, usa o painel.
+            threshold_base = max(min_conf, min_conf_asset)
+            has_history = (best_local and best_local["hour_samples"] >= 6)
+            threshold = threshold_base if has_history else min_conf
+
+            if best_local and best_local["confidence"] >= threshold:
                 local_candidates.append(best_local)
 
         if local_candidates:
@@ -811,7 +826,6 @@ class SimpleBot:
     def execute_reserved(self):
         if not self.next_trade_plan or time.time() < self.pause_until_ts or not self.check_daily_limits(): self.next_trade_plan = None; return
         
-        # Double check lock
         with self.trade_lock:
              if self.active_trades: return
         
@@ -874,13 +888,16 @@ class SimpleBot:
                 for _ in range(2):
                     with self.api_lock: candles_after = self.api.get_candles(asset, 60, 3, int(time.time()))
                     if candles_after: 
+                        # CORREÇÃO: Aplica normalização aqui também
                         candles_after = self.normalize_candles(candles_after) 
-                        break
+                        candles_after = self.normalize_closed_candles(candles_after)
+                        if candles_after: break
                     time.sleep(1)
             except: pass
 
             if self.config["mode"] == "OBSERVE":
-                last = self.get_last_closed_candle(candles_after, now_ts=int(time.time()))
+                # Pega a última vela FECHADA real
+                last = candles_after[-1] if candles_after else None
                 if last:
                     win = (direction == "call" and last["close"] > last["open"]) or (direction == "put" and last["close"] < last["open"])
                     res_str = "WIN" if win else "LOSS"; profit = (amount * 0.87) if win else -amount
@@ -927,10 +944,8 @@ class SimpleBot:
                     if risk["loss_streak"] >= 3: extra = 240
                     risk["cooldown_until"] = time.time() + ASSET_LOSS_COOLDOWN_SECONDS + extra
                     
-                    # ❄️ STRATEGY FREEZER: 1H DE GELO NA ESTRATÉGIA RUIM ❄️
-                    self.strategy_cooldowns[(asset, strategy_key)] = time.time() + 3600
-                    self.log_to_db(f"❄️ FREEZE: {strategy_key} em {asset} por 1H (Loss)", "WARNING")
-                    
+                    self.strategy_cooldowns[(asset, strategy_key)] = time.time() + 1800 # 30 min freeze
+                    self.log_to_db(f"❄️ FREEZE: {strategy_key} em {asset} por 30m (Loss)", "WARNING")
                     self.log_to_db(f"🧱 DEFESA_PAIR: {asset} min_conf={risk['min_conf']:.2f} loss_seq={risk['loss_streak']}", "WARNING")
 
             with self.dynamic_lock:
@@ -952,7 +967,7 @@ class SimpleBot:
 
     def start(self):
         threading.Thread(target=watchdog, daemon=True).start()
-        self.log_to_db("🧠 Inicializando Bot (Mechanical Brain V63)...", "SYSTEM")
+        self.log_to_db("🧠 Inicializando Bot (Mechanical Brain V65)...", "SYSTEM")
         
         if not hasattr(self, "last_heartbeat_ts"): self.last_heartbeat_ts = 0
         if not hasattr(self, "last_config_ts"): self.last_config_ts = 0
@@ -975,7 +990,9 @@ class SimpleBot:
                     lock_status = "LOCKED" if self.active_trades else "OPEN"
                     self.log_to_db(f"❤️ ALIVE cand={cands} next={'YES' if self.next_trade_plan else 'NO'} lock={lock_status}", "SYSTEM")
 
-                if int(now) % 10 == 0: self.push_balance_to_front()
+                if now - self.last_balance_push_ts >= 30:
+                    self.last_balance_push_ts = now
+                    self.push_balance_to_front()
 
                 self.reset_daily_if_needed()
                 if now - self.last_config_ts >= 5: self.fetch_config(); self.last_config_ts = now
