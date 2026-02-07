@@ -37,7 +37,7 @@ except ImportError:
         sys.exit(1)
 
 
-BOT_VERSION = "SHOCK_ENGINE_V72.1_SIGNAL_FIX_2026-02-07"
+BOT_VERSION = "SHOCK_ENGINE_V72.2_STRUCTURAL_FIX_2026-02-07"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -104,179 +104,12 @@ def clamp(v, a, b):
     return max(a, min(b, v))
 
 # ==============================================================================
-# ANÁLISE DE COMPORTAMENTO (MODULE)
-# ==============================================================================
-class BehaviorAnalysis:
-    """ Módulo interno para análise de comportamento, SR e estrutura """
-    
-    @staticmethod
-    def calculate_adx(candles, period=14):
-        if len(candles) < period * 2: return {}
-        
-        highs = [float(c['max']) for c in candles]
-        lows = [float(c['min']) for c in candles]
-        closes = [float(c['close']) for c in candles]
-        
-        plus_dm = []
-        minus_dm = []
-        tr = []
-        
-        for i in range(1, len(candles)):
-            h_diff = highs[i] - highs[i-1]
-            l_diff = lows[i-1] - lows[i]
-            
-            plus_dm.append(h_diff if h_diff > l_diff and h_diff > 0 else 0)
-            minus_dm.append(l_diff if l_diff > h_diff and l_diff > 0 else 0)
-            
-            tr.append(max(highs[i] - lows[i], abs(highs[i] - closes[i-1]), abs(lows[i] - closes[i-1])))
-
-        def smooth(data, p):
-            res = [sum(data[:p])]
-            for x in data[p:]:
-                res.append(res[-1] - (res[-1]/p) + x)
-            return res
-
-        tr_smooth = smooth(tr, period)
-        plus_dm_smooth = smooth(plus_dm, period)
-        minus_dm_smooth = smooth(minus_dm, period)
-        
-        if len(tr_smooth) == 0: return {}
-
-        di_plus = [(p / t) * 100 if t else 0 for p, t in zip(plus_dm_smooth, tr_smooth)]
-        di_minus = [(m / t) * 100 if t else 0 for m, t in zip(minus_dm_smooth, tr_smooth)]
-        
-        dx = []
-        for i in range(len(di_plus)):
-            denom = di_plus[i] + di_minus[i]
-            num = abs(di_plus[i] - di_minus[i])
-            dx.append((num / denom) * 100 if denom else 0)
-            
-        adx_val = sum(dx[-period:]) / period if len(dx) >= period else 0
-        
-        return {
-            "adx": adx_val,
-            "di_plus": di_plus[-1] if di_plus else 0,
-            "di_minus": di_minus[-1] if di_minus else 0
-        }
-
-    @staticmethod
-    def calculate_choppiness(candles, period=14):
-        if len(candles) < period + 1: return 50.0
-        
-        highs = [float(c['max']) for c in candles]
-        lows = [float(c['min']) for c in candles]
-        closes = [float(c['close']) for c in candles]
-        
-        tr_sum = 0
-        for i in range(1, period + 1):
-            idx = -i
-            tr = max(highs[idx] - lows[idx], abs(highs[idx] - closes[idx-1]), abs(lows[idx] - closes[idx-1]))
-            tr_sum += tr
-            
-        range_max = max(highs[-period:])
-        range_min = min(lows[-period:])
-        denom = range_max - range_min
-        
-        if denom == 0: return 50.0
-        
-        chop = 100 * math.log10(tr_sum / denom) / math.log10(period)
-        return chop
-
-    @staticmethod
-    def classify_regime(adx, chop):
-        if adx > 25 and chop < 50: return "TREND"
-        if adx < 20 or chop > 61.8: return "RANGE"
-        return "MIXED"
-
-    @staticmethod
-    def detect_structure(candles, pivot_window=3, lookback=60):
-        if len(candles) < lookback: return {"state": "UNKNOWN"}
-        
-        highs = [float(c['max']) for c in candles]
-        lows = [float(c['min']) for c in candles]
-        
-        pivot_highs = []
-        pivot_lows = []
-        
-        for i in range(pivot_window, len(candles) - pivot_window):
-            window_highs = highs[i-pivot_window:i+pivot_window+1]
-            window_lows = lows[i-pivot_window:i+pivot_window+1]
-            
-            if highs[i] == max(window_highs): pivot_highs.append(highs[i])
-            if lows[i] == min(window_lows): pivot_lows.append(lows[i])
-            
-        if len(pivot_highs) < 2 or len(pivot_lows) < 2: return {"state": "UNKNOWN"}
-        
-        last_hh = pivot_highs[-1] > pivot_highs[-2]
-        last_hl = pivot_lows[-1] > pivot_lows[-2]
-        last_lh = pivot_highs[-1] < pivot_highs[-2]
-        last_ll = pivot_lows[-1] < pivot_lows[-2]
-        
-        if last_hh and last_hl: return {"state": "UP_HH_HL"}
-        if last_lh and last_ll: return {"state": "DOWN_LH_LL"}
-        return {"state": "MIXED"}
-
-    @staticmethod
-    def get_sr_zones(candles, window_size=5, tolerance_pct=0.0015, top_n=5, lookback=400):
-        if not candles:
-            return {"support": [], "resistance": []}
-
-        cs = candles[-lookback:] if len(candles) > lookback else candles
-        highs = [float(c["max"]) for c in cs]
-        lows = [float(c["min"]) for c in cs]
-
-        piv_hi = []
-        piv_lo = []
-
-        # Detecção de pivôs locais
-        for i in range(window_size, len(cs) - window_size):
-            h = highs[i]
-            l = lows[i]
-            if h == max(highs[i-window_size:i+window_size+1]):
-                piv_hi.append(h)
-            if l == min(lows[i-window_size:i+window_size+1]):
-                piv_lo.append(l)
-
-        # Clusterização (Agrupa níveis próximos)
-        def cluster(levels):
-            if not levels: return []
-            levels = sorted(levels)
-            clusters = [[levels[0]]]
-            for lvl in levels[1:]:
-                base = sum(clusters[-1]) / len(clusters[-1])
-                # Se estiver dentro da tolerância, agrupa
-                if abs(lvl - base) / max(base, 1e-12) <= tolerance_pct:
-                    clusters[-1].append(lvl)
-                else:
-                    clusters.append([lvl])
-            # Retorna a média de cada cluster
-            return [sum(c) / len(c) for c in clusters]
-
-        res = cluster(piv_hi)
-        sup = cluster(piv_lo)
-
-        # Retorna os N mais relevantes (extremos e recentes)
-        # Simplificação: ordenamos por valor. Resistências altas, Suportes baixos.
-        res = sorted(res, reverse=True)[:top_n] # Resistências mais altas (topos)
-        sup = sorted(sup)[:top_n]             # Suportes mais baixos (fundos)
-        
-        return {"support": sup, "resistance": res}
-
-    @staticmethod
-    def distance_to_nearest_level(price, levels):
-        if not levels: return 999.0
-        nearest = min([abs(price - l) for l in levels])
-        return nearest / price
-
-# ==============================================================================
-# ANÁLISE TÉCNICA (INDICADORES BÁSICOS)
+# ANÁLISE TÉCNICA (CORE)
 # ==============================================================================
 class TechnicalAnalysis:
     @staticmethod
     def calculate_atr(candles, period=14):
-        # ATR real (SMA do TR)
-        if not candles or len(candles) < period + 1:
-            return 0.0
+        if not candles or len(candles) < period + 1: return 0.0
         trs = []
         for i in range(-period, 0):
             c = candles[i]; p = candles[i - 1]
@@ -489,6 +322,166 @@ class BollingerReentryStrategy:
         if prev_close < lo_prev and curr_close > lo_curr and rsi <= 35: return "call", "BB_REENTRY_CALL"
         if prev_close > up_prev and curr_close < up_curr and rsi >= 65: return "put", "BB_REENTRY_PUT"
         return None, "Sem BB"
+
+# ==============================================================================
+# ANÁLISE DE COMPORTAMENTO (MODULE)
+# ==============================================================================
+class BehaviorAnalysis:
+    """ Módulo interno para análise de comportamento, SR e estrutura """
+    
+    @staticmethod
+    def calculate_adx(candles, period=14):
+        if len(candles) < period * 2: return {}
+        
+        highs = [float(c['max']) for c in candles]
+        lows = [float(c['min']) for c in candles]
+        closes = [float(c['close']) for c in candles]
+        
+        plus_dm = []
+        minus_dm = []
+        tr = []
+        
+        for i in range(1, len(candles)):
+            h_diff = highs[i] - highs[i-1]
+            l_diff = lows[i-1] - lows[i]
+            
+            plus_dm.append(h_diff if h_diff > l_diff and h_diff > 0 else 0)
+            minus_dm.append(l_diff if l_diff > h_diff and l_diff > 0 else 0)
+            
+            tr.append(max(highs[i] - lows[i], abs(highs[i] - closes[i-1]), abs(lows[i] - closes[i-1])))
+
+        def smooth(data, p):
+            res = [sum(data[:p])]
+            for x in data[p:]:
+                res.append(res[-1] - (res[-1]/p) + x)
+            return res
+
+        tr_smooth = smooth(tr, period)
+        plus_dm_smooth = smooth(plus_dm, period)
+        minus_dm_smooth = smooth(minus_dm, period)
+        
+        if len(tr_smooth) == 0: return {}
+
+        di_plus = [(p / t) * 100 if t else 0 for p, t in zip(plus_dm_smooth, tr_smooth)]
+        di_minus = [(m / t) * 100 if t else 0 for m, t in zip(minus_dm_smooth, tr_smooth)]
+        
+        dx = []
+        for i in range(len(di_plus)):
+            denom = di_plus[i] + di_minus[i]
+            num = abs(di_plus[i] - di_minus[i])
+            dx.append((num / denom) * 100 if denom else 0)
+            
+        adx_val = sum(dx[-period:]) / period if len(dx) >= period else 0
+        
+        return {
+            "adx": adx_val,
+            "di_plus": di_plus[-1] if di_plus else 0,
+            "di_minus": di_minus[-1] if di_minus else 0
+        }
+
+    @staticmethod
+    def calculate_choppiness(candles, period=14):
+        if len(candles) < period + 1: return 50.0
+        
+        highs = [float(c['max']) for c in candles]
+        lows = [float(c['min']) for c in candles]
+        closes = [float(c['close']) for c in candles]
+        
+        tr_sum = 0
+        for i in range(1, period + 1):
+            idx = -i
+            tr = max(highs[idx] - lows[idx], abs(highs[idx] - closes[idx-1]), abs(lows[idx] - closes[idx-1]))
+            tr_sum += tr
+            
+        range_max = max(highs[-period:])
+        range_min = min(lows[-period:])
+        denom = range_max - range_min
+        
+        if denom == 0: return 50.0
+        
+        chop = 100 * math.log10(tr_sum / denom) / math.log10(period)
+        return chop
+
+    @staticmethod
+    def classify_regime(adx, chop):
+        if adx > 25 and chop < 50: return "TREND"
+        if adx < 20 or chop > 61.8: return "RANGE"
+        return "MIXED"
+
+    @staticmethod
+    def detect_structure(candles, pivot_window=3, lookback=60):
+        if len(candles) < lookback: return {"state": "UNKNOWN"}
+        
+        highs = [float(c['max']) for c in candles]
+        lows = [float(c['min']) for c in candles]
+        
+        pivot_highs = []
+        pivot_lows = []
+        
+        for i in range(pivot_window, len(candles) - pivot_window):
+            window_highs = highs[i-pivot_window:i+pivot_window+1]
+            window_lows = lows[i-pivot_window:i+pivot_window+1]
+            
+            if highs[i] == max(window_highs): pivot_highs.append(highs[i])
+            if lows[i] == min(window_lows): pivot_lows.append(lows[i])
+            
+        if len(pivot_highs) < 2 or len(pivot_lows) < 2: return {"state": "UNKNOWN"}
+        
+        last_hh = pivot_highs[-1] > pivot_highs[-2]
+        last_hl = pivot_lows[-1] > pivot_lows[-2]
+        last_lh = pivot_highs[-1] < pivot_highs[-2]
+        last_ll = pivot_lows[-1] < pivot_lows[-2]
+        
+        if last_hh and last_hl: return {"state": "UP_HH_HL"}
+        if last_lh and last_ll: return {"state": "DOWN_LH_LL"}
+        return {"state": "MIXED"}
+
+    @staticmethod
+    def get_sr_zones(candles, window_size=5, tolerance_pct=0.0015, top_n=5, lookback=400):
+        if not candles:
+            return {"support": [], "resistance": []}
+
+        cs = candles[-lookback:] if len(candles) > lookback else candles
+        highs = [float(c["max"]) for c in cs]
+        lows = [float(c["min"]) for c in cs]
+
+        piv_hi = []
+        piv_lo = []
+
+        # Detecção de pivôs locais
+        for i in range(window_size, len(cs) - window_size):
+            h = highs[i]
+            l = lows[i]
+            if h == max(highs[i-window_size:i+window_size+1]):
+                piv_hi.append(h)
+            if l == min(lows[i-window_size:i+window_size+1]):
+                piv_lo.append(l)
+
+        # Clusterização (Agrupa níveis próximos)
+        def cluster(levels):
+            if not levels: return []
+            levels = sorted(levels)
+            clusters = [[levels[0]]]
+            for lvl in levels[1:]:
+                base = sum(clusters[-1]) / len(clusters[-1])
+                if abs(lvl - base) / max(base, 1e-12) <= tolerance_pct:
+                    clusters[-1].append(lvl)
+                else:
+                    clusters.append([lvl])
+            return [sum(c) / len(c) for c in clusters]
+
+        res = cluster(piv_hi)
+        sup = cluster(piv_lo)
+        res = sorted(res, reverse=True)[:top_n] 
+        sup = sorted(sup)[:top_n]             
+        
+        return {"support": sup, "resistance": res}
+
+    @staticmethod
+    def distance_to_nearest_level(price, levels):
+        if not levels: return 999.0
+        nearest = min([abs(price - l) for l in levels])
+        return nearest / price
 
 # ==============================================================================
 # STRATEGY BRAIN
@@ -1030,8 +1023,13 @@ class SimpleBot:
                 self.log_to_db(f"❌ Falha Ordem {asset}", "ERROR")
                 self.update_signal(sid, "FAILED", "FAILED", 0.0)
                 return
+            
+            # Sync timestamp balance push
+            now = time.time()
+            if now - self.last_balance_push_ts >= 30:
+                 self.last_balance_push_ts = now
+                 self.push_balance_to_front()
 
-            self.push_balance_to_front()
             time.sleep(64) # Aguarda resultado
             
             # Resultado
@@ -1088,10 +1086,78 @@ class SimpleBot:
         finally:
             with self.trade_lock: self.active_trades.discard(asset)
 
+    # --- RECALIBRAÇÃO ---
+    def recalibrate_current_hour(self, assets_limit=25, backtest_steps=40):
+        if not self.api or not self.api.check_connect(): return
+        self.log_to_db("⚙️ Brain: Recalibrando hora atual...", "SYSTEM")
+        now_dt = datetime.now(BR_TIMEZONE)
+        sample_assets = self.best_assets[:]
+        random.shuffle(sample_assets)
+        sample_assets = sample_assets[:assets_limit]
+        
+        for asset in sample_assets:
+            try:
+                time.sleep(0.1)
+                with self.api_lock: candles = self.api.get_candles(asset, 60, 120, int(time.time()))
+                if not candles: continue
+                candles = self.normalize_candles(candles)
+                candles = self.normalize_closed_candles(candles)
+                
+                # Backtest simples para popular memória
+                for s in self.strategies_pool:
+                    wins = 0; total = 0
+                    for i in range(len(candles) - backtest_steps - 2, len(candles) - 2):
+                         window = candles[i-60:i+1]; result = candles[i+1]
+                         sig, _ = self.check_strategy_signal(s, window, asset)
+                         if sig:
+                             total += 1
+                             win = (sig == "call" and result["close"] > result["open"]) or (sig == "put" and result["close"] < result["open"])
+                             if win: wins += 1
+                    
+                    if total >= 3:
+                         k = self.brain._key(asset, now_dt)
+                         if k not in self.brain.stats: self.brain.stats[k] = {}
+                         if s not in self.brain.stats[k]: self.brain.stats[k][s] = {"w":0.0, "t":0.0}
+                         self.brain.stats[k][s]["w"] += float(wins)
+                         self.brain.stats[k][s]["t"] += float(total)
+                         self.brain.rebuild_key(asset, now_dt)
+
+            except: pass
+        self.last_recalibrate_ts = time.time()
+        self.log_to_db("🧠 Brain: Recalibração concluída.", "SUCCESS")
+
+    # --- VOLATILITY CALC ---
+    def calculate_vol_metrics(self, asset, candles):
+        with self.dynamic_lock:
+            atr_period = int(self.dynamic.get("atr_period", 14))
+            low_mult = float(self.dynamic.get("vol_low_mult", 0.60))
+            high_mult = float(self.dynamic.get("vol_high_mult", 1.80))
+
+        atr = TechnicalAnalysis.calculate_atr(candles, period=atr_period)
+        price = float(candles[-1]["close"])
+        atr_pct = atr / max(price, 1e-12)
+
+        with self.vol_lock:
+            mem = self.vol_memory[asset]
+            mem.append(atr_pct)
+            if len(mem) < 40:
+                # WARMUP BLOCK: Se ATR for absurdo (> 0.4%), bloqueia.
+                # CORREÇÃO CRÍTICA: Adicionado 'med':0 para não quebrar o loop
+                if atr_pct > 0.004:
+                     return {"state": "WARMUP_BLOCK", "current": atr_pct, "low": 0, "high": 0, "high_shock": 0, "med": 0}
+                return {"state": "WARMUP", "current": atr_pct, "low": 0, "high": 999, "high_shock": 999, "med": 0}
+            arr = sorted(mem)
+            med = arr[len(arr) // 2]
+            low = med * low_mult
+            high = med * high_mult
+            high_shock = med * 2.4
+
+        return {"state": "READY", "current": atr_pct, "med": med, "low": low, "high": high, "high_shock": high_shock}
+
     # --- MAIN LOOP ---
     def start(self):
         threading.Thread(target=watchdog, daemon=True).start()
-        self.log_to_db("🧠 Inicializando Bot (Behavior Aware V72 Final)...", "SYSTEM")
+        self.log_to_db("🧠 Inicializando Bot (Behavior Aware V72.2)...", "SYSTEM")
         
         # Init vars safe
         if not hasattr(self, "last_heartbeat_ts"): self.last_heartbeat_ts = 0
@@ -1149,6 +1215,15 @@ class SimpleBot:
         t = float(v["t"])
         w = float(v["w"])
         return (w / t), int(t)
+
+    def get_dynamic_amount(self, asset, strategy_key, base_amount, plan_confidence):
+        if len(self.session_memory) < 5: wr_session = 0.50
+        else: wr_session = sum(self.session_memory) / len(self.session_memory)
+        wr_pair = self.get_wr_pair(asset, strategy_key)
+        wr_mix = (wr_session * 0.5) + (wr_pair * 0.5)
+        mult = 0.50 + 0.50 * clamp((wr_mix - 0.50) / 0.15, 0.0, 1.0)
+        mult = mult * clamp(plan_confidence / 0.80, 0.80, 1.05)
+        return round(base_amount * clamp(mult, 0.50, 1.0), 2)
 
 if __name__ == "__main__":
     SimpleBot().start()
