@@ -37,7 +37,7 @@ except ImportError:
         sys.exit(1)
 
 
-BOT_VERSION = "SHOCK_ENGINE_V68_BB_REENTRY_2026-02-05"
+BOT_VERSION = "SHOCK_ENGINE_V70_CONTEXT_MASTER_2026-02-07"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -49,7 +49,7 @@ SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
 EXNOVA_EMAIL = os.environ.get("EXNOVA_EMAIL", "")
 EXNOVA_PASSWORD = os.environ.get("EXNOVA_PASSWORD", "")
 
-# Ajustes finos de Pipeline
+# Ajustes finos de Pipeline (Batch 3 = Equilíbrio)
 SCAN_BATCH = int(os.environ.get("SCAN_BATCH", "3")) 
 SCAN_TTL = float(os.environ.get("SCAN_TTL", "3.0")) 
 
@@ -91,7 +91,7 @@ def safe_json_extract(text: str):
     if not text:
         return None
     try:
-        if isinstance(text, dict): return text # Ja é dict
+        if isinstance(text, dict): return text
         s = text.find("{")
         e = text.rfind("}") + 1
         if s != -1 and e > s:
@@ -125,17 +125,13 @@ class TechnicalAnalysis:
             return 50.0
         gains = 0.0
         losses = 0.0
-        # Media simples inicial
         for i in range(-period, 0):
             diff = closes[i] - closes[i-1]
             if diff > 0:
                 gains += diff
             else:
                 losses += abs(diff)
-        
-        if losses == 0:
-            return 100.0
-        
+        if losses == 0: return 100.0
         rs = gains / max(losses, 1e-12)
         return 100.0 - (100.0 / (1.0 + rs))
 
@@ -148,22 +144,6 @@ class TechnicalAnalysis:
         for price in prices[period:]:
             ema = (price * k) + (ema * (1 - k))
         return ema
-
-    @staticmethod
-    def calculate_sma(data, period):
-        if len(data) < period: return 0
-        return sum(data[-period:]) / period
-
-    @staticmethod
-    def calculate_wma(data, period):
-        if len(data) < period: return 0
-        weighted_sum = 0
-        weight_sum = 0
-        for i in range(period):
-            weight = i + 1
-            weighted_sum += data[-(period-i)] * weight
-            weight_sum += weight
-        return weighted_sum / weight_sum
 
     @staticmethod
     def analyze_candle(candle):
@@ -246,55 +226,71 @@ class ShockLiveDetector:
             if close_pos <= (1.0 - close_pos_min) and pullback_ratio <= pullback_ratio_max: return "call", "SHOCK_DOWN", {}
         return None, "Sem padrão", {}
 
+class EmaPullbackStrategy:
+    @staticmethod
+    def get_signal(candles, ema_fast=9, ema_slow=21, touch_k=0.25):
+        if not candles or len(candles) < 60:
+            return None, "Dados insuficientes"
+
+        ema9 = TechnicalAnalysis.calculate_ema(candles, ema_fast)
+        ema21 = TechnicalAnalysis.calculate_ema(candles, ema_slow)
+        ema21_prev = TechnicalAnalysis.calculate_ema(candles[:-1], ema_slow)
+        slope = ema21 - ema21_prev
+
+        # Candles já são fechados/normalizados
+        c0 = TechnicalAnalysis.analyze_candle(candles[-1])  # último fechado (confirmação)
+        c1 = TechnicalAnalysis.analyze_candle(candles[-2])  # anterior (pullback)
+
+        # tendência
+        trend_up = (ema9 > ema21) and (slope > 0)
+        trend_down = (ema9 < ema21) and (slope < 0)
+
+        # AJUSTE FINO: Usar média de range para tolerância, não range do candle isolado
+        ranges = [(c["max"] - c["min"]) for c in candles[-20:]]
+        avg_range = (sum(ranges) / len(ranges)) if ranges else c1["range"]
+        tol = avg_range * touch_k
+
+        near_ema9_low = abs(c1["min"] - ema9) <= tol
+        near_ema9_high = abs(c1["max"] - ema9) <= tol
+
+        # Alta: um vermelho de pullback + um verde confirmando
+        if trend_up and c1["color"] == "red" and near_ema9_low and c0["color"] == "green":
+            close_pos = (c0["close"] - c0["min"]) / max(c0["range"], 1e-12)
+            if close_pos >= 0.60: # Fecha no topo
+                return "call", "EMA_PULLBACK_CALL"
+
+        # Baixa: um verde de pullback + um vermelho confirmando
+        if trend_down and c1["color"] == "green" and near_ema9_high and c0["color"] == "red":
+            close_pos = (c0["max"] - c0["close"]) / max(c0["range"], 1e-12)
+            if close_pos >= 0.60: # Fecha no fundo
+                return "put", "EMA_PULLBACK_PUT"
+
+        return None, "Sem pullback"
+
 class BollingerReentryStrategy:
     @staticmethod
     def get_signal(candles, period=20, std_mult=2.0):
-        if not candles or len(candles) < period + 5:
-            return None, "Dados insuficientes"
-
-        # filtro de range (evita tendência forte se abrindo)
-        if not TechnicalAnalysis.check_compression(candles[-30:]):
-            return None, "Sem range (Tendencia detectada)"
+        if not candles or len(candles) < period + 5: return None, "Dados insuficientes"
+        if not TechnicalAnalysis.check_compression(candles[-30:]): return None, "Sem range"
 
         closes = [float(c["close"]) for c in candles]
-
         def band_at(idx):
-            # idx relativo ao fim da lista completa
             window = closes[idx - period + 1: idx + 1]
             if len(window) < period: return 0, 0, 0
             sma = sum(window) / period
             var = sum((x - sma) ** 2 for x in window) / period
             std = var ** 0.5
-            upper = sma + std_mult * std
-            lower = sma - std_mult * std
-            return sma, upper, lower
+            return sma, sma + std_mult * std, sma - std_mult * std
 
-        # Índices: -1 é fechado atual, -2 é anterior
-        prev_idx = len(candles) - 2
-        curr_idx = len(candles) - 1
-
+        prev_idx = len(candles) - 2; curr_idx = len(candles) - 1
         _, up_prev, lo_prev = band_at(prev_idx)
         _, up_curr, lo_curr = band_at(curr_idx)
 
-        prev_close = closes[-2]
-        curr_close = closes[-1]
-
+        prev_close = closes[-2]; curr_close = closes[-1]
         rsi = TechnicalAnalysis.calculate_rsi(closes, 14)
 
-        # CALL: 
-        # Anterior fechou ABAIXO da banda inferior
-        # Atual fechou DENTRO da banda (acima da inferior)
-        if prev_close < lo_prev and curr_close > lo_curr:
-            if rsi <= 35: # Sobrevendido
-                return "call", "BB_REENTRY_CALL"
-
-        # PUT:
-        # Anterior fechou ACIMA da banda superior
-        # Atual fechou DENTRO da banda (abaixo da superior)
-        if prev_close > up_prev and curr_close < up_curr:
-            if rsi >= 65: # Sobrecomprado
-                return "put", "BB_REENTRY_PUT"
-
+        if prev_close < lo_prev and curr_close > lo_curr and rsi <= 35: return "call", "BB_REENTRY_CALL"
+        if prev_close > up_prev and curr_close < up_curr and rsi >= 65: return "put", "BB_REENTRY_PUT"
         return None, "Sem BB"
 
 class TsunamiFlowStrategy:
@@ -374,7 +370,6 @@ class StrategyBrain:
             score = (wr * 0.8) + (min(t, 30.0) / 30.0 * 0.2)
             cand = {"strategy": strat, "wr": wr, "samples": int(t), "score": score}
             if (best is None) or (cand["score"] > best["score"]): best = cand
-
         if best and best["samples"] >= self.min_samples:
             self.map[k] = {"strategy": best["strategy"], "wr": float(best["wr"]), "samples": int(best["samples"])}
         else:
@@ -385,7 +380,6 @@ class StrategyBrain:
         m = self.map.get(k)
         if m and m["strategy"] in allowed_strategies:
             return m["strategy"], float(m["wr"]), int(m["samples"]), "HOUR_MAP"
-
         bucket = self.get_bucket(asset, dt)
         best = None
         for s in allowed_strategies:
@@ -418,18 +412,16 @@ class SimpleBot:
 
         # Brain e Memórias
         self.brain = StrategyBrain(self.log_to_db, min_samples=4, decay=0.92) 
-        # ESTRATÉGIAS ATUALIZADAS
-        self.strategies_pool = ["V2_TREND", "TSUNAMI_FLOW", "VOLUME_REACTOR", "BB_REENTRY", "SHOCK_REVERSAL"]
+        self.strategies_pool = ["V2_TREND", "TSUNAMI_FLOW", "VOLUME_REACTOR", "BB_REENTRY", "SHOCK_REVERSAL", "EMA_PULLBACK"]
         
         self.pair_strategy_memory = defaultdict(lambda: deque(maxlen=40))
         self.strategy_memory = defaultdict(lambda: deque(maxlen=40))
         self.session_memory = deque(maxlen=20)
         self.strategy_cooldowns = {} 
 
-        # Volatility Gate
         self.vol_lock = threading.RLock()
         self.vol_memory = defaultdict(lambda: deque(maxlen=240))
-        self.vol_last_log = {} # Throttling de logs
+        self.vol_last_log = {} 
 
         self.base_min_conf = 0.55
         self.asset_risk = defaultdict(lambda: {
@@ -493,7 +485,6 @@ class SimpleBot:
             "shock_enabled": True, "shock_body_mult": 1.5, "shock_range_mult": 1.4,
             "shock_close_pos_min": 0.85, "shock_pullback_ratio_max": 0.25,
             "trend_filter_enabled": True,
-            # Configs do Volatility Gate
             "vol_enabled": True,
             "atr_period": 14,
             "vol_low_mult": 0.60,
@@ -599,13 +590,11 @@ class SimpleBot:
                     "max_wins_per_day": int(d.get("max_wins_per_day", 0) or 0),
                     "max_losses_per_day": int(d.get("max_losses_per_day", 0) or 0),
                 })
-                # ATUALIZAÇÃO DINÂMICA VIA JSON
                 dyn_json = d.get("dynamic_json")
                 if dyn_json:
                     parsed = safe_json_extract(dyn_json)
                     if parsed:
-                        with self.dynamic_lock:
-                            self.dynamic.update(parsed)
+                        with self.dynamic_lock: self.dynamic.update(parsed)
         except: pass
 
     def reset_daily_if_needed(self):
@@ -617,10 +606,7 @@ class SimpleBot:
             
             # Reset de risco diário
             self.asset_risk = defaultdict(lambda: {
-                "min_conf": self.base_min_conf,
-                "loss_streak": 0,
-                "win_streak": 0,
-                "cooldown_until": 0.0
+                "min_conf": self.base_min_conf, "loss_streak": 0, "win_streak": 0, "cooldown_until": 0.0
             })
             self.strategy_cooldowns = {}
             self.vol_last_log = {}
@@ -654,10 +640,8 @@ class SimpleBot:
         return (w / t), int(t)
 
     def get_dynamic_amount(self, asset, strategy_key, base_amount, plan_confidence):
-        if len(self.session_memory) < 5: 
-            wr_session = 0.50
-        else: 
-            wr_session = sum(self.session_memory) / len(self.session_memory)
+        if len(self.session_memory) < 5: wr_session = 0.50
+        else: wr_session = sum(self.session_memory) / len(self.session_memory)
         wr_pair = self.get_wr_pair(asset, strategy_key)
         wr_mix = (wr_session * 0.5) + (wr_pair * 0.5)
         mult = 0.50 + 0.50 * clamp((wr_mix - 0.50) / 0.15, 0.0, 1.0)
@@ -673,6 +657,7 @@ class SimpleBot:
             if TechnicalAnalysis.check_compression(candles): return None, "Compressão"
             return TechnicalAnalysis.get_signal_v2(candles)
         if strategy_name == "BB_REENTRY": return BollingerReentryStrategy.get_signal(candles)
+        if strategy_name == "EMA_PULLBACK": return EmaPullbackStrategy.get_signal(candles) # NEW
         if strategy_name == "TSUNAMI_FLOW": return TsunamiFlowStrategy.get_signal(candles)
         if strategy_name == "VOLUME_REACTOR": return VolumeReactorStrategy.get_signal(candles)
         return None, "Estratégia inválida"
@@ -713,7 +698,7 @@ class SimpleBot:
             if item and (now - item["ts"] <= ttl) and len(item["candles"]) >= need:
                 return self.normalize_closed_candles(item["candles"])
         try:
-            with self.api_lock: candles = self.api.get_candles(asset, 60, max(need, 60), int(time.time()))
+            with self.api_lock: candles = self.api.get_candles(asset, 60, max(need + 10, 70), int(time.time())) # SAFE
             if candles:
                 candles = self.normalize_candles(candles)
                 with self.candles_lock: self.candles_cache[asset] = {"ts": now, "candles": candles}
@@ -735,17 +720,26 @@ class SimpleBot:
         with self.vol_lock:
             mem = self.vol_memory[asset]
             mem.append(atr_pct)
-
             if len(mem) < 40:
+                # WARMUP BLOCK: Se ATR for absurdo (> 0.4%), bloqueia.
+                if atr_pct > 0.004:
+                     return {"state": "WARMUP_BLOCK", "current": atr_pct, "low": 0, "high": 0, "high_shock": 0}
                 return {"state": "WARMUP", "current": atr_pct, "low": 0, "high": 999, "high_shock": 999}
-
             arr = sorted(mem)
             med = arr[len(arr) // 2]
             low = med * low_mult
             high = med * high_mult
-            high_shock = med * 2.4 # SHOCK aceita mais volatilidade
+            high_shock = med * 2.4
 
-        return {"state": "READY", "current": atr_pct, "low": low, "high": high, "high_shock": high_shock}
+        return {"state": "READY", "current": atr_pct, "med": med, "low": low, "high": high, "high_shock": high_shock}
+
+    # --- HELPER DE GATE POR ESTRATÉGIA ---
+    def vol_ok_for_strategy(self, strat, curr, med):
+        if strat == "BB_REENTRY": return curr <= med * 1.15
+        if strat in ["V2_TREND", "EMA_PULLBACK", "TSUNAMI_FLOW"]: return (curr >= med * 0.70) and (curr <= med * 1.90)
+        if strat == "VOLUME_REACTOR": return (curr >= med * 0.95) and (curr <= med * 2.20)
+        if strat == "SHOCK_REVERSAL": return (curr >= med * 1.60) and (curr <= med * 3.00)
+        return True
 
     # --- RECALIBRAÇÃO MECÂNICA ---
     def recalibrate_current_hour(self, assets_limit=25, backtest_steps=40):
@@ -822,30 +816,46 @@ class SimpleBot:
             candles = self.fetch_candles_cached(asset, need=60, ttl=SCAN_TTL)
             if not candles: continue
 
+            # --- CONTEXTO DE MERCADO ---
+            ema9 = TechnicalAnalysis.calculate_ema(candles, 9)
+            ema21 = TechnicalAnalysis.calculate_ema(candles, 21)
+            spread = abs(ema9 - ema21)
+            ema21_prev = TechnicalAnalysis.calculate_ema(candles[:-1], 21)
+            slope = abs(ema21 - ema21_prev)
+            bodies = [abs(c["close"] - c["open"]) for c in candles[-10:]]
+            avg_body = sum(bodies) / len(bodies) if bodies else 0.00001
+            is_strong_trend = (spread > avg_body * 0.5) and (slope > avg_body * 0.1)
+            
             # --- VOLATILITY CHECK ---
             vol_metrics = None
             if vol_enabled:
                 vol_metrics = self.calculate_vol_metrics(asset, candles)
+                # Se estiver em warmup block, pula tudo
+                if vol_metrics["state"] == "WARMUP_BLOCK": continue
 
             best_local = None
             for strat in target_list:
                 blocked_until = self.strategy_cooldowns.get((asset, strat), 0)
                 if time.time() < blocked_until: continue 
                 
-                # GATE CHECK
+                # GATE CHECK (POR ESTRATÉGIA)
                 if vol_enabled and vol_metrics and vol_metrics["state"] == "READY":
-                    curr = vol_metrics["current"]
-                    low = vol_metrics["low"]
-                    high = vol_metrics["high_shock"] if strat == "SHOCK_REVERSAL" else vol_metrics["high"]
-                    
-                    if not (low <= curr <= high):
-                         k = (asset, datetime.now(BR_TIMEZONE).strftime("%Y%m%d%H%M"))
-                         if not self.vol_last_log.get(k):
-                             self.vol_last_log[k] = True
-                             self.log_to_db(f"🌪️ GATE: {asset} {strat} skip (vol={curr:.5f})", "DEBUG")
+                    if not self.vol_ok_for_strategy(strat, vol_metrics["current"], vol_metrics["med"]):
                          continue
 
-                sig, lbl = self.check_strategy_signal(strat, candles, asset)
+                # TREND CHECK (TSUNAMI)
+                if strat == "TSUNAMI_FLOW":
+                    # Check manual inside loop
+                    sig_t, _ = TsunamiFlowStrategy.get_signal(candles)
+                    if not sig_t: continue
+                    trend_up = ema9 > ema21
+                    trend_down = ema9 < ema21
+                    if trend_up and sig_t == "put": continue
+                    if trend_down and sig_t == "call": continue
+                    sig, lbl = sig_t, "TSUNAMI_FLOW"
+                else:
+                    sig, lbl = self.check_strategy_signal(strat, candles, asset)
+                
                 if not sig: continue
                 
                 wr_pair = self.get_wr_pair(asset, strat)
@@ -861,7 +871,10 @@ class SimpleBot:
                 cand = {
                     "asset": asset, "direction": sig, "strategy": strat, "label": lbl, 
                     "wr_pair": wr_pair, "wr_hour": wr_hour, "hour_samples": hour_samples,
-                    "confidence": conf, "score": score, "brain_src": src
+                    "confidence": conf, "score": score, "brain_src": src,
+                    "trend": "STRONG" if is_strong_trend else "RANGE",
+                    "vol_pct": vol_metrics["current"] if vol_metrics else 0.0,
+                    "vol_med": vol_metrics["med"] if vol_metrics else 0.0
                 }
                 if (best_local is None) or (cand["score"] > best_local["score"]): best_local = cand
 
@@ -895,8 +908,9 @@ class SimpleBot:
         
         risk = self.asset_risk[best["asset"]]
         self.log_to_db(
-            f"🧠 RESERVADO: {best['asset']} {best['direction'].upper()} {best['strategy']} "
-            f"conf={best['confidence']:.2f} score={best['score']:.3f} min_conf={risk['min_conf']:.2f}",
+            f"🧠 RESERVADO_FINAL: {best['asset']} {best['direction'].upper()} {best['strategy']} "
+            f"conf={best['confidence']:.2f} score={best['score']:.3f} min_conf={risk['min_conf']:.2f} "
+            f"CTX={best['trend']} VOL={best['vol_pct']:.5f}/{best['vol_med']:.5f}",
             "SYSTEM"
         )
 
@@ -1026,7 +1040,7 @@ class SimpleBot:
 
     def start(self):
         threading.Thread(target=watchdog, daemon=True).start()
-        self.log_to_db("🧠 Inicializando Bot (Mechanical Brain V68 - BB Reentry)...", "SYSTEM")
+        self.log_to_db("🧠 Inicializando Bot (Mechanical Brain V70 - Context Master)...", "SYSTEM")
         if not hasattr(self, "last_heartbeat_ts"): self.last_heartbeat_ts = 0
         if not hasattr(self, "last_config_ts"): self.last_config_ts = 0
         if not hasattr(self, "last_activity_ts"): self.last_activity_ts = time.time()
