@@ -37,7 +37,7 @@ except ImportError:
         sys.exit(1)
 
 
-BOT_VERSION = "SHOCK_ENGINE_V72_FINAL_POLISH_2026-02-07"
+BOT_VERSION = "SHOCK_ENGINE_V72.1_SIGNAL_FIX_2026-02-07"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -575,6 +575,7 @@ class SimpleBot:
         self.db_lock = threading.RLock()
         self.dynamic_lock = threading.RLock()
         
+        # Pipeline Vars
         self.candles_cache = {} # M1 cache
         self.candles_cache_m15 = {} # M15 cache
         self.candles_lock = threading.RLock()
@@ -666,7 +667,6 @@ class SimpleBot:
         }
 
         self.init_supabase()
-        # Sem AICommander
 
     # --- INFRA ---
     def touch_watchdog(self):
@@ -787,19 +787,49 @@ class SimpleBot:
     def analyze_behavior(self, m1_candles, m15_candles):
         adx_pack = BehaviorAnalysis.calculate_adx(m1_candles, period=14) or {}
         chop = BehaviorAnalysis.calculate_choppiness(m1_candles, period=14)
+        
         adx = float(adx_pack.get("adx", 0.0))
+        di_p = float(adx_pack.get("di_plus", 0.0))
+        di_m = float(adx_pack.get("di_minus", 0.0))
+        
         regime = BehaviorAnalysis.classify_regime(adx, chop)
         struct = BehaviorAnalysis.detect_structure(m1_candles, pivot_window=3, lookback=60)
+        
         zones = {}
-        if m15_candles: zones = BehaviorAnalysis.get_sr_zones(m15_candles, lookback=120)
+        if m15_candles:
+            zones = BehaviorAnalysis.get_sr_zones(m15_candles, lookback=120)
+            
         last_close = float(m1_candles[-1]["close"])
         d_sup = BehaviorAnalysis.distance_to_nearest_level(last_close, zones.get("support", [])) if zones else 999.0
         d_res = BehaviorAnalysis.distance_to_nearest_level(last_close, zones.get("resistance", [])) if zones else 999.0
         
         return {
-            "regime": regime, "adx": adx, "chop": chop,
+            "regime": regime, "adx": adx, "di_plus": di_p, "di_minus": di_m, "chop": chop,
             "structure": struct, "sr": zones, "dist_support": d_sup, "dist_resistance": d_res
         }
+
+    def insert_signal(self, asset, direction, strategy, amount, status="PENDING", result="PENDING", profit=0.0):
+        if not self.supabase: return None
+        try:
+            payload = {
+                "pair": asset, "direction": direction, "strategy": strategy, "status": status,
+                "result": result, "profit": float(profit), "amount": float(amount),
+                "created_at": datetime.now(timezone.utc).isoformat()
+            }
+            with self.db_lock: res = self.supabase.table("trade_signals").insert(payload).execute()
+            if getattr(res, "data", None) and len(res.data) > 0: return res.data[0].get("id")
+        except Exception as e: self.log_to_db(f"⚠️ insert_signal: {e}", "ERROR")
+        return None
+
+    def update_signal(self, signal_id, status, result, profit):
+        if not self.supabase or not signal_id: return
+        try:
+            with self.db_lock:
+                self.supabase.table("trade_signals").update({
+                    "status": status, "result": result, "profit": float(profit),
+                    "updated_at": datetime.now(timezone.utc).isoformat()
+                }).eq("id", signal_id).execute()
+        except Exception as e: self.log_to_db(f"⚠️ update_signal: {e}", "ERROR")
 
     # --- STRATEGY SIGNAL ---
     def check_strategy_signal(self, strategy_name, candles, asset_name=""):
@@ -835,7 +865,6 @@ class SimpleBot:
         with self.dynamic_lock:
             allow_trading = bool(self.dynamic.get("allow_trading", True))
             min_conf = float(self.dynamic.get("min_confidence", 0.55))
-            vol_enabled = bool(self.dynamic.get("vol_enabled", True))
 
         if not allow_trading or (time.time() - self.last_global_trade_ts < GLOBAL_COOLDOWN_SECONDS): return
         
@@ -856,7 +885,7 @@ class SimpleBot:
             # --- BEHAVIOR ANALYSIS ---
             m1 = self.fetch_candles_cached_tf(asset, 60, need=80, ttl=SCAN_TTL)
             if not m1: continue
-            m15 = self.fetch_candles_cached_tf(asset, 900, need=130, ttl=60.0) # Increased history
+            m15 = self.fetch_candles_cached_tf(asset, 900, need=130, ttl=60.0) # Cache longo pra M15
 
             behavior = self.analyze_behavior(m1, m15)
             
@@ -885,6 +914,7 @@ class SimpleBot:
 
             # Volatility check setup
             vol_metrics = None
+            vol_enabled = self.dynamic.get("vol_enabled", True)
             if vol_enabled:
                  vol_metrics = self.calculate_vol_metrics(asset, m1) # Reuse m1
                  if vol_metrics["state"] == "WARMUP_BLOCK": continue
@@ -929,9 +959,9 @@ class SimpleBot:
                 if (best_local is None) or (cand["score"] > best_local["score"]): best_local = cand
 
             min_conf_asset = float(risk["min_conf"])
-            
-            # Simple threshold logic: Asset Risk or Panel Config
-            threshold = max(min_conf, min_conf_asset)
+            threshold_base = max(min_conf, min_conf_asset)
+            has_history = (best_local and best_local.get("hour_samples", 0) >= 6)
+            threshold = threshold_base if has_history else min_conf
 
             if best_local and best_local["confidence"] >= threshold:
                 local_candidates.append(best_local)
@@ -1000,13 +1030,8 @@ class SimpleBot:
                 self.log_to_db(f"❌ Falha Ordem {asset}", "ERROR")
                 self.update_signal(sid, "FAILED", "FAILED", 0.0)
                 return
-            
-            # Sync timestamp balance push
-            now = time.time()
-            if now - self.last_balance_push_ts >= 30:
-                 self.last_balance_push_ts = now
-                 self.push_balance_to_front()
 
+            self.push_balance_to_front()
             time.sleep(64) # Aguarda resultado
             
             # Resultado
@@ -1063,73 +1088,6 @@ class SimpleBot:
         finally:
             with self.trade_lock: self.active_trades.discard(asset)
 
-    # --- VOLATILITY CALC ---
-    def calculate_vol_metrics(self, asset, candles):
-        with self.dynamic_lock:
-            atr_period = int(self.dynamic.get("atr_period", 14))
-            low_mult = float(self.dynamic.get("vol_low_mult", 0.60))
-            high_mult = float(self.dynamic.get("vol_high_mult", 1.80))
-
-        atr = TechnicalAnalysis.calculate_atr(candles, period=atr_period)
-        price = float(candles[-1]["close"])
-        atr_pct = atr / max(price, 1e-12)
-
-        with self.vol_lock:
-            mem = self.vol_memory[asset]
-            mem.append(atr_pct)
-            if len(mem) < 40:
-                # CORREÇÃO CRÍTICA: Adicionado 'med':0 para não quebrar o loop
-                if atr_pct > 0.004:
-                     return {"state": "WARMUP_BLOCK", "current": atr_pct, "low": 0, "high": 0, "high_shock": 0, "med": 0}
-                return {"state": "WARMUP", "current": atr_pct, "low": 0, "high": 999, "high_shock": 999, "med": 0}
-            arr = sorted(mem)
-            med = arr[len(arr) // 2]
-            low = med * low_mult
-            high = med * high_mult
-            high_shock = med * 2.4
-
-        return {"state": "READY", "current": atr_pct, "med": med, "low": low, "high": high, "high_shock": high_shock}
-
-    # --- RECALIBRAÇÃO ---
-    def recalibrate_current_hour(self, assets_limit=25, backtest_steps=40):
-        if not self.api or not self.api.check_connect(): return
-        self.log_to_db("⚙️ Brain: Recalibrando hora atual...", "SYSTEM")
-        now_dt = datetime.now(BR_TIMEZONE)
-        sample_assets = self.best_assets[:]
-        random.shuffle(sample_assets)
-        sample_assets = sample_assets[:assets_limit]
-        
-        for asset in sample_assets:
-            try:
-                time.sleep(0.1)
-                with self.api_lock: candles = self.api.get_candles(asset, 60, 120, int(time.time()))
-                if not candles: continue
-                candles = self.normalize_candles(candles)
-                candles = self.normalize_closed_candles(candles)
-                
-                # Backtest simples para popular memória
-                for s in self.strategies_pool:
-                    wins = 0; total = 0
-                    for i in range(len(candles) - backtest_steps - 2, len(candles) - 2):
-                         window = candles[i-60:i+1]; result = candles[i+1]
-                         sig, _ = self.check_strategy_signal(s, window, asset)
-                         if sig:
-                             total += 1
-                             win = (sig == "call" and result["close"] > result["open"]) or (sig == "put" and result["close"] < result["open"])
-                             if win: wins += 1
-                    
-                    if total >= 3:
-                         k = self.brain._key(asset, now_dt)
-                         if k not in self.brain.stats: self.brain.stats[k] = {}
-                         if s not in self.brain.stats[k]: self.brain.stats[k][s] = {"w":0.0, "t":0.0}
-                         self.brain.stats[k][s]["w"] += float(wins)
-                         self.brain.stats[k][s]["t"] += float(total)
-                         self.brain.rebuild_key(asset, now_dt)
-
-            except: pass
-        self.last_recalibrate_ts = time.time()
-        self.log_to_db("🧠 Brain: Recalibração concluída.", "SUCCESS")
-
     # --- MAIN LOOP ---
     def start(self):
         threading.Thread(target=watchdog, daemon=True).start()
@@ -1153,10 +1111,7 @@ class SimpleBot:
                     self.last_alive_log_ts = now
                     self.log_to_db("❤️ ALIVE", "SYSTEM")
                 
-                if now - self.last_balance_push_ts >= 30:
-                    self.last_balance_push_ts = now
-                    self.push_balance_to_front()
-
+                if int(now) % 30 == 0: self.push_balance_to_front()
                 self.reset_daily_if_needed()
                 
                 if now - self.last_config_ts >= 5: self.fetch_config(); self.last_config_ts = now
