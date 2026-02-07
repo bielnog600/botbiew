@@ -37,7 +37,7 @@ except ImportError:
         sys.exit(1)
 
 
-BOT_VERSION = "SHOCK_ENGINE_V70_CONTEXT_MASTER_2026-02-07"
+BOT_VERSION = "SHOCK_ENGINE_V70.1_MED_KEY_FIX_2026-02-07"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -485,6 +485,7 @@ class SimpleBot:
             "shock_enabled": True, "shock_body_mult": 1.5, "shock_range_mult": 1.4,
             "shock_close_pos_min": 0.85, "shock_pullback_ratio_max": 0.25,
             "trend_filter_enabled": True,
+            # Configs do Volatility Gate
             "vol_enabled": True,
             "atr_period": 14,
             "vol_low_mult": 0.60,
@@ -722,9 +723,10 @@ class SimpleBot:
             mem.append(atr_pct)
             if len(mem) < 40:
                 # WARMUP BLOCK: Se ATR for absurdo (> 0.4%), bloqueia.
+                # CORREÇÃO CRÍTICA: Adicionado 'med':0 para não quebrar o loop
                 if atr_pct > 0.004:
-                     return {"state": "WARMUP_BLOCK", "current": atr_pct, "low": 0, "high": 0, "high_shock": 0}
-                return {"state": "WARMUP", "current": atr_pct, "low": 0, "high": 999, "high_shock": 999}
+                     return {"state": "WARMUP_BLOCK", "current": atr_pct, "low": 0, "high": 0, "high_shock": 0, "med": 0}
+                return {"state": "WARMUP", "current": atr_pct, "low": 0, "high": 999, "high_shock": 999, "med": 0}
             arr = sorted(mem)
             med = arr[len(arr) // 2]
             low = med * low_mult
@@ -840,7 +842,9 @@ class SimpleBot:
                 
                 # GATE CHECK (POR ESTRATÉGIA)
                 if vol_enabled and vol_metrics and vol_metrics["state"] == "READY":
-                    if not self.vol_ok_for_strategy(strat, vol_metrics["current"], vol_metrics["med"]):
+                    # USO SEGURO DO MED
+                    med_val = vol_metrics.get("med", 0)
+                    if not self.vol_ok_for_strategy(strat, vol_metrics["current"], med_val):
                          continue
 
                 # TREND CHECK (TSUNAMI)
@@ -874,7 +878,7 @@ class SimpleBot:
                     "confidence": conf, "score": score, "brain_src": src,
                     "trend": "STRONG" if is_strong_trend else "RANGE",
                     "vol_pct": vol_metrics["current"] if vol_metrics else 0.0,
-                    "vol_med": vol_metrics["med"] if vol_metrics else 0.0
+                    "vol_med": vol_metrics.get("med", 0.0) if vol_metrics else 0.0
                 }
                 if (best_local is None) or (cand["score"] > best_local["score"]): best_local = cand
 
@@ -1040,7 +1044,8 @@ class SimpleBot:
 
     def start(self):
         threading.Thread(target=watchdog, daemon=True).start()
-        self.log_to_db("🧠 Inicializando Bot (Mechanical Brain V70 - Context Master)...", "SYSTEM")
+        self.log_to_db("🧠 Inicializando Bot (Mechanical Brain V70.1 Hotfix)...", "SYSTEM")
+        
         if not hasattr(self, "last_heartbeat_ts"): self.last_heartbeat_ts = 0
         if not hasattr(self, "last_config_ts"): self.last_config_ts = 0
         if not hasattr(self, "last_activity_ts"): self.last_activity_ts = time.time()
