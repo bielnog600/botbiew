@@ -37,7 +37,7 @@ except ImportError:
         sys.exit(1)
 
 
-BOT_VERSION = "SHOCK_ENGINE_V73_REAL_BALANCE_GUARD_2026-02-11"
+BOT_VERSION = "SHOCK_ENGINE_V73.1_RECALIBRATE_FIX_2026-02-11"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -928,11 +928,13 @@ class SimpleBot:
 
             behavior = self.analyze_behavior(m1, m15)
             
+            # Logging Throttled
             log_key = (asset, datetime.now(BR_TIMEZONE).strftime("%Y%m%d%H%M"))
             if not self.behavior_last_log.get(log_key):
                 self.behavior_last_log[log_key] = True
                 self.log_to_db(f"🧭 BEHAVIOR {asset} reg={behavior['regime']} adx={behavior['adx']:.1f} struct={behavior['structure']['state']} dS={behavior['dist_support']:.4f} dR={behavior['dist_resistance']:.4f}", "DEBUG")
 
+            # SELEÇÃO DE ESTRATÉGIAS POR REGIME
             reg = behavior["regime"]
             struct = behavior["structure"]["state"]
             
@@ -944,10 +946,12 @@ class SimpleBot:
             else: # MIXED/UNKNOWN
                 target_list = ["EMA_PULLBACK", "BB_REENTRY", "SHOCK_REVERSAL", "V2_TREND"]
 
+            # Brain override (dica histórica)
             chosen, wr_hint, samples, src = self.brain.choose_strategy(asset, now_dt, self.strategies_pool)
             if chosen != "NO_TRADE" and chosen not in target_list:
                 target_list.append(chosen)
 
+            # Volatility check setup
             vol_metrics = None
             vol_enabled = self.dynamic.get("vol_enabled", True)
             if vol_enabled:
@@ -959,6 +963,7 @@ class SimpleBot:
                 blocked_until = self.strategy_cooldowns.get((asset, strat), 0)
                 if time.time() < blocked_until: continue 
                 
+                # GATE CHECK (POR ESTRATÉGIA)
                 if vol_enabled and vol_metrics and vol_metrics["state"] == "READY":
                     med_val = vol_metrics.get("med", 0)
                     if not self.vol_ok_for_strategy(strat, vol_metrics["current"], med_val):
@@ -967,16 +972,19 @@ class SimpleBot:
                 sig, lbl = self.check_strategy_signal(strat, m1, asset)
                 if not sig: continue
                 
+                # --- SR PENALTY (CONFIDENCE) ---
                 score_penalty = 1.0
                 if behavior['dist_resistance'] <= 0.0012 and sig == 'call': score_penalty = 0.85
                 if behavior['dist_support'] <= 0.0012 and sig == 'put': score_penalty = 0.85
                 
+                # Confiança
                 wr_pair = self.get_wr_pair(asset, strat)
                 wr_hour, hour_samples = self.get_wr_hour(asset, now_dt, strat)
                 sample_factor = clamp(hour_samples / 12.0, 0.0, 1.0)
                 
                 conf = clamp((wr_pair * 0.55) + (wr_hour * 0.35) + (sample_factor * 0.10), 0.0, 0.95)
                 
+                # Aplica penalidade SR na confiança tambem
                 if score_penalty < 1.0:
                     conf = conf * 0.92
 
@@ -1020,7 +1028,7 @@ class SimpleBot:
         risk = self.asset_risk[best["asset"]]
         self.log_to_db(
             f"🧠 RESERVADO: {best['asset']} {best['direction'].upper()} {best['strategy']} "
-            f"conf={best['confidence']:.2f} score={best['score']:.3f} min_conf={risk['min_conf']:.2f}",
+            f"conf={best['confidence']:.2f} score={best['score']:.3f} reg={best['regime']}",
             "SYSTEM"
         )
 
@@ -1039,6 +1047,7 @@ class SimpleBot:
         
         try:
             amt = float(self.config["entry_value"])
+            # Inserir sinal
             sid = self.insert_signal(asset, direction, f"{strategy_key}", amt)
             
             self.log_to_db(f"🟡 BUY: {asset} {direction} ${amt}", "INFO")
@@ -1048,6 +1057,7 @@ class SimpleBot:
             else:
                 with self.api_lock: st, tid = self.api.buy(amt, asset, direction, 1)
                 if not st: 
+                    # Tenta digital
                     with self.api_lock:
                         try:
                             self.api.subscribe_strike_list(asset, 1)
@@ -1095,9 +1105,13 @@ class SimpleBot:
                     if c_res:
                         c_res = self.normalize_candles(c_res)
                         last = self.normalize_closed_candles(c_res, tf_sec=60)[-1]
+                        
+                        # Logica simples de win/loss visual
                         op = last['open']; cl = last['close']
-                        if direction == "call": win = cl > op
-                        else: win = cl < op
+                        if direction == "call":
+                            win = cl > op
+                        else:
+                            win = cl < op
                         
                         if win: res_str = "WIN (Chart)"; profit = amt * 0.87
                         elif op == cl: res_str = "DOJI"; profit = 0.0
@@ -1137,10 +1151,50 @@ class SimpleBot:
         finally:
             with self.trade_lock: self.active_trades.discard(asset)
 
+    # --- RECALIBRAÇÃO ---
+    def recalibrate_current_hour(self, assets_limit=25, backtest_steps=40):
+        if not self.api or not self.api.check_connect(): return
+        self.log_to_db("⚙️ Brain: Recalibrando hora atual...", "SYSTEM")
+        now_dt = datetime.now(BR_TIMEZONE)
+        sample_assets = self.best_assets[:]
+        random.shuffle(sample_assets)
+        sample_assets = sample_assets[:assets_limit]
+        
+        for asset in sample_assets:
+            try:
+                time.sleep(0.1)
+                with self.api_lock: candles = self.api.get_candles(asset, 60, 120, int(time.time()))
+                if not candles: continue
+                candles = self.normalize_candles(candles)
+                candles = self.normalize_closed_candles(candles)
+                
+                # Backtest simples para popular memória
+                for s in self.strategies_pool:
+                    wins = 0; total = 0
+                    for i in range(len(candles) - backtest_steps - 2, len(candles) - 2):
+                         window = candles[i-60:i+1]; result = candles[i+1]
+                         sig, _ = self.check_strategy_signal(s, window, asset)
+                         if sig:
+                             total += 1
+                             win = (sig == "call" and result["close"] > result["open"]) or (sig == "put" and result["close"] < result["open"])
+                             if win: wins += 1
+                    
+                    if total >= 3:
+                         k = self.brain._key(asset, now_dt)
+                         if k not in self.brain.stats: self.brain.stats[k] = {}
+                         if s not in self.brain.stats[k]: self.brain.stats[k][s] = {"w":0.0, "t":0.0}
+                         self.brain.stats[k][s]["w"] += float(wins)
+                         self.brain.stats[k][s]["t"] += float(total)
+                         self.brain.rebuild_key(asset, now_dt)
+
+            except: pass
+        self.last_recalibrate_ts = time.time()
+        self.log_to_db("🧠 Brain: Recalibração concluída.", "SUCCESS")
+
     # --- MAIN LOOP ---
     def start(self):
         threading.Thread(target=watchdog, daemon=True).start()
-        self.log_to_db("🧠 Inicializando Bot (Real Balance Guard V73)...", "SYSTEM")
+        self.log_to_db("🧠 Inicializando Bot (Real Balance Guard V73.1)...", "SYSTEM")
         
         # Init vars safe
         if not hasattr(self, "last_heartbeat_ts"): self.last_heartbeat_ts = 0
