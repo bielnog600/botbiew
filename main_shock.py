@@ -37,7 +37,7 @@ except ImportError:
         sys.exit(1)
 
 
-BOT_VERSION = "SHOCK_ENGINE_V72.2_STRUCTURAL_FIX_2026-02-07"
+BOT_VERSION = "SHOCK_ENGINE_V73_REAL_BALANCE_GUARD_2026-02-11"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -196,6 +196,7 @@ class ShockLiveDetector:
         pullback_ratio_max = float(dyn.get("shock_pullback_ratio_max", 0.25))
         trend_filter = bool(dyn.get("trend_filter_enabled", True))
 
+        # OBS: Agora recebe candles normalizados (fechados), então -1 é a última vela fechada.
         live = TechnicalAnalysis.analyze_candle(candles[-1])
         closed = candles[:-1]
         ema9 = TechnicalAnalysis.calculate_ema(closed, 9)
@@ -613,6 +614,8 @@ class SimpleBot:
         self.loss_streak = 0
         self.pause_until_ts = 0
         
+        self.initial_balance_day = 0.0 # Guard para Stop Loss de Banca
+        
         self.last_heartbeat_ts = 0
         self.last_config_ts = 0
         self.last_activity_ts = time.time()
@@ -685,9 +688,11 @@ class SimpleBot:
         if not self.supabase or not self.api: return
         try:
             with self.api_lock: bal = self.api.get_balance()
+            if self.initial_balance_day == 0: self.initial_balance_day = float(bal)
             with self.db_lock:
                 self.supabase.table("bot_config").update({"current_balance": float(bal), "updated_at": datetime.now(timezone.utc).isoformat()}).eq("id", 1).execute()
-        except: pass
+        except Exception as e:
+            self.log_to_db(f"⚠️ Erro Sync Saldo: {e}", "ERROR")
 
     # --- CONNECTION ---
     def connect(self):
@@ -736,12 +741,75 @@ class SimpleBot:
             self.current_date = today; self.daily_wins = 0; self.daily_losses = 0; self.daily_total = 0
             self.win_streak = 0; self.loss_streak = 0; self.pause_until_ts = 0; self.next_trade_plan = None
             self.asset_cooldown = {}
+            self.initial_balance_day = 0 # Reset balance guard
             self.asset_risk = defaultdict(lambda: {"min_conf": self.base_min_conf, "loss_streak": 0, "win_streak": 0, "cooldown_until": 0.0})
             self.strategy_cooldowns = {}
             self.vol_last_log = {}
             self.log_to_db("🚀 Nova sessão diária (Risk & Strategy Reset)", "SYSTEM")
 
-    # --- HELPERS ---
+    def check_daily_limits(self):
+        if self.config["max_trades_per_day"] > 0 and self.daily_total >= self.config["max_trades_per_day"]:
+            self.log_to_db("🛑 Limite de trades do dia atingido", "WARNING"); return False
+        if self.config["max_wins_per_day"] > 0 and self.daily_wins >= self.config["max_wins_per_day"]:
+            self.log_to_db("🏆 Meta de wins atingida", "SUCCESS"); return False
+        if self.config["max_losses_per_day"] > 0 and self.daily_losses >= self.config["max_losses_per_day"]:
+            self.log_to_db("❌ Limite de losses atingido", "ERROR"); return False
+        
+        # --- STOP LOSS BANCA (20% do dia) ---
+        if self.initial_balance_day > 0:
+             try:
+                 curr = float(self.api.get_balance())
+                 if curr < (self.initial_balance_day * 0.80):
+                     self.log_to_db(f"💀 STOP LOSS BANCA ATINGIDO! Inicial: {self.initial_balance_day} Atual: {curr}", "CRITICAL")
+                     self.config["status"] = "PAUSED"
+                     return False
+             except: pass
+
+        return True
+
+    def get_wr(self, strategy):
+        mem = self.strategy_memory.get(strategy)
+        if not mem: return 0.55
+        return sum(mem) / len(mem)
+
+    def get_wr_pair(self, asset, strategy):
+        mem = self.pair_strategy_memory.get((asset, strategy))
+        if not mem or len(mem) < 6: return 0.55
+        return sum(mem) / len(mem)
+
+    def get_wr_hour(self, asset, dt, strategy):
+        bucket = self.brain.get_bucket(asset, dt) or {}
+        v = bucket.get(strategy)
+        if not v or v.get("t", 0) <= 0: return 0.55, 0
+        t = float(v["t"])
+        w = float(v["w"])
+        return (w / t), int(t)
+
+    def get_dynamic_amount(self, asset, strategy_key, base_amount, plan_confidence):
+        if len(self.session_memory) < 5: wr_session = 0.50
+        else: wr_session = sum(self.session_memory) / len(self.session_memory)
+        wr_pair = self.get_wr_pair(asset, strategy_key)
+        wr_mix = (wr_session * 0.5) + (wr_pair * 0.5)
+        mult = 0.50 + 0.50 * clamp((wr_mix - 0.50) / 0.15, 0.0, 1.0)
+        mult = mult * clamp(plan_confidence / 0.80, 0.80, 1.05)
+        return round(base_amount * clamp(mult, 0.50, 1.0), 2)
+
+    def check_strategy_signal(self, strategy_name, candles, asset_name=""):
+        if strategy_name == "SHOCK_REVERSAL":
+            with self.dynamic_lock: dyn = self.dynamic.copy()
+            sig, lbl, _ = ShockLiveDetector.detect(candles, asset_name, dyn)
+            return sig, lbl
+        if strategy_name == "V2_TREND":
+            if TechnicalAnalysis.check_compression(candles): return None, "Compressão"
+            return TechnicalAnalysis.get_signal_v2(candles)
+        if strategy_name == "BB_REENTRY": return BollingerReentryStrategy.get_signal(candles)
+        if strategy_name == "EMA_PULLBACK": return EmaPullbackStrategy.get_signal(candles)
+        if strategy_name == "TSUNAMI_FLOW": return TsunamiFlowStrategy.get_signal(candles)
+        if strategy_name == "VOLUME_REACTOR": return VolumeReactorStrategy.get_signal(candles)
+        if strategy_name == "GAP_TRADER": return GapTraderStrategy.get_signal(candles)
+        return None, "Estratégia inválida"
+
+    # --- HELPER: Velas ---
     def _candle_ts(self, c):
         try: return int(c.get("from", 0))
         except: return 0
@@ -780,22 +848,16 @@ class SimpleBot:
     def analyze_behavior(self, m1_candles, m15_candles):
         adx_pack = BehaviorAnalysis.calculate_adx(m1_candles, period=14) or {}
         chop = BehaviorAnalysis.calculate_choppiness(m1_candles, period=14)
-        
         adx = float(adx_pack.get("adx", 0.0))
         di_p = float(adx_pack.get("di_plus", 0.0))
         di_m = float(adx_pack.get("di_minus", 0.0))
-        
         regime = BehaviorAnalysis.classify_regime(adx, chop)
         struct = BehaviorAnalysis.detect_structure(m1_candles, pivot_window=3, lookback=60)
-        
         zones = {}
-        if m15_candles:
-            zones = BehaviorAnalysis.get_sr_zones(m15_candles, lookback=120)
-            
+        if m15_candles: zones = BehaviorAnalysis.get_sr_zones(m15_candles, lookback=120)
         last_close = float(m1_candles[-1]["close"])
         d_sup = BehaviorAnalysis.distance_to_nearest_level(last_close, zones.get("support", [])) if zones else 999.0
         d_res = BehaviorAnalysis.distance_to_nearest_level(last_close, zones.get("resistance", [])) if zones else 999.0
-        
         return {
             "regime": regime, "adx": adx, "di_plus": di_p, "di_minus": di_m, "chop": chop,
             "structure": struct, "sr": zones, "dist_support": d_sup, "dist_resistance": d_res
@@ -825,22 +887,6 @@ class SimpleBot:
         except Exception as e: self.log_to_db(f"⚠️ update_signal: {e}", "ERROR")
 
     # --- STRATEGY SIGNAL ---
-    def check_strategy_signal(self, strategy_name, candles, asset_name=""):
-        if strategy_name == "SHOCK_REVERSAL":
-            with self.dynamic_lock: dyn = self.dynamic.copy()
-            sig, lbl, _ = ShockLiveDetector.detect(candles, asset_name, dyn)
-            return sig, lbl
-        if strategy_name == "V2_TREND":
-            if TechnicalAnalysis.check_compression(candles): return None, "Compressão"
-            return TechnicalAnalysis.get_signal_v2(candles)
-        if strategy_name == "BB_REENTRY": return BollingerReentryStrategy.get_signal(candles)
-        if strategy_name == "EMA_PULLBACK": return EmaPullbackStrategy.get_signal(candles)
-        if strategy_name == "TSUNAMI_FLOW": return TsunamiFlowStrategy.get_signal(candles)
-        if strategy_name == "VOLUME_REACTOR": return VolumeReactorStrategy.get_signal(candles)
-        if strategy_name == "GAP_TRADER": return GapTraderStrategy.get_signal(candles)
-        return None, "Estratégia inválida"
-
-    # --- HELPER DE GATE POR ESTRATÉGIA ---
     def vol_ok_for_strategy(self, strat, curr, med):
         if strat == "BB_REENTRY": return curr <= med * 1.15
         if strat in ["V2_TREND", "EMA_PULLBACK", "TSUNAMI_FLOW"]: return (curr >= med * 0.70) and (curr <= med * 1.90)
@@ -882,13 +928,11 @@ class SimpleBot:
 
             behavior = self.analyze_behavior(m1, m15)
             
-            # Logging Throttled
             log_key = (asset, datetime.now(BR_TIMEZONE).strftime("%Y%m%d%H%M"))
             if not self.behavior_last_log.get(log_key):
                 self.behavior_last_log[log_key] = True
                 self.log_to_db(f"🧭 BEHAVIOR {asset} reg={behavior['regime']} adx={behavior['adx']:.1f} struct={behavior['structure']['state']} dS={behavior['dist_support']:.4f} dR={behavior['dist_resistance']:.4f}", "DEBUG")
 
-            # SELEÇÃO DE ESTRATÉGIAS POR REGIME
             reg = behavior["regime"]
             struct = behavior["structure"]["state"]
             
@@ -900,12 +944,10 @@ class SimpleBot:
             else: # MIXED/UNKNOWN
                 target_list = ["EMA_PULLBACK", "BB_REENTRY", "SHOCK_REVERSAL", "V2_TREND"]
 
-            # Brain override (dica histórica)
             chosen, wr_hint, samples, src = self.brain.choose_strategy(asset, now_dt, self.strategies_pool)
             if chosen != "NO_TRADE" and chosen not in target_list:
                 target_list.append(chosen)
 
-            # Volatility check setup
             vol_metrics = None
             vol_enabled = self.dynamic.get("vol_enabled", True)
             if vol_enabled:
@@ -917,7 +959,6 @@ class SimpleBot:
                 blocked_until = self.strategy_cooldowns.get((asset, strat), 0)
                 if time.time() < blocked_until: continue 
                 
-                # GATE CHECK (POR ESTRATÉGIA)
                 if vol_enabled and vol_metrics and vol_metrics["state"] == "READY":
                     med_val = vol_metrics.get("med", 0)
                     if not self.vol_ok_for_strategy(strat, vol_metrics["current"], med_val):
@@ -926,19 +967,16 @@ class SimpleBot:
                 sig, lbl = self.check_strategy_signal(strat, m1, asset)
                 if not sig: continue
                 
-                # --- SR PENALTY (CONFIDENCE) ---
                 score_penalty = 1.0
                 if behavior['dist_resistance'] <= 0.0012 and sig == 'call': score_penalty = 0.85
                 if behavior['dist_support'] <= 0.0012 and sig == 'put': score_penalty = 0.85
                 
-                # Confiança
                 wr_pair = self.get_wr_pair(asset, strat)
                 wr_hour, hour_samples = self.get_wr_hour(asset, now_dt, strat)
                 sample_factor = clamp(hour_samples / 12.0, 0.0, 1.0)
                 
                 conf = clamp((wr_pair * 0.55) + (wr_hour * 0.35) + (sample_factor * 0.10), 0.0, 0.95)
                 
-                # Aplica penalidade SR na confiança tambem
                 if score_penalty < 1.0:
                     conf = conf * 0.92
 
@@ -982,7 +1020,7 @@ class SimpleBot:
         risk = self.asset_risk[best["asset"]]
         self.log_to_db(
             f"🧠 RESERVADO: {best['asset']} {best['direction'].upper()} {best['strategy']} "
-            f"conf={best['confidence']:.2f} score={best['score']:.3f} reg={best['regime']}",
+            f"conf={best['confidence']:.2f} score={best['score']:.3f} min_conf={risk['min_conf']:.2f}",
             "SYSTEM"
         )
 
@@ -1001,7 +1039,6 @@ class SimpleBot:
         
         try:
             amt = float(self.config["entry_value"])
-            # Inserir sinal
             sid = self.insert_signal(asset, direction, f"{strategy_key}", amt)
             
             self.log_to_db(f"🟡 BUY: {asset} {direction} ${amt}", "INFO")
@@ -1011,7 +1048,6 @@ class SimpleBot:
             else:
                 with self.api_lock: st, tid = self.api.buy(amt, asset, direction, 1)
                 if not st: 
-                    # Tenta digital
                     with self.api_lock:
                         try:
                             self.api.subscribe_strike_list(asset, 1)
@@ -1024,39 +1060,54 @@ class SimpleBot:
                 self.update_signal(sid, "FAILED", "FAILED", 0.0)
                 return
             
-            # Sync timestamp balance push
-            now = time.time()
-            if now - self.last_balance_push_ts >= 30:
-                 self.last_balance_push_ts = now
-                 self.push_balance_to_front()
-
-            time.sleep(64) # Aguarda resultado
+            # --- REAL BALANCE GUARD ---
+            # Espera até 10s para ver se o saldo muda, confirmando que a corretora processou
+            initial_bal = 0.0
+            with self.api_lock: initial_bal = float(self.api.get_balance())
             
-            # Resultado
+            # Push inicial
+            self.push_balance_to_front()
+            
+            time.sleep(64) # Aguarda vela
+            
+            # Checagem de Resultado V2 (Mudança de Saldo)
             res_str = "UNKNOWN"; profit = 0.0
             
-            # Pega velas para saber quem ganhou
-            try:
-                with self.api_lock: c_res = self.api.get_candles(asset, 60, 3, int(time.time()))
-                if c_res:
-                    c_res = self.normalize_candles(c_res)
-                    last = self.normalize_closed_candles(c_res, tf_sec=60)[-1]
-                    
-                    # Logica simples de win/loss visual
-                    op = last['open']; cl = last['close']
-                    if direction == "call":
-                        win = cl > op
-                    else:
-                        win = cl < op
-                    
-                    if win: res_str = "WIN"; profit = amt * 0.87
-                    elif op == cl: res_str = "DOJI"; profit = 0.0
-                    else: res_str = "LOSS"; profit = -amt
-            except: pass
+            final_bal = initial_bal
+            # Tenta ler saldo novo por 10s
+            for _ in range(10):
+                with self.api_lock: final_bal = float(self.api.get_balance())
+                if abs(final_bal - initial_bal) > 0.01:
+                    break
+                time.sleep(1)
+
+            delta = final_bal - initial_bal
+            
+            if delta > 0.01:
+                res_str = "WIN"; profit = delta
+            elif delta < -0.01:
+                res_str = "LOSS"; profit = delta
+            else:
+                # Se saldo não mudou, assume LOSS ou DOJI (em Digital, empate é loss)
+                # Vamos tentar ver pela vela pra ter certeza
+                try:
+                    with self.api_lock: c_res = self.api.get_candles(asset, 60, 3, int(time.time()))
+                    if c_res:
+                        c_res = self.normalize_candles(c_res)
+                        last = self.normalize_closed_candles(c_res, tf_sec=60)[-1]
+                        op = last['open']; cl = last['close']
+                        if direction == "call": win = cl > op
+                        else: win = cl < op
+                        
+                        if win: res_str = "WIN (Chart)"; profit = amt * 0.87
+                        elif op == cl: res_str = "DOJI"; profit = 0.0
+                        else: res_str = "LOSS (Chart)"; profit = -amt
+                except: 
+                    res_str = "DOJI/ERROR"; profit = 0.0
 
             # Atualiza stats
             risk = self.asset_risk[asset]
-            if res_str == "WIN":
+            if "WIN" in res_str:
                 self.daily_wins += 1; self.win_streak += 1; self.loss_streak = 0
                 self.pair_strategy_memory[(asset, strategy_key)].append(1)
                 self.session_memory.append(1)
@@ -1064,7 +1115,7 @@ class SimpleBot:
                 risk["win_streak"] += 1; risk["loss_streak"] = 0
                 risk["min_conf"] = max(self.base_min_conf, float(risk["min_conf"]) - 0.02)
                 
-            elif res_str == "LOSS":
+            elif "LOSS" in res_str:
                 self.daily_losses += 1; self.loss_streak += 1; self.win_streak = 0
                 self.pair_strategy_memory[(asset, strategy_key)].append(0)
                 self.session_memory.append(0)
@@ -1079,85 +1130,17 @@ class SimpleBot:
             self.update_signal(sid, res_str, res_str, profit)
             self.push_balance_to_front()
             
-            self.log_to_db(f"{'🏆' if res_str=='WIN' else '🔻'} {res_str} {asset}: {profit:.2f}", "SUCCESS" if res_str=="WIN" else "ERROR")
+            self.log_to_db(f"{'🏆' if 'WIN' in res_str else '🔻'} {res_str} {asset}: {profit:.2f}", "SUCCESS" if "WIN" in res_str else "ERROR")
 
         except Exception as e:
             self.log_to_db(f"❌ Trade Err: {e}", "ERROR")
         finally:
             with self.trade_lock: self.active_trades.discard(asset)
 
-    # --- RECALIBRAÇÃO ---
-    def recalibrate_current_hour(self, assets_limit=25, backtest_steps=40):
-        if not self.api or not self.api.check_connect(): return
-        self.log_to_db("⚙️ Brain: Recalibrando hora atual...", "SYSTEM")
-        now_dt = datetime.now(BR_TIMEZONE)
-        sample_assets = self.best_assets[:]
-        random.shuffle(sample_assets)
-        sample_assets = sample_assets[:assets_limit]
-        
-        for asset in sample_assets:
-            try:
-                time.sleep(0.1)
-                with self.api_lock: candles = self.api.get_candles(asset, 60, 120, int(time.time()))
-                if not candles: continue
-                candles = self.normalize_candles(candles)
-                candles = self.normalize_closed_candles(candles)
-                
-                # Backtest simples para popular memória
-                for s in self.strategies_pool:
-                    wins = 0; total = 0
-                    for i in range(len(candles) - backtest_steps - 2, len(candles) - 2):
-                         window = candles[i-60:i+1]; result = candles[i+1]
-                         sig, _ = self.check_strategy_signal(s, window, asset)
-                         if sig:
-                             total += 1
-                             win = (sig == "call" and result["close"] > result["open"]) or (sig == "put" and result["close"] < result["open"])
-                             if win: wins += 1
-                    
-                    if total >= 3:
-                         k = self.brain._key(asset, now_dt)
-                         if k not in self.brain.stats: self.brain.stats[k] = {}
-                         if s not in self.brain.stats[k]: self.brain.stats[k][s] = {"w":0.0, "t":0.0}
-                         self.brain.stats[k][s]["w"] += float(wins)
-                         self.brain.stats[k][s]["t"] += float(total)
-                         self.brain.rebuild_key(asset, now_dt)
-
-            except: pass
-        self.last_recalibrate_ts = time.time()
-        self.log_to_db("🧠 Brain: Recalibração concluída.", "SUCCESS")
-
-    # --- VOLATILITY CALC ---
-    def calculate_vol_metrics(self, asset, candles):
-        with self.dynamic_lock:
-            atr_period = int(self.dynamic.get("atr_period", 14))
-            low_mult = float(self.dynamic.get("vol_low_mult", 0.60))
-            high_mult = float(self.dynamic.get("vol_high_mult", 1.80))
-
-        atr = TechnicalAnalysis.calculate_atr(candles, period=atr_period)
-        price = float(candles[-1]["close"])
-        atr_pct = atr / max(price, 1e-12)
-
-        with self.vol_lock:
-            mem = self.vol_memory[asset]
-            mem.append(atr_pct)
-            if len(mem) < 40:
-                # WARMUP BLOCK: Se ATR for absurdo (> 0.4%), bloqueia.
-                # CORREÇÃO CRÍTICA: Adicionado 'med':0 para não quebrar o loop
-                if atr_pct > 0.004:
-                     return {"state": "WARMUP_BLOCK", "current": atr_pct, "low": 0, "high": 0, "high_shock": 0, "med": 0}
-                return {"state": "WARMUP", "current": atr_pct, "low": 0, "high": 999, "high_shock": 999, "med": 0}
-            arr = sorted(mem)
-            med = arr[len(arr) // 2]
-            low = med * low_mult
-            high = med * high_mult
-            high_shock = med * 2.4
-
-        return {"state": "READY", "current": atr_pct, "med": med, "low": low, "high": high, "high_shock": high_shock}
-
     # --- MAIN LOOP ---
     def start(self):
         threading.Thread(target=watchdog, daemon=True).start()
-        self.log_to_db("🧠 Inicializando Bot (Behavior Aware V72.2)...", "SYSTEM")
+        self.log_to_db("🧠 Inicializando Bot (Real Balance Guard V73)...", "SYSTEM")
         
         # Init vars safe
         if not hasattr(self, "last_heartbeat_ts"): self.last_heartbeat_ts = 0
@@ -1199,31 +1182,6 @@ class SimpleBot:
             except Exception as e:
                 self.log_to_db(f"❌ Main Loop Error: {e}", "ERROR")
                 time.sleep(3)
-
-    def check_daily_limits(self):
-         return True # Simplified for brevity, add full logic if needed
-
-    def get_wr_pair(self, asset, strategy):
-        mem = self.pair_strategy_memory.get((asset, strategy))
-        if not mem or len(mem) < 6: return 0.55
-        return sum(mem) / len(mem)
-
-    def get_wr_hour(self, asset, dt, strategy):
-        bucket = self.brain.get_bucket(asset, dt) or {}
-        v = bucket.get(strategy)
-        if not v or v.get("t", 0) <= 0: return 0.55, 0
-        t = float(v["t"])
-        w = float(v["w"])
-        return (w / t), int(t)
-
-    def get_dynamic_amount(self, asset, strategy_key, base_amount, plan_confidence):
-        if len(self.session_memory) < 5: wr_session = 0.50
-        else: wr_session = sum(self.session_memory) / len(self.session_memory)
-        wr_pair = self.get_wr_pair(asset, strategy_key)
-        wr_mix = (wr_session * 0.5) + (wr_pair * 0.5)
-        mult = 0.50 + 0.50 * clamp((wr_mix - 0.50) / 0.15, 0.0, 1.0)
-        mult = mult * clamp(plan_confidence / 0.80, 0.80, 1.05)
-        return round(base_amount * clamp(mult, 0.50, 1.0), 2)
 
 if __name__ == "__main__":
     SimpleBot().start()
