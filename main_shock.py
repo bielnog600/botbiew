@@ -886,6 +886,33 @@ class SimpleBot:
                 }).eq("id", signal_id).execute()
         except Exception as e: self.log_to_db(f"⚠️ update_signal: {e}", "ERROR")
 
+    # --- VOLATILITY CALC ---
+    def calculate_vol_metrics(self, asset, candles):
+        with self.dynamic_lock:
+            atr_period = int(self.dynamic.get("atr_period", 14))
+            low_mult = float(self.dynamic.get("vol_low_mult", 0.60))
+            high_mult = float(self.dynamic.get("vol_high_mult", 1.80))
+
+        atr = TechnicalAnalysis.calculate_atr(candles, period=atr_period)
+        price = float(candles[-1]["close"])
+        atr_pct = atr / max(price, 1e-12)
+
+        with self.vol_lock:
+            mem = self.vol_memory[asset]
+            mem.append(atr_pct)
+            if len(mem) < 40:
+                # WARMUP BLOCK: Se ATR for absurdo (> 0.4%), bloqueia.
+                if atr_pct > 0.004:
+                     return {"state": "WARMUP_BLOCK", "current": atr_pct, "low": 0, "high": 0, "high_shock": 0, "med": 0}
+                return {"state": "WARMUP", "current": atr_pct, "low": 0, "high": 999, "high_shock": 999, "med": 0}
+            arr = sorted(mem)
+            med = arr[len(arr) // 2]
+            low = med * low_mult
+            high = med * high_mult
+            high_shock = med * 2.4
+
+        return {"state": "READY", "current": atr_pct, "med": med, "low": low, "high": high, "high_shock": high_shock}
+
     # --- STRATEGY SIGNAL ---
     def vol_ok_for_strategy(self, strat, curr, med):
         if strat == "BB_REENTRY": return curr <= med * 1.15
