@@ -1126,9 +1126,9 @@ class SimpleBot:
                         else:
                             win = cl < op
                         
-                        if win: res_str = "WIN (Chart)"; profit = amt * 0.87
+                        if win: res_str = "WIN"; profit = amt * 0.87
                         elif op == cl: res_str = "DOJI"; profit = 0.0
-                        else: res_str = "LOSS (Chart)"; profit = -amt
+                        else: res_str = "LOSS"; profit = -amt
                 except: 
                     res_str = "DOJI/ERROR"; profit = 0.0
 
