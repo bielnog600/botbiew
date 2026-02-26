@@ -474,7 +474,7 @@ class BehaviorAnalysis:
         res = cluster(piv_hi)
         sup = cluster(piv_lo)
         res = sorted(res, reverse=True)[:top_n] 
-        sup = sorted(sup)[:top_n]             
+        sup = sorted(sup)[:top_n]              
         
         return {"support": sup, "resistance": res}
 
@@ -645,7 +645,8 @@ class SimpleBot:
         self.config = {
             "status": "PAUSED", "account_type": "PRACTICE", "entry_value": 1.0,
             "max_trades_per_day": 0, "max_wins_per_day": 0, "max_losses_per_day": 0,
-            "mode": "LIVE", "strategy_mode": "AUTO"
+            "mode": "LIVE", "strategy_mode": "AUTO",
+            "timer_enabled": False, "timer_start": "00:00", "timer_end": "23:59"
         }
 
         self.init_supabase()
@@ -713,7 +714,17 @@ class SimpleBot:
                     "max_trades_per_day": int(d.get("max_trades_per_day", 0) or 0),
                     "max_wins_per_day": int(d.get("max_wins_per_day", 0) or 0),
                     "max_losses_per_day": int(d.get("max_losses_per_day", 0) or 0),
+                    "strategy_mode": str(d.get("strategy_mode", "AUTO")).strip().upper(),
+                    "timer_enabled": bool(d.get("timer_enabled", False)),
+                    "timer_start": str(d.get("timer_start", "00:00")),
+                    "timer_end": str(d.get("timer_end", "23:59")),
                 })
+                
+                # Troca o saldo (Demo/Real) on-the-fly sem precisar reiniciar
+                if self.api and self.api.check_connect():
+                    try: self.api.change_balance(self.config["account_type"])
+                    except: pass
+
                 dyn_json = d.get("dynamic_json")
                 if dyn_json:
                     parsed = safe_json_extract(dyn_json)
@@ -752,6 +763,26 @@ class SimpleBot:
              except: pass
 
         return True
+
+    def check_timer_limits(self):
+        """ Verifica se o bot está dentro da janela de operação agendada no painel """
+        if not self.config.get("timer_enabled"):
+            return True
+        try:
+            start_str = self.config.get("timer_start", "00:00")
+            end_str = self.config.get("timer_end", "23:59")
+            now = datetime.now(BR_TIMEZONE)
+            
+            start_time = datetime.strptime(start_str, "%H:%M").time()
+            end_time = datetime.strptime(end_str, "%H:%M").time()
+            current_time = now.time()
+
+            if start_time <= end_time:
+                return start_time <= current_time <= end_time
+            else: # Caso passe da meia noite (ex: 22:00 as 02:00)
+                return current_time >= start_time or current_time <= end_time
+        except Exception:
+            return True # Em caso de falha de formatação do front, permite rodar
 
     def get_wr(self, strategy):
         mem = self.strategy_memory.get(strategy)
@@ -920,6 +951,10 @@ class SimpleBot:
 
         if not allow_trading or (time.time() - self.last_global_trade_ts < GLOBAL_COOLDOWN_SECONDS): return
         
+        # Bloqueios Críticos do Painel (Stops diários e Timer)
+        if not self.check_daily_limits(): return
+        if not self.check_timer_limits(): return
+        
         with self.trade_lock:
             if self.active_trades: return 
 
@@ -947,22 +982,31 @@ class SimpleBot:
                 self.behavior_last_log[log_key] = True
                 self.log_to_db(f"🧭 BEHAVIOR {asset} reg={behavior['regime']} adx={behavior['adx']:.1f} struct={behavior['structure']['state']} dS={behavior['dist_support']:.4f} dR={behavior['dist_resistance']:.4f}", "DEBUG")
 
-            # SELEÇÃO DE ESTRATÉGIAS POR REGIME
+            # SELEÇÃO DE ESTRATÉGIAS POR REGIME E PAINEL
             reg = behavior["regime"]
             struct = behavior["structure"]["state"]
+            strat_mode = self.config.get("strategy_mode", "AUTO")
             
             target_list = []
-            if reg == "TREND" and struct in ["UP_HH_HL", "DOWN_LH_LL"]:
-                target_list = ["V2_TREND", "EMA_PULLBACK", "TSUNAMI_FLOW"]
-            elif reg == "RANGE":
-                target_list = ["BB_REENTRY", "SHOCK_REVERSAL", "VOLUME_REACTOR"]
-            else: # MIXED/UNKNOWN
-                target_list = ["EMA_PULLBACK", "BB_REENTRY", "SHOCK_REVERSAL", "V2_TREND"]
+            
+            if strat_mode == "AUTO":
+                if reg == "TREND" and struct in ["UP_HH_HL", "DOWN_LH_LL"]:
+                    target_list = ["V2_TREND", "EMA_PULLBACK", "TSUNAMI_FLOW"]
+                elif reg == "RANGE":
+                    target_list = ["BB_REENTRY", "SHOCK_REVERSAL", "VOLUME_REACTOR"]
+                else: # MIXED/UNKNOWN
+                    target_list = ["EMA_PULLBACK", "BB_REENTRY", "SHOCK_REVERSAL", "V2_TREND"]
 
-            # Brain override (dica histórica)
-            chosen, wr_hint, samples, src = self.brain.choose_strategy(asset, now_dt, self.strategies_pool)
-            if chosen != "NO_TRADE" and chosen not in target_list:
-                target_list.append(chosen)
+                # Brain override (dica histórica) apenas no automático
+                chosen, wr_hint, samples, src = self.brain.choose_strategy(asset, now_dt, self.strategies_pool)
+                if chosen != "NO_TRADE" and chosen not in target_list:
+                    target_list.append(chosen)
+            else:
+                # Oculta/Força apenas a estratégia definida no painel
+                if strat_mode == "TENDMAX": 
+                    target_list = ["V2_TREND"] # Mapeando TENDMAX do Front para o Engine do bot
+                else:
+                    target_list = [strat_mode]
 
             # Volatility check setup
             vol_metrics = None
