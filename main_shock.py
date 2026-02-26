@@ -1279,7 +1279,9 @@ class SimpleBot:
                     if not self.connect(): time.sleep(5); continue
                 if self.config["status"] == "PAUSED" or now < self.pause_until_ts: time.sleep(1); continue
 
-                if (now - self.last_recalibrate_ts) > 1800: self.recalibrate_current_hour()
+                # Recalibra a inteligência das estratégias. 
+                # Alterado de 1800 (30 min) para 43200 (12 horas) = 2x ao dia.
+                if (now - self.last_recalibrate_ts) > 43200: self.recalibrate_current_hour()
 
                 sec = datetime.now(BR_TIMEZONE).second
                 if 30 <= sec <= 57: self.pre_scan_window()
