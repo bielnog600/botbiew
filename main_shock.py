@@ -651,6 +651,28 @@ class SimpleBot:
 
         self.init_supabase()
 
+    def sync_daily_stats(self):
+        """ Sincroniza o contador de vitórias/derrotas do dia lendo direto do banco """
+        if not self.supabase: return
+        try:
+            now_br = datetime.now(BR_TIMEZONE)
+            start_of_day = now_br.replace(hour=0, minute=0, second=0, microsecond=0)
+            
+            with self.db_lock:
+                res = self.supabase.table("trade_signals")\
+                    .select("*")\
+                    .gte("created_at", start_of_day.astimezone(timezone.utc).isoformat())\
+                    .execute()
+            
+            if res.data:
+                valid_trades = [t for t in res.data if t.get("status") not in ["PENDING", "FAILED"] and t.get("result") != "DOJI"]
+                self.daily_wins = sum(1 for t in valid_trades if t.get("result") == "WIN")
+                self.daily_losses = sum(1 for t in valid_trades if t.get("result") == "LOSS")
+                self.daily_total = len(valid_trades)
+                self.log_to_db(f"🔄 Stats Sincronizadas: {self.daily_wins}W / {self.daily_losses}L (Total: {self.daily_total})", "SYSTEM")
+        except Exception as e:
+            self.log_to_db(f"⚠️ Erro ao sincronizar stats: {e}", "ERROR")
+
     # --- INFRA ---
     def touch_watchdog(self):
         global LAST_LOG_TIME
@@ -743,24 +765,35 @@ class SimpleBot:
             self.strategy_cooldowns = {}
             self.vol_last_log = {}
             self.log_to_db("🚀 Nova sessão diária (Risk & Strategy Reset)", "SYSTEM")
+            self.sync_daily_stats()
 
     def check_daily_limits(self):
+        pause_reason = None
         if self.config["max_trades_per_day"] > 0 and self.daily_total >= self.config["max_trades_per_day"]:
-            self.log_to_db("🛑 Limite de trades do dia atingido", "WARNING"); return False
-        if self.config["max_wins_per_day"] > 0 and self.daily_wins >= self.config["max_wins_per_day"]:
-            self.log_to_db("🏆 Meta de wins atingida", "SUCCESS"); return False
-        if self.config["max_losses_per_day"] > 0 and self.daily_losses >= self.config["max_losses_per_day"]:
-            self.log_to_db("❌ Limite de losses atingido", "ERROR"); return False
+            pause_reason = "🛑 Limite de trades do dia atingido"
+        elif self.config["max_wins_per_day"] > 0 and self.daily_wins >= self.config["max_wins_per_day"]:
+            pause_reason = "🏆 Meta de wins atingida"
+        elif self.config["max_losses_per_day"] > 0 and self.daily_losses >= self.config["max_losses_per_day"]:
+            pause_reason = "❌ Limite de losses atingido"
         
         # --- STOP LOSS BANCA (20% do dia) ---
         if self.initial_balance_day > 0:
              try:
                  curr = float(self.api.get_balance())
                  if curr < (self.initial_balance_day * 0.80):
-                     self.log_to_db(f"💀 STOP LOSS BANCA ATINGIDO! Inicial: {self.initial_balance_day} Atual: {curr}", "CRITICAL")
-                     self.config["status"] = "PAUSED"
-                     return False
+                     pause_reason = f"💀 STOP LOSS BANCA ATINGIDO! Inicial: {self.initial_balance_day} Atual: {curr}"
              except: pass
+
+        if pause_reason:
+            self.log_to_db(pause_reason, "WARNING")
+            self.config["status"] = "PAUSED"
+            # Pausa automaticamente lá no banco de dados para a UI atualizar e travar o bot
+            if self.supabase:
+                try:
+                    with self.db_lock:
+                        self.supabase.table("bot_config").update({"status": "PAUSED"}).eq("id", 1).execute()
+                except: pass
+            return False
 
         return True
 
@@ -1151,9 +1184,13 @@ class SimpleBot:
             delta = final_bal - initial_bal
             
             if delta > 0.01:
-                res_str = "WIN"; profit = delta
+                res_str = "WIN"
+                # CORREÇÃO: O delta é o valor investido + lucro devolvido.
+                # Para registrar apenas o lucro puro, descontamos a entrada (amt).
+                profit = delta - amt 
             elif delta < -0.01:
-                res_str = "LOSS"; profit = delta
+                res_str = "LOSS"
+                profit = delta
             else:
                 # Se saldo não mudou, assume LOSS ou DOJI (em Digital, empate é loss)
                 # Vamos tentar ver pela vela pra ter certeza
@@ -1177,7 +1214,9 @@ class SimpleBot:
                     res_str = "DOJI/ERROR"; profit = 0.0
 
             # Atualiza stats
+            self.daily_total += 1
             risk = self.asset_risk[asset]
+            
             if "WIN" in res_str:
                 self.daily_wins += 1; self.win_streak += 1; self.loss_streak = 0
                 self.pair_strategy_memory[(asset, strategy_key)].append(1)
@@ -1202,6 +1241,9 @@ class SimpleBot:
             self.push_balance_to_front()
             
             self.log_to_db(f"{'🏆' if 'WIN' in res_str else '🔻'} {res_str} {asset}: {profit:.2f}", "SUCCESS" if "WIN" in res_str else "ERROR")
+            
+            # Valida limites logo após a operação, para pausar o bot se bateu a meta/stop
+            self.check_daily_limits()
 
         except Exception as e:
             self.log_to_db(f"❌ Trade Err: {e}", "ERROR")
@@ -1259,6 +1301,10 @@ class SimpleBot:
         if not hasattr(self, "last_activity_ts"): self.last_activity_ts = time.time()
         if not hasattr(self, "last_balance_push_ts"): self.last_balance_push_ts = 0
         if not hasattr(self, "last_alive_log_ts"): self.last_alive_log_ts = 0
+
+        # Força leitura do banco logo ao iniciar
+        self.fetch_config()
+        self.sync_daily_stats()
 
         if not self.api or not self.connect(): time.sleep(3)
         self.recalibrate_current_hour()
