@@ -37,7 +37,7 @@ except ImportError:
         sys.exit(1)
 
 
-BOT_VERSION = "SHOCK_ENGINE_V73.1_RECALIBRATE_FIX_2026-02-11"
+BOT_VERSION = "SHOCK_ENGINE_V73.2_RESTRICT_MODE"
 print(f"🚀 START::{BOT_VERSION}")
 
 # ==============================================================================
@@ -590,9 +590,10 @@ class SimpleBot:
         self.vol_last_log = {} 
         self.behavior_last_log = {} 
 
-        self.base_min_conf = 0.55
+        # Aumentada a confiança mínima (Bot mais estrito)
+        self.base_min_conf = 0.65 
         self.asset_risk = defaultdict(lambda: {
-            "min_conf": 0.55,
+            "min_conf": 0.65,
             "loss_streak": 0,
             "win_streak": 0,
             "cooldown_until": 0.0
@@ -633,13 +634,14 @@ class SimpleBot:
         self.calibration_running = False
 
         self.dynamic = {
-            "allow_trading": True, "prefer_strategy": "AUTO", "min_confidence": 0.55,
+            "allow_trading": True, "prefer_strategy": "AUTO", "min_confidence": 0.65,
             "pause_win_streak": 2, "pause_win_seconds": 180,
             "pause_loss_streak": 2, "pause_loss_seconds": 900,
             "shock_enabled": True, "shock_body_mult": 1.5, "shock_range_mult": 1.4,
             "shock_close_pos_min": 0.85, "shock_pullback_ratio_max": 0.25,
             "trend_filter_enabled": True,
-            "vol_enabled": True, "atr_period": 14, "vol_low_mult": 0.60, "vol_high_mult": 1.80,
+            # Teto de volatilidade abaixado de 1.80 para 1.50 (evita agitação excessiva)
+            "vol_enabled": True, "atr_period": 14, "vol_low_mult": 0.60, "vol_high_mult": 1.50,
         }
 
         self.config = {
@@ -941,7 +943,7 @@ class SimpleBot:
         with self.dynamic_lock:
             atr_period = int(self.dynamic.get("atr_period", 14))
             low_mult = float(self.dynamic.get("vol_low_mult", 0.60))
-            high_mult = float(self.dynamic.get("vol_high_mult", 1.80))
+            high_mult = float(self.dynamic.get("vol_high_mult", 1.50)) # Reduzido de 1.80 para 1.50
 
         atr = TechnicalAnalysis.calculate_atr(candles, period=atr_period)
         price = float(candles[-1]["close"])
@@ -951,8 +953,9 @@ class SimpleBot:
             mem = self.vol_memory[asset]
             mem.append(atr_pct)
             if len(mem) < 40:
-                # WARMUP BLOCK: Se ATR for absurdo (> 0.4%), bloqueia.
-                if atr_pct > 0.004:
+                # WARMUP BLOCK: Limite estrito de volatilidade (Notícias fortíssimas)
+                # Reduzido de 0.004 para 0.0025. Impede operações em velas absurdas.
+                if atr_pct > 0.0025:
                      return {"state": "WARMUP_BLOCK", "current": atr_pct, "low": 0, "high": 0, "high_shock": 0, "med": 0}
                 return {"state": "WARMUP", "current": atr_pct, "low": 0, "high": 999, "high_shock": 999, "med": 0}
             arr = sorted(mem)
@@ -965,10 +968,11 @@ class SimpleBot:
 
     # --- STRATEGY SIGNAL ---
     def vol_ok_for_strategy(self, strat, curr, med):
-        if strat == "BB_REENTRY": return curr <= med * 1.15
-        if strat in ["V2_TREND", "EMA_PULLBACK", "TSUNAMI_FLOW"]: return (curr >= med * 0.70) and (curr <= med * 1.90)
-        if strat == "VOLUME_REACTOR": return (curr >= med * 0.95) and (curr <= med * 2.20)
-        if strat == "SHOCK_REVERSAL": return (curr >= med * 1.60) and (curr <= med * 3.00)
+        # Filtros de tolerância por estratégia (Mais estritos)
+        if strat == "BB_REENTRY": return curr <= med * 1.05 # Requer mercado bem calmo
+        if strat in ["V2_TREND", "EMA_PULLBACK", "TSUNAMI_FLOW"]: return (curr >= med * 0.80) and (curr <= med * 1.50)
+        if strat == "VOLUME_REACTOR": return (curr >= med * 1.10) and (curr <= med * 1.80)
+        if strat == "SHOCK_REVERSAL": return (curr >= med * 1.80) and (curr <= med * 2.50)
         return True
 
     # --- SCANNING ---
@@ -980,7 +984,7 @@ class SimpleBot:
 
         with self.dynamic_lock:
             allow_trading = bool(self.dynamic.get("allow_trading", True))
-            min_conf = float(self.dynamic.get("min_confidence", 0.55))
+            min_conf = float(self.dynamic.get("min_confidence", 0.65)) # Puxa do painel ou default 65%
 
         if not allow_trading or (time.time() - self.last_global_trade_ts < GLOBAL_COOLDOWN_SECONDS): return
         
@@ -1005,7 +1009,27 @@ class SimpleBot:
             # --- BEHAVIOR ANALYSIS ---
             m1 = self.fetch_candles_cached_tf(asset, 60, need=80, ttl=SCAN_TTL)
             if not m1: continue
+            
+            # --- FILTRO ANTI-NOTÍCIA (SPIKE DETECTOR) ---
+            # Compara a última vela com a média das 20 anteriores.
+            bodies = [abs(float(c["close"]) - float(c["open"])) for c in m1[-20:-1]]
+            avg_body = (sum(bodies) / len(bodies)) if bodies else 0.00001
+            last_body = abs(float(m1[-1]["close"]) - float(m1[-1]["open"]))
+            
+            if last_body > avg_body * 3.5: # Anomalia absurda (Vela 3.5x maior que o normal)
+                self.log_to_db(f"⚠️ {asset}: Anomalia de Preço/Notícia detectada! Par bloqueado por 15 min.", "WARNING")
+                self.asset_risk[asset]["cooldown_until"] = time.time() + 900 # Põe de castigo por 15 minutos
+                continue
+
             m15 = self.fetch_candles_cached_tf(asset, 900, need=130, ttl=60.0) # Cache longo pra M15
+            
+            # --- FILTRO MULTI-TIMEFRAME (MACRO TENDÊNCIA EM M15) ---
+            m15_trend = "NONE"
+            if m15 and len(m15) >= 21:
+                ema9_m15 = TechnicalAnalysis.calculate_ema(m15, 9)
+                ema21_m15 = TechnicalAnalysis.calculate_ema(m15, 21)
+                if ema9_m15 > ema21_m15: m15_trend = "UP"
+                elif ema9_m15 < ema21_m15: m15_trend = "DOWN"
 
             behavior = self.analyze_behavior(m1, m15)
             
@@ -1061,6 +1085,12 @@ class SimpleBot:
 
                 sig, lbl = self.check_strategy_signal(strat, m1, asset)
                 if not sig: continue
+                
+                # --- CONFIRMAÇÃO MACRO (NOVO) ---
+                # Se for estratégia de tendência, obriga o M15 a estar alinhado com o M1
+                if strat in ["V2_TREND", "EMA_PULLBACK", "TSUNAMI_FLOW"]:
+                    if sig == "call" and m15_trend == "DOWN": continue # M1 subindo mas M15 caindo? Ignora.
+                    if sig == "put" and m15_trend == "UP": continue # M1 caindo mas M15 subindo? Ignora.
                 
                 # --- SR PENALTY (CONFIDENCE) ---
                 score_penalty = 1.0
@@ -1293,7 +1323,7 @@ class SimpleBot:
     # --- MAIN LOOP ---
     def start(self):
         threading.Thread(target=watchdog, daemon=True).start()
-        self.log_to_db("🧠 Inicializando Bot (Real Balance Guard V73.1)...", "SYSTEM")
+        self.log_to_db("🧠 Inicializando Bot (Real Balance Guard V73.2 RESTRICT)...", "SYSTEM")
         
         # Init vars safe
         if not hasattr(self, "last_heartbeat_ts"): self.last_heartbeat_ts = 0
